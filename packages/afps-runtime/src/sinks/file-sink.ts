@@ -4,7 +4,7 @@
 import { appendFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 
 export interface FileSinkOptions {
@@ -17,15 +17,13 @@ export interface FileSinkOptions {
 }
 
 /**
- * Append each event to a `.jsonl` stream; write the aggregated
- * `RunResult` to a companion `.result.json` on finalize.
+ * Append each {@link RunEvent} as a single JSON line; write the
+ * aggregated {@link RunResult} to a companion `.result.json` on
+ * finalize.
  *
- * The `.jsonl` produced here is the canonical input of
- * `FileContextProvider` (event-sourcing): a subsequent run can replay
- * the file to reconstruct memories/state without any server, closing
- * the loop for fully offline operation.
- *
- * Specification: see `AFPS_EXTENSION_ARCHITECTURE.md` §3.3, §6.
+ * The `.jsonl` produced here is the canonical input for event-sourced
+ * replay: a subsequent run can tail the file and feed each line back
+ * through a reducer to reconstruct the full run state.
  */
 export class FileSink implements EventSink {
   private readonly path: string;
@@ -38,10 +36,9 @@ export class FileSink implements EventSink {
     this.initOnce = mkdir(dirname(this.path), { recursive: true }).then(() => undefined);
   }
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
+  async handle(event: RunEvent): Promise<void> {
     await this.initOnce;
-    const serialized = JSON.stringify(envelope);
-    await appendFile(this.path, serialized + "\n", { encoding: "utf8" });
+    await appendFile(this.path, JSON.stringify(event) + "\n", { encoding: "utf8" });
   }
 
   async finalize(result: RunResult): Promise<void> {

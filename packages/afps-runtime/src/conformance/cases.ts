@@ -377,23 +377,34 @@ async function withScript(
   return { skipped: false, output: out };
 }
 
-const L4_MONOTONIC_SEQUENCES: ConformanceCase = {
+const L4_ORDERED_EMISSION: ConformanceCase = {
   id: "L4.1",
   level: "L4",
-  title: "emits every scripted event with strictly monotonic sequence",
+  title: "emits every scripted event in arrival order with a stable runId",
   run: async (adapter) => {
     const res = await withScript(adapter);
     if (res.skipped) return skipped("adapter does not implement runScripted");
     const { emitted } = res.output;
     if (emitted.length !== SAMPLE_SCRIPT.length) {
-      return fail(`emitted ${emitted.length} envelopes, expected ${SAMPLE_SCRIPT.length}`);
+      return fail(`emitted ${emitted.length} events, expected ${SAMPLE_SCRIPT.length}`);
     }
+    const EXPECTED_TYPES = [
+      "log.written",
+      "memory.added",
+      "memory.added",
+      "state.set",
+      "state.set",
+      "output.emitted",
+      "output.emitted",
+      "report.appended",
+      "report.appended",
+    ];
     for (let i = 0; i < emitted.length; i++) {
-      if (emitted[i]!.sequence !== i) {
-        return fail(`envelope ${i} has sequence ${emitted[i]!.sequence}, expected ${i}`);
+      if (emitted[i]!.type !== EXPECTED_TYPES[i]) {
+        return fail(`event ${i} has type ${emitted[i]!.type}, expected ${EXPECTED_TYPES[i]}`);
       }
       if (emitted[i]!.runId !== "run_L4") {
-        return fail(`envelope ${i} has runId ${emitted[i]!.runId}, expected run_L4`);
+        return fail(`event ${i} has runId ${emitted[i]!.runId}, expected run_L4`);
       }
     }
     return pass();
@@ -451,7 +462,7 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
     const res = await withScript(adapter, []);
     if (res.skipped) return skipped("adapter does not implement runScripted");
     if (res.output.emitted.length !== 0) {
-      return fail(`emitted ${res.output.emitted.length} envelopes on empty script`);
+      return fail(`emitted ${res.output.emitted.length} events on empty script`);
     }
     if (res.output.finalizeCalls !== 1) {
       return fail(`finalize should still be called once, got ${res.output.finalizeCalls}`);
@@ -486,7 +497,7 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L3_UNKNOWN_KEY,
   L3_CHAIN_ACCEPTED,
   L3_UNTRUSTED_ROOT,
-  L4_MONOTONIC_SEQUENCES,
+  L4_ORDERED_EMISSION,
   L4_FINALIZE_EXACTLY_ONCE,
   L4_REDUCER_SEMANTICS,
   L4_EMPTY_SCRIPT,

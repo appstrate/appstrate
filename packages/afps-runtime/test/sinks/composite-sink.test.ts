@@ -4,18 +4,18 @@
 import { describe, it, expect } from "bun:test";
 import { CompositeSink } from "../../src/sinks/composite-sink.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
 
 class RecordingSink implements EventSink {
-  readonly events: AfpsEventEnvelope[] = [];
+  readonly events: RunEvent[] = [];
   finalizeResult: RunResult | null = null;
-  onEventError?: Error;
+  handleError?: Error;
   finalizeError?: Error;
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    if (this.onEventError) throw this.onEventError;
-    this.events.push(envelope);
+  async handle(event: RunEvent): Promise<void> {
+    if (this.handleError) throw this.handleError;
+    this.events.push(event);
   }
   async finalize(result: RunResult): Promise<void> {
     if (this.finalizeError) throw this.finalizeError;
@@ -31,21 +31,21 @@ const emptyResult: RunResult = {
   logs: [],
 };
 
+function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
+  return { type, timestamp: 0, runId: "r", ...extra };
+}
+
 describe("CompositeSink", () => {
-  it("broadcasts onEvent to every child", async () => {
+  it("broadcasts handle to every child", async () => {
     const a = new RecordingSink();
     const b = new RecordingSink();
     const composite = new CompositeSink([a, b]);
 
-    const env: AfpsEventEnvelope = {
-      runId: "r",
-      sequence: 1,
-      event: { type: "add_memory", content: "x" },
-    };
-    await composite.onEvent(env);
+    const ev = event("memory.added", { content: "x" });
+    await composite.handle(ev);
 
-    expect(a.events).toEqual([env]);
-    expect(b.events).toEqual([env]);
+    expect(a.events).toEqual([ev]);
+    expect(b.events).toEqual([ev]);
   });
 
   it("broadcasts finalize to every child", async () => {
@@ -62,21 +62,16 @@ describe("CompositeSink", () => {
   it("waits for every child even when one fails, then surfaces aggregate error", async () => {
     const a = new RecordingSink();
     const b = new RecordingSink();
-    b.onEventError = new Error("boom");
+    b.handleError = new Error("boom");
     const c = new RecordingSink();
     const composite = new CompositeSink([a, b, c]);
 
-    const env: AfpsEventEnvelope = {
-      runId: "r",
-      sequence: 1,
-      event: { type: "log", level: "info", message: "x" },
-    };
+    const ev = event("log.written", { level: "info", message: "x" });
 
-    await expect(composite.onEvent(env)).rejects.toThrow(/boom/);
+    await expect(composite.handle(ev)).rejects.toThrow(/boom/);
 
-    // healthy siblings still received the event
-    expect(a.events).toEqual([env]);
-    expect(c.events).toEqual([env]);
+    expect(a.events).toEqual([ev]);
+    expect(c.events).toEqual([ev]);
   });
 
   it("reports multiple failures in one aggregate error", async () => {
@@ -93,11 +88,7 @@ describe("CompositeSink", () => {
 
   it("works with zero children (no-op)", async () => {
     const composite = new CompositeSink([]);
-    await composite.onEvent({
-      runId: "r",
-      sequence: 1,
-      event: { type: "log", level: "info", message: "x" },
-    });
+    await composite.handle(event("log.written", { level: "info", message: "x" }));
     await composite.finalize(emptyResult);
   });
 });

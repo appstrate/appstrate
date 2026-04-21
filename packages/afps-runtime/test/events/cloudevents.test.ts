@@ -2,21 +2,24 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { buildCloudEventEnvelope, type CloudEventType } from "../../src/events/cloudevents.ts";
-import type { AfpsEvent } from "../../src/types/afps-event.ts";
+import { buildCloudEventEnvelope } from "../../src/events/cloudevents.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
+
+function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
+  return { type, timestamp: 1714000000000, runId: "run_abc", ...extra };
+}
 
 describe("buildCloudEventEnvelope", () => {
-  it("builds a valid CloudEvents 1.0 envelope for add_memory", () => {
+  it("builds a valid CloudEvents 1.0 envelope for a canonical event", () => {
     const env = buildCloudEventEnvelope({
-      event: { type: "add_memory", content: "hi" },
-      runId: "run_abc",
+      event: event("memory.added", { content: "hi" }),
       sequence: 3,
       id: "01HXYZ000000000000000000",
       nowMs: 1714000000000,
     });
     expect(env).toEqual({
       specversion: "1.0",
-      type: "dev.afps.add_memory.v1",
+      type: "memory.added",
       source: "/afps/runs/run_abc",
       id: "01HXYZ000000000000000000",
       time: "2024-04-24T23:06:40.000Z",
@@ -26,64 +29,60 @@ describe("buildCloudEventEnvelope", () => {
     });
   });
 
-  it("maps every AFPS event type to its CloudEvents type", () => {
-    const mappings: ReadonlyArray<[AfpsEvent["type"], CloudEventType]> = [
-      ["add_memory", "dev.afps.add_memory.v1"],
-      ["set_state", "dev.afps.set_state.v1"],
-      ["output", "dev.afps.output.v1"],
-      ["report", "dev.afps.report.v1"],
-      ["log", "dev.afps.log.v1"],
+  it("mirrors the RunEvent type verbatim (no rewriting)", () => {
+    const mappings: readonly string[] = [
+      "memory.added",
+      "state.set",
+      "output.emitted",
+      "report.appended",
+      "log.written",
+      "@my-org/audit.logged",
     ];
-    for (const [afps, ce] of mappings) {
-      const event = sampleEvent(afps);
+    for (const type of mappings) {
       const env = buildCloudEventEnvelope({
-        event,
-        runId: "r",
+        event: event(type),
         sequence: 0,
         id: "id",
         nowMs: 0,
       });
-      expect(env.type).toBe(ce);
+      expect(env.type).toBe(type);
     }
   });
 
-  it("strips the `type` discriminator from the data payload", () => {
+  it("strips envelope fields (type, timestamp, runId, toolCallId) from the data payload", () => {
     const env = buildCloudEventEnvelope({
-      event: { type: "output", data: { count: 42 } },
-      runId: "r",
+      event: {
+        type: "output.emitted",
+        timestamp: 1714000000000,
+        runId: "r",
+        toolCallId: "tc_1",
+        data: { count: 42 },
+      },
       sequence: 1,
       id: "id",
     });
     expect(env.data).toEqual({ data: { count: 42 } });
     expect((env.data as Record<string, unknown>).type).toBeUndefined();
+    expect((env.data as Record<string, unknown>).timestamp).toBeUndefined();
+    expect((env.data as Record<string, unknown>).runId).toBeUndefined();
+    expect((env.data as Record<string, unknown>).toolCallId).toBeUndefined();
   });
 
-  it("uses `Date.now()` as default nowMs", () => {
-    const before = Date.now();
+  it("preserves third-party payload fields verbatim", () => {
     const env = buildCloudEventEnvelope({
-      event: { type: "log", level: "info", message: "x" },
-      runId: "r",
+      event: event("@scope/custom.verb", { actor: "u_1", nested: { n: 2 } }),
       sequence: 0,
       id: "id",
     });
-    const after = Date.now();
-    const envMs = Date.parse(env.time);
-    expect(envMs).toBeGreaterThanOrEqual(before);
-    expect(envMs).toBeLessThanOrEqual(after);
+    expect(env.data).toEqual({ actor: "u_1", nested: { n: 2 } });
+  });
+
+  it("uses event.timestamp as default nowMs", () => {
+    const env = buildCloudEventEnvelope({
+      event: event("log.written", { level: "info", message: "x" }),
+      sequence: 0,
+      id: "id",
+    });
+    expect(env.time).toBe("2024-04-24T23:06:40.000Z");
   });
 });
-
-function sampleEvent(type: AfpsEvent["type"]): AfpsEvent {
-  switch (type) {
-    case "add_memory":
-      return { type, content: "x" };
-    case "set_state":
-      return { type, state: null };
-    case "output":
-      return { type, data: null };
-    case "report":
-      return { type, content: "" };
-    case "log":
-      return { type, level: "info", message: "" };
-  }
-}

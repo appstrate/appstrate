@@ -3,7 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 import { buildCloudEventEnvelope } from "../events/cloudevents.ts";
 import { sign } from "../events/signing.ts";
@@ -44,7 +44,8 @@ export interface HttpSinkOptions {
 }
 
 /**
- * Stream events to a URL using CloudEvents 1.0 + Standard Webhooks.
+ * Stream {@link RunEvent}s to a URL using CloudEvents 1.0 + Standard
+ * Webhooks.
  *
  * Each event is POSTed with these headers:
  *
@@ -57,8 +58,6 @@ export interface HttpSinkOptions {
  *
  * Transient failures (network error, 5xx, 429) are retried with
  * exponential backoff + jitter. Non-transient 4xx errors propagate.
- *
- * Specification: see `AFPS_EXTENSION_ARCHITECTURE.md` §5.
  */
 export class HttpSink implements EventSink {
   private readonly url: string;
@@ -70,6 +69,7 @@ export class HttpSink implements EventSink {
   private readonly initialBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly fetchImpl: typeof fetch;
+  private sequence = 0;
 
   constructor(opts: HttpSinkOptions) {
     this.url = opts.url;
@@ -83,13 +83,12 @@ export class HttpSink implements EventSink {
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
+  async handle(event: RunEvent): Promise<void> {
     const id = this.generateId();
     const nowMs = this.now();
     const cloudEvent = buildCloudEventEnvelope({
-      event: envelope.event,
-      runId: envelope.runId,
-      sequence: envelope.sequence,
+      event,
+      sequence: this.sequence++,
       id,
       nowMs,
     });
@@ -128,7 +127,6 @@ export class HttpSink implements EventSink {
         if (res.ok) return;
 
         if (res.status < 500 && res.status !== 429) {
-          // Non-retryable — bail out immediately without further attempts.
           throw new NonRetryableHttpError(res.status, res.statusText);
         }
 

@@ -13,7 +13,7 @@
  */
 
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
-import type { AfpsEvent, AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { AfpsEvent } from "../types/afps-event.ts";
 import { toRunEvent } from "../types/run-event.ts";
 import type { RunError, RunResult } from "../types/run-result.ts";
 import { reduceEvents } from "./reducer.ts";
@@ -56,22 +56,10 @@ export class MockRunner implements BundleRunner {
     });
     this.opts.onPromptRendered?.(rendered);
 
-    let sequence = 0;
     const now = this.opts.nowMs ?? Date.now;
     for (const event of this.opts.events) {
       signal?.throwIfAborted();
-      const envelope: AfpsEventEnvelope = {
-        runId: context.runId,
-        sequence: sequence++,
-        event,
-      };
-      // Prefer handle() (AFPS 1.3 open envelope) over onEvent (legacy).
-      // Sinks that implement both SHOULD treat handle as authoritative.
-      if (sink.handle) {
-        await sink.handle(toRunEvent({ event, runId: context.runId, nowMs: now() }));
-      } else if (sink.onEvent) {
-        await sink.onEvent(envelope);
-      }
+      await sink.handle(toRunEvent({ event, runId: context.runId, nowMs: now() }));
     }
 
     const result = reduceEvents(this.opts.events, {

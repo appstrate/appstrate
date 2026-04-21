@@ -27,7 +27,8 @@ import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
 import { SnapshotContextProvider } from "../../src/providers/context/snapshot-provider.ts";
 import { MockRunner } from "../../src/runner/mock.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { AfpsEvent, AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { AfpsEvent } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
 import type { ContextSnapshot } from "../../src/providers/context/snapshot-provider.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
@@ -81,11 +82,11 @@ describe("fixtures/reference — end-to-end round trip", () => {
     const context = await readJson<ExecutionContext>("context.json");
     const events = await readJson<AfpsEvent[]>("events.json");
 
-    const emitted: AfpsEventEnvelope[] = [];
+    const emitted: RunEvent[] = [];
     let finalized: RunResult | undefined;
     const sink: EventSink = {
-      onEvent: async (env) => {
-        emitted.push(env);
+      handle: async (event) => {
+        emitted.push(event);
       },
       finalize: async (r) => {
         finalized = r;
@@ -99,7 +100,6 @@ describe("fixtures/reference — end-to-end round trip", () => {
     });
 
     expect(emitted).toHaveLength(events.length);
-    expect(emitted.map((e) => e.sequence)).toEqual(events.map((_, i) => i));
     expect(result.memories).toHaveLength(1);
     expect(result.state).toEqual({ iteration: 1 });
     expect(result.output).toEqual({ summary: "AFPS ships a portable runtime.", partial: false });

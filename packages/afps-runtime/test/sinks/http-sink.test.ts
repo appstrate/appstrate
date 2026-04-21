@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HttpSink } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
-import type { AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
 
 interface CapturedRequest {
@@ -61,10 +61,11 @@ function startTestServer(): ServerContext {
 }
 
 const RUN_SECRET = "test-secret-k9rdqs";
-const SAMPLE_ENVELOPE: AfpsEventEnvelope = {
+const SAMPLE_EVENT: RunEvent = {
+  type: "memory.added",
+  timestamp: 1714000000000,
   runId: "run_http_test",
-  sequence: 7,
-  event: { type: "add_memory", content: "sent via http sink" },
+  content: "sent via http sink",
 };
 const SAMPLE_RESULT: RunResult = {
   memories: [{ content: "sent via http sink" }],
@@ -93,7 +94,7 @@ describe("HttpSink", () => {
       now: () => 1714000000000,
     });
 
-    await sink.onEvent(SAMPLE_ENVELOPE);
+    await sink.handle(SAMPLE_EVENT);
 
     expect(server.received).toHaveLength(1);
     const req = server.received[0]!;
@@ -114,11 +115,49 @@ describe("HttpSink", () => {
 
     const cloudEvent = JSON.parse(req.body);
     expect(cloudEvent.specversion).toBe("1.0");
-    expect(cloudEvent.type).toBe("dev.afps.add_memory.v1");
+    expect(cloudEvent.type).toBe("memory.added");
     expect(cloudEvent.source).toBe("/afps/runs/run_http_test");
     expect(cloudEvent.id).toBe("id_0001");
-    expect(cloudEvent.sequence).toBe(7);
+    expect(cloudEvent.sequence).toBe(0);
     expect(cloudEvent.data).toEqual({ content: "sent via http sink" });
+  });
+
+  it("increments the sequence extension monotonically across events", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+      generateId: () => "id",
+      now: () => 1714000000000,
+    });
+
+    await sink.handle(SAMPLE_EVENT);
+    await sink.handle({ ...SAMPLE_EVENT, content: "second" });
+    await sink.handle({ ...SAMPLE_EVENT, content: "third" });
+
+    expect(server.received).toHaveLength(3);
+    expect(JSON.parse(server.received[0]!.body).sequence).toBe(0);
+    expect(JSON.parse(server.received[1]!.body).sequence).toBe(1);
+    expect(JSON.parse(server.received[2]!.body).sequence).toBe(2);
+  });
+
+  it("forwards third-party event types verbatim as the CloudEvent type", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+      generateId: () => "id",
+      now: () => 1714000000000,
+    });
+
+    await sink.handle({
+      type: "@my-org/audit.logged",
+      timestamp: 1714000000000,
+      runId: "run_x",
+      actor: "u_1",
+    });
+
+    const cloudEvent = JSON.parse(server.received[0]!.body);
+    expect(cloudEvent.type).toBe("@my-org/audit.logged");
+    expect(cloudEvent.data).toEqual({ actor: "u_1" });
   });
 
   it("posts the aggregated result to the finalize URL", async () => {
@@ -148,7 +187,7 @@ describe("HttpSink", () => {
       maxAttempts: 4,
     });
 
-    await sink.onEvent(SAMPLE_ENVELOPE);
+    await sink.handle(SAMPLE_EVENT);
 
     expect(server.received).toHaveLength(3); // 2 failures + 1 success
   });
@@ -163,7 +202,7 @@ describe("HttpSink", () => {
       maxAttempts: 3,
     });
 
-    await sink.onEvent(SAMPLE_ENVELOPE);
+    await sink.handle(SAMPLE_EVENT);
 
     expect(server.received).toHaveLength(2);
   });
@@ -178,7 +217,7 @@ describe("HttpSink", () => {
       maxAttempts: 4,
     });
 
-    await expect(sink.onEvent(SAMPLE_ENVELOPE)).rejects.toThrow(/non-retryable 400/);
+    await expect(sink.handle(SAMPLE_EVENT)).rejects.toThrow(/non-retryable 400/);
     expect(server.received).toHaveLength(1);
   });
 
@@ -192,7 +231,7 @@ describe("HttpSink", () => {
       maxAttempts: 2,
     });
 
-    await expect(sink.onEvent(SAMPLE_ENVELOPE)).rejects.toThrow(/retryable 500/);
+    await expect(sink.handle(SAMPLE_EVENT)).rejects.toThrow(/retryable 500/);
     expect(server.received).toHaveLength(2);
   });
 
@@ -202,7 +241,7 @@ describe("HttpSink", () => {
       runSecret: RUN_SECRET,
     });
 
-    await sink.onEvent(SAMPLE_ENVELOPE);
+    await sink.handle(SAMPLE_EVENT);
     await sink.finalize(SAMPLE_RESULT);
 
     expect(server.received[0]!.url).toBe("/events");

@@ -14,6 +14,5 @@ export {
 export {
   buildCloudEventEnvelope,
   type CloudEventEnvelope,
-  type CloudEventType,
   type BuildEnvelopeOptions,
 } from "./cloudevents.ts";

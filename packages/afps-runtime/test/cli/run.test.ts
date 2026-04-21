@@ -73,8 +73,10 @@ describe("afps run", () => {
     expect(lines).toHaveLength(2);
     const first = JSON.parse(lines[0]!);
     const second = JSON.parse(lines[1]!);
-    expect(first.sequence).toBe(0);
-    expect(second.sequence).toBe(1);
+    expect(first.type).toBe("memory.added");
+    expect(first.content).toBe("one");
+    expect(second.type).toBe("memory.added");
+    expect(second.content).toBe("two");
   });
 
   it("returns exit 1 on an invalid scripted event", async () => {

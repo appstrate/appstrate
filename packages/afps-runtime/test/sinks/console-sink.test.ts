@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { ConsoleSink, type ConsoleWritable } from "../../src/sinks/console-sink.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 
 class BufferWritable implements ConsoleWritable {
   readonly chunks: string[] = [];
@@ -15,6 +16,10 @@ class BufferWritable implements ConsoleWritable {
   }
 }
 
+function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
+  return { type, timestamp: 0, runId: "r", ...extra };
+}
+
 describe("ConsoleSink", () => {
   let buf: BufferWritable;
   let sink: ConsoleSink;
@@ -24,26 +29,26 @@ describe("ConsoleSink", () => {
     sink = new ConsoleSink({ out: buf });
   });
 
-  it("formats add_memory with the sequence prefix", async () => {
-    await sink.onEvent({
-      runId: "r",
-      sequence: 1,
-      event: { type: "add_memory", content: "pref metric" },
-    });
+  it("formats memory.added with a sequence prefix", async () => {
+    await sink.handle(event("memory.added", { content: "pref metric" }));
     expect(buf.output).toContain("#0001");
     expect(buf.output).toContain("pref metric");
     expect(buf.output.endsWith("\n")).toBe(true);
   });
 
-  it("formats each event kind distinctly", async () => {
-    await sink.onEvent({ runId: "r", sequence: 2, event: { type: "set_state", state: { a: 1 } } });
-    await sink.onEvent({ runId: "r", sequence: 3, event: { type: "output", data: "x" } });
-    await sink.onEvent({ runId: "r", sequence: 4, event: { type: "report", content: "# R" } });
-    await sink.onEvent({
-      runId: "r",
-      sequence: 5,
-      event: { type: "log", level: "warn", message: "careful" },
-    });
+  it("increments the sequence prefix monotonically across calls", async () => {
+    await sink.handle(event("memory.added", { content: "a" }));
+    await sink.handle(event("memory.added", { content: "b" }));
+    const lines = buf.output.trim().split("\n");
+    expect(lines[0]).toContain("#0001");
+    expect(lines[1]).toContain("#0002");
+  });
+
+  it("formats each canonical event kind distinctly", async () => {
+    await sink.handle(event("state.set", { state: { a: 1 } }));
+    await sink.handle(event("output.emitted", { data: "x" }));
+    await sink.handle(event("report.appended", { content: "# R" }));
+    await sink.handle(event("log.written", { level: "warn", message: "careful" }));
     const lines = buf.output.trim().split("\n");
     expect(lines).toHaveLength(4);
     expect(lines[0]).toContain("state");
@@ -52,10 +57,15 @@ describe("ConsoleSink", () => {
     expect(lines[3]).toContain("careful");
   });
 
+  it("formats unknown / third-party event types with a fallback marker", async () => {
+    await sink.handle(event("@my-org/audit.logged", { actor: "u_1", action: "delete" }));
+    expect(buf.output).toContain("@my-org/audit.logged");
+    expect(buf.output).toContain("u_1");
+  });
+
   it("truncates very long payloads", async () => {
     const long = "a".repeat(1000);
-    await sink.onEvent({ runId: "r", sequence: 1, event: { type: "add_memory", content: long } });
-    // 200 max + "#0001 ✚ memory: " prefix + newline
+    await sink.handle(event("memory.added", { content: long }));
     expect(buf.output.length).toBeLessThan(300);
     expect(buf.output).toContain("…");
   });

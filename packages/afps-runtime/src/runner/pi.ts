@@ -17,7 +17,7 @@
  */
 
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
-import type { AfpsEvent, AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { AfpsEvent } from "../types/afps-event.ts";
 import { toRunEvent } from "../types/run-event.ts";
 import type { RunError, RunResult } from "../types/run-result.ts";
 import { reduceEvents } from "./reducer.ts";
@@ -114,20 +114,9 @@ export class PiRunner implements BundleRunner {
     this.opts.onPromptRendered?.(rendered);
 
     const collected: AfpsEvent[] = [];
-    let sequence = 0;
     const emit: AfpsEventEmitter = async (event) => {
       collected.push(event);
-      const envelope: AfpsEventEnvelope = {
-        runId: context.runId,
-        sequence: sequence++,
-        event,
-      };
-      // Prefer handle() (AFPS 1.3 open envelope) over onEvent (legacy).
-      if (sink.handle) {
-        await sink.handle(toRunEvent({ event, runId: context.runId }));
-      } else if (sink.onEvent) {
-        await sink.onEvent(envelope);
-      }
+      await sink.handle(toRunEvent({ event, runId: context.runId }));
     };
 
     const factory = this.opts.sessionFactory ?? defaultSessionFactory;

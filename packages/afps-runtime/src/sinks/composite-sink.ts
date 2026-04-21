@@ -2,24 +2,18 @@
 // Copyright 2026 Appstrate
 
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../types/afps-event.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 
 /**
- * Fan-out sink: broadcasts each `onEvent` / `handle` / `finalize` call
- * to all child sinks in parallel. If any child rejects, the aggregated
- * error surfaces via `Promise.allSettled` after every sibling has had a
- * chance to complete — this keeps one flaky sink from cancelling
- * persistence on healthy ones.
+ * Fan-out sink: broadcasts each `handle` / `finalize` call to all child
+ * sinks in parallel. If any child rejects, the aggregated error surfaces
+ * via `Promise.allSettled` after every sibling has had a chance to
+ * complete — this keeps one flaky sink from cancelling persistence on
+ * healthy ones.
  *
- * Children that implement only the legacy `onEvent` (pre-1.3 AFPS
- * sinks) are invoked via `onEvent`; children that implement the new
- * `handle(RunEvent)` are invoked via `handle`. Both are called when
- * both are present, matching the runtime's emission contract.
- *
- * Example: stream events to a local `.jsonl` **and** to Appstrate over
- * HTTP at the same time — no bespoke orchestration needed.
+ * Example: stream events to a local `.jsonl` **and** to a remote HTTP
+ * endpoint at the same time — no bespoke orchestration needed.
  */
 export class CompositeSink implements EventSink {
   private readonly children: readonly EventSink[];
@@ -28,16 +22,9 @@ export class CompositeSink implements EventSink {
     this.children = children;
   }
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    await this.runAll(
-      this.children.flatMap((c) => (c.onEvent ? [c.onEvent(envelope)] : [])),
-      "onEvent",
-    );
-  }
-
   async handle(event: RunEvent): Promise<void> {
     await this.runAll(
-      this.children.flatMap((c) => (c.handle ? [c.handle(event)] : [])),
+      this.children.map((c) => c.handle(event)),
       "handle",
     );
   }

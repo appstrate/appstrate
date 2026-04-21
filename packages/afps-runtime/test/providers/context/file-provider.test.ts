@@ -6,7 +6,6 @@ import { mkdtemp, rm, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileContextProvider } from "../../../src/providers/context/file-provider.ts";
-import { FileSink } from "../../../src/sinks/file-sink.ts";
 import type { AfpsEventEnvelope } from "../../../src/types/afps-event.ts";
 
 async function makeTempDir(): Promise<string> {
@@ -154,21 +153,6 @@ describe("FileContextProvider", () => {
     await writeFile(path, "", { encoding: "utf8" });
     const p = new FileContextProvider({ paths: [path] });
     expect(await p.getResource!("anything")).toBeUndefined();
-  });
-
-  it("reads FileSink output round-trip (real sink writes → provider replays)", async () => {
-    const path = join(dir, "round-trip.jsonl");
-    const sink = new FileSink({ path });
-
-    await sink.onEvent(envelope("r", 0, { type: "add_memory", content: "persistent" }));
-    await sink.onEvent(envelope("r", 1, { type: "set_state", state: "persisted" }));
-
-    const p = new FileContextProvider({ paths: [path] });
-    const memories = await p.getMemories();
-    const state = await p.getState();
-
-    expect(memories.map((m) => m.content)).toEqual(["persistent"]);
-    expect(state).toBe("persisted");
   });
 
   it("caches the load across calls (idempotent)", async () => {

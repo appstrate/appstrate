@@ -19,7 +19,7 @@ import {
   type PiToolConfig,
 } from "../../src/runner/pi-tools.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -42,16 +42,16 @@ function loadRef(prompt = "hello {{runId}}") {
 }
 
 function collecting(): EventSink & {
-  envelopes: AfpsEventEnvelope[];
+  events: RunEvent[];
   finalized: RunResult[];
 } {
-  const envelopes: AfpsEventEnvelope[] = [];
+  const events: RunEvent[] = [];
   const finalized: RunResult[] = [];
   return {
-    envelopes,
+    events,
     finalized,
-    onEvent: async (env) => {
-      envelopes.push(env);
+    handle: async (event) => {
+      events.push(event);
     },
     finalize: async (r) => {
       finalized.push(r);
@@ -114,14 +114,14 @@ describe("PiRunner — with injected session factory", () => {
       sink,
       contextProvider: new SnapshotContextProvider(),
     });
-    expect(sink.envelopes.map((e) => e.sequence)).toEqual([0, 1, 2, 3, 4]);
-    expect(sink.envelopes.every((e) => e.runId === "run_pi")).toBe(true);
-    expect(sink.envelopes.map((e) => e.event.type)).toEqual([
-      "log",
-      "add_memory",
-      "set_state",
-      "output",
-      "report",
+    expect(sink.events).toHaveLength(5);
+    expect(sink.events.every((e) => e.runId === "run_pi")).toBe(true);
+    expect(sink.events.map((e) => e.type)).toEqual([
+      "log.written",
+      "memory.added",
+      "state.set",
+      "output.emitted",
+      "report.appended",
     ]);
     expect(sink.finalized).toHaveLength(1);
     const r = sink.finalized[0]!;
@@ -150,12 +150,10 @@ describe("PiRunner — with injected session factory", () => {
       contextProvider: new SnapshotContextProvider(),
     });
     expect(result.error?.message).toBe("provider timeout");
-    expect(sink.envelopes).toHaveLength(1);
-    expect(sink.envelopes[0]!.event).toEqual({
-      type: "log",
-      level: "error",
-      message: "provider timeout",
-    });
+    expect(sink.events).toHaveLength(1);
+    expect(sink.events[0]!.type).toBe("log.written");
+    expect(sink.events[0]!.level).toBe("error");
+    expect(sink.events[0]!.message).toBe("provider timeout");
     expect(sink.finalized).toHaveLength(1);
   });
 
@@ -202,7 +200,7 @@ describe("PiRunner — with injected session factory", () => {
       }),
     ).rejects.toThrow();
     expect(factoryCalled).toBe(false);
-    expect(sink.envelopes).toHaveLength(0);
+    expect(sink.events).toHaveLength(0);
     expect(sink.finalized).toHaveLength(0);
   });
 

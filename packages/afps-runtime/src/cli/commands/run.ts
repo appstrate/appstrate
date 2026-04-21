@@ -274,7 +274,7 @@ async function buildSink(
   if (sinks.length === 0) {
     // --sink=console + --quiet: return a no-op sink
     return {
-      onEvent: async () => undefined,
+      handle: async () => undefined,
       finalize: async () => undefined,
     };
   }

@@ -7,7 +7,8 @@ import { MockRunner } from "../../src/runner/mock.ts";
 import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
 import { SnapshotContextProvider } from "../../src/providers/context/snapshot-provider.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { AfpsEvent, AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { AfpsEvent } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -29,16 +30,16 @@ function loadRef(prompt = "Run {{runId}}"): ReturnType<typeof loadBundleFromBuff
 }
 
 function collectingSink(): EventSink & {
-  envelopes: AfpsEventEnvelope[];
+  events: RunEvent[];
   finalized: RunResult[];
 } {
-  const envelopes: AfpsEventEnvelope[] = [];
+  const events: RunEvent[] = [];
   const finalized: RunResult[] = [];
   return {
-    envelopes,
+    events,
     finalized,
-    onEvent: async (env) => {
-      envelopes.push(env);
+    handle: async (event) => {
+      events.push(event);
     },
     finalize: async (r) => {
       finalized.push(r);
@@ -47,7 +48,7 @@ function collectingSink(): EventSink & {
 }
 
 describe("MockRunner", () => {
-  it("emits every scripted event through the sink with monotonic sequences", async () => {
+  it("emits every scripted event through the sink in arrival order", async () => {
     const events: AfpsEvent[] = [
       { type: "log", level: "info", message: "go" },
       { type: "add_memory", content: "m1" },
@@ -61,9 +62,9 @@ describe("MockRunner", () => {
       sink,
       contextProvider: new SnapshotContextProvider(),
     });
-    expect(sink.envelopes.map((e) => e.sequence)).toEqual([0, 1, 2]);
-    expect(sink.envelopes.every((e) => e.runId === "r_1")).toBe(true);
-    expect(sink.envelopes.map((e) => e.event)).toEqual(events);
+    expect(sink.events).toHaveLength(3);
+    expect(sink.events.every((e) => e.runId === "r_1")).toBe(true);
+    expect(sink.events.map((e) => e.type)).toEqual(["log.written", "memory.added", "memory.added"]);
   });
 
   it("calls sink.finalize exactly once with the aggregated result", async () => {
@@ -126,7 +127,7 @@ describe("MockRunner", () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow();
-    expect(sink.envelopes).toHaveLength(0);
+    expect(sink.events).toHaveLength(0);
     expect(sink.finalized).toHaveLength(0);
   });
 
@@ -138,7 +139,7 @@ describe("MockRunner", () => {
       sink,
       contextProvider: new SnapshotContextProvider(),
     });
-    expect(sink.envelopes).toHaveLength(0);
+    expect(sink.events).toHaveLength(0);
     expect(sink.finalized).toHaveLength(1);
     expect(result.memories).toHaveLength(0);
     expect(result.state).toBeNull();

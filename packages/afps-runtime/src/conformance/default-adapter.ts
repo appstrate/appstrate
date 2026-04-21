@@ -14,7 +14,7 @@ import { renderPrompt } from "../bundle/prompt-renderer.ts";
 import { SnapshotContextProvider } from "../providers/context/snapshot-provider.ts";
 import { MockRunner } from "../runner/mock.ts";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 import type { ConformanceAdapter, RunScriptedOutput } from "./adapter.ts";
 
@@ -29,11 +29,11 @@ export function createDefaultAdapter(): ConformanceAdapter {
     verifySignature: (canonicalBytes, signatureDoc, trustRoot) =>
       verifyBundleSignature(canonicalBytes, signatureDoc, trustRoot),
     runScripted: async (bundle, context, scriptedEvents): Promise<RunScriptedOutput> => {
-      const emitted: AfpsEventEnvelope[] = [];
+      const emitted: RunEvent[] = [];
       let finalizeCalls = 0;
       const sink: EventSink = {
-        onEvent: async (env) => {
-          emitted.push(env);
+        handle: async (event) => {
+          emitted.push(event);
         },
         finalize: async () => {
           finalizeCalls++;

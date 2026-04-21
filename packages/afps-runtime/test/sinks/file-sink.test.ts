@@ -6,7 +6,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSink } from "../../src/sinks/file-sink.ts";
-import type { AfpsEventEnvelope } from "../../src/types/afps-event.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
+
+function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
+  return { type, timestamp: 0, runId: "r", ...extra };
+}
 
 describe("FileSink", () => {
   let dir: string;
@@ -23,18 +27,18 @@ describe("FileSink", () => {
     const path = join(dir, "run.jsonl");
     const sink = new FileSink({ path });
 
-    const envelopes: AfpsEventEnvelope[] = [
-      { runId: "r", sequence: 1, event: { type: "add_memory", content: "a" } },
-      { runId: "r", sequence: 2, event: { type: "log", level: "info", message: "x" } },
+    const events: RunEvent[] = [
+      event("memory.added", { content: "a" }),
+      event("log.written", { level: "info", message: "x" }),
     ];
 
-    for (const e of envelopes) await sink.onEvent(e);
+    for (const e of events) await sink.handle(e);
 
     const text = await readFile(path, "utf8");
     const lines = text.trim().split("\n");
     expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]!)).toEqual(envelopes[0]!);
-    expect(JSON.parse(lines[1]!)).toEqual(envelopes[1]!);
+    expect(JSON.parse(lines[0]!)).toEqual(events[0]!);
+    expect(JSON.parse(lines[1]!)).toEqual(events[1]!);
   });
 
   it("writes the aggregated result to a companion .result.json", async () => {
@@ -59,33 +63,25 @@ describe("FileSink", () => {
     const path = join(dir, "deeply", "nested", "run.jsonl");
     const sink = new FileSink({ path });
 
-    await sink.onEvent({
-      runId: "r",
-      sequence: 1,
-      event: { type: "add_memory", content: "x" },
-    });
+    await sink.handle(event("memory.added", { content: "x" }));
 
     const text = await readFile(path, "utf8");
-    expect(text).toContain("add_memory");
+    expect(text).toContain("memory.added");
   });
 
-  it("preserves event ordering across many onEvent calls", async () => {
+  it("preserves event ordering across many handle calls", async () => {
     const path = join(dir, "order.jsonl");
     const sink = new FileSink({ path });
 
     for (let i = 0; i < 50; i++) {
-      await sink.onEvent({
-        runId: "r",
-        sequence: i,
-        event: { type: "add_memory", content: `m${i}` },
-      });
+      await sink.handle(event("memory.added", { content: `m${i}`, index: i }));
     }
 
     const text = await readFile(path, "utf8");
     const lines = text.trim().split("\n");
     expect(lines).toHaveLength(50);
     for (let i = 0; i < 50; i++) {
-      expect(JSON.parse(lines[i]!).sequence).toBe(i);
+      expect(JSON.parse(lines[i]!).index).toBe(i);
     }
   });
 });

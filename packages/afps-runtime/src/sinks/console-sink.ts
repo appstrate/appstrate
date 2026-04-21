@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 
 /**
@@ -28,13 +28,15 @@ export interface ConsoleWritable {
 
 export class ConsoleSink implements EventSink {
   private readonly out: ConsoleWritable;
+  private sequence = 0;
 
   constructor(opts: ConsoleSinkOptions = {}) {
     this.out = opts.out ?? process.stdout;
   }
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    this.out.write(this.formatEvent(envelope) + "\n");
+  async handle(event: RunEvent): Promise<void> {
+    this.sequence += 1;
+    this.out.write(this.formatEvent(event, this.sequence) + "\n");
   }
 
   async finalize(result: RunResult): Promise<void> {
@@ -47,25 +49,26 @@ export class ConsoleSink implements EventSink {
     this.out.write(summary + "\n");
   }
 
-  private formatEvent(envelope: AfpsEventEnvelope): string {
-    const { event, sequence } = envelope;
+  private formatEvent(event: RunEvent, sequence: number): string {
     const seq = `#${sequence.toString().padStart(4, "0")}`;
     switch (event.type) {
-      case "add_memory":
-        return `${seq} ✚ memory: ${truncate(event.content, 200)}`;
-      case "set_state":
+      case "memory.added":
+        return `${seq} ✚ memory: ${truncate(String(event.content ?? ""), 200)}`;
+      case "state.set":
         return `${seq} ▲ state: ${truncate(safeStringify(event.state), 200)}`;
-      case "output":
+      case "output.emitted":
         return `${seq} ◆ output: ${truncate(safeStringify(event.data), 200)}`;
-      case "report":
-        return `${seq} 📝 report: ${truncate(event.content, 200)}`;
-      case "log":
-        return `${seq} ${logMarker(event.level)} ${event.message}`;
+      case "report.appended":
+        return `${seq} 📝 report: ${truncate(String(event.content ?? ""), 200)}`;
+      case "log.written":
+        return `${seq} ${logMarker(event.level)} ${String(event.message ?? "")}`;
+      default:
+        return `${seq} • ${event.type}: ${truncate(safeStringify(eventPayload(event)), 200)}`;
     }
   }
 }
 
-function logMarker(level: "info" | "warn" | "error"): string {
+function logMarker(level: unknown): string {
   switch (level) {
     case "info":
       return "ℹ";
@@ -73,6 +76,8 @@ function logMarker(level: "info" | "warn" | "error"): string {
       return "⚠";
     case "error":
       return "✗";
+    default:
+      return "·";
   }
 }
 
@@ -86,4 +91,14 @@ function safeStringify(value: unknown): string {
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1) + "…";
+}
+
+const ENVELOPE_KEYS = new Set<string>(["type", "timestamp", "runId", "toolCallId"]);
+
+function eventPayload(event: RunEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event)) {
+    if (!ENVELOPE_KEYS.has(key)) out[key] = value;
+  }
+  return out;
 }
