@@ -11,10 +11,11 @@ locally.
 - **Execution-contract parity.** Appstrate and external runners load the
   exact same bundle through the exact same interfaces.
 - **Zero coupling.** The runtime has no knowledge of Appstrate. Appstrate
-  ships its own implementations of the open interfaces (`HttpSink`,
-  `AppstrateContextProvider`, `AppstrateCredentialProvider`).
-- **Reproducible.** A run can be recorded (file sink → `.jsonl`) and replayed
-  via `afps run --events <file>` with identical structural behaviour.
+  ships its own sink (`AppstrateEventSink`) and resolvers against the
+  runtime's open surface.
+- **Reproducible.** A run can be recorded (file sink → `.jsonl`) and
+  replayed via `afps run --events <file>` with identical structural
+  behaviour.
 - **Apache-2.0.** Toolbox, not a platform — build whatever you want on top.
 
 ## Install
@@ -36,7 +37,7 @@ afps <command> [options]
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  run <bundle>        Execute a bundle using the MockRunner
+  run <bundle>        Replay a scripted RunEvent[] through the sink + reducer
   conformance         Run the AFPS conformance suite (L1–L4)
 ```
 
@@ -79,9 +80,9 @@ import {
   readBundleSignature,
   verifyBundleSignature,
   renderPrompt,
-  SnapshotContextProvider,
-  MockRunner,
+  reduceEvents,
   ConsoleSink,
+  type RunEvent,
 } from "@appstrate/afps-runtime";
 
 const bundle = await loadBundleFromFile("./agent.afps");
@@ -99,46 +100,45 @@ if (sig) {
   if (!result.ok) throw new Error(`signature invalid: ${result.reason}`);
 }
 
-// Rendering the prompt
-const provider = new SnapshotContextProvider({
-  memories: [{ content: "prior finding", createdAt: Date.now() }],
-});
+// Render the prompt — memories / state / history travel on the
+// ExecutionContext; no provider bridge is involved.
 const prompt = await renderPrompt({
   template: bundle.prompt,
-  context: { runId: "run_1", input: { topic: "birds" } },
-  provider,
+  context: {
+    runId: "run_1",
+    input: { topic: "birds" },
+    memories: [{ content: "prior finding", createdAt: Date.now() }],
+  },
 });
 
-// Executing (scripted, deterministic)
-const runner = new MockRunner({
-  events: [
-    { type: "log", level: "info", message: "hello" },
-    { type: "add_memory", content: "learned something" },
-    { type: "output", data: { done: true } },
-  ],
-});
-const result = await runner.run({
-  bundle,
-  context: { runId: "run_1", input: {} },
-  sink: new ConsoleSink(),
-  contextProvider: provider,
-});
+// Consume an event stream through a sink (produced by a runner you wire
+// up externally — e.g. the spec-aligned `Runner` interface from
+// `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
+const sink = new ConsoleSink();
+const events: RunEvent[] = [
+  { type: "log.written", timestamp: Date.now(), runId: "run_1", level: "info", message: "hello" },
+  { type: "memory.added", timestamp: Date.now(), runId: "run_1", content: "learned something" },
+  { type: "output.emitted", timestamp: Date.now(), runId: "run_1", data: { done: true } },
+];
+for (const ev of events) await sink.handle(ev);
+const result = reduceEvents(events);
+await sink.finalize(result);
 ```
 
 ### Package subpath exports
 
-| Subpath                               | What                                                          |
-| ------------------------------------- | ------------------------------------------------------------- |
-| `@appstrate/afps-runtime`             | Everything — re-exports all modules                           |
-| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering            |
-| `@appstrate/afps-runtime/runner`      | `BundleRunner`, `MockRunner`, `reduceEvents`                  |
-| `@appstrate/afps-runtime/interfaces`  | `EventSink`, `ContextProvider`, `CredentialProvider`, …       |
-| `@appstrate/afps-runtime/providers`   | Built-in providers (snapshot, file, env, …)                   |
-| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`        |
-| `@appstrate/afps-runtime/events`      | CloudEvents envelope, Standard Webhooks signing, JSONL parser |
-| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                    |
-| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner            |
-| `@appstrate/afps-runtime/types`       | `AfpsEvent`, `ExecutionContext`, `RunResult`, …               |
+| Subpath                               | What                                                               |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                |
+| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                 |
+| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                |
+| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                               |
+| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`             |
+| `@appstrate/afps-runtime/resolvers`   | `ProviderResolver`, `ToolResolver`, `SkillResolver`, `ToolContext` |
+| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                   |
+| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                         |
+| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                 |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …         |
 
 ## Conformance
 
@@ -155,15 +155,16 @@ console.log(formatReport(report));
 
 Levels (from the spec):
 
-| Level  | Scope           | Representative case                                        |
-| ------ | --------------- | ---------------------------------------------------------- |
-| **L1** | Bundle loader   | Rejects a ZIP missing `manifest.json`                      |
-| **L2** | Prompt renderer | Strips function-valued context fields                      |
-| **L3** | Signing         | Verifies a 1-hop trust chain, rejects untrusted root       |
-| **L4** | Execution       | Event `sequence` monotonic, `sink.finalize()` exactly once |
+| Level  | Scope           | Representative case                                     |
+| ------ | --------------- | ------------------------------------------------------- |
+| **L1** | Bundle loader   | Rejects a ZIP missing `manifest.json`                   |
+| **L2** | Prompt renderer | Strips function-valued context fields                   |
+| **L3** | Signing         | Verifies a 1-hop trust chain, rejects untrusted root    |
+| **L4** | Execution       | Events emitted in arrival order, `sink.finalize()` once |
 
-L4 adapter method is optional — implementations that only cover
-loading/rendering/signing have L4 cases automatically marked `skipped`.
+The L4 `runScripted` adapter method is optional — implementations that
+only cover loading/rendering/signing have L4 cases automatically marked
+`skipped`.
 
 ### Implementing the adapter in another language
 
@@ -177,9 +178,9 @@ fixtures/reference/
 ├── bundle-unsigned.afps    # same bundle without signature.sig
 ├── key.json                # { keyId, publicKey, privateKey } (Ed25519, raw 32-byte base64)
 ├── trust-root.json         # { keys: [{ keyId, publicKey }] }
-├── events.json             # AfpsEvent[] replayed by MockRunner
-├── context.json            # ExecutionContext passed to runBundle
-└── snapshot.json           # SnapshotContextProvider input
+├── events.json             # RunEvent[] scripted replay (type/timestamp/runId + payload)
+├── context.json            # ExecutionContext passed to render
+└── snapshot.json           # { memories?, state?, history? } merged onto the context
 ```
 
 Regenerate with `bun run scripts/build-fixtures.ts` (keys rotate each run
@@ -216,53 +217,11 @@ Runtime dependencies are intentionally minimal:
 - **[`mustache`](https://github.com/janl/mustache.js)** — logic-less template rendering (MIT, zero-dep)
 - **[`zod`](https://zod.dev)** — runtime type validation (MIT)
 
-No Pi SDK coupling at the core level — the `PiRunner` implementation
-lazy-imports `@mariozechner/pi-coding-agent` + `@mariozechner/pi-ai`
-on first `.run()` call, so consumers who only use `MockRunner` never
-pull the SDK.
-
-## Running against a real LLM — PiRunner
-
-`PiRunner` wires the 5 AFPS platform tools (`add_memory`, `set_state`,
-`output`, `report`, `log`) as Pi extensions whose `execute` pushes the
-matching `AfpsEvent` through your sink in-process — same contract as
-`MockRunner`, same reducer, same envelope.
-
-```sh
-# Install the optional peer deps
-bun add @mariozechner/pi-coding-agent @mariozechner/pi-ai
-
-# Run against Anthropic
-export LLM_API_KEY=sk-ant-…
-afps run agent.afps \
-  --runner pi \
-  --model claude-opus-4-7 \
-  --api anthropic-messages \
-  --context context.json \
-  --snapshot snapshot.json
-```
-
-Or as a library:
-
-```ts
-import { PiRunner, ConsoleSink, SnapshotContextProvider, loadBundleFromFile } from "@appstrate/afps-runtime";
-
-const runner = new PiRunner({
-  model: { id: "claude-opus-4-7", api: "anthropic-messages" },
-  apiKey: process.env.LLM_API_KEY!,
-  thinkingLevel: "medium",
-});
-const bundle = await loadBundleFromFile("./agent.afps");
-const result = await runner.run({
-  bundle,
-  context: { runId: "r1", input: { topic: "X" } },
-  sink: new ConsoleSink(),
-  contextProvider: new SnapshotContextProvider({ memories: [...] }),
-});
-```
-
-Supported `--api` values: `anthropic-messages`, `openai-completions`,
-`openai-responses`, `google-generative-ai`, `mistral-conversations`.
+The runtime exposes a `Runner` interface under
+`@appstrate/afps-runtime/runner` but does not ship a concrete LLM-backed
+implementation in v1 — downstream projects (including Appstrate itself,
+which delegates execution to a Docker container) implement the interface
+with their own session backend.
 
 ## License
 
