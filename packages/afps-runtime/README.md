@@ -216,9 +216,53 @@ Runtime dependencies are intentionally minimal:
 - **[`mustache`](https://github.com/janl/mustache.js)** — logic-less template rendering (MIT, zero-dep)
 - **[`zod`](https://zod.dev)** — runtime type validation (MIT)
 
-No Pi SDK coupling at the core level — a `PiRunner` implementation of
-`BundleRunner` ships separately so consumers only pull the Pi SDK when
-they need real LLM execution.
+No Pi SDK coupling at the core level — the `PiRunner` implementation
+lazy-imports `@mariozechner/pi-coding-agent` + `@mariozechner/pi-ai`
+on first `.run()` call, so consumers who only use `MockRunner` never
+pull the SDK.
+
+## Running against a real LLM — PiRunner
+
+`PiRunner` wires the 5 AFPS platform tools (`add_memory`, `set_state`,
+`output`, `report`, `log`) as Pi extensions whose `execute` pushes the
+matching `AfpsEvent` through your sink in-process — same contract as
+`MockRunner`, same reducer, same envelope.
+
+```sh
+# Install the optional peer deps
+bun add @mariozechner/pi-coding-agent @mariozechner/pi-ai
+
+# Run against Anthropic
+export LLM_API_KEY=sk-ant-…
+afps run agent.afps \
+  --runner pi \
+  --model claude-opus-4-7 \
+  --api anthropic-messages \
+  --context context.json \
+  --snapshot snapshot.json
+```
+
+Or as a library:
+
+```ts
+import { PiRunner, ConsoleSink, SnapshotContextProvider, loadBundleFromFile } from "@appstrate/afps-runtime";
+
+const runner = new PiRunner({
+  model: { id: "claude-opus-4-7", api: "anthropic-messages" },
+  apiKey: process.env.LLM_API_KEY!,
+  thinkingLevel: "medium",
+});
+const bundle = await loadBundleFromFile("./agent.afps");
+const result = await runner.run({
+  bundle,
+  context: { runId: "r1", input: { topic: "X" } },
+  sink: new ConsoleSink(),
+  contextProvider: new SnapshotContextProvider({ memories: [...] }),
+});
+```
+
+Supported `--api` values: `anthropic-messages`, `openai-completions`,
+`openai-responses`, `google-generative-ai`, `mistral-conversations`.
 
 ## License
 

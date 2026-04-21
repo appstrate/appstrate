@@ -97,6 +97,38 @@ describe("afps run", () => {
     expect(io.stderrText()).toContain("--events");
   });
 
+  it("rejects an unknown --runner with exit 2", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const io = captureIo();
+    const code = await runCli(["run", bundle, "--runner", "galaxy"], io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("unknown --runner");
+  });
+
+  it("--runner pi requires --model, --api, and --api-key", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+
+    for (const [args, needle] of [
+      [["run", bundle, "--runner", "pi"], "--model"],
+      [["run", bundle, "--runner", "pi", "--model", "x"], "--api"],
+      [
+        ["run", bundle, "--runner", "pi", "--model", "x", "--api", "anthropic-messages"],
+        "--api-key",
+      ],
+      [
+        ["run", bundle, "--runner", "pi", "--model", "x", "--api", "telepathy", "--api-key", "k"],
+        "unknown --api",
+      ],
+    ] as const) {
+      const io = captureIo();
+      const code = await runCli(args, io);
+      expect(code).toBe(2);
+      expect(io.stderrText()).toContain(needle);
+    }
+  });
+
   it("rejects an unknown --sink mode with exit 1", async () => {
     const bundle = join(dir, "a.afps");
     const events = join(dir, "events.json");

@@ -69,7 +69,21 @@
     "mustache": "^4.2.0",
     "zod": "^4.3.6"
   },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@mariozechner/pi-ai": {
+      "optional": true
+    }
+  },
   "devDependencies": {
-    "@types/mustache": "^4.2.6"
+    "@types/mustache": "^4.2.6",
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
   }
 }
