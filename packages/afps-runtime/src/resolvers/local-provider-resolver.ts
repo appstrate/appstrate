@@ -5,6 +5,7 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
+  resolveBodyStream,
   serializeFetchResponse,
   type ProviderCallFn,
   type ProviderMeta,
@@ -103,7 +104,10 @@ export class LocalProviderResolver implements ProviderResolver {
       }
       applyCredentialInjection(headers, entry);
 
-      const bodyBytes = await resolveBodyStream(req.body, entry.fields);
+      const bodyBytes = await resolveBodyStream(req.body, {
+        allowFromFile: true,
+        transformString: (input) => substitutePlaceholders(input, entry.fields),
+      });
 
       const res = await this.fetchImpl(target, {
         method: req.method,
@@ -133,18 +137,4 @@ function applyCredentialInjection(
   const headerName = injection.headerName ?? "Authorization";
   const headerPrefix = injection.headerPrefix ?? "";
   headers[headerName] = `${headerPrefix}${rendered}`;
-}
-
-async function resolveBodyStream(
-  body: string | Uint8Array | null | { fromFile: string } | undefined,
-  fields: Record<string, string>,
-): Promise<string | Uint8Array | undefined> {
-  if (body === undefined || body === null) return undefined;
-  if (typeof body === "string") return substitutePlaceholders(body, fields);
-  if (body instanceof Uint8Array) return body;
-  if ("fromFile" in body) {
-    const fs = await import("node:fs/promises");
-    return new Uint8Array(await fs.readFile(body.fromFile));
-  }
-  return undefined;
 }

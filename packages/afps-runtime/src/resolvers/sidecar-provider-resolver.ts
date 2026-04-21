@@ -5,6 +5,7 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
+  resolveBodyStream,
   serializeFetchResponse,
   type ProviderCallFn,
   type ProviderMeta,
@@ -78,21 +79,4 @@ export class SidecarProviderResolver implements ProviderResolver {
       return serializeFetchResponse(res);
     };
   }
-}
-
-/**
- * Materialise the request body as a `BodyInit`-compatible value. File
- * references (`{ fromFile }`) are read from the workspace by the caller
- * — this helper only handles the string / Uint8Array / null cases so a
- * {@link SidecarProviderResolver} with no fs access still works.
- */
-async function resolveBodyStream(
-  body: string | Uint8Array | null | { fromFile: string } | undefined,
-): Promise<string | Uint8Array | undefined> {
-  if (body === undefined || body === null) return undefined;
-  if (typeof body === "string") return body;
-  if (body instanceof Uint8Array) return body;
-  throw new Error(
-    `SidecarProviderResolver: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use LocalProviderResolver for file-ref IO`,
-  );
 }

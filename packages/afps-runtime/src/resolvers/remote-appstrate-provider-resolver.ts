@@ -5,6 +5,7 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
+  resolveBodyStream,
   serializeFetchResponse,
   type ProviderCallFn,
   type ProviderMeta,
@@ -75,7 +76,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
 
   private buildCall(ref: ProviderRef, meta: ProviderMeta): ProviderCallFn {
     return async (req) => {
-      const bodyBytes = await resolveBodyStream(req.body);
+      const bodyBytes = await resolveBodyStream(req.body, { allowFromFile: true });
       const headers: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,
@@ -95,17 +96,4 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       return serializeFetchResponse(res);
     };
   }
-}
-
-async function resolveBodyStream(
-  body: string | Uint8Array | null | { fromFile: string } | undefined,
-): Promise<string | Uint8Array | undefined> {
-  if (body === undefined || body === null) return undefined;
-  if (typeof body === "string") return body;
-  if (body instanceof Uint8Array) return body;
-  if ("fromFile" in body) {
-    const fs = await import("node:fs/promises");
-    return new Uint8Array(await fs.readFile(body.fromFile));
-  }
-  return undefined;
 }

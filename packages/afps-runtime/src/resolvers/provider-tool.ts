@@ -199,6 +199,32 @@ function slugify(name: string): string {
 }
 
 /**
+ * Materialise a request body into a `BodyInit`-compatible value.
+ * Handles the three shapes accepted by {@link ProviderCallRequest.body}:
+ * strings (optionally transformed — e.g. placeholder substitution by
+ * the local resolver), raw bytes (pass-through), and file references
+ * (only resolved when `allowFromFile` is true; sidecar-based transports
+ * disallow them since the sidecar has no workspace access).
+ */
+export async function resolveBodyStream(
+  body: string | Uint8Array | null | { fromFile: string } | undefined,
+  opts: { allowFromFile?: boolean; transformString?: (input: string) => string } = {},
+): Promise<string | Uint8Array | undefined> {
+  if (body === undefined || body === null) return undefined;
+  if (typeof body === "string") {
+    return opts.transformString ? opts.transformString(body) : body;
+  }
+  if (body instanceof Uint8Array) return body;
+  if (!opts.allowFromFile) {
+    throw new Error(
+      `resolveBodyStream: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use a resolver with allowFromFile`,
+    );
+  }
+  const fs = await import("node:fs/promises");
+  return new Uint8Array(await fs.readFile(body.fromFile));
+}
+
+/**
  * Serialise a `fetch` response into the spec-shaped
  * {@link ProviderCallResponse} every resolver returns to the LLM. The
  * body is read once and inlined as UTF-8 — streaming to file is a
