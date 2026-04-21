@@ -78,7 +78,11 @@
       },
       "dependencies": {
         "@apidevtools/swagger-parser": "^12.1.0",
+        "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/runner-pi": "workspace:*",
         "@clack/prompts": "^1.2.0",
+        "@mariozechner/pi-ai": "^0.67.2",
+        "@mariozechner/pi-coding-agent": "^0.67.2",
         "@napi-rs/keyring": "^1.2.0",
         "async-mutex": "^0.5.0",
         "commander": "^14.0.3",

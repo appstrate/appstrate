@@ -45,6 +45,7 @@ import {
   appCreateCommand,
 } from "./commands/app.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
+import { runCommand } from "./commands/run.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -550,5 +551,44 @@ program
   });
 
 registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
+
+program
+  .command("run")
+  .description("Execute an AFPS bundle locally via PiRunner (CLI mode — no platform preamble)")
+  .argument("<bundle>", "Path to the .afps bundle (or .zip)")
+  .option(
+    "--providers <mode>",
+    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",
+  )
+  .option("--creds-file <path>", "JSON credentials file for --providers=local")
+  .option("--api-key <key>", "Appstrate API key (ask_...) for --providers=remote")
+  .option("--input <json>", "Input JSON object passed to the agent")
+  .option("--input-file <path>", "Read input JSON from file")
+  .option("--config <json>", "Config JSON object passed to the agent")
+  .option("--model <id>", "Model ID (default: claude-sonnet-4-5)")
+  .option("--model-api <api>", "Model API (default: anthropic-messages)")
+  .option("--llm-api-key <key>", "LLM API key (default: from env — ANTHROPIC_API_KEY etc.)")
+  .option("--run-id <id>", "Explicit run id (default: generated)")
+  .option("--output <path>", "Write the final RunResult JSON to this path")
+  .option("--json", "Emit canonical RunEvents as JSONL on stdout")
+  .action(async (bundle: string, opts) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await runCommand({
+      profile: globalOpts.profile,
+      bundle,
+      providers: typeof opts.providers === "string" ? opts.providers : undefined,
+      credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
+      apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
+      input: typeof opts.input === "string" ? opts.input : undefined,
+      inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
+      config: typeof opts.config === "string" ? opts.config : undefined,
+      model: typeof opts.model === "string" ? opts.model : undefined,
+      modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
+      llmApiKey: typeof opts.llmApiKey === "string" ? opts.llmApiKey : undefined,
+      runId: typeof opts.runId === "string" ? opts.runId : undefined,
+      output: typeof opts.output === "string" ? opts.output : undefined,
+      json: opts.json === true,
+    });
+  });
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));
