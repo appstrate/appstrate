@@ -90,6 +90,7 @@
   "workspaces": [
     "apps/*",
     "packages/*",
+    "packages/afps/*",
     "runtime-pi",
     "runtime-pi/sidecar",
     "e2e"
@@ -99,7 +100,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.3.1",
+    "@afps-spec/schema": "file:../afps-spec/schema",
     "@appstrate/core": "workspace:*",
     "@electric-sql/pglite": "^0.4.4",
     "ajv": "^8.18.0"

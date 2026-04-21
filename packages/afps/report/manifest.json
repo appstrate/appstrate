@@ -1,0 +1,25 @@
+{
+  "name": "@afps/report",
+  "version": "1.0.0",
+  "type": "tool",
+  "schemaVersion": "1.3",
+  "displayName": "Report",
+  "description": "Append lines to the human-readable run report — emits `report.appended` events.",
+  "license": "Apache-2.0",
+  "entrypoint": "src/index.ts",
+  "tool": {
+    "name": "report",
+    "description": "Append a line to the human-readable run report. Lines are concatenated with newline separators in the final RunResult.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["content"],
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "One line of the human-readable report."
+        }
+      }
+    }
+  }
+}

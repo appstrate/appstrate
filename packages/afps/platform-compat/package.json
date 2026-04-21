@@ -1,0 +1,43 @@
+{
+  "name": "@afps/platform-compat",
+  "version": "1.0.0",
+  "description": "Compatibility shim re-exporting the five AFPS 1.3 platform tools as a single bundle. Intended for runners that auto-inject the pre-1.3 hardcoded tools into legacy agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "afps",
+    "agent",
+    "compat",
+    "platform"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate",
+    "directory": "packages/afps/platform-compat"
+  },
+  "peerDependencies": {
+    "@afps-spec/schema": "^1.5.0"
+  },
+  "dependencies": {
+    "@afps/log": "1.0.0",
+    "@afps/memory": "1.0.0",
+    "@afps/output": "1.0.0",
+    "@afps/report": "1.0.0",
+    "@afps/state": "1.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.10"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
