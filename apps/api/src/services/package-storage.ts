@@ -11,11 +11,29 @@ import {
   TOOL_CONFIG,
   PROVIDER_CONFIG,
 } from "./package-items/index.ts";
+import { loadAndVerifyBundle } from "./adapters/bundle-signature-policy.ts";
 
 const BUCKET = "agent-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
 
-/** Download a versioned package ZIP from Storage. Optionally verifies integrity. Returns null if not found. */
+/**
+ * Download a versioned package ZIP from Storage.
+ *
+ * Two orthogonal integrity checks are applied when the inputs are
+ * present:
+ *
+ *   1. `expectedIntegrity` (SRI sha256 over the raw ZIP bytes, stored in
+ *      `package_versions.integrity` when the version was published) —
+ *      detects storage corruption and tampering of the artifact at
+ *      rest.
+ *   2. AFPS bundle signature (`signature.sig` inside the ZIP, verified
+ *      against the `AFPS_TRUST_ROOT` + `AFPS_SIGNATURE_POLICY` env
+ *      config) — detects tampering by anyone who could have written
+ *      the ZIP since it was signed by the publisher.
+ *
+ * Returns `null` if the object does not exist. Throws on integrity or
+ * (under policy=required) signature failure.
+ */
 export async function downloadVersionZip(
   packageId: string,
   version: string,
@@ -25,8 +43,10 @@ export async function downloadVersionZip(
   const data = await storage.downloadFile(BUCKET, path);
   if (!data) return null;
 
+  const bytes = new Uint8Array(data);
+
   if (expectedIntegrity) {
-    const result = verifyArtifactIntegrity(new Uint8Array(data), expectedIntegrity);
+    const result = verifyArtifactIntegrity(bytes, expectedIntegrity);
     if (!result.valid) {
       logger.error("Integrity mismatch on version download", {
         packageId,
@@ -37,6 +57,11 @@ export async function downloadVersionZip(
       throw new Error(`Integrity check failed for ${packageId}@${version}`);
     }
   }
+
+  // Signature policy is applied here (and not inside the unzip path)
+  // so every code path that pulls a bundle from storage goes through
+  // the same gate: run path, re-publish, dependency resolution, etc.
+  await loadAndVerifyBundle(bytes, packageId);
 
   return Buffer.from(data);
 }

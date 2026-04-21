@@ -132,6 +132,22 @@ const envSchema = z
     LEGAL_TERMS_URL: z.string().optional(),
     LEGAL_PRIVACY_URL: z.string().optional(),
 
+    // AFPS bundle signing
+    //
+    // AFPS_TRUST_ROOT: JSON array of trusted publishers:
+    //   [{ "keyId": "...", "publicKey": "<base64>", "comment": "..." }]
+    // Bundles signed by a key not in this list (directly or via chain) are
+    // rejected when AFPS_SIGNATURE_POLICY=required.
+    AFPS_TRUST_ROOT: z
+      .string()
+      .default("[]")
+      .transform((s) => JSON.parse(s) as unknown[]),
+    // AFPS_SIGNATURE_POLICY — how to treat bundle signatures at load:
+    //   - "off"      (default) — no verification, unsigned bundles accepted
+    //   - "warn"     — verify if signed; log warnings on unsigned/invalid
+    //   - "required" — reject unsigned and invalid bundles (load fails)
+    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("off"),
+
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
