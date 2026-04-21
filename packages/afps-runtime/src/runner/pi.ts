@@ -18,6 +18,7 @@
 
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
 import type { AfpsEvent, AfpsEventEnvelope } from "../types/afps-event.ts";
+import { toRunEvent } from "../types/run-event.ts";
 import type { RunError, RunResult } from "../types/run-result.ts";
 import { reduceEvents } from "./reducer.ts";
 import type { BundleRunner, RunBundleOptions } from "./types.ts";
@@ -121,7 +122,10 @@ export class PiRunner implements BundleRunner {
         sequence: sequence++,
         event,
       };
-      await sink.onEvent(envelope);
+      if (sink.handle) {
+        await sink.handle(toRunEvent({ event, runId: context.runId }));
+      }
+      if (sink.onEvent) await sink.onEvent(envelope);
     };
 
     const factory = this.opts.sessionFactory ?? defaultSessionFactory;

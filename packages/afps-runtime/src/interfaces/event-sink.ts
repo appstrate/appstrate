@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 
 /**
@@ -9,25 +10,45 @@ import type { RunResult } from "../types/run-result.ts";
  *
  * Two orthogonal flows:
  *
- * - `onEvent`: called once per event as the run streams. Sinks stream to
- *   a file, HTTP endpoint, console, or fan out to multiple destinations.
+ * - `onEvent`: legacy pre-1.3 call path — called once per event with the
+ *   runtime-assigned envelope. Implementations SHOULD continue to accept
+ *   it for compatibility with AFPS 1.0–1.2 runners.
+ * - `handle` (AFPS 1.3+): called once per open-envelope {@link RunEvent}.
+ *   The envelope carries its own `type`, `timestamp`, `runId`, and may
+ *   be a third-party event (unknown to the runtime). Prefer this when
+ *   building new sinks — it is the spec-aligned contract.
  * - `finalize`: called exactly once at the end of the run with the
  *   aggregated {@link RunResult}. Sinks may persist the result, close
  *   connections, flush buffers, etc.
  *
+ * The runtime will call whichever methods the sink implements. If both
+ * `onEvent` and `handle` are present, the runtime calls `handle` with
+ * the open envelope and `onEvent` with the legacy envelope only for the
+ * five reserved core-domain events (memory/state/output/report/log).
+ *
  * Implementations MUST be safe under back-pressure — the runtime may
  * emit events faster than the sink can forward them.
  *
- * Specification: see `AFPS_EXTENSION_ARCHITECTURE.md` §6.
+ * Specification: `afps-spec/schema/src/interfaces.ts` — {@link EventSink}.
  */
 export interface EventSink {
   /**
-   * Handle a single event. Called in sequence order, sequentially
-   * awaited — the runtime will not call `onEvent` again until the
-   * returned promise resolves. Implementations that need concurrency
-   * should buffer internally.
+   * AFPS 1.3+ handler — open-envelope {@link RunEvent}. Called in
+   * sequence order, sequentially awaited — the runtime will not call
+   * `handle` again until the returned promise resolves.
+   *
+   * Optional for back-compat with sinks authored against 1.0–1.2.
    */
-  onEvent(envelope: AfpsEventEnvelope): Promise<void>;
+  handle?(event: RunEvent): Promise<void>;
+
+  /**
+   * Handle a single legacy event envelope (pre-1.3 surface).
+   * Called in sequence order, sequentially awaited.
+   *
+   * Optional — new sinks SHOULD implement {@link handle} instead.
+   * Kept for compatibility with existing AFPS 1.0–1.2 sinks.
+   */
+  onEvent?(envelope: AfpsEventEnvelope): Promise<void>;
 
   /**
    * Called exactly once after the final event, before the runtime
