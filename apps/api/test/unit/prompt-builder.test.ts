@@ -66,6 +66,26 @@ describe("buildEnrichedPrompt — core structure", () => {
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
   });
+
+  it("skipSidecarEnvironmentProse suppresses System/Environment/AuthenticatedProviderAPI", () => {
+    const ctx = baseContext({
+      timeout: 60,
+      providers: [
+        {
+          id: "gmail",
+          displayName: "Gmail",
+          authMode: "oauth2",
+        },
+      ],
+      tokens: { gmail: "tok" },
+    });
+    const prompt = buildEnrichedPrompt(ctx, { skipSidecarEnvironmentProse: true });
+    expect(prompt).not.toContain("## System");
+    expect(prompt).not.toContain("### Environment");
+    expect(prompt).not.toContain("## Authenticated Provider API");
+    // raw prompt still appended at the end after separator
+    expect(prompt).toContain("---");
+  });
 });
 
 // ─── Tool documentation (TOOL.md) ──────────────────────────

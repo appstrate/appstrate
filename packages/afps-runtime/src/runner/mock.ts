@@ -65,10 +65,13 @@ export class MockRunner implements BundleRunner {
         sequence: sequence++,
         event,
       };
+      // Prefer handle() (AFPS 1.3 open envelope) over onEvent (legacy).
+      // Sinks that implement both SHOULD treat handle as authoritative.
       if (sink.handle) {
         await sink.handle(toRunEvent({ event, runId: context.runId, nowMs: now() }));
+      } else if (sink.onEvent) {
+        await sink.onEvent(envelope);
       }
-      if (sink.onEvent) await sink.onEvent(envelope);
     }
 
     const result = reduceEvents(this.opts.events, {

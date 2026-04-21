@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} — consumes the 5 canonical AFPS
- * events and fans them out to the platform's persistence layer:
+ * Appstrate-backed {@link EventSink} — consumes the canonical AFPS
+ * reserved-domain events and fans them out to the platform's
+ * persistence layer:
  *
  *   - `run_logs` table (one row per observable event, same shape the
  *     legacy in-route switch produced — preserves SSE + log history UI)
@@ -12,15 +13,19 @@
  *
  * The sink itself performs NO status update, NO webhook dispatch, and NO
  * post-run metadata collection. Those remain the route handler's
- * responsibility until Phase E lands the AppstrateContainerRunner,
- * which will orchestrate the full lifecycle through the sink.
+ * responsibility.
  *
- * See docs/architecture/AFPS_EXTENSION_ARCHITECTURE.md §6 for the
- * push-side contract.
+ * AFPS 1.3 surface: the primary entrypoint is `handle(event: RunEvent)` —
+ * the open envelope spec'd in afps-spec/schema/src/interfaces.ts. Legacy
+ * `onEvent(envelope)` is kept for compatibility with callers still on the
+ * pre-1.3 surface (notably existing unit tests that bypass the runtime
+ * and call the sink directly). Both paths feed the same aggregator.
  */
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { AfpsEventEnvelope } from "@appstrate/afps-runtime/types";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
+import { toRunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import type { OrgScope } from "../../lib/scope.ts";
 import { appendRunLog } from "../state/runs.ts";
@@ -62,28 +67,38 @@ export class AppstrateEventSink implements EventSink {
     this.runId = opts.runId;
   }
 
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    const { event } = envelope;
+  /**
+   * AFPS 1.3 primary entrypoint — open {@link RunEvent} envelope. Core
+   * reserved-domain events (memory.added / state.set / output.emitted /
+   * report.appended / log.written) feed the aggregator; other event
+   * types pass through silently (third-party tools do not contribute
+   * to the canonical RunResult projection).
+   */
+  async handle(event: RunEvent): Promise<void> {
     switch (event.type) {
-      case "add_memory":
-        this.aggregate.memories.push(event.content);
+      case "memory.added": {
+        if (typeof event.content === "string") {
+          this.aggregate.memories.push(event.content);
+        }
         break;
+      }
 
-      case "set_state":
+      case "state.set": {
         this.aggregate.state = isPlainObject(event.state)
           ? event.state
-          : // Preserve the route handler's long-standing behaviour of
-            // accepting any JSON value via `set_state` by wrapping scalars
-            // under a `value` key rather than discarding them.
-            { value: event.state };
+          : event.state === undefined
+            ? this.aggregate.state
+            : // Preserve the route handler's long-standing behaviour of
+              // accepting any JSON value via `set_state` by wrapping scalars
+              // under a `value` key rather than discarding them.
+              { value: event.state };
         break;
+      }
 
-      case "output":
+      case "output.emitted": {
         if (isPlainObject(event.data)) {
           Object.assign(this.aggregate.output, event.data);
         } else if (event.data !== undefined) {
-          // Non-object output replaces wholesale — matches the runtime
-          // reducer's mergeOutput semantics for non-plain-object values.
           this.aggregate.output = { value: event.data };
         }
         await appendRunLog(
@@ -96,32 +111,53 @@ export class AppstrateEventSink implements EventSink {
           "info",
         );
         break;
+      }
 
-      case "report":
-        this.aggregate.report += (this.aggregate.report ? "\n\n" : "") + event.content;
-        await appendRunLog(
-          this.scope,
-          this.runId,
-          "result",
-          "report",
-          null,
-          { content: event.content },
-          "info",
-        );
+      case "report.appended": {
+        if (typeof event.content === "string") {
+          this.aggregate.report += (this.aggregate.report ? "\n\n" : "") + event.content;
+          await appendRunLog(
+            this.scope,
+            this.runId,
+            "result",
+            "report",
+            null,
+            { content: event.content },
+            "info",
+          );
+        }
         break;
+      }
 
-      case "log":
-        await appendRunLog(
-          this.scope,
-          this.runId,
-          "progress",
-          "progress",
-          event.message,
-          null,
-          event.level,
-        );
+      case "log.written": {
+        const level = event.level;
+        const message = event.message;
+        if (
+          (level === "info" || level === "warn" || level === "error") &&
+          typeof message === "string"
+        ) {
+          await appendRunLog(this.scope, this.runId, "progress", "progress", message, null, level);
+        }
+        break;
+      }
+
+      default:
+        // Third-party event — no canonical projection. Runners that want
+        // to observe third-party events can compose with CompositeSink.
         break;
     }
+  }
+
+  /**
+   * Pre-1.3 entrypoint — lifts the legacy envelope into an open RunEvent
+   * and delegates to {@link handle}. Kept so existing tests and callers
+   * that bypass the runtime (and therefore miss the runtime's preferred
+   * `handle` path) keep working without modification.
+   *
+   * @deprecated use {@link handle} directly.
+   */
+  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
+    await this.handle(toRunEvent({ event: envelope.event, runId: envelope.runId }));
   }
 
   async finalize(result: RunResult): Promise<void> {

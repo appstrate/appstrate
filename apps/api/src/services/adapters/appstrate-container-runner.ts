@@ -32,6 +32,7 @@
 
 import type { BundleRunner, RunBundleOptions, RunResult } from "@appstrate/afps-runtime/runner";
 import type { AfpsEvent, AfpsEventEnvelope } from "@appstrate/afps-runtime/types";
+import { toRunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import type { PromptContext, RunAdapter, RunMessage, UploadedFile } from "./types.ts";
 
@@ -87,7 +88,14 @@ export class AppstrateContainerRunner implements BundleRunner {
         sequence: sequence++,
         event,
       };
-      await sink.onEvent(envelope);
+      // Pre-1.3 AppstrateEventSink is onEvent-only; 1.3 sinks add handle.
+      // Match the runtime precedence (handle wins when both present) so
+      // double-accumulation is impossible.
+      if (sink.handle) {
+        await sink.handle(toRunEvent({ event, runId: context.runId }));
+      } else if (sink.onEvent) {
+        await sink.onEvent(envelope);
+      }
     };
 
     try {

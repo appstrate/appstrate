@@ -122,10 +122,12 @@ export class PiRunner implements BundleRunner {
         sequence: sequence++,
         event,
       };
+      // Prefer handle() (AFPS 1.3 open envelope) over onEvent (legacy).
       if (sink.handle) {
         await sink.handle(toRunEvent({ event, runId: context.runId }));
+      } else if (sink.onEvent) {
+        await sink.onEvent(envelope);
       }
-      if (sink.onEvent) await sink.onEvent(envelope);
     };
 
     const factory = this.opts.sessionFactory ?? defaultSessionFactory;

@@ -21,10 +21,11 @@ import type { RunResult } from "../types/run-result.ts";
  *   aggregated {@link RunResult}. Sinks may persist the result, close
  *   connections, flush buffers, etc.
  *
- * The runtime will call whichever methods the sink implements. If both
- * `onEvent` and `handle` are present, the runtime calls `handle` with
- * the open envelope and `onEvent` with the legacy envelope only for the
- * five reserved core-domain events (memory/state/output/report/log).
+ * The runtime calls whichever method the sink implements. When both are
+ * present, `handle` takes precedence and `onEvent` is NOT also called —
+ * sinks that need the legacy envelope should implement `onEvent` alone
+ * and skip `handle`. This is the migration path from 1.0–1.2 sinks to
+ * spec-native 1.3 sinks.
  *
  * Implementations MUST be safe under back-pressure — the runtime may
  * emit events faster than the sink can forward them.
