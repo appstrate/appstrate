@@ -6,10 +6,8 @@ import {
   VERSION,
   afpsEventSchema,
   executionContextSchema,
-  AUTH_KINDS,
   renderTemplate,
   renderPrompt,
-  NoopContextProvider,
 } from "../src/index.ts";
 
 describe("public surface", () => {
@@ -27,19 +25,8 @@ describe("public surface", () => {
     expect(typeof executionContextSchema.safeParse).toBe("function");
   });
 
-  it("exports the Phase 4 template + bundle + providers surface", () => {
+  it("exports the template + bundle render surface", () => {
     expect(typeof renderTemplate).toBe("function");
     expect(typeof renderPrompt).toBe("function");
-    expect(new NoopContextProvider()).toBeDefined();
-  });
-
-  it("exports AUTH_KINDS as a const tuple with the expected members", () => {
-    expect(AUTH_KINDS).toEqual([
-      "api_key",
-      "oauth2_client_creds",
-      "oauth2_device_code",
-      "oauth2_pkce_server",
-      "pat",
-    ]);
   });
 });

@@ -17,11 +17,22 @@
 
 import type { LoadedBundle } from "../bundle/loader.ts";
 import type { TrustRoot, VerifySignatureResult } from "../bundle/signing.ts";
-import type { ContextSnapshot } from "../providers/context/snapshot-provider.ts";
-import type { ExecutionContext } from "../types/execution-context.ts";
+import type { ExecutionContext, HistoryEntry, MemorySnapshot } from "../types/execution-context.ts";
 import type { AfpsEvent } from "../types/afps-event.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
+
+/**
+ * Pre-captured snapshot merged onto the {@link ExecutionContext} before
+ * rendering. Mirrors the optional `memories` / `history` / `state`
+ * fields of {@link ExecutionContext} so the suite can inject pull-side
+ * data without exposing a provider interface.
+ */
+export interface RenderSnapshot {
+  memories?: MemorySnapshot[];
+  history?: HistoryEntry[];
+  state?: unknown;
+}
 
 export interface ConformanceAdapter {
   /** Human-readable name used in the final report. */
@@ -41,7 +52,7 @@ export interface ConformanceAdapter {
   renderPrompt(
     template: string,
     context: ExecutionContext,
-    snapshot: ContextSnapshot,
+    snapshot: RenderSnapshot,
   ): Promise<string>;
 
   /**

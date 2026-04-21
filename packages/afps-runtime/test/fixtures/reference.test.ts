@@ -24,15 +24,23 @@ import {
   type TrustRoot,
 } from "../../src/bundle/signing.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
-import { SnapshotContextProvider } from "../../src/providers/context/snapshot-provider.ts";
 import { reduceRunEvents } from "../../src/runner/run-event-reducer.ts";
 import { toRunEvent } from "../../src/types/run-event.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
 import type { AfpsEvent } from "../../src/types/afps-event.ts";
 import type { RunEvent } from "../../src/types/run-event.ts";
-import type { ExecutionContext } from "../../src/types/execution-context.ts";
-import type { ContextSnapshot } from "../../src/providers/context/snapshot-provider.ts";
+import type {
+  ExecutionContext,
+  HistoryEntry,
+  MemorySnapshot,
+} from "../../src/types/execution-context.ts";
 import type { RunResult } from "../../src/types/run-result.ts";
+
+interface SnapshotFile {
+  memories?: MemorySnapshot[];
+  history?: HistoryEntry[];
+  state?: unknown;
+}
 
 const FIXTURE = new URL("../../fixtures/reference/", import.meta.url).pathname;
 
@@ -65,11 +73,15 @@ describe("fixtures/reference — end-to-end round trip", () => {
     const bytes = await readFile(join(FIXTURE, "bundle.afps"));
     const bundle = loadBundleFromBuffer(bytes);
     const context = await readJson<ExecutionContext>("context.json");
-    const snapshot = await readJson<ContextSnapshot>("snapshot.json");
+    const snapshot = await readJson<SnapshotFile>("snapshot.json");
     const rendered = await renderPrompt({
       template: bundle.prompt,
-      context,
-      provider: new SnapshotContextProvider(snapshot),
+      context: {
+        ...context,
+        ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
+        ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
+        ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+      },
     });
     expect(rendered).toContain("Run id: `ref_run_001`");
     expect(rendered).toContain("**AFPS conformance**");

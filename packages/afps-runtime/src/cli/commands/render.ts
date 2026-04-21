@@ -5,10 +5,6 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { loadBundleFromBuffer } from "../../bundle/loader.ts";
 import { renderPrompt } from "../../bundle/prompt-renderer.ts";
-import {
-  SnapshotContextProvider,
-  type ContextSnapshot,
-} from "../../providers/context/snapshot-provider.ts";
 import type { ExecutionContext } from "../../types/execution-context.ts";
 import type { CliIO } from "../index.ts";
 
@@ -20,9 +16,8 @@ Usage:
 Options:
   --context <path>    JSON file with render context (runId, input, …).
                       Fields omitted default to empty.
-  --snapshot <path>   JSON file with a ContextSnapshot
-                      ({ memories?, state?, history? }) used by the
-                      SnapshotContextProvider.
+  --snapshot <path>   JSON file with { memories?, state?, history? }
+                      merged onto the context before rendering.
 
 The rendered prompt is printed to stdout with no headers or framing so
 it can be piped into other tools.
@@ -32,6 +27,12 @@ interface RenderContextFile {
   runId?: string;
   input?: unknown;
   [key: string]: unknown;
+}
+
+interface SnapshotFile {
+  memories?: ExecutionContext["memories"];
+  history?: ExecutionContext["history"];
+  state?: unknown;
 }
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
@@ -66,36 +67,37 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   const bundleBytes = await readFile(bundlePath);
   const bundle = loadBundleFromBuffer(bundleBytes);
 
-  let context: RenderContextFile = {};
+  let contextFile: RenderContextFile = {};
   if (parsed.values.context) {
     try {
-      context = JSON.parse(await readFile(parsed.values.context, "utf-8")) as RenderContextFile;
+      contextFile = JSON.parse(await readFile(parsed.values.context, "utf-8")) as RenderContextFile;
     } catch (err) {
       io.stderr(`afps render: cannot read context file: ${(err as Error).message}\n`);
       return 1;
     }
   }
 
-  let snapshot: ContextSnapshot | undefined;
+  let snapshot: SnapshotFile = {};
   if (parsed.values.snapshot) {
     try {
-      snapshot = JSON.parse(await readFile(parsed.values.snapshot, "utf-8")) as ContextSnapshot;
+      snapshot = JSON.parse(await readFile(parsed.values.snapshot, "utf-8")) as SnapshotFile;
     } catch (err) {
       io.stderr(`afps render: cannot read snapshot file: ${(err as Error).message}\n`);
       return 1;
     }
   }
 
-  const provider = new SnapshotContextProvider(snapshot);
-  const resolved: ExecutionContext = {
-    runId: context.runId ?? "cli-dry-run",
-    input: context.input ?? {},
-    ...context,
+  const context: ExecutionContext = {
+    runId: contextFile.runId ?? "cli-dry-run",
+    input: contextFile.input ?? {},
+    ...contextFile,
+    ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
+    ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
+    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
   };
   const rendered = await renderPrompt({
     template: bundle.prompt,
-    context: resolved,
-    provider,
+    context,
   });
   io.stdout(rendered);
   if (!rendered.endsWith("\n")) io.stdout("\n");

@@ -17,21 +17,20 @@
 import { loadBundleFromBuffer } from "../bundle/loader.ts";
 import { verifyBundleSignature } from "../bundle/signing.ts";
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
-import { SnapshotContextProvider } from "../providers/context/snapshot-provider.ts";
 import { reduceRunEvents } from "../runner/run-event-reducer.ts";
 import { toRunEvent } from "../types/run-event.ts";
 import type { EventSink } from "../interfaces/event-sink.ts";
+import type { ExecutionContext } from "../types/execution-context.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
-import type { ConformanceAdapter, RunScriptedOutput } from "./adapter.ts";
+import type { ConformanceAdapter, RenderSnapshot, RunScriptedOutput } from "./adapter.ts";
 
 export function createDefaultAdapter(): ConformanceAdapter {
   return {
     name: "@appstrate/afps-runtime",
     loadBundle: (bytes) => loadBundleFromBuffer(bytes),
     renderPrompt: (template, context, snapshot) => {
-      const provider = new SnapshotContextProvider(snapshot);
-      return renderPrompt({ template, context, provider });
+      return renderPrompt({ template, context: mergeSnapshot(context, snapshot) });
     },
     verifySignature: (canonicalBytes, signatureDoc, trustRoot) =>
       verifyBundleSignature(canonicalBytes, signatureDoc, trustRoot),
@@ -55,5 +54,14 @@ export function createDefaultAdapter(): ConformanceAdapter {
 
       return { emitted, result, finalizeCalls };
     },
+  };
+}
+
+function mergeSnapshot(context: ExecutionContext, snapshot: RenderSnapshot): ExecutionContext {
+  return {
+    ...context,
+    ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
+    ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
+    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
   };
 }

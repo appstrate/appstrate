@@ -7,7 +7,6 @@ import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
 import { validateBundle } from "../../src/bundle/validator.ts";
 import { computeIntegrity, verifyIntegrity } from "../../src/bundle/hash.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
-import { SnapshotContextProvider } from "../../src/providers/context/snapshot-provider.ts";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -55,19 +54,19 @@ describe("bundle integration — build → load → validate → render", () => 
     expect(verifyIntegrity(tampered, sri).valid).toBe(false);
   });
 
-  it("renders the prompt template with memories injected via SnapshotContextProvider", async () => {
+  it("renders the prompt template with memories carried on the ExecutionContext", async () => {
     const bundle = loadBundleFromBuffer(zip);
-    const provider = new SnapshotContextProvider({
-      memories: [
-        { content: "Plants photosynthesise.", createdAt: 1000 },
-        { content: "Water boils at 100°C.", createdAt: 2000 },
-      ],
-    });
 
     const rendered = await renderPrompt({
       template: bundle.prompt,
-      context: { runId: "run_abc", input: { topic: "biology" } },
-      provider,
+      context: {
+        runId: "run_abc",
+        input: { topic: "biology" },
+        memories: [
+          { content: "Plants photosynthesise.", createdAt: 1000 },
+          { content: "Water boils at 100°C.", createdAt: 2000 },
+        ],
+      },
     });
 
     expect(rendered).toContain("Investigate biology for run run_abc.");
@@ -81,7 +80,6 @@ describe("bundle integration — build → load → validate → render", () => 
     const rendered = await renderPrompt({
       template: bundle.prompt,
       context: { runId: "r", input: { topic: "x" } },
-      provider: new SnapshotContextProvider(),
     });
     expect(rendered).toContain("(no prior findings)");
   });
