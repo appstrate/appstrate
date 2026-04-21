@@ -11,7 +11,7 @@
 
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
-import { buildEnrichedPrompt } from "./prompt-builder.ts";
+import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
@@ -49,7 +49,7 @@ export function createPiContainerExecutor(orchestrator?: ContainerOrchestrator):
     plan,
     signal,
   ): AsyncGenerator<RunEvent> {
-    const prompt = buildEnrichedPrompt(context, plan);
+    const prompt = buildPlatformSystemPrompt(context, plan);
 
     const { llmConfig } = plan;
     const modelId = llmConfig.modelId;

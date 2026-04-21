@@ -1,5 +1,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Appstrate platform system prompt composer.
+ *
+ * ## Contract
+ *
+ * This module produces the **platform-proprietary** system prompt that
+ * wraps the user's raw AFPS template before the agent container starts.
+ * It is NOT part of any AFPS contract: external consumers of
+ * `@appstrate/afps-runtime` receive only the output of
+ * `renderTemplate(bundle.prompt, buildPromptView(context))` — the canonical
+ * per-agent template — and are expected to compose their own platform
+ * preamble on top (or none at all for a minimal run).
+ *
+ * ## Inputs
+ *
+ * - `context: ExecutionContext` — the AFPS canonical run context
+ *   (runId, input, memories, state, history, config). Flows through
+ *   {@link buildTemplateView} into the 1.1+ Mustache render.
+ * - `plan: AppstrateRunPlan` — platform wiring + resolved resources
+ *   (LLM config, timeout, providers, tokens, tools, skills, files,
+ *   runApi, proxy). Drives every platform-specific section below.
+ *
+ * ## Structure
+ *
+ * The resulting prompt concatenates, in order:
+ *   1. `## System` — identity + environment (ephemeral, timeout, workspace)
+ *   2. `### Tools` — bundle tool catalogue + TOOL.md docs
+ *   3. `### Skills` — bundle skill catalogue
+ *   4. `## Authenticated Provider API` — sidecar proxy usage per provider
+ *   5. `## User Input` + `## Documents` — run-scoped input + files
+ *   6. `## Configuration` — per-agent config values
+ *   7. `## Previous State` — state from last run (if any)
+ *   8. `## Memory` — accumulated memories across runs
+ *   9. `## Run History` — sidecar `/run-history` API
+ *  10. The template-rendered user prompt (1.1+) or verbatim rawPrompt (1.0).
+ *
+ * An external consumer reproducing Appstrate-level behaviour must either
+ * call {@link buildPlatformSystemPrompt} directly (via Appstrate's
+ * published adapter surface) or build an equivalent preamble from
+ * equivalent inputs — the spec makes no guarantee about either section
+ * order or presence.
+ */
+
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
@@ -53,7 +96,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function buildEnrichedPrompt(context: ExecutionContext, plan: AppstrateRunPlan): string {
+export function buildPlatformSystemPrompt(
+  context: ExecutionContext,
+  plan: AppstrateRunPlan,
+): string {
   const sections: string[] = [];
   const input = (context.input as Record<string, unknown>) ?? {};
   const config = context.config ?? {};
@@ -355,3 +401,10 @@ export function buildEnrichedPrompt(context: ExecutionContext, plan: AppstrateRu
 
   return sections.join("\n") + "\n---\n\n" + finalRawPrompt;
 }
+
+/**
+ * @deprecated Use {@link buildPlatformSystemPrompt}. Kept only to
+ * minimise churn in existing call sites; will be removed once all
+ * consumers migrate.
+ */
+export const buildEnrichedPrompt = buildPlatformSystemPrompt;
