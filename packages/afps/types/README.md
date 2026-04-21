@@ -10,7 +10,7 @@ vocabulary without coupling to a specific implementation.
 
 ## What's in
 
-- **Manifest refs** (`DependencyRef`, `ToolRef`, `ProviderRef`, `SkillRef`, `PreludeRef`, `JSONSchema`) — parallel to the Zod schemas in `@afps-spec/schema`.
+- **Manifest refs** (`DependencyRef`, `ToolRef`, `ProviderRef`, `SkillRef`, `JSONSchema`) — parallel to the Zod schemas in `@afps-spec/schema`.
 - **Tool protocol** (`Tool`, `ToolContext`, `ToolResult`) — the shape every AFPS tool implementation MUST satisfy.
 - **Wire envelope** (`RunEvent`) — open event shape flowing from tools to sinks.
 

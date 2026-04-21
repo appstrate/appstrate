@@ -19,7 +19,6 @@ export type {
   ToolRef,
   ProviderRef,
   SkillRef,
-  PreludeRef,
   JSONSchema,
   Tool,
   ToolContext,
@@ -27,7 +26,7 @@ export type {
   RunEvent,
 } from "@afps/types";
 
-import type { ToolRef, ProviderRef, SkillRef, PreludeRef, Tool, RunEvent } from "@afps/types";
+import type { ToolRef, ProviderRef, SkillRef, Tool, RunEvent } from "@afps/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers (runtime-internal)
@@ -52,12 +51,6 @@ export interface ResolvedSkill {
   frontmatter?: Record<string, unknown>;
 }
 
-export interface ResolvedPrelude {
-  name: string;
-  version: string;
-  content: string;
-}
-
 // ─────────────────────────────────────────────
 // Resolvers (runtime-internal)
 // ─────────────────────────────────────────────
@@ -72,10 +65,6 @@ export interface ProviderResolver {
 
 export interface SkillResolver {
   resolve(refs: SkillRef[], bundle: Bundle): Promise<ResolvedSkill[]>;
-}
-
-export interface PreludeResolver {
-  resolve(refs: PreludeRef[], bundle: Bundle): Promise<ResolvedPrelude[]>;
 }
 
 // ─────────────────────────────────────────────

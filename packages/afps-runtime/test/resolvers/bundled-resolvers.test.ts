@@ -5,10 +5,8 @@ import { describe, it, expect } from "bun:test";
 import {
   BundledToolResolver,
   BundledSkillResolver,
-  BundledPreludeResolver,
   BundledToolResolutionError,
   BundledSkillResolutionError,
-  BundledPreludeResolutionError,
   toBundle,
   type Bundle,
   type Tool,
@@ -90,45 +88,6 @@ describe("BundledSkillResolver", () => {
     await expect(
       resolver.resolve([{ name: "@acme/missing", version: "^1" }], makeBundle({})),
     ).rejects.toBeInstanceOf(BundledSkillResolutionError);
-  });
-});
-
-describe("BundledPreludeResolver", () => {
-  it("loads prompt.md per entry in declaration order", async () => {
-    const bundle = makeBundle({
-      ".agent-package/preludes/@afps/environment/prompt.md": "ENV",
-      ".agent-package/preludes/@appstrate/platform/prompt.md": "PLATFORM",
-    });
-    const resolver = new BundledPreludeResolver();
-    const refs = [
-      { name: "@afps/environment", version: "^2" },
-      { name: "@appstrate/platform", version: "^1" },
-    ];
-    const out = await resolver.resolve(refs, bundle);
-    expect(out.map((r) => r.name)).toEqual(["@afps/environment", "@appstrate/platform"]);
-    expect(out.map((r) => r.content)).toEqual(["ENV", "PLATFORM"]);
-  });
-
-  it("skips optional preludes when absent", async () => {
-    const bundle = makeBundle({
-      ".agent-package/preludes/@afps/environment/prompt.md": "ENV",
-    });
-    const resolver = new BundledPreludeResolver();
-    const out = await resolver.resolve(
-      [
-        { name: "@afps/environment", version: "^2" },
-        { name: "@appstrate/platform", version: "^1", optional: true },
-      ],
-      bundle,
-    );
-    expect(out.map((r) => r.name)).toEqual(["@afps/environment"]);
-  });
-
-  it("fails fail-closed on missing non-optional prelude", async () => {
-    const resolver = new BundledPreludeResolver();
-    await expect(
-      resolver.resolve([{ name: "@missing/x", version: "^1" }], makeBundle({})),
-    ).rejects.toBeInstanceOf(BundledPreludeResolutionError);
   });
 });
 

@@ -1,9 +1,0 @@
-{
-  "name": "@afps/environment",
-  "version": "2.0.0",
-  "type": "skill",
-  "schemaVersion": "1.3",
-  "displayName": "AFPS Environment Prelude",
-  "description": "Canonical platform-identity prelude. Describes the agent execution contract in tool-agnostic terms — no sidecar, no curl, no platform-specific wiring.",
-  "license": "Apache-2.0"
-}

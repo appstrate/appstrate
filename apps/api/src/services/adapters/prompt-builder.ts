@@ -68,57 +68,38 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/**
- * When a bundle's `systemPreludes` already provides `@appstrate/environment`
- * (see appstrate-environment-prompt.ts), the runtime renders the same
- * sidecar/environment prose via the prelude resolver — emitting it twice
- * from the prompt-builder produces duplicate sections. This flag lets
- * callers suppress the built-in copy when the prelude path owns it.
- */
-export interface BuildEnrichedPromptOptions {
-  /** Skip "## System / ### Environment / ## Authenticated Provider API" when true. */
-  skipSidecarEnvironmentProse?: boolean;
-}
-
-export function buildEnrichedPrompt(
-  ctx: PromptContext,
-  opts: BuildEnrichedPromptOptions = {},
-): string {
+export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
   const connectedProviders = ctx.providers.filter((p) => ctx.tokens[p.id]);
 
   // --- System identity & environment ---
-  // Opt-out path: bundles that declare @appstrate/environment as a
-  // systemPrelude already receive this section via the prelude resolver.
-  if (!opts.skipSidecarEnvironmentProse) {
-    sections.push("## System\n");
-    sections.push("You are an AI agent running on the Appstrate platform.");
-    sections.push("You execute a specific task inside an isolated, ephemeral container.\n");
+  sections.push("## System\n");
+  sections.push("You are an AI agent running on the Appstrate platform.");
+  sections.push("You execute a specific task inside an isolated, ephemeral container.\n");
 
-    sections.push("### Environment");
+  sections.push("### Environment");
+  sections.push(
+    "- **Ephemeral container**: This container is destroyed when your run ends. " +
+      "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
+      "Do NOT rely on the filesystem for persistence.",
+  );
+  sections.push(
+    "- **Network access**: Outbound HTTP/HTTPS is available. " +
+      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
+      "Only authenticated requests to connected providers require the sidecar credential proxy " +
+      "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
+  );
+  if (ctx.timeout) {
     sections.push(
-      "- **Ephemeral container**: This container is destroyed when your run ends. " +
-        "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
-        "Do NOT rely on the filesystem for persistence.",
-    );
-    sections.push(
-      "- **Network access**: Outbound HTTP/HTTPS is available. " +
-        "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-        "Only authenticated requests to connected providers require the sidecar credential proxy " +
-        "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
-    );
-    if (ctx.timeout) {
-      sections.push(
-        `- **Timeout**: You have ${ctx.timeout} seconds to complete this task. ` +
-          "Work efficiently and output your result promptly.",
-      );
-    }
-    sections.push(
-      "- **Workspace**: Your current working directory is the agent workspace. " +
-        "Uploaded documents are available under `./documents/` (relative to cwd). " +
-        "You may use the filesystem for temporary processing during this run only.\n",
+      `- **Timeout**: You have ${ctx.timeout} seconds to complete this task. ` +
+        "Work efficiently and output your result promptly.",
     );
   }
+  sections.push(
+    "- **Workspace**: Your current working directory is the agent workspace. " +
+      "Uploaded documents are available under `./documents/` (relative to cwd). " +
+      "You may use the filesystem for temporary processing during this run only.\n",
+  );
 
   // Available tools
   if (ctx.availableTools && ctx.availableTools.length > 0) {
@@ -155,9 +136,7 @@ export function buildEnrichedPrompt(
   }
 
   // --- Authenticated provider API access ---
-  // Same opt-out as System/Environment: @appstrate/environment prelude
-  // renders the same section from its Mustache template.
-  if (connectedProviders.length > 0 && !opts.skipSidecarEnvironmentProse) {
+  if (connectedProviders.length > 0) {
     sections.push("## Authenticated Provider API\n");
     sections.push(
       "The sidecar credential proxy at `$SIDECAR_URL/proxy` injects the user's credentials into requests " +

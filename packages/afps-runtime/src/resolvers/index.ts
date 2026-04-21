@@ -4,13 +4,13 @@
 /**
  * AFPS 1.3 runtime resolvers.
  *
- * Four interfaces, each mirroring a category of `dependencies.*` plus
- * `systemPreludes[]` on an agent manifest. The runtime supplies default
+ * Three interfaces mirroring `dependencies.tools[]`, `.providers[]`,
+ * `.skills[]` on an agent manifest. The runtime supplies default
  * "bundled" implementations that read content shipped inside the `.afps`
  * file; runners supply external implementations (notably `ProviderResolver`)
  * for anything that lives outside the bundle.
  *
- * Specification: `afps-spec/schema/src/interfaces.ts` (§8).
+ * Specification: `afps-spec/spec.md` §8.
  */
 
 export type {
@@ -19,17 +19,14 @@ export type {
   ToolRef,
   ProviderRef,
   SkillRef,
-  PreludeRef,
   JSONSchema,
   Tool,
   ToolContext,
   ToolResult,
   ResolvedSkill,
-  ResolvedPrelude,
   ToolResolver,
   ProviderResolver,
   SkillResolver,
-  PreludeResolver,
   SpecRunResult,
 } from "./types.ts";
 
@@ -43,10 +40,6 @@ export {
   type BundledToolModule,
 } from "./bundled-tool-resolver.ts";
 export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
-export {
-  BundledPreludeResolver,
-  BundledPreludeResolutionError,
-} from "./bundled-prelude-resolver.ts";
 export { toBundle, type BundleAdapter } from "./bundle-adapter.ts";
 
 // Provider-resolver surface — tool factory + concrete impls.

@@ -34,14 +34,6 @@ export type ToolRef = DependencyRef;
 export type ProviderRef = DependencyRef;
 export type SkillRef = DependencyRef;
 
-export interface PreludeRef extends DependencyRef {
-  /**
-   * When true, resolvers MAY skip this prelude if it cannot be resolved.
-   * When false/undefined, missing preludes MUST fail the run fail-closed.
-   */
-  optional?: boolean;
-}
-
 /**
  * JSON-Schema-shaped parameter definition for a tool.
  * Kept as `unknown` at this layer to avoid pinning a specific JSON Schema

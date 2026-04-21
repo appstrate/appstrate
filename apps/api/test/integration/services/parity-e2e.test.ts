@@ -12,10 +12,6 @@
  *   4. run_logs rows + memory inserts line up with the DB side-effects
  *      an external runtime consumer would see via an equivalent sink
  *      implementation.
- *
- * A separate block verifies the @appstrate/environment prelude renders
- * against a realistic PromptView produced by the context provider +
- * buildPromptView.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,12 +26,6 @@ import {
   AppstrateContainerRunner,
   mapRunMessageToAfpsEvent,
 } from "../../../src/services/adapters/appstrate-container-runner.ts";
-import { AppstratePreludeResolver } from "../../../src/services/adapters/appstrate-prelude-resolver.ts";
-import {
-  APPSTRATE_ENVIRONMENT_NAME,
-  APPSTRATE_ENVIRONMENT_VERSION,
-  buildAppstratePreludeFlags,
-} from "../../../src/services/adapters/appstrate-environment-prompt.ts";
 import type {
   PromptContext,
   RunAdapter,
@@ -44,7 +34,7 @@ import type {
 } from "../../../src/services/adapters/types.ts";
 import type { AfpsEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
-import { buildPromptView, renderPrompt } from "@appstrate/afps-runtime/bundle";
+import { buildPromptView } from "@appstrate/afps-runtime/bundle";
 import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
@@ -223,37 +213,5 @@ describe("Parity E2E — full adapter stack", () => {
     expect(view.memories.map((m) => m.content)).toEqual(["mem 2", "mem 1"]);
     expect(view.config).toEqual({ verbose: true });
     expect(view.state).toBeNull();
-  });
-
-  it("renderPrompt + @appstrate/environment prelude composes without touching the agent template", async () => {
-    const resolver = new AppstratePreludeResolver();
-    const providers = [{ id: "gmail", displayName: "Gmail", authMode: "oauth2" }];
-
-    const out = await renderPrompt({
-      template: "---\nAgent body: topic={{input.topic}}",
-      context: { runId, input: { topic: "parity" } },
-      provider: new AppstrateContextProvider({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        packageId: agentId,
-        actor,
-        excludeRunId: runId,
-      }),
-      preludes: [{ name: APPSTRATE_ENVIRONMENT_NAME, version: APPSTRATE_ENVIRONMENT_VERSION }],
-      preludeResolver: resolver,
-      providers,
-      timeout: 600,
-      platform: buildAppstratePreludeFlags({ providers, timeout: 600 }),
-    });
-
-    // Prelude content rendered (environment preamble + providers list).
-    expect(out).toContain("Appstrate platform");
-    expect(out).toContain("### Connected Providers");
-    expect(out).toContain("Gmail");
-    expect(out).toContain("You have 600 seconds");
-
-    // Agent body preserved verbatim at the end (after Mustache
-    // interpolation of `{{input.topic}}`).
-    expect(out).toContain("Agent body: topic=parity");
   });
 });

@@ -9,13 +9,9 @@
  * import the narrow surface they need; the top-level re-exports the
  * full public API for convenience.
  *
- * AFPS 1.3 introduces four spec-aligned resolver interfaces
- * (ToolResolver, ProviderResolver, SkillResolver, PreludeResolver). They
- * live under `@appstrate/afps-runtime/resolvers` and are re-exported
- * here. The legacy single-ref prelude resolver remains available via
- * the `@appstrate/afps-runtime/bundle` subpath for existing consumers
- * (e.g. Appstrate's `AppstratePreludeResolver`) — it is NOT re-exported
- * at the top level so the spec-level 1.3 interface wins unambiguously.
+ * AFPS 1.3 introduces three spec-aligned resolver interfaces
+ * (ToolResolver, ProviderResolver, SkillResolver). They live under
+ * `@appstrate/afps-runtime/resolvers`.
  */
 
 export const VERSION = "0.0.0";
@@ -27,9 +23,6 @@ export * from "./sinks/index.ts";
 export * from "./providers/index.ts";
 export * from "./template/index.ts";
 
-// Explicit bundle re-exports — excludes the legacy `PreludeResolver`
-// type and its `PromptPreludeResolver` alias (both available via the
-// `/bundle` subpath for the one remaining consumer).
 export {
   renderPrompt,
   buildPromptView,
@@ -38,7 +31,6 @@ export {
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./bundle/prompt-renderer.ts";
-export { resolvePreludes, MapPreludeResolver, PreludeResolutionError } from "./bundle/preludes.ts";
 export { computeIntegrity, verifyIntegrity, type IntegrityCheckResult } from "./bundle/hash.ts";
 export {
   loadBundleFromBuffer,

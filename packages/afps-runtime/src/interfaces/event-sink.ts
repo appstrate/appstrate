@@ -30,7 +30,7 @@ import type { RunResult } from "../types/run-result.ts";
  * Implementations MUST be safe under back-pressure — the runtime may
  * emit events faster than the sink can forward them.
  *
- * Specification: `afps-spec/schema/src/interfaces.ts` — {@link EventSink}.
+ * Specification: `afps-spec/spec.md` — {@link EventSink}.
  */
 export interface EventSink {
   /**

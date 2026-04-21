@@ -4,7 +4,6 @@
 import type { ContextProvider } from "../interfaces/context-provider.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { renderTemplate } from "../template/mustache.ts";
-import { resolvePreludes, type PreludeRef, type PreludeResolver } from "./preludes.ts";
 
 /**
  * The "view" shape made available to a prompt template at render time.
@@ -36,8 +35,8 @@ export interface PromptViewProvider {
 
 /**
  * Upload surfaced to 1.2+ templates — a single file the agent can read
- * from the workspace filesystem. Shape matches what a prelude or agent
- * template typically renders when listing available documents.
+ * from the workspace filesystem. Shape matches what an agent template
+ * typically renders when listing available documents.
  */
 export interface PromptViewUpload {
   name: string;
@@ -74,8 +73,8 @@ export interface PromptView {
    */
   providers?: ReadonlyArray<PromptViewProvider>;
   /**
-   * Declared timeout (seconds). Surfaced so prelude templates can
-   * render it into the environment description.
+   * Declared timeout (seconds). Surfaced so environment templates can
+   * render it into the prompt.
    */
   timeout?: number;
   /**
@@ -85,10 +84,10 @@ export interface PromptView {
   uploads?: ReadonlyArray<PromptViewUpload>;
   /**
    * Opaque platform-specific bag. Intentionally unstructured — platforms
-   * set whatever their preludes need (sidecar URL, run-history endpoint,
-   * quota hints, etc.). External runners that don't set this leave it
-   * undefined; templates addressing `{{platform.*}}` fields safely
-   * render as empty in that case.
+   * set whatever their environment template needs (sidecar URL,
+   * run-history endpoint, quota hints, etc.). External runners that
+   * don't set this leave it undefined; templates addressing
+   * `{{platform.*}}` fields safely render as empty in that case.
    */
   platform?: Record<string, unknown>;
 }
@@ -104,24 +103,6 @@ export interface RenderPromptOptions {
   memoryLimit?: number;
   /** Cap history entries injected into the prompt. Default: 10. */
   historyLimit?: number;
-  /**
-   * Ordered list of system preludes (schemaVersion 1.2+). When present,
-   * each prelude's `prompt.md` is concatenated before `template` in the
-   * declared order, then the whole composed string is rendered against
-   * the same `PromptView` as the agent template.
-   */
-  preludes?: readonly PreludeRef[];
-  /**
-   * Resolver that converts a {@link PreludeRef} to its raw template
-   * string. Required when `preludes` is non-empty; a missing prelude
-   * throws {@link PreludeResolutionError}.
-   */
-  preludeResolver?: PreludeResolver;
-  /**
-   * Separator inserted between prelude prompts and between the last
-   * prelude and the agent prompt. Default: `"\n\n"` (blank line).
-   */
-  preludeSeparator?: string;
   /**
    * Platform-identity bag to attach to the rendered view. See
    * {@link PromptView.platform}.
@@ -151,12 +132,7 @@ export interface RenderPromptOptions {
  */
 export async function renderPrompt(opts: RenderPromptOptions): Promise<string> {
   const view = await buildPromptView(opts);
-  const preludePrompt = await resolvePreludes(opts.preludes, opts.preludeResolver, {
-    separator: opts.preludeSeparator,
-  });
-  const separator = opts.preludeSeparator ?? "\n\n";
-  const composed = preludePrompt ? `${preludePrompt}${separator}${opts.template}` : opts.template;
-  return renderTemplate(composed, view);
+  return renderTemplate(opts.template, view);
 }
 
 /**

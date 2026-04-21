@@ -16,7 +16,7 @@
  * responsibility.
  *
  * AFPS 1.3 surface: the primary entrypoint is `handle(event: RunEvent)` —
- * the open envelope spec'd in afps-spec/schema/src/interfaces.ts. Legacy
+ * the open envelope spec'd in afps-spec/spec.md. Legacy
  * `onEvent(envelope)` is kept for compatibility with callers still on the
  * pre-1.3 surface (notably existing unit tests that bypass the runtime
  * and call the sink directly). Both paths feed the same aggregator.

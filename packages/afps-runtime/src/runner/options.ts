@@ -14,20 +14,14 @@
  * — both surfaces compile against the same `@appstrate/afps-runtime`
  * install and share all other infrastructure (sinks, events, bundles).
  *
- * Specification: `afps-spec/schema/src/interfaces.ts` §8, spec document
+ * Specification: `afps-spec/spec.md` §8, spec document
  * §5 (Runtime Package).
  */
 
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { LoadedBundle } from "../bundle/loader.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
-import type {
-  PreludeResolver,
-  ProviderResolver,
-  SkillResolver,
-  Tool,
-  ToolResolver,
-} from "../resolvers/types.ts";
+import type { ProviderResolver, SkillResolver, Tool, ToolResolver } from "../resolvers/types.ts";
 
 export interface RunOptions {
   /** Already-loaded bundle (manifest + prompt + files). */
@@ -53,7 +47,6 @@ export interface RunOptions {
    */
   toolResolver?: ToolResolver;
   skillResolver?: SkillResolver;
-  preludeResolver?: PreludeResolver;
 
   /**
    * Per-tool override, applied AFTER the ToolResolver result. Use this

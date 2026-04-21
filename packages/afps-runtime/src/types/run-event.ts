@@ -13,7 +13,7 @@
  * `provider`. Third-party tools SHOULD namespace their own types
  * (e.g. `"@my-org/audit.logged"`).
  *
- * Specification: `afps-spec/schema/src/interfaces.ts` — {@link RunEvent}.
+ * Specification: `afps-spec/spec.md` — {@link RunEvent}.
  */
 
 import type { AfpsEvent } from "./afps-event.ts";
