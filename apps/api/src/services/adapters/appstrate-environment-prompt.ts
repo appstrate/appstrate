@@ -87,7 +87,7 @@ Read the documents directly from the filesystem (paths are relative to cwd).
  * logic-less Mustache. Kept separate from the runtime's canonical
  * PromptView so external runners are not forced to populate them.
  */
-export interface AppstratePreludeFlags {
+export interface AppstratePreludeFlags extends Record<string, unknown> {
   hasTimeout: boolean;
   hasProviders: boolean;
   hasUploads: boolean;
