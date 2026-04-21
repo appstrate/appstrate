@@ -117,29 +117,7 @@ function parseLimits(): CredentialProxyLimits {
   }
 }
 
-// Per-session cookie jars, keyed by X-Session-Id header.
-// Simple in-memory implementation with TTL — adequate for single-instance
-// deployments and tests; a Redis-backed jar is a follow-up for horizontal
-// scaling (see spec §10.2 "Session cookie jar").
-const cookieJars = new Map<string, { jar: Map<string, string[]>; expiresAt: number }>();
-
-function acquireCookieJar(sessionId: string, ttlSeconds: number): Map<string, string[]> {
-  const now = Date.now();
-  const existing = cookieJars.get(sessionId);
-  if (existing && existing.expiresAt > now) {
-    existing.expiresAt = now + ttlSeconds * 1000;
-    return existing.jar;
-  }
-  const jar = new Map<string, string[]>();
-  cookieJars.set(sessionId, { jar, expiresAt: now + ttlSeconds * 1000 });
-  // Opportunistic GC — only runs on hot path so no timer overhead.
-  if (cookieJars.size > 1024) {
-    for (const [key, entry] of cookieJars.entries()) {
-      if (entry.expiresAt <= now) cookieJars.delete(key);
-    }
-  }
-  return jar;
-}
+import { getCookieJarStore } from "../services/credential-proxy/cookie-jar.ts";
 
 export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
@@ -246,7 +224,7 @@ export function createCredentialProxyRouter() {
         fwdHeaders[name] = value;
       }
 
-      const jar = acquireCookieJar(sessionId, limits.session_ttl_seconds);
+      const jar = await getCookieJarStore();
 
       const started = Date.now();
       try {
@@ -261,6 +239,8 @@ export function createCredentialProxyRouter() {
           body,
           substituteBody,
           cookieJar: jar,
+          jarSessionId: sessionId,
+          cookieJarTtlSeconds: limits.session_ttl_seconds,
           sessionKey: providerId,
           maxResponseBytes: limits.max_response_bytes,
         });

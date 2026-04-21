@@ -23,6 +23,16 @@
 import type { Db } from "@appstrate/db/client";
 import { resolveCredentialsForProxy, getProviderCredentialId } from "@appstrate/connect";
 
+/**
+ * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
+ * store implementation lives in `./cookie-jar.ts`; we only depend on the
+ * narrow contract here so the core stays free of infra imports.
+ */
+export interface CookieJarAdapter {
+  get(sessionId: string, providerKey: string): Promise<string[]>;
+  set(sessionId: string, providerKey: string, cookies: string[], ttlSeconds: number): Promise<void>;
+}
+
 export interface ProxyCallInput {
   /** Application that owns the credentials. */
   applicationId: string;
@@ -55,10 +65,22 @@ export interface ProxyCallInput {
   body?: string | Uint8Array | null;
   substituteBody?: boolean;
 
-  /** Cookie jar (per-session). Mutated in place — caller owns the jar. */
-  cookieJar?: Map<string, string[]>;
-  /** Session key for cookie jar lookups; defaults to providerId. */
+  /**
+   * Cookie jar store — read before the upstream call, written after.
+   * Pass `undefined` to disable cookie persistence for this call. The
+   * store abstraction is async so Redis-backed implementations can be
+   * used transparently.
+   */
+  cookieJar?: CookieJarAdapter;
+  /**
+   * Jar lookup key (usually `sessionId`). Combined with `sessionKey`
+   * below to scope cookies per-provider within one session.
+   */
+  jarSessionId?: string;
+  /** Per-provider scope key for the jar. Defaults to `providerId`. */
   sessionKey?: string;
+  /** TTL applied on each write. Required when `cookieJar` is provided. */
+  cookieJarTtlSeconds?: number;
 
   /**
    * Cap (bytes) on the upstream response body streamed back to the caller.
@@ -181,19 +203,21 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
 
   // Cookie jar — inject stored cookies, capture any Set-Cookie.
   const jar = input.cookieJar;
-  if (jar) {
-    const cookies = jar.get(sessionKey);
-    if (cookies && cookies.length > 0) {
+  const jarSessionId = input.jarSessionId;
+  const jarTtl = input.cookieJarTtlSeconds;
+  if (jar && jarSessionId) {
+    const cookies = await jar.get(jarSessionId, sessionKey);
+    if (cookies.length > 0) {
       headers.set("Cookie", cookies.join("; "));
     }
   }
 
   const res = await fetchImpl(target, { method: input.method, headers, body });
 
-  if (jar) {
+  if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();
     if (setCookies && setCookies.length > 0) {
-      jar.set(sessionKey, setCookies);
+      await jar.set(jarSessionId, sessionKey, setCookies, jarTtl);
     }
   }
 
