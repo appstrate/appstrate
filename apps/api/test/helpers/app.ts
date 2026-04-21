@@ -32,6 +32,7 @@ import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { initAppConfig } from "../../src/lib/app-config.ts";
+import { notFound } from "../../src/lib/errors.ts";
 
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
@@ -199,6 +200,12 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
+
+  // Mirrors production: unknown /api/* → 404 problem+json (no SPA fallback in tests).
+  app.all("/api/*", (c) => {
+    const pathname = new URL(c.req.url).pathname;
+    throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+  });
 
   if (!explicit) cachedApp = app;
   return app;

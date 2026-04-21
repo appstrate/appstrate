@@ -46,7 +46,7 @@ import {
   getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
-import { ApiError } from "./lib/errors.ts";
+import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
@@ -251,6 +251,14 @@ app.route("/internal", internalRouter);
 // catch-all below, otherwise the static fallback shadows module paths.
 // No-op when no module exposes `createRouter()`.
 registerModuleRoutes(app);
+
+// Unknown /api/* → 404 problem+json. Without this the SPA fallback below would
+// match every unknown API path and return index.html with a 200, breaking
+// pass-through clients (CLI, curl, SDKs).
+app.all("/api/*", (c) => {
+  const pathname = new URL(c.req.url).pathname;
+  throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+});
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
 app.use(
