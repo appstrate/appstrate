@@ -1,38 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AppstrateContainerRunner — covers the BundleRunner contract, the
- * RunMessage → AfpsEvent mapping, platform-metric side-channel, and
- * error-path reducer semantics. Uses a synthetic adapter so tests run
- * without Docker.
+ * AppstrateContainerRunner — covers the event-forwarding contract, the
+ * reducer-backed RunResult, and the error path. Uses a synthetic adapter
+ * so tests run without Docker. The runner forwards whatever
+ * {@link RunEvent}s the adapter yields straight to the sink; mapping from
+ * Pi SDK output lines to RunEvents is covered in `pi-adapter.test.ts` /
+ * `pi-parser.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  AppstrateContainerRunner,
-  mapRunMessageToAfpsEvent,
-} from "../../src/services/adapters/appstrate-container-runner.ts";
-import type {
-  PromptContext,
-  RunAdapter,
-  RunMessage,
-  UploadedFile,
-} from "../../src/services/adapters/types.ts";
-import type { AfpsEvent, AfpsEventEnvelope } from "@appstrate/afps-runtime/types";
-import type { EventSink } from "@appstrate/afps-runtime/interfaces";
+import { AppstrateContainerRunner } from "../../src/services/adapters/appstrate-container-runner.ts";
+import type { PromptContext, RunAdapter, UploadedFile } from "../../src/services/adapters/types.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
-import { NoopContextProvider } from "@appstrate/afps-runtime/providers";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
-
-function makeBundle(): LoadedBundle {
-  return {
-    manifest: { name: "@testorg/runner", version: "1.0.0", type: "agent" },
-    prompt: "ignored by mock adapter",
-    files: {},
-    compressedSize: 0,
-    decompressedSize: 0,
-  };
-}
+import type { AppstrateEventSink } from "../../src/services/adapters/appstrate-event-sink.ts";
 
 function makePromptContext(): PromptContext {
   return {
@@ -71,20 +53,12 @@ function makePromptContext(): PromptContext {
   };
 }
 
-class RecordingSink implements EventSink {
-  events: AfpsEventEnvelope[] = [];
-  finalResult: RunResult | null = null;
-
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    this.events.push(envelope);
-  }
-  async finalize(result: RunResult): Promise<void> {
-    this.finalResult = result;
-  }
+function event(runId: string, type: string, extra: Record<string, unknown> = {}): RunEvent {
+  return { type, timestamp: Date.now(), runId, ...extra };
 }
 
 class ScriptedAdapter implements RunAdapter {
-  constructor(private readonly script: RunMessage[]) {}
+  constructor(private readonly script: RunEvent[]) {}
 
   async *execute(
     _runId: string,
@@ -93,112 +67,67 @@ class ScriptedAdapter implements RunAdapter {
     _pkg?: Buffer,
     _signal?: AbortSignal,
     _files?: UploadedFile[],
-  ): AsyncGenerator<RunMessage> {
-    for (const msg of this.script) yield msg;
+  ): AsyncGenerator<RunEvent> {
+    for (const ev of this.script) yield ev;
   }
 }
 
 class FailingAdapter implements RunAdapter {
   constructor(private readonly err: Error) {}
-  async *execute(): AsyncGenerator<RunMessage> {
+  async *execute(): AsyncGenerator<RunEvent> {
     throw this.err;
     // unreachable yield — keeps the generator-function contract
-    yield {} as RunMessage;
+    yield {} as RunEvent;
   }
 }
 
-describe("mapRunMessageToAfpsEvent", () => {
-  it("maps the 5 canonical run-messages to AFPS events", () => {
-    const cases: Array<[RunMessage, AfpsEvent]> = [
-      [
-        { type: "add_memory", content: "c" },
-        { type: "add_memory", content: "c" },
-      ],
-      [
-        { type: "set_state", data: { x: 1 } },
-        { type: "set_state", state: { x: 1 } },
-      ],
-      [
-        { type: "output", data: { y: 2 } },
-        { type: "output", data: { y: 2 } },
-      ],
-      [
-        { type: "report", content: "r" },
-        { type: "report", content: "r" },
-      ],
-      [
-        { type: "progress", message: "m", level: "info" },
-        { type: "log", level: "info", message: "m" },
-      ],
-    ];
-    for (const [input, expected] of cases) {
-      expect(mapRunMessageToAfpsEvent(input)).toEqual(expected);
-    }
-  });
+/**
+ * Minimal sink that records events and tracks final RunResult without
+ * touching the DB — shares the structural surface the runner expects
+ * from {@link AppstrateEventSink} (handle + finalize).
+ */
+class RecordingSink {
+  events: RunEvent[] = [];
+  finalResult: RunResult | null = null;
 
-  it("maps adapter `error` messages to log events at level=error", () => {
-    expect(mapRunMessageToAfpsEvent({ type: "error", message: "boom" })).toEqual({
-      type: "log",
-      level: "error",
-      message: "boom",
-    });
-  });
-
-  it("normalises debug log levels down to info", () => {
-    expect(mapRunMessageToAfpsEvent({ type: "progress", level: "debug", message: "x" })).toEqual({
-      type: "log",
-      level: "info",
-      message: "x",
-    });
-  });
-
-  it("drops `usage` messages (non-canonical — platform side-channel only)", () => {
-    expect(
-      mapRunMessageToAfpsEvent({
-        type: "usage",
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
-    ).toBeNull();
-  });
-});
+  async handle(event: RunEvent): Promise<void> {
+    this.events.push(event);
+  }
+  async finalize(result: RunResult): Promise<void> {
+    this.finalResult = result;
+  }
+}
 
 describe("AppstrateContainerRunner", () => {
-  it("streams mapped events through the sink + reduces to RunResult", async () => {
-    const script: RunMessage[] = [
-      { type: "progress", message: "starting", level: "info" },
-      { type: "add_memory", content: "keep this" },
-      { type: "output", data: { a: 1 } },
-      { type: "output", data: { b: 2 } },
-      { type: "set_state", data: { counter: 99 } },
-      { type: "report", content: "done" },
+  it("streams events through the sink and reduces to RunResult", async () => {
+    const runId = "r_test";
+    const script: RunEvent[] = [
+      event(runId, "appstrate.progress", { message: "starting", level: "info" }),
+      event(runId, "memory.added", { content: "keep this" }),
+      event(runId, "output.emitted", { data: { a: 1 } }),
+      event(runId, "output.emitted", { data: { b: 2 } }),
+      event(runId, "state.set", { state: { counter: 99 } }),
+      event(runId, "report.appended", { content: "done" }),
     ];
     const runner = new AppstrateContainerRunner({
       adapter: new ScriptedAdapter(script),
-      buildPromptContext: async () => ({
-        promptContext: makePromptContext(),
-        timeout: 60,
-      }),
+      plan: { promptContext: makePromptContext(), timeout: 60 },
     });
     const sink = new RecordingSink();
 
     const result = await runner.run({
-      bundle: makeBundle(),
-      context: { runId: "r_test", input: {} },
-      sink,
-      contextProvider: new NoopContextProvider(),
+      runId,
+      sink: sink as unknown as AppstrateEventSink,
     });
 
-    expect(sink.events.map((e) => e.event.type)).toEqual([
-      "log",
-      "add_memory",
-      "output",
-      "output",
-      "set_state",
-      "report",
+    expect(sink.events.map((e) => e.type)).toEqual([
+      "appstrate.progress",
+      "memory.added",
+      "output.emitted",
+      "output.emitted",
+      "state.set",
+      "report.appended",
     ]);
-    // Envelope contract: sequential sequence + propagated runId.
-    expect(sink.events.map((e) => e.sequence)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(sink.events.every((e) => e.runId === "r_test")).toBe(true);
 
     expect(result).toEqual(sink.finalResult!);
     expect(result.output).toEqual({ a: 1, b: 2 });
@@ -207,87 +136,62 @@ describe("AppstrateContainerRunner", () => {
     expect(result.report).toBe("done");
   });
 
-  it("routes `usage` messages to the onPlatformMetric side-channel", async () => {
-    const usage: RunMessage = {
-      type: "usage",
+  it("forwards appstrate.metric events to the sink (aggregator reads them)", async () => {
+    const runId = "r_usage";
+    const metric = event(runId, "appstrate.metric", {
       usage: { input_tokens: 10, output_tokens: 5 },
       cost: 0.001,
-    };
-    const observed: RunMessage[] = [];
+    });
     const runner = new AppstrateContainerRunner({
-      adapter: new ScriptedAdapter([usage]),
-      buildPromptContext: async () => ({
-        promptContext: makePromptContext(),
-        timeout: 60,
-      }),
-      onPlatformMetric: (msg) => observed.push(msg),
+      adapter: new ScriptedAdapter([metric]),
+      plan: { promptContext: makePromptContext(), timeout: 60 },
     });
     const sink = new RecordingSink();
 
-    await runner.run({
-      bundle: makeBundle(),
-      context: { runId: "r_usage", input: {} },
-      sink,
-      contextProvider: new NoopContextProvider(),
-    });
+    await runner.run({ runId, sink: sink as unknown as AppstrateEventSink });
 
-    // No AFPS event was emitted for `usage`.
-    expect(sink.events).toHaveLength(0);
-    expect(observed).toEqual([usage]);
+    expect(sink.events).toHaveLength(1);
+    expect(sink.events[0]!.type).toBe("appstrate.metric");
   });
 
-  it("synthesises an error log event + finalises when the adapter throws", async () => {
+  it("synthesises an appstrate.error event + finalises when the adapter throws", async () => {
+    const runId = "r_crash";
     const runner = new AppstrateContainerRunner({
       adapter: new FailingAdapter(new Error("crash")),
-      buildPromptContext: async () => ({
-        promptContext: makePromptContext(),
-        timeout: 60,
-      }),
+      plan: { promptContext: makePromptContext(), timeout: 60 },
     });
     const sink = new RecordingSink();
 
     const result = await runner.run({
-      bundle: makeBundle(),
-      context: { runId: "r_crash", input: {} },
-      sink,
-      contextProvider: new NoopContextProvider(),
+      runId,
+      sink: sink as unknown as AppstrateEventSink,
     });
 
     expect(sink.events).toHaveLength(1);
-    expect(sink.events[0]!.event).toEqual({
-      type: "log",
-      level: "error",
-      message: "crash",
-    });
+    expect(sink.events[0]!.type).toBe("appstrate.error");
+    expect(sink.events[0]!.message).toBe("crash");
     expect(result.error?.message).toBe("crash");
-    // finalize was called with the reducer-computed result.
     expect(sink.finalResult).not.toBeNull();
-    expect(sink.finalResult?.logs).toHaveLength(1);
   });
 
   it("rethrows when the abort signal triggered the error (caller owns finalisation)", async () => {
     const controller = new AbortController();
+    controller.abort();
+    const runId = "r_abort";
     const runner = new AppstrateContainerRunner({
       adapter: new FailingAdapter(new DOMException("aborted", "AbortError")),
-      buildPromptContext: async () => {
-        controller.abort();
-        return { promptContext: makePromptContext(), timeout: 60 };
-      },
+      plan: { promptContext: makePromptContext(), timeout: 60 },
     });
     const sink = new RecordingSink();
 
     await expect(
       runner.run({
-        bundle: makeBundle(),
-        context: { runId: "r_abort", input: {} },
-        sink,
-        contextProvider: new NoopContextProvider(),
+        runId,
+        sink: sink as unknown as AppstrateEventSink,
         signal: controller.signal,
       }),
     ).rejects.toBeDefined();
 
-    // When aborted, the runner delegates finalisation to the caller
-    // and does NOT synthesise a sink-side log event.
     expect(sink.finalResult).toBeNull();
   });
 });

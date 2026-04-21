@@ -1,34 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} — consumes the canonical AFPS
- * reserved-domain events and fans them out to the platform's
- * persistence layer:
+ * Appstrate-backed {@link EventSink} — consumes {@link RunEvent}s emitted
+ * by the run adapter and fans them out to the platform's persistence layer:
  *
  *   - `run_logs` table (one row per observable event, same shape the
  *     legacy in-route switch produced — preserves SSE + log history UI)
- *   - internal aggregator (structuredOutput / state / memories / report)
- *     which the route handler reads when the run ends to compute the
- *     final `result`, `state`, and memory write-back
+ *   - internal aggregator (output / state / memories / report / usage /
+ *     cost / lastAdapterError) which the route handler reads when the
+ *     run ends to compute the final `result`, `state`, memory write-back,
+ *     and failure reason.
  *
  * The sink itself performs NO status update, NO webhook dispatch, and NO
  * post-run metadata collection. Those remain the route handler's
  * responsibility.
  *
- * AFPS 1.3 surface: the primary entrypoint is `handle(event: RunEvent)` —
- * the open envelope spec'd in afps-spec/spec.md. Legacy
- * `onEvent(envelope)` is kept for compatibility with callers still on the
- * pre-1.3 surface (notably existing unit tests that bypass the runtime
- * and call the sink directly). Both paths feed the same aggregator.
+ * Event routing:
+ *
+ *   AFPS canonical (reserved domains):
+ *     memory.added    → aggregate.memories
+ *     state.set       → aggregate.state
+ *     output.emitted  → aggregate.output + run_logs (result/output)
+ *     report.appended → aggregate.report + run_logs (result/report)
+ *     log.written     → run_logs (progress) with level
+ *
+ *   Platform-specific (appstrate.* namespace):
+ *     appstrate.progress → run_logs (progress/progress) with message/data/level
+ *     appstrate.error    → aggregate.lastAdapterError + run_logs (system/adapter_error)
+ *     appstrate.metric   → aggregate.usage / aggregate.cost (no run_logs row)
  */
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
-import type { AfpsEventEnvelope } from "@appstrate/afps-runtime/types";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { toRunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import type { OrgScope } from "../../lib/scope.ts";
 import { appendRunLog } from "../state/runs.ts";
+import type { TokenUsage } from "./types.ts";
 
 /**
  * Mutable projection the route handler reads after the run completes.
@@ -36,14 +43,20 @@ import { appendRunLog } from "../state/runs.ts";
  * migration is drop-in — shape, semantics, and defaults are preserved.
  */
 export interface AggregatedRunState {
-  /** Deep-merged `output` event payloads (object-only merge; non-object replaces). */
+  /** Deep-merged `output.emitted` payloads (object-only merge; non-object replaces). */
   output: Record<string, unknown>;
-  /** Last `set_state` payload. `null` if the agent never called `set_state`. */
+  /** Last `state.set` payload. `null` if the agent never called `set_state`. */
   state: Record<string, unknown> | null;
-  /** All `add_memory` contents, in arrival order. */
+  /** All `memory.added` contents, in arrival order. */
   memories: string[];
-  /** Concatenated `report` contents, separated by `\n\n`. */
+  /** Concatenated `report.appended` contents, separated by `\n\n`. */
   report: string;
+  /** Accumulated token usage from `appstrate.metric` events. */
+  usage: TokenUsage;
+  /** Accumulated cost (USD) from `appstrate.metric` events. */
+  cost: number;
+  /** Most recent `appstrate.error.message`; drives the run's failure reason. */
+  lastAdapterError: string | null;
 }
 
 export interface AppstrateEventSinkOptions {
@@ -59,6 +72,9 @@ export class AppstrateEventSink implements EventSink {
     state: null,
     memories: [],
     report: "",
+    usage: { input_tokens: 0, output_tokens: 0 },
+    cost: 0,
+    lastAdapterError: null,
   };
   private finalResult: RunResult | null = null;
 
@@ -67,13 +83,6 @@ export class AppstrateEventSink implements EventSink {
     this.runId = opts.runId;
   }
 
-  /**
-   * AFPS 1.3 primary entrypoint — open {@link RunEvent} envelope. Core
-   * reserved-domain events (memory.added / state.set / output.emitted /
-   * report.appended / log.written) feed the aggregator; other event
-   * types pass through silently (third-party tools do not contribute
-   * to the canonical RunResult projection).
-   */
   async handle(event: RunEvent): Promise<void> {
     switch (event.type) {
       case "memory.added": {
@@ -141,23 +150,45 @@ export class AppstrateEventSink implements EventSink {
         break;
       }
 
+      case "appstrate.progress": {
+        const message = typeof event.message === "string" ? event.message : null;
+        const data = isPlainObject(event.data) ? event.data : null;
+        const level = resolveLogLevel(event.level) ?? "debug";
+        await appendRunLog(this.scope, this.runId, "progress", "progress", message, data, level);
+        break;
+      }
+
+      case "appstrate.error": {
+        const message = typeof event.message === "string" ? event.message : null;
+        const data = isPlainObject(event.data) ? event.data : null;
+        if (message) this.aggregate.lastAdapterError = message;
+        await appendRunLog(
+          this.scope,
+          this.runId,
+          "system",
+          "adapter_error",
+          message,
+          data,
+          "error",
+        );
+        break;
+      }
+
+      case "appstrate.metric": {
+        if (isPlainObject(event.usage)) {
+          accumulateUsage(this.aggregate.usage, event.usage as TokenUsage);
+        }
+        if (typeof event.cost === "number") {
+          this.aggregate.cost += event.cost;
+        }
+        break;
+      }
+
       default:
         // Third-party event — no canonical projection. Runners that want
         // to observe third-party events can compose with CompositeSink.
         break;
     }
-  }
-
-  /**
-   * Pre-1.3 entrypoint — lifts the legacy envelope into an open RunEvent
-   * and delegates to {@link handle}. Kept so existing tests and callers
-   * that bypass the runtime (and therefore miss the runtime's preferred
-   * `handle` path) keep working without modification.
-   *
-   * @deprecated use {@link handle} directly.
-   */
-  async onEvent(envelope: AfpsEventEnvelope): Promise<void> {
-    await this.handle(toRunEvent({ event: envelope.event, runId: envelope.runId }));
   }
 
   async finalize(result: RunResult): Promise<void> {
@@ -180,4 +211,20 @@ export class AppstrateEventSink implements EventSink {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {
+  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
+    return value;
+  }
+  return null;
+}
+
+function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
+  total.input_tokens += addition.input_tokens ?? 0;
+  total.output_tokens += addition.output_tokens ?? 0;
+  total.cache_creation_input_tokens =
+    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
+  total.cache_read_input_tokens =
+    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
 }

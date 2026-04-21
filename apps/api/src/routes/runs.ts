@@ -17,8 +17,9 @@ import {
 } from "../services/state/index.ts";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
-import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
+import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
+import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -43,14 +44,6 @@ import {
   isInlineShadowPackageId,
 } from "../services/inline-run.ts";
 import { runInlinePreflight, type InlineRunBody } from "../services/inline-run-preflight.ts";
-function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
-  total.input_tokens += addition.input_tokens;
-  total.output_tokens += addition.output_tokens;
-  total.cache_creation_input_tokens =
-    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
-  total.cache_read_input_tokens =
-    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
-}
 
 async function collectAfterRunMetadata(
   params: RunStatusChangeParams,
@@ -85,8 +78,7 @@ export async function executeAgentInBackground(
   const { signal } = controller;
   // Derived once — cheap string test used to decorate every lifecycle event.
   const packageEphemeral = isInlineShadowPackageId(agent.id);
-
-  let accumulatedCost = 0;
+  const sink = new AppstrateEventSink({ scope, runId });
 
   try {
     // Update status to running
@@ -100,84 +92,19 @@ export async function executeAgentInBackground(
       packageEphemeral,
     });
 
-    // Execute via adapter
-    const adapter = new PiAdapter();
-
     const timeout = (agent.manifest.timeout as number | undefined) ?? 300;
-    const structuredOutput: Record<string, unknown> = {};
-    let state: Record<string, unknown> | null = null;
-    const memories: string[] = [];
-    let reportContent = "";
-    let lastAdapterError: string | null = null;
-    const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
-
-    try {
-      for await (const msg of adapter.execute(
-        runId,
+    const runner = new AppstrateContainerRunner({
+      adapter: new PiAdapter(),
+      plan: {
         promptContext,
         timeout,
-        agentPackage ?? undefined,
-        signal,
+        agentPackage: agentPackage ?? undefined,
         inputFiles,
-      )) {
-        if (msg.usage) accumulateUsage(accumulated, msg.usage);
-        if (msg.cost != null) accumulatedCost += msg.cost;
+      },
+    });
 
-        switch (msg.type) {
-          case "progress":
-            await appendRunLog(
-              scope,
-              runId,
-              "progress",
-              "progress",
-              msg.message ?? null,
-              msg.data ?? null,
-              msg.level ?? "debug",
-            );
-            break;
-
-          case "error":
-            lastAdapterError = msg.message ?? null;
-            await appendRunLog(
-              scope,
-              runId,
-              "system",
-              "adapter_error",
-              msg.message ?? null,
-              msg.data ?? null,
-              "error",
-            );
-            break;
-
-          case "output":
-            if (msg.data) Object.assign(structuredOutput, msg.data);
-            await appendRunLog(scope, runId, "result", "output", null, msg.data ?? null, "info");
-            break;
-
-          case "set_state":
-            if (msg.data) state = msg.data;
-            break;
-
-          case "add_memory":
-            if (msg.content) memories.push(msg.content);
-            break;
-
-          case "report":
-            if (msg.content) {
-              reportContent += (reportContent ? "\n\n" : "") + msg.content;
-            }
-            await appendRunLog(
-              scope,
-              runId,
-              "result",
-              "report",
-              null,
-              { content: msg.content } as Record<string, unknown>,
-              "info",
-            );
-            break;
-        }
-      }
+    try {
+      await runner.run({ runId, sink, signal });
     } catch (err) {
       if (signal.aborted) {
         // Cancelled by user — cancel route already wrote DB status
@@ -185,14 +112,14 @@ export async function executeAgentInBackground(
       }
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
-        const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+        const totalTokens = sink.current.usage.input_tokens + sink.current.usage.output_tokens;
         const metadata = await collectAfterRunMetadata({
           orgId,
           runId,
           packageId: agent.id,
           applicationId,
           status: "timeout",
-          cost: accumulatedCost,
+          cost: sink.current.cost,
           duration,
           modelSource: modelSource ?? null,
         });
@@ -204,7 +131,7 @@ export async function executeAgentInBackground(
           notifiedAt: new Date().toISOString(),
           ...(totalTokens > 0
             ? {
-                tokenUsage: { ...accumulated } as Record<string, unknown>,
+                tokenUsage: { ...sink.current.usage } as Record<string, unknown>,
               }
             : {}),
           ...(metadata ? { metadata } : {}),
@@ -227,7 +154,7 @@ export async function executeAgentInBackground(
           packageId: agent.id,
           applicationId,
           status: "timeout",
-          cost: accumulatedCost,
+          cost: sink.current.cost,
           duration,
           modelSource: modelSource ?? null,
           packageEphemeral,
@@ -239,9 +166,9 @@ export async function executeAgentInBackground(
 
     // Determine outcome: fail only on adapter error or zero tokens (LLM unreachable).
     // An agent without the output tool succeeds even without structured output.
-    const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+    const totalTokens = sink.current.usage.input_tokens + sink.current.usage.output_tokens;
     const error =
-      lastAdapterError ??
+      sink.current.lastAdapterError ??
       (totalTokens === 0
         ? promptContext.proxyUrl
           ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
@@ -259,7 +186,7 @@ export async function executeAgentInBackground(
         packageId: agent.id,
         applicationId,
         status: "failed",
-        cost: accumulatedCost,
+        cost: sink.current.cost,
         duration,
         modelSource: modelSource ?? null,
       });
@@ -286,7 +213,7 @@ export async function executeAgentInBackground(
         packageId: agent.id,
         applicationId,
         status: "failed",
-        cost: accumulatedCost,
+        cost: sink.current.cost,
         duration,
         modelSource: modelSource ?? null,
         packageEphemeral,
@@ -295,8 +222,9 @@ export async function executeAgentInBackground(
     } else {
       // --- Success path (with or without structured output) ---
 
-      // Validate output against schema (if any output was produced)
+      const structuredOutput = sink.current.output;
       const hasOutput = Object.keys(structuredOutput).length > 0;
+      // Validate output against schema (if any output was produced)
       if (hasOutput) {
         const outputSchema = agent.manifest.output?.schema;
         if (outputSchema) {
@@ -322,12 +250,14 @@ export async function executeAgentInBackground(
         }
       }
 
+      const reportContent = sink.current.report;
       const hasReport = reportContent.length > 0;
       const result: Record<string, unknown> = {
         ...(hasOutput ? { output: structuredOutput } : {}),
         ...(hasReport ? { report: reportContent } : {}),
       };
 
+      const memories = sink.current.memories;
       if (memories.length > 0) {
         await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
@@ -338,11 +268,12 @@ export async function executeAgentInBackground(
         packageId: agent.id,
         applicationId,
         status: "success",
-        cost: accumulatedCost,
+        cost: sink.current.cost,
         duration,
         modelSource: modelSource ?? null,
       });
 
+      const state = sink.current.state;
       await updateRun(scope, runId, {
         status: "success",
         result,
@@ -350,8 +281,10 @@ export async function executeAgentInBackground(
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
-        ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
-        cost: accumulatedCost > 0 ? accumulatedCost : null,
+        ...(totalTokens > 0
+          ? { tokenUsage: { ...sink.current.usage } as Record<string, unknown> }
+          : {}),
+        cost: sink.current.cost > 0 ? sink.current.cost : null,
         ...(metadata ? { metadata } : {}),
       });
 
@@ -373,7 +306,7 @@ export async function executeAgentInBackground(
         packageId: agent.id,
         applicationId,
         status: "success",
-        cost: accumulatedCost,
+        cost: sink.current.cost,
         duration,
         modelSource: modelSource ?? null,
         packageEphemeral,
@@ -392,7 +325,7 @@ export async function executeAgentInBackground(
       packageId: agent.id,
       applicationId,
       status: "failed",
-      cost: accumulatedCost,
+      cost: sink.current.cost,
       duration,
       modelSource: modelSource ?? null,
     });
@@ -423,7 +356,7 @@ export async function executeAgentInBackground(
       packageId: agent.id,
       applicationId,
       status: "failed",
-      cost: accumulatedCost,
+      cost: sink.current.cost,
       duration,
       modelSource: modelSource ?? null,
       packageEphemeral,

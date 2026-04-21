@@ -19,11 +19,10 @@
 import type { AfpsEvent } from "./afps-event.ts";
 
 /**
- * Open envelope emitted by tools during a run. Re-exported from
- * `@afps-spec/schema/interfaces` for type parity, but redeclared here so
- * the runtime has no type-level dependency edge on the spec package for
- * this shape (the spec only formalises the contract; the runtime owns
- * the runtime-level behaviour).
+ * Open envelope emitted by tools during a run. Mirrors the shape exported
+ * by `@afps/types` (the vendor-neutral TS projection of the AFPS spec);
+ * redeclared here so the runtime has no type-level dependency edge on
+ * the types package for this shape.
  */
 export interface RunEvent {
   /** "<domain>.<verb>" — discriminant chosen by the emitting tool. */

@@ -5,14 +5,16 @@ import {
   _deriveKeyPlaceholderForTesting as deriveKeyPlaceholder,
   _processPiLogsForTesting as processPiLogs,
 } from "../../src/services/adapters/pi.ts";
-import type { RunMessage } from "../../src/services/adapters/types.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 
-async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
-  const messages: RunMessage[] = [];
-  for await (const msg of gen) {
-    messages.push(msg);
+const RUN_ID = "run_test";
+
+async function collectEvents(gen: AsyncGenerator<RunEvent>): Promise<RunEvent[]> {
+  const events: RunEvent[] = [];
+  for await (const ev of gen) {
+    events.push(ev);
   }
-  return messages;
+  return events;
 }
 
 async function* linesGenerator(lines: string[]): AsyncGenerator<string> {
@@ -52,34 +54,34 @@ describe("deriveKeyPlaceholder", () => {
 });
 
 describe("processPiLogs", () => {
-  it("emits progress for text_delta lines", async () => {
+  it("emits appstrate.progress for text_delta lines", async () => {
     const lines = [JSON.stringify({ type: "text_delta", text: "Hello world" })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toBe("Hello world");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(events[0]!.message).toBe("Hello world");
   });
 
-  it("passes through output events", async () => {
+  it("passes through output events as output.emitted", async () => {
     const lines = [JSON.stringify({ type: "output", data: { count: 42 } })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("output");
-    expect(messages[0]!.data).toEqual({ count: 42 });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("output.emitted");
+    expect(events[0]!.data).toEqual({ count: 42 });
   });
 
-  it("passes through set_state events", async () => {
+  it("passes through set_state events as state.set", async () => {
     const lines = [JSON.stringify({ type: "set_state", state: { cursor: "abc" } })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("set_state");
-    expect(messages[0]!.data).toEqual({ cursor: "abc" });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("state.set");
+    expect(events[0]!.state).toEqual({ cursor: "abc" });
   });
 
   it("filters out code blocks from text buffer", async () => {
@@ -89,11 +91,10 @@ describe("processPiLogs", () => {
       JSON.stringify({ type: "text_delta", text: " After code" }),
     ];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    // Code blocks should be filtered, "Before code" and "After code" should be emitted
-    const progressMessages = messages.filter((m) => m.type === "progress");
-    const combined = progressMessages.map((m) => m.message).join("");
+    const progressEvents = events.filter((e) => e.type === "appstrate.progress");
+    const combined = progressEvents.map((e) => String(e.message ?? "")).join("");
     expect(combined).toContain("Before code");
     expect(combined).not.toContain("print('hi')");
   });
@@ -101,20 +102,20 @@ describe("processPiLogs", () => {
   it("flushes remaining text buffer at end", async () => {
     const lines = [JSON.stringify({ type: "text_delta", text: "Final text" })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toBe("Final text");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(events[0]!.message).toBe("Final text");
   });
 
   it("handles empty lines gracefully", async () => {
     const lines = ["", "   ", JSON.stringify({ type: "text_delta", text: "valid" })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.message).toBe("valid");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.message).toBe("valid");
   });
 
   it("flushes text buffer when non-text event arrives", async () => {
@@ -123,29 +124,28 @@ describe("processPiLogs", () => {
       JSON.stringify({ type: "output", data: { result: "done" } }),
     ];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    // Should have: flushed "buffered text", then output
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toBe("buffered text");
-    expect(messages[1]!.type).toBe("output");
+    expect(events).toHaveLength(2);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(events[0]!.message).toBe("buffered text");
+    expect(events[1]!.type).toBe("output.emitted");
   });
 
-  it("handles tool_start events as progress with data", async () => {
+  it("handles tool_start events as appstrate.progress with data", async () => {
     const lines = [
       JSON.stringify({ type: "tool_start", name: "read_file", args: { path: "/tmp/x" } }),
     ];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toContain("read_file");
-    expect(messages[0]!.data?.tool).toBe("read_file");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(String(events[0]!.message ?? "")).toContain("read_file");
+    expect((events[0]!.data as Record<string, unknown>).tool).toBe("read_file");
   });
 
-  it("handles usage events", async () => {
+  it("handles usage events as appstrate.metric", async () => {
     const lines = [
       JSON.stringify({
         type: "usage",
@@ -154,65 +154,64 @@ describe("processPiLogs", () => {
       }),
     ];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("usage");
-    expect(messages[0]!.usage?.input_tokens).toBe(100);
-    expect(messages[0]!.cost).toBe(0.005);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.metric");
+    expect((events[0]!.usage as { input_tokens: number }).input_tokens).toBe(100);
+    expect(events[0]!.cost).toBe(0.005);
   });
 
-  it("handles error events", async () => {
+  it("handles error events as appstrate.error", async () => {
     const lines = [JSON.stringify({ type: "error", message: "Something failed" })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("error");
-    expect(messages[0]!.message).toBe("Something failed");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.error");
+    expect(events[0]!.message).toBe("Something failed");
   });
 
-  it("handles non-JSON lines as container output", async () => {
+  it("handles non-JSON lines as [container] progress", async () => {
     const lines = ["some raw container output"];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toContain("[container]");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(String(events[0]!.message ?? "")).toContain("[container]");
   });
 
-  it("handles add_memory events", async () => {
+  it("handles add_memory events as memory.added", async () => {
     const lines = [JSON.stringify({ type: "add_memory", content: "Important discovery" })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("add_memory");
-    expect(messages[0]!.content).toBe("Important discovery");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("memory.added");
+    expect(events[0]!.content).toBe("Important discovery");
   });
 
-  it("handles log events with levels", async () => {
+  it("handles log events with levels as appstrate.progress", async () => {
     const lines = [
       JSON.stringify({ type: "log", level: "warn", message: "Rate limit approaching" }),
     ];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.level).toBe("warn");
-    expect(messages[0]!.message).toBe("Rate limit approaching");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
+    expect(events[0]!.level).toBe("warn");
+    expect(events[0]!.message).toBe("Rate limit approaching");
   });
 
   it("auto-flushes when text buffer exceeds 300 chars", async () => {
     const longText = "x".repeat(350);
     const lines = [JSON.stringify({ type: "text_delta", text: longText })];
 
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
+    const events = await collectEvents(processPiLogs(linesGenerator(lines), RUN_ID));
 
-    // Should have been flushed because it exceeded 300 chars
-    expect(messages.length).toBeGreaterThanOrEqual(1);
-    expect(messages[0]!.type).toBe("progress");
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0]!.type).toBe("appstrate.progress");
   });
 });

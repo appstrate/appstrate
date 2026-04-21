@@ -5,6 +5,7 @@ import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 
 export type { ModelCost };
 export { modelCostSchema };
@@ -16,16 +17,6 @@ export const tokenUsageSchema = z.object({
   cache_read_input_tokens: z.number().nonnegative().optional(),
 });
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
-
-export interface RunMessage {
-  type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory" | "report";
-  message?: string;
-  data?: Record<string, unknown>;
-  usage?: TokenUsage;
-  cost?: number;
-  level?: "debug" | "info" | "warn" | "error";
-  content?: string;
-}
 
 export interface UploadedFile {
   fieldName: string;
@@ -96,6 +87,20 @@ export interface PromptContext {
   toolDocs?: Array<{ id: string; content: string }>;
 }
 
+/**
+ * A run adapter yields {@link RunEvent}s consumed by an
+ * {@link AppstrateEventSink}. Events either carry canonical AFPS reserved
+ * domains (memory.added / state.set / output.emitted / report.appended /
+ * log.written) or the platform-specific namespace `appstrate.*`:
+ *
+ *   - `appstrate.progress`  — text delta, tool invocation markers, container
+ *                              lifecycle breadcrumbs; persisted as progress log rows.
+ *   - `appstrate.error`     — adapter-level errors (infrastructure failures);
+ *                              persisted as system/adapter_error rows and surfaced
+ *                              as the run failure reason.
+ *   - `appstrate.metric`    — token usage / cost side-channel; accumulated by
+ *                              the sink and read back by the route handler.
+ */
 export interface RunAdapter {
   execute(
     runId: string,
@@ -104,7 +109,7 @@ export interface RunAdapter {
     agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<RunMessage>;
+  ): AsyncGenerator<RunEvent>;
 }
 
 export class TimeoutError extends Error {

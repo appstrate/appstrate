@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../../lib/logger.ts";
-import type { RunAdapter, RunMessage, PromptContext, UploadedFile } from "./types.ts";
+import type { RunAdapter, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -11,6 +11,7 @@ import {
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 
 import { getEnv } from "@appstrate/env";
 
@@ -28,7 +29,7 @@ export class PiAdapter implements RunAdapter {
     agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<RunMessage> {
+  ): AsyncGenerator<RunEvent> {
     const prompt = buildEnrichedPrompt(ctx);
 
     const llmConfig = ctx.llmConfig;
@@ -151,7 +152,7 @@ export class PiAdapter implements RunAdapter {
         extraData: { api: llmConfig.api, model: modelId },
         signal,
         stopOnTimeout: [sidecarHandle],
-        processLogs: processPiLogs,
+        processLogs: (logs) => processPiLogs(logs, runId),
       });
     } finally {
       // Cleanup sidecar first, then boundary (network requires all containers disconnected)
@@ -188,22 +189,35 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
-async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<RunMessage> {
+async function* processPiLogs(
+  logs: AsyncGenerator<string>,
+  runId: string,
+): AsyncGenerator<RunEvent> {
   let textBuffer = "";
   let inCodeBlock = false;
 
-  const emitBuffer = (): RunMessage | null => {
+  const emitBuffer = (): RunEvent | null => {
     const text = textBuffer.trim();
     textBuffer = "";
-    return text.length > 0 ? { type: "progress", message: text } : null;
+    return text.length > 0 ? progressEvent(runId, text) : null;
   };
 
   for await (const line of logs) {
-    const msg = parsePiStreamLine(line);
+    const msg = parsePiStreamLine(line, runId);
     if (!msg) continue;
 
-    if (msg.type === "progress" && !msg.data && !msg.level) {
-      textBuffer += msg.message ?? "";
+    // Text-delta-style progress streaming — accumulate short chunks and
+    // flush on fence / size threshold. Only plain text messages without
+    // structured `data` go through this path; structured events flush
+    // the buffer first and then pass through unchanged.
+    const isPlainProgress =
+      msg.type === "appstrate.progress" &&
+      msg.message !== undefined &&
+      msg.data === undefined &&
+      msg.level === undefined;
+
+    if (isPlainProgress) {
+      textBuffer += String(msg.message ?? "");
 
       if (inCodeBlock) {
         const closeIdx = textBuffer.indexOf("```");
@@ -251,35 +265,53 @@ export { processPiLogs as _processPiLogsForTesting };
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
 
 /** @internal Exported for testing */
-export function parsePiStreamLine(line: string): RunMessage | null {
+export function parsePiStreamLine(line: string, runId: string): RunEvent | null {
   try {
     const obj = JSON.parse(line);
 
     switch (obj.type) {
       case "text_delta":
-        return { type: "progress", message: obj.text || "" };
+        return progressEvent(runId, String(obj.text ?? ""));
 
       case "assistant_message":
         return null;
 
       case "output":
-        return { type: "output", data: obj.data };
+        return {
+          type: "output.emitted",
+          timestamp: Date.now(),
+          runId,
+          data: obj.data,
+        };
 
       case "report":
-        return { type: "report", content: obj.content || "" };
+        return {
+          type: "report.appended",
+          timestamp: Date.now(),
+          runId,
+          content: String(obj.content ?? ""),
+        };
 
       case "set_state":
-        return { type: "set_state", data: obj.state };
+        return {
+          type: "state.set",
+          timestamp: Date.now(),
+          runId,
+          state: obj.state,
+        };
 
       case "add_memory":
-        return { type: "add_memory", content: obj.content || "" };
+        return {
+          type: "memory.added",
+          timestamp: Date.now(),
+          runId,
+          content: String(obj.content ?? ""),
+        };
 
       case "tool_start":
-        return {
-          type: "progress",
-          message: `Tool: ${obj.name || "unknown"}`,
+        return progressEvent(runId, `Tool: ${obj.name ?? "unknown"}`, {
           data: { tool: obj.name, args: obj.args },
-        };
+        });
 
       case "tool_end":
         return null;
@@ -287,7 +319,9 @@ export function parsePiStreamLine(line: string): RunMessage | null {
       case "usage": {
         const t = obj.tokens || {};
         return {
-          type: "usage",
+          type: "appstrate.metric",
+          timestamp: Date.now(),
+          runId,
           usage: {
             input_tokens: t.input ?? 0,
             output_tokens: t.output ?? 0,
@@ -302,16 +336,20 @@ export function parsePiStreamLine(line: string): RunMessage | null {
         return null;
 
       case "error":
-        return { type: "error", message: obj.message || "unknown error" };
+        return {
+          type: "appstrate.error",
+          timestamp: Date.now(),
+          runId,
+          message: String(obj.message ?? "unknown error"),
+        };
 
       case "log": {
-        const validLevels = ["debug", "info", "warn", "error"];
-        return {
-          type: "progress",
-          message: obj.message || "",
-          data: obj.data ?? undefined,
-          level: validLevels.includes(obj.level) ? obj.level : "info",
-        };
+        const validLevels = ["debug", "info", "warn", "error"] as const;
+        const level = (validLevels as readonly string[]).includes(obj.level) ? obj.level : "info";
+        return progressEvent(runId, String(obj.message ?? ""), {
+          data: obj.data,
+          level,
+        });
       }
 
       default:
@@ -320,6 +358,22 @@ export function parsePiStreamLine(line: string): RunMessage | null {
   } catch {
     const trimmed = line.trim();
     if (trimmed.length === 0) return null;
-    return { type: "progress", message: `[container] ${trimmed}` };
+    return progressEvent(runId, `[container] ${trimmed}`);
   }
+}
+
+function progressEvent(
+  runId: string,
+  message: string,
+  extra?: { data?: unknown; level?: string },
+): RunEvent {
+  const event: RunEvent = {
+    type: "appstrate.progress",
+    timestamp: Date.now(),
+    runId,
+    message,
+  };
+  if (extra?.data !== undefined) event.data = extra.data;
+  if (extra?.level !== undefined) event.level = extra.level;
+  return event;
 }

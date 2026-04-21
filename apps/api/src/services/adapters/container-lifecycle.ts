@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../../lib/logger.ts";
-import type { RunMessage } from "./types.ts";
 import { TimeoutError } from "./types.ts";
 import type { ContainerOrchestrator, WorkloadHandle } from "../orchestrator/index.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 
 export interface ContainerLifecycleOptions {
   orchestrator: ContainerOrchestrator;
@@ -15,7 +15,7 @@ export interface ContainerLifecycleOptions {
   signal?: AbortSignal;
   /** Extra workload handles to stop on timeout (e.g. sidecar). */
   stopOnTimeout?: WorkloadHandle[];
-  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<RunMessage>;
+  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<RunEvent>;
 }
 
 /**
@@ -24,12 +24,14 @@ export interface ContainerLifecycleOptions {
  */
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
-): AsyncGenerator<RunMessage> {
+): AsyncGenerator<RunEvent> {
   const { orchestrator, handle, adapterName, runId, timeout, extraData, signal } = options;
 
   yield {
-    type: "progress",
-    message: `container started`,
+    type: "appstrate.progress",
+    timestamp: Date.now(),
+    runId,
+    message: "container started",
     data: { adapter: adapterName, runId, workloadId: handle.id, ...extraData },
   };
 
@@ -50,10 +52,12 @@ export async function* runContainerLifecycle(
   let lastError: string | undefined;
 
   try {
-    for await (const msg of options.processLogs(orchestrator.streamLogs(handle, signal))) {
-      if (msg.type === "output") hasOutput = true;
-      if (msg.type === "error") lastError = msg.message;
-      yield msg;
+    for await (const event of options.processLogs(orchestrator.streamLogs(handle, signal))) {
+      if (event.type === "output.emitted") hasOutput = true;
+      if (event.type === "appstrate.error" && typeof event.message === "string") {
+        lastError = event.message;
+      }
+      yield event;
     }
 
     // Skip waitForExit if cancelled — workload will be killed by stopWorkload

@@ -15,7 +15,8 @@ import type {
   WorkloadSpec,
   SidecarConfig,
 } from "../../src/services/orchestrator/types.ts";
-import type { RunMessage, PromptContext } from "../../src/services/adapters/types.ts";
+import type { PromptContext } from "../../src/services/adapters/types.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -75,10 +76,10 @@ function basePromptContext(overrides?: Partial<PromptContext>): PromptContext {
   };
 }
 
-async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
-  const messages: RunMessage[] = [];
-  for await (const msg of gen) messages.push(msg);
-  return messages;
+async function collectMessages(gen: AsyncGenerator<RunEvent>): Promise<RunEvent[]> {
+  const events: RunEvent[] = [];
+  for await (const ev of gen) events.push(ev);
+  return events;
 }
 
 // ─── Tests ──────────────────────────────────────────────────
@@ -106,10 +107,10 @@ describe("PiAdapter.execute()", () => {
     expect(orchestrator.removeIsolationBoundary).toHaveBeenCalledTimes(1);
 
     // Verify messages: "container started" + streamed log messages
-    expect(messages[0]!.type).toBe("progress");
-    expect(messages[0]!.message).toContain("container started");
+    expect(messages[0]!.type).toBe("appstrate.progress");
+    expect(String(messages[0]!.message ?? "")).toContain("container started");
 
-    const output = messages.find((m) => m.type === "output");
+    const output = messages.find((m) => m.type === "output.emitted");
     expect(output).toBeDefined();
     expect(output!.data).toEqual({ result: "Done" });
   });
