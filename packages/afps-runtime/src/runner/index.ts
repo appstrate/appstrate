@@ -4,6 +4,9 @@
 export { type BundleRunner, type RunBundleOptions } from "./types.ts";
 export { MockRunner, type MockRunnerOptions } from "./mock.ts";
 export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
+// Re-exported for ergonomics: runners produce RunResult, so consumers
+// typically import it alongside BundleRunner / reduceEvents.
+export type { RunResult, RunError, LogEntry } from "../types/run-result.ts";
 export {
   PiRunner,
   type PiRunnerOptions,
