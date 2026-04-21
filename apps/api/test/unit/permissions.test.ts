@@ -14,7 +14,6 @@ describe("resolvePermissions", () => {
     expect(perms.has("org:delete")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
-    expect(perms.has("billing:manage")).toBe(true);
   });
 
   it("admin has all except org:delete and members:change-role", () => {
@@ -24,7 +23,6 @@ describe("resolvePermissions", () => {
     expect(perms.has("org:update")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);
-    expect(perms.has("billing:manage")).toBe(true);
   });
 
   it("member can read + run agents + manage own connections", () => {
@@ -67,7 +65,6 @@ describe("resolvePermissions", () => {
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("org:read")).toBe(true);
     expect(perms.has("runs:read")).toBe(true);
-    expect(perms.has("billing:read")).toBe(true);
     // Module-owned read permissions included in viewer
     expect(perms.has("schedules:read")).toBe(true);
     expect(perms.has("models:read")).toBe(true);
@@ -108,9 +105,9 @@ describe("validateScopes", () => {
   });
 
   it("rejects session-only permissions", () => {
-    const scopes = ["org:read", "org:delete", "members:invite", "billing:manage"];
+    const scopes = ["org:read", "org:delete", "members:invite"];
     const ownerResult = validateScopes(scopes, "owner");
-    // All org/members/billing are session-only, excluded from API keys
+    // org/members are session-only, excluded from API keys
     expect(ownerResult).toHaveLength(0);
   });
 
@@ -166,8 +163,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "members:invite",
       "members:remove",
       "members:change-role",
-      "billing:read",
-      "billing:manage",
       "api-keys:read",
       "api-keys:create",
       "api-keys:revoke",
@@ -217,11 +212,12 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
   });
 
   it("excludes module-owned permissions — those are layered in at boot via getApiKeyAllowedScopes()", () => {
-    // webhooks:* and oauth-clients:* are now module-contributed with
-    // `apiKeyGrantable: true`, merged into the dynamic view by
+    // webhooks:*, oauth-clients:*, and billing:* are module-contributed
+    // (webhooks + oidc + cloud modules respectively). `apiKeyGrantable`
+    // is opted-in per contribution, merged into the dynamic view by
     // `getApiKeyAllowedScopes()`. The core constant must not carry them
-    // — otherwise disabling the webhooks/oidc modules would leave dead
-    // scope strings bound to API-key creation.
+    // — otherwise disabling the owning module would leave dead scope
+    // strings bound to API-key creation.
     const moduleOwned = [
       "webhooks:read",
       "webhooks:write",
@@ -229,6 +225,8 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "oauth-clients:read",
       "oauth-clients:write",
       "oauth-clients:delete",
+      "billing:read",
+      "billing:manage",
     ];
     for (const perm of moduleOwned) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);

@@ -77,7 +77,6 @@ export interface CoreResources {
   "api-keys": "read" | "create" | "revoke";
   applications: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  billing: "read" | "manage";
 }
 
 /** Core resource names. */
@@ -121,7 +120,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "api-keys",
   "applications",
   "end-users",
-  "billing",
 ]);
 
 /**

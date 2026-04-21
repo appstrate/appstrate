@@ -204,7 +204,6 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "api-keys": true,
       applications: true,
       "end-users": true,
-      billing: true,
     };
     for (const name of Object.keys(allCoreResources)) {
       expect(CORE_RESOURCE_NAMES.has(name)).toBe(true);
@@ -231,7 +230,6 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "api-keys": true,
       applications: true,
       "end-users": true,
-      billing: true,
     };
     const interfaceNames = new Set(Object.keys(allCoreResources));
     for (const name of CORE_RESOURCE_NAMES) {

@@ -149,9 +149,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Billing
-  "billing:read",
-  "billing:manage",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -198,8 +195,6 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "applications:read",
   "end-users:read",
   "end-users:write",
-  // Billing (read only)
-  "billing:read",
 ]);
 
 /** Viewer: read-only on everything visible. */
@@ -220,7 +215,6 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "proxies:read",
   "applications:read",
   "end-users:read",
-  "billing:read",
 ]);
 
 /** Role → core-permissions mapping. Module contributions are layered on top via the provider hook below. */
@@ -237,8 +231,7 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
 
 /**
  * Core permissions that can be granted to API keys. Session-only
- * operations (org management, billing, personal profiles, etc.) are
- * excluded.
+ * operations (org management, personal profiles, etc.) are excluded.
  *
  * Internal source of truth. Inside apps/api, always read this value —
  * the public re-export `API_KEY_ALLOWED_SCOPES` wraps it in a logging
