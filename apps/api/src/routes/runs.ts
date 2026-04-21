@@ -22,7 +22,11 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
 import { loadBundleFromBuffer, type LoadedBundle } from "@appstrate/afps-runtime/bundle";
-import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+import {
+  BundledToolResolver,
+  BundledSkillResolver,
+  SidecarProviderResolver,
+} from "@appstrate/afps-runtime/resolvers";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -135,13 +139,26 @@ export async function executeAgentInBackground(
     });
 
     const bundle = await buildRunnerBundle(agent, agentPackage ?? null);
-    const providerResolver: ProviderResolver = { resolve: async () => [] };
+
+    // Spec-aligned resolvers — the runtime ships bundled + sidecar defaults
+    // that read from the loaded bundle and from the in-container sidecar
+    // (http://sidecar:8080). They are handed to the Runner so the
+    // AFPS 1.3 contract is honoured; the current container-delegating
+    // executor doesn't consume them (the Pi SDK inside the container
+    // resolves its own tools), but an in-container Runner (Phase 7) will.
+    const toolResolver = new BundledToolResolver();
+    const skillResolver = new BundledSkillResolver();
+    const providerResolver = new SidecarProviderResolver({
+      sidecarUrl: "http://sidecar:8080",
+    });
 
     try {
       await runner.run({
         bundle,
         context,
         providerResolver,
+        toolResolver,
+        skillResolver,
         eventSink: sink,
         signal,
       });
