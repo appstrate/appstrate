@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 export { type BundleRunner, type RunBundleOptions } from "./types.ts";
+export { type Runner, type RunOptions } from "./options.ts";
 export { MockRunner, type MockRunnerOptions } from "./mock.ts";
 export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers

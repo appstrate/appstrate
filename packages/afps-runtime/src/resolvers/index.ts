@@ -33,6 +33,10 @@ export type {
   SpecRunResult,
 } from "./types.ts";
 
+// RunEvent lives in src/types/ — re-exported here for convenience so
+// resolver authors can import all the types they need from one place.
+export type { RunEvent } from "../types/run-event.ts";
+
 export {
   BundledToolResolver,
   BundledToolResolutionError,
@@ -44,3 +48,26 @@ export {
   BundledPreludeResolutionError,
 } from "./bundled-prelude-resolver.ts";
 export { toBundle, type BundleAdapter } from "./bundle-adapter.ts";
+
+// Provider-resolver surface — tool factory + concrete impls.
+export {
+  makeProviderTool,
+  type ProviderMeta,
+  type ProviderCallRequest,
+  type ProviderCallResponse,
+  type ProviderCallFn,
+  type MakeProviderToolOptions,
+} from "./provider-tool.ts";
+export {
+  SidecarProviderResolver,
+  type SidecarProviderResolverOptions,
+} from "./sidecar-provider-resolver.ts";
+export {
+  LocalProviderResolver,
+  type LocalCredentialsFile,
+  type LocalProviderResolverOptions,
+} from "./local-provider-resolver.ts";
+export {
+  RemoteAppstrateProviderResolver,
+  type RemoteAppstrateProviderResolverOptions,
+} from "./remote-appstrate-provider-resolver.ts";

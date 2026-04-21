@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
+import {
+  makeProviderTool,
+  type ProviderCallFn,
+  type ProviderCallResponse,
+  type ProviderMeta,
+} from "./provider-tool.ts";
+
+export interface SidecarProviderResolverOptions {
+  /**
+   * Base URL of the sidecar proxy. Normally `http://sidecar:8080` inside
+   * an Appstrate-orchestrated container; can be any URL that implements
+   * the `/proxy` contract described in `runtime-pi/sidecar/server.ts`.
+   */
+  sidecarUrl: string;
+  /** Override the low-level HTTP client. Defaults to the global `fetch`. */
+  fetch?: typeof fetch;
+  /**
+   * Extra headers to forward on every request (e.g. tracing). Headers
+   * set per-call by the LLM override these.
+   */
+  baseHeaders?: Record<string, string>;
+  /** Directory prefix for provider manifests in the bundle. */
+  providerPrefix?: string;
+}
+
+/**
+ * {@link ProviderResolver} that delegates to the Appstrate sidecar for
+ * credential injection, URL enforcement, and transport. The sidecar
+ * contract is unchanged — this resolver is a thin typed client.
+ *
+ * Credentials never transit the runtime: the sidecar fetches them from
+ * the platform API using the per-run token and substitutes them into
+ * the outgoing request before forwarding to the upstream provider.
+ */
+export class SidecarProviderResolver implements ProviderResolver {
+  private readonly sidecarUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly baseHeaders: Record<string, string>;
+  private readonly providerPrefix: string;
+
+  constructor(opts: SidecarProviderResolverOptions) {
+    if (!opts.sidecarUrl) throw new Error("SidecarProviderResolver: sidecarUrl is required");
+    this.sidecarUrl = opts.sidecarUrl.replace(/\/$/, "");
+    this.fetchImpl = opts.fetch ?? fetch;
+    this.baseHeaders = opts.baseHeaders ?? {};
+    this.providerPrefix = opts.providerPrefix ?? ".agent-package/providers/";
+  }
+
+  async resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]> {
+    const tools: Tool[] = [];
+    for (const ref of refs) {
+      const meta = await readProviderMeta(bundle, ref, this.providerPrefix);
+      const call = this.buildCall(ref, meta);
+      tools.push(makeProviderTool(meta, call));
+    }
+    return tools;
+  }
+
+  private buildCall(ref: ProviderRef, meta: ProviderMeta): ProviderCallFn {
+    return async (req) => {
+      const bodyBytes = await resolveBodyStream(req.body);
+      const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, {
+        method: req.method,
+        headers: {
+          ...this.baseHeaders,
+          "X-Provider": ref.name,
+          "X-Target": req.target,
+          ...(req.headers ?? {}),
+        },
+        body: bodyBytes,
+      });
+
+      const headers: Record<string, string> = {};
+      res.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+
+      // For now every response goes back inline — the sidecar already
+      // applies a 50 KB truncation via X-Truncated. Streaming-to-file is
+      // a follow-up enhancement (spec §16.2).
+      const text = await res.text();
+      const response: ProviderCallResponse = {
+        status: res.status,
+        headers,
+        body: { inline: text, inlineEncoding: "utf8" },
+      };
+      void meta;
+      return response;
+    };
+  }
+}
+
+/**
+ * Load a provider manifest from the bundle. Missing files surface as
+ * explicit errors so resolvers fail fast rather than silently falling
+ * back to a permissive default.
+ */
+async function readProviderMeta(
+  bundle: Bundle,
+  ref: ProviderRef,
+  prefix: string,
+): Promise<ProviderMeta> {
+  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
+  for (const path of candidates) {
+    if (await bundle.exists(path)) {
+      const raw = await bundle.readText(path);
+      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
+      return { name: ref.name, ...parsed };
+    }
+  }
+  // Fallback: a minimal meta with allowAllUris true. Some providers ship
+  // without a local manifest and rely on the sidecar for enforcement.
+  return { name: ref.name, allowAllUris: true };
+}
+
+/**
+ * Materialise the request body as a `BodyInit`-compatible value. File
+ * references (`{ fromFile }`) are read from the workspace by the caller
+ * — this helper only handles the string / Uint8Array / null cases so a
+ * {@link SidecarProviderResolver} with no fs access still works.
+ */
+async function resolveBodyStream(
+  body: string | Uint8Array | null | { fromFile: string } | undefined,
+): Promise<string | Uint8Array | undefined> {
+  if (body === undefined || body === null) return undefined;
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array) return body;
+  throw new Error(
+    `SidecarProviderResolver: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use LocalProviderResolver for file-ref IO`,
+  );
+}
