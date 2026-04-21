@@ -23,6 +23,11 @@ export function matchVersion(versions: string[], range: string): string | null {
   return semver.maxSatisfying(versions, range);
 }
 
+/** Check whether `version` satisfies the semver `range`. */
+export function satisfiesRange(version: string, range: string): boolean {
+  return semver.satisfies(version, range);
+}
+
 /** Auto-bump the patch segment of `currentVersion`. Returns null if invalid semver. */
 export function bumpPatch(currentVersion: string): string | null {
   return semver.inc(currentVersion, "patch");

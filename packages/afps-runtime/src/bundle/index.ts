@@ -5,8 +5,17 @@ export {
   renderPrompt,
   buildPromptView,
   type PromptView,
+  type PromptViewProvider,
+  type PromptViewUpload,
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
+export {
+  resolvePreludes,
+  MapPreludeResolver,
+  PreludeResolutionError,
+  type PreludeRef,
+  type PreludeResolver,
+} from "./preludes.ts";
 export { computeIntegrity, verifyIntegrity, type IntegrityCheckResult } from "./hash.ts";
 export {
   loadBundleFromBuffer,

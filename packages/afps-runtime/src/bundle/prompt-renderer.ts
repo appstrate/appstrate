@@ -4,6 +4,7 @@
 import type { ContextProvider } from "../interfaces/context-provider.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { renderTemplate } from "../template/mustache.ts";
+import { resolvePreludes, type PreludeRef, type PreludeResolver } from "./preludes.ts";
 
 /**
  * The "view" shape made available to a prompt template at render time.
@@ -16,6 +17,37 @@ import { renderTemplate } from "../template/mustache.ts";
  * change shape. Consumer templates should treat the view as
  * forward-compatible.
  */
+/**
+ * Provider surfaced to 1.2+ templates. Mirrors the common fields any
+ * platform's provider registry exposes, without prescribing the exact
+ * shape of credential schemas — those remain platform-specific and
+ * are typically read via skill/tool docs rather than Mustache.
+ */
+export interface PromptViewProvider {
+  id: string;
+  displayName?: string;
+  authMode?: string;
+  authorizedUris?: readonly string[];
+  allowAllUris?: boolean;
+  docsUrl?: string;
+  /** Platform-specific opaque bag — e.g. proxy endpoint, sidecar URL. */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * Upload surfaced to 1.2+ templates — a single file the agent can read
+ * from the workspace filesystem. Shape matches what a prelude or agent
+ * template typically renders when listing available documents.
+ */
+export interface PromptViewUpload {
+  name: string;
+  /** Relative path from the workspace root (e.g. `./documents/file.pdf`). */
+  path: string;
+  size: number;
+  /** MIME type if known — e.g. `application/pdf`. */
+  type?: string;
+}
+
 export interface PromptView {
   /** Unique identifier for this execution. */
   runId: string;
@@ -34,6 +66,31 @@ export interface PromptView {
   state: unknown;
   /** Recent run summaries, most recent first. Empty array when none. */
   history: ReadonlyArray<{ runId: string; timestamp: number; output: unknown }>;
+  /**
+   * Provider catalogue — the set of third-party services the agent is
+   * connected to for this run. Populated by the consumer (platform),
+   * surfaced to 1.2+ templates via `{{#providers}}…{{/providers}}`.
+   * Absent when the agent has no provider dependencies.
+   */
+  providers?: ReadonlyArray<PromptViewProvider>;
+  /**
+   * Declared timeout (seconds). Surfaced so prelude templates can
+   * render it into the environment description.
+   */
+  timeout?: number;
+  /**
+   * Uploaded files attached to this run, listed in the order the caller
+   * supplied them. Absent when the run has no uploads.
+   */
+  uploads?: ReadonlyArray<PromptViewUpload>;
+  /**
+   * Opaque platform-specific bag. Intentionally unstructured — platforms
+   * set whatever their preludes need (sidecar URL, run-history endpoint,
+   * quota hints, etc.). External runners that don't set this leave it
+   * undefined; templates addressing `{{platform.*}}` fields safely
+   * render as empty in that case.
+   */
+  platform?: Record<string, unknown>;
 }
 
 export interface RenderPromptOptions {
@@ -47,6 +104,35 @@ export interface RenderPromptOptions {
   memoryLimit?: number;
   /** Cap history entries injected into the prompt. Default: 10. */
   historyLimit?: number;
+  /**
+   * Ordered list of system preludes (schemaVersion 1.2+). When present,
+   * each prelude's `prompt.md` is concatenated before `template` in the
+   * declared order, then the whole composed string is rendered against
+   * the same `PromptView` as the agent template.
+   */
+  preludes?: readonly PreludeRef[];
+  /**
+   * Resolver that converts a {@link PreludeRef} to its raw template
+   * string. Required when `preludes` is non-empty; a missing prelude
+   * throws {@link PreludeResolutionError}.
+   */
+  preludeResolver?: PreludeResolver;
+  /**
+   * Separator inserted between prelude prompts and between the last
+   * prelude and the agent prompt. Default: `"\n\n"` (blank line).
+   */
+  preludeSeparator?: string;
+  /**
+   * Platform-identity bag to attach to the rendered view. See
+   * {@link PromptView.platform}.
+   */
+  platform?: Record<string, unknown>;
+  /** Provider catalogue surfaced to the view. See {@link PromptView.providers}. */
+  providers?: readonly PromptViewProvider[];
+  /** Uploads surfaced to the view. See {@link PromptView.uploads}. */
+  uploads?: readonly PromptViewUpload[];
+  /** Declared timeout (seconds). See {@link PromptView.timeout}. */
+  timeout?: number;
 }
 
 /**
@@ -65,7 +151,12 @@ export interface RenderPromptOptions {
  */
 export async function renderPrompt(opts: RenderPromptOptions): Promise<string> {
   const view = await buildPromptView(opts);
-  return renderTemplate(opts.template, view);
+  const preludePrompt = await resolvePreludes(opts.preludes, opts.preludeResolver, {
+    separator: opts.preludeSeparator,
+  });
+  const separator = opts.preludeSeparator ?? "\n\n";
+  const composed = preludePrompt ? `${preludePrompt}${separator}${opts.template}` : opts.template;
+  return renderTemplate(composed, view);
 }
 
 /**
@@ -93,6 +184,10 @@ export async function buildPromptView(
     memories,
     state,
     history,
+    ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
+    ...(opts.uploads !== undefined ? { uploads: opts.uploads } : {}),
+    ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
+    ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
   };
 }
 
