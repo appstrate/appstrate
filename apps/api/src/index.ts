@@ -30,6 +30,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
+import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
@@ -234,6 +235,7 @@ app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/connections", createConnectionsRouter());
+app.route("/api/credential-proxy", createCredentialProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

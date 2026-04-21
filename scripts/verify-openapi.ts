@@ -321,6 +321,9 @@ const expectedEndpoints = [
   // Uploads
   "POST /api/uploads",
   "PUT /api/uploads/_content",
+
+  // Credential proxy (AFPS 1.3 BYOI)
+  "POST /api/credential-proxy/proxy",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

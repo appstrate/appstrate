@@ -43,6 +43,7 @@ import { packagesPaths } from "./paths/packages.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
 import { uploadsPaths } from "./paths/uploads.ts";
+import { credentialProxyPaths } from "./paths/credential-proxy.ts";
 
 const corePaths = {
   ...healthPaths,
@@ -70,6 +71,7 @@ const corePaths = {
   ...applicationsPaths,
   ...endUsersPaths,
   ...uploadsPaths,
+  ...credentialProxyPaths,
 };
 
 const components = {

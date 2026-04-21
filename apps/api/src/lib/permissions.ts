@@ -58,6 +58,7 @@ interface ResourceActions {
   webhooks: "read" | "write" | "delete";
   "oauth-clients": "read" | "write" | "delete";
   billing: "read" | "manage";
+  "credential-proxy": "call";
 }
 
 /** All resource names. */
@@ -157,6 +158,8 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Billing
   "billing:read",
   "billing:manage",
+  // Credential proxy (BYOI — see API_KEY_ALLOWED_SCOPES note below)
+  "credential-proxy:call",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -297,6 +300,11 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "oauth-clients:read",
   "oauth-clients:write",
   "oauth-clients:delete",
+  // Credential proxy — BYOI ("Bring Your Own Instance") for remote
+  // AFPS runs. High-value scope: one compromised API key can reach every
+  // provider in the application. NOT granted by default; callers must
+  // explicitly add it when minting the key.
+  "credential-proxy:call",
 ]);
 
 // ---------------------------------------------------------------------------
