@@ -2,12 +2,18 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRunHandler, type RunDeps, type RunnerPiModule } from "../../src/cli/commands/run.ts";
+import {
+  assembleExecutionContext,
+  createRunHandler,
+  type RunDeps,
+  type RunnerPiModule,
+} from "../../src/cli/commands/run.ts";
 import { runCli } from "../../src/cli/index.ts";
-import { captureIo, writeBundleFile } from "./helpers.ts";
+import { captureIo, writeBundleFile, writeJsonFile } from "./helpers.ts";
+import { generateKeyPair } from "../../src/bundle/signing.ts";
 
 /**
  * Minimal stub module — Phase 1 never invokes PiRunner, so the shapes
@@ -202,5 +208,214 @@ describe("afps run — runner-pi loading (Phase 1)", () => {
     // Phase 1 placeholder — execution not yet wired.
     expect(code).toBe(1);
     expect(io.stderrText()).toContain("not yet wired");
+  });
+});
+
+describe("afps run — bundle load + signature + context (Phase 2)", () => {
+  let dir: string;
+  const validArgs = (b: string, extra: string[] = []): string[] => [
+    b,
+    "--api",
+    "anthropic-messages",
+    "--model",
+    "claude-haiku-4-5-20251001",
+    "--api-key",
+    "sk-test",
+    ...extra,
+  ];
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "afps-cli-run-phase2-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("exits 3 when the bundle file is not a valid .afps archive", async () => {
+    const bundle = join(dir, "bad.afps");
+    await writeFile(bundle, "not a zip file");
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("afps run: invalid bundle:");
+  });
+
+  it("exits 3 when the bundle path does not exist", async () => {
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(join(dir, "nope.afps")), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("afps run: invalid bundle:");
+    expect(io.stderrText()).toContain("ENOENT");
+  });
+
+  it("exits 3 when --trust-root is required but bundle is unsigned", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const trustRoot = join(dir, "trust.json");
+    const kp = generateKeyPair();
+    await writeJsonFile(trustRoot, {
+      keys: [{ keyId: kp.keyId, publicKey: kp.publicKey }],
+    });
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--trust-root", trustRoot]), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("signature check failed");
+    expect(io.stderrText()).toContain("unsigned");
+  });
+
+  it("exits 3 when --trust-root does not contain the signing key", async () => {
+    const bundle = join(dir, "signed.afps");
+    await writeBundleFile(bundle);
+    const signingKey = join(dir, "key.json");
+    const kp = generateKeyPair();
+    await writeJsonFile(signingKey, kp);
+    const signIo = captureIo();
+    const signCode = await runCli(["sign", bundle, "--key", signingKey], signIo);
+    expect(signCode).toBe(0);
+
+    const otherKp = generateKeyPair();
+    const wrongTrust = join(dir, "wrong-trust.json");
+    await writeJsonFile(wrongTrust, {
+      keys: [{ keyId: otherKp.keyId, publicKey: otherKp.publicKey }],
+    });
+
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--trust-root", wrongTrust]), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("signature check failed");
+  });
+
+  it("proceeds past signature check with a matching trust root", async () => {
+    const bundle = join(dir, "signed.afps");
+    await writeBundleFile(bundle);
+    const signingKey = join(dir, "key.json");
+    const kp = generateKeyPair();
+    await writeJsonFile(signingKey, kp);
+    const signCode = await runCli(["sign", bundle, "--key", signingKey], captureIo());
+    expect(signCode).toBe(0);
+
+    const trustRoot = join(dir, "trust.json");
+    await writeJsonFile(trustRoot, {
+      keys: [{ keyId: kp.keyId, publicKey: kp.publicKey }],
+    });
+
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--trust-root", trustRoot]), io);
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("not yet wired");
+  });
+
+  it("exits 3 when --trust-root file cannot be read", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--trust-root", join(dir, "missing.json")]), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("cannot read --trust-root");
+  });
+
+  it("exits 3 when --trust-root file is malformed", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const bad = join(dir, "bad-trust.json");
+    await writeFile(bad, "not json");
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--trust-root", bad]), io);
+    expect(code).toBe(3);
+    expect(io.stderrText()).toContain("cannot read --trust-root");
+  });
+
+  it("exits 1 when --context file cannot be read", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--context", join(dir, "missing.json")]), io);
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("cannot read --context");
+  });
+
+  it("exits 1 when --snapshot file has invalid JSON", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const bad = join(dir, "bad-snapshot.json");
+    await writeFile(bad, "{not json");
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--snapshot", bad]), io);
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("cannot read --snapshot");
+  });
+
+  it("accepts valid --context and --snapshot files without error", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const context = join(dir, "context.json");
+    await writeJsonFile(context, { runId: "r1", input: { foo: 1 } });
+    const snapshot = join(dir, "snapshot.json");
+    await writeJsonFile(snapshot, {
+      memories: [{ content: "m", createdAt: 0 }],
+      state: { k: "v" },
+    });
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(
+      validArgs(bundle, ["--context", context, "--snapshot", snapshot]),
+      io,
+    );
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("not yet wired");
+  });
+});
+
+describe("assembleExecutionContext — pure helper", () => {
+  it("defaults runId and input when context file is empty", () => {
+    const ctx = assembleExecutionContext({}, {});
+    expect(ctx.runId).toBe("cli-run");
+    expect(ctx.input).toEqual({});
+  });
+
+  it("preserves explicit runId and input from the context file", () => {
+    const ctx = assembleExecutionContext({ runId: "run-7", input: { task: "write" } }, {});
+    expect(ctx.runId).toBe("run-7");
+    expect(ctx.input).toEqual({ task: "write" });
+  });
+
+  it("merges snapshot.memories onto the context", () => {
+    const ctx = assembleExecutionContext(
+      { runId: "r", input: {} },
+      { memories: [{ content: "m1", createdAt: 10 }] },
+    );
+    expect(ctx.memories).toEqual([{ content: "m1", createdAt: 10 }]);
+  });
+
+  it("merges snapshot.state onto the context (overrides context state)", () => {
+    const ctx = assembleExecutionContext(
+      { runId: "r", input: {}, state: { from: "context" } },
+      { state: { from: "snapshot" } },
+    );
+    expect(ctx.state).toEqual({ from: "snapshot" });
+  });
+
+  it("merges snapshot.history when provided", () => {
+    const ctx = assembleExecutionContext(
+      { runId: "r", input: {} },
+      { history: [{ runId: "prev", timestamp: 1, output: { done: true } }] },
+    );
+    expect(ctx.history).toEqual([{ runId: "prev", timestamp: 1, output: { done: true } }]);
+  });
+
+  it("keeps snapshot fields absent from the context when not provided", () => {
+    const ctx = assembleExecutionContext({ runId: "r", input: {} }, {});
+    expect(ctx.memories).toBeUndefined();
+    expect(ctx.history).toBeUndefined();
+    expect(ctx.state).toBeUndefined();
   });
 });

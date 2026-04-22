@@ -23,7 +23,13 @@
  */
 
 import { parseArgs } from "node:util";
+import { readFile } from "node:fs/promises";
 import type { CliIO } from "../index.ts";
+import { readBundleFromBuffer } from "../../bundle/read.ts";
+import type { Bundle } from "../../bundle/types.ts";
+import { verifyBundleWithPolicy } from "../../bundle/signature-policy.ts";
+import type { TrustRoot } from "../../bundle/signing.ts";
+import type { ExecutionContext } from "../../types/execution-context.ts";
 
 /**
  * Structural shape of the `@appstrate/runner-pi` exports this command
@@ -210,18 +216,126 @@ export function createRunHandler(
       return 1;
     }
 
-    // Phase 1 scaffolding: arg validation + runner-pi load verified.
-    // Real execution lands in Phase 3 — early return with a placeholder
-    // so the command short-circuits without pretending to have done
-    // work.
-    void bundlePath;
+    let bundle: Bundle;
+    try {
+      const bytes = await readFile(bundlePath);
+      bundle = readBundleFromBuffer(new Uint8Array(bytes));
+    } catch (err) {
+      io.stderr(`afps run: invalid bundle: ${formatLoaderError(err)}\n`);
+      return 3;
+    }
+
+    const trustRootPath = parsed.values["trust-root"];
+    if (trustRootPath !== undefined) {
+      let trustRoot: TrustRoot;
+      try {
+        trustRoot = await loadTrustRoot(trustRootPath);
+      } catch (err) {
+        io.stderr(`afps run: cannot read --trust-root: ${(err as Error).message}\n`);
+        return 3;
+      }
+      try {
+        verifyBundleWithPolicy(bundle, { policy: "required", trustRoot });
+      } catch (err) {
+        io.stderr(`afps run: signature check failed: ${(err as Error).message}\n`);
+        return 3;
+      }
+    }
+
+    let contextFile: ContextFile = {};
+    if (parsed.values.context) {
+      try {
+        contextFile = (await readJson(parsed.values.context)) as ContextFile;
+      } catch (err) {
+        io.stderr(`afps run: cannot read --context: ${(err as Error).message}\n`);
+        return 1;
+      }
+    }
+
+    let snapshot: SnapshotFile = {};
+    if (parsed.values.snapshot) {
+      try {
+        snapshot = (await readJson(parsed.values.snapshot)) as SnapshotFile;
+      } catch (err) {
+        io.stderr(`afps run: cannot read --snapshot: ${(err as Error).message}\n`);
+        return 1;
+      }
+    }
+
+    const context = assembleExecutionContext(contextFile, snapshot);
+
+    // Phase 2 scaffolding: bundle loaded, signature verified, context
+    // assembled. Real execution lands in Phase 3.
     void api;
     void model;
     void apiKey;
     void runnerPi;
-    io.stderr("afps run: bundle loading and execution not yet wired (Phase 2 + 3)\n");
+    void bundle;
+    void context;
+    io.stderr("afps run: runner orchestration not yet wired (Phase 3)\n");
     return 1;
   };
+}
+
+interface ContextFile {
+  runId?: string;
+  input?: unknown;
+  [key: string]: unknown;
+}
+
+interface SnapshotFile {
+  memories?: ExecutionContext["memories"];
+  history?: ExecutionContext["history"];
+  state?: unknown;
+}
+
+/**
+ * Assemble a runnable {@link ExecutionContext} from the optional
+ * `--context` file and the optional `--snapshot` file. Snapshot keys
+ * override corresponding context keys (matches `afps render` behaviour
+ * so the two commands remain byte-identical given the same inputs).
+ *
+ * Exported for unit testing — the handler exercises it indirectly
+ * through the Phase 3 runner invocation.
+ */
+export function assembleExecutionContext(
+  contextFile: ContextFile,
+  snapshot: SnapshotFile,
+): ExecutionContext {
+  return {
+    runId: contextFile.runId ?? "cli-run",
+    input: contextFile.input ?? {},
+    ...contextFile,
+    ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
+    ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
+    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+  };
+}
+
+async function readJson(path: string): Promise<unknown> {
+  const text = await readFile(path, "utf-8");
+  return JSON.parse(text) as unknown;
+}
+
+async function loadTrustRoot(path: string): Promise<TrustRoot> {
+  const raw = (await readJson(path)) as TrustRoot;
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as TrustRoot).keys)) {
+    throw new Error("trust root must be an object with a `keys` array");
+  }
+  return raw;
+}
+
+/**
+ * Minimal fs-error formatter that flattens `ENOENT: …` / BundleError
+ * messages into a single short sentence. Bundle reader errors carry a
+ * `code` plus `message` so tack the code onto the message for
+ * debuggability.
+ */
+function formatLoaderError(err: unknown): string {
+  if (err && typeof err === "object" && "code" in err && "message" in err) {
+    return `${(err as { message: string }).message} [${String((err as { code: unknown }).code)}]`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** Production handler — real dynamic import of `@appstrate/runner-pi`. */
