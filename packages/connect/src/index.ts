@@ -61,8 +61,6 @@ export {
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
-  matchesAuthorizedUriPrefix,
-  matchesAnyAuthorizedUriPrefix,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
 } from "./proxy-primitives.ts";

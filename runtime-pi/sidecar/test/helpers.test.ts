@@ -258,14 +258,25 @@ describe("matchesAuthorizedUri", () => {
     );
   });
 
-  it("matches wildcard pattern", () => {
+  it("`**` matches any substring including path separators", () => {
+    expect(
+      matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/**"]),
+    ).toBe(true);
+  });
+
+  it("`*` matches a single path segment only", () => {
     expect(
       matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/*"]),
+    ).toBe(false);
+    expect(
+      matchesAuthorizedUri("https://api.example.com/users", ["https://api.example.com/*"]),
     ).toBe(true);
   });
 
   it("rejects non-matching URL", () => {
-    expect(matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/*"])).toBe(false);
+    expect(matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/**"])).toBe(
+      false,
+    );
   });
 
   it("rejects when patterns is empty", () => {
@@ -273,8 +284,8 @@ describe("matchesAuthorizedUri", () => {
   });
 
   it("matches with multiple patterns", () => {
-    expect(matchesAuthorizedUri("https://b.com/data", ["https://a.com/*", "https://b.com/*"])).toBe(
-      true,
-    );
+    expect(
+      matchesAuthorizedUri("https://b.com/data", ["https://a.com/**", "https://b.com/**"]),
+    ).toBe(true);
   });
 });

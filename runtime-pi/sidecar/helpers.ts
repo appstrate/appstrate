@@ -38,12 +38,14 @@ export {
   filterHeaders,
 } from "@appstrate/connect/proxy-primitives";
 
-// Adapter preserving the sidecar's historical (url, patterns[]) shape.
-// Internally delegates to the legacy prefix-star matcher; unifying on
-// the AFPS-spec matcher (`matchesAuthorizedUriSpec`) is tracked
-// separately — it is a user-visible behaviour change against existing
-// provider configs (see proxy-primitives.ts module docstring).
-import { matchesAnyAuthorizedUriPrefix } from "@appstrate/connect/proxy-primitives";
+import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
+
+/**
+ * Check a target URL against a list of `authorizedUris` patterns using
+ * the AFPS 1.3 spec semantics (`*` matches a single path segment, `**`
+ * matches any substring). Thin wrapper preserving the sidecar's
+ * historical `(url, patterns[])` shape.
+ */
 export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return matchesAnyAuthorizedUriPrefix(url, patterns);
+  return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
 }

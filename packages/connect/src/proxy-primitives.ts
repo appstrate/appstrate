@@ -4,27 +4,9 @@
  * Shared primitives used by the credential-proxy server route
  * (`apps/api/src/routes/credential-proxy.ts`) and the in-container
  * sidecar (`runtime-pi/sidecar/app.ts`). Both code paths implement the
- * same wire protocol (X-Provider/X-Target/Set-Cookie passthrough) but
- * evolved independently; this module is the single point of truth so
- * any future bug fix or hardening applies consistently.
- *
- * Two flavours of URL allowlist matching ship today:
- *
- *  - {@link matchesAuthorizedUriSpec}    — AFPS 1.3 spec-compliant. `*`
- *    matches a single path segment (no `/`), `**` matches any
- *    substring. Used by the external credential-proxy route.
- *
- *  - {@link matchesAuthorizedUriPrefix}  — legacy prefix-star + exact
- *    matching. `pattern*` → `url.startsWith(prefix)`. Used by the
- *    in-container sidecar today; kept for backwards compatibility with
- *    existing provider configurations that depend on the loose
- *    "anything after *" semantic.
- *
- * Unifying the two requires migrating provider configs in the wild —
- * tracked as a follow-up. Do NOT silently switch the sidecar to the
- * spec version: it will start rejecting URLs that match a pattern like
- * `https://api.example.com/v1*` against `/v1/foo/bar` (spec: no, only
- * single segment; prefix: yes).
+ * same wire protocol (X-Provider/X-Target/Set-Cookie passthrough) and
+ * share the AFPS 1.3 spec-compliant URL allowlist matcher so drift is
+ * impossible by construction.
  */
 
 /**
@@ -70,30 +52,6 @@ export function matchesAuthorizedUriSpec(pattern: string, target: string): boole
       "$",
   );
   return regex.test(target);
-}
-
-/**
- * Legacy prefix-star URL matcher used by the in-container sidecar.
- * Kept in parity with `runtime-pi/sidecar/helpers.ts` pre-extraction.
- *
- * Semantics:
- *   - `pattern*` (ends with `*`) → `url.startsWith(pattern.slice(0, -1))`
- *   - otherwise                  → `url === pattern`
- *
- * Reminder: this is LESS strict than the spec version — a pattern like
- * `https://api.example.com/v1*` here matches `/v1/foo/bar`; the spec
- * version does not.
- */
-export function matchesAuthorizedUriPrefix(pattern: string, target: string): boolean {
-  if (pattern.endsWith("*")) {
-    return target.startsWith(pattern.slice(0, -1));
-  }
-  return target === pattern;
-}
-
-/** Convenience: check a target against a list of patterns (legacy sidecar shape). */
-export function matchesAnyAuthorizedUriPrefix(target: string, patterns: string[]): boolean {
-  return patterns.some((p) => matchesAuthorizedUriPrefix(p, target));
 }
 
 /**

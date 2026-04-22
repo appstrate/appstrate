@@ -10,7 +10,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
     fetchCredentials: mock(
       async (): Promise<CredentialsResponse> => ({
         credentials: { access_token: "test-123" },
-        authorizedUris: ["https://api.example.com/*"],
+        authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
       }),
     ),
@@ -371,7 +371,7 @@ describe("ALL /proxy — validation", () => {
     const fetchCredentials = mock(
       async (): Promise<CredentialsResponse> => ({
         credentials: {},
-        authorizedUris: ["https://api.example.com/*"],
+        authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
       }),
     );
@@ -737,7 +737,7 @@ describe("ALL /proxy — binary body integrity", () => {
       refreshCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "new-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
@@ -754,7 +754,7 @@ describe("ALL /proxy — binary body integrity", () => {
       fetchCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "old-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
@@ -1214,14 +1214,14 @@ describe("proxy retry-on-401", () => {
       fetchCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "old-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
       refreshCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "new-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
@@ -1259,7 +1259,7 @@ describe("proxy retry-on-401", () => {
       refreshCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "still-bad" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
@@ -1351,7 +1351,7 @@ describe("proxy retry-on-401", () => {
       refreshCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "new-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),
@@ -1373,7 +1373,7 @@ describe("proxy retry-on-401", () => {
       fetchCredentials: mock(
         async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "old-token" },
-          authorizedUris: ["https://api.example.com/*"],
+          authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
         }),
       ),

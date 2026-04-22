@@ -12,8 +12,6 @@ import {
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
-  matchesAuthorizedUriPrefix,
-  matchesAnyAuthorizedUriPrefix,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
 } from "../src/proxy-primitives.ts";
@@ -127,42 +125,6 @@ describe("matchesAuthorizedUriSpec (AFPS 1.3 semantics)", () => {
     expect(
       matchesAuthorizedUriSpec("https://api.example.com/v1", "https://api.example.com/v1/foo"),
     ).toBe(false);
-  });
-});
-
-describe("matchesAuthorizedUriPrefix (legacy sidecar semantics)", () => {
-  it("matches an exact URL", () => {
-    expect(
-      matchesAuthorizedUriPrefix("https://api.example.com/v1", "https://api.example.com/v1"),
-    ).toBe(true);
-  });
-
-  it("`*` at the end matches any suffix including slashes", () => {
-    expect(
-      matchesAuthorizedUriPrefix(
-        "https://api.example.com/v1*",
-        "https://api.example.com/v1/foo/bar",
-      ),
-    ).toBe(true);
-  });
-
-  it("rejects mismatched prefix", () => {
-    expect(
-      matchesAuthorizedUriPrefix("https://api.example.com/v1*", "https://other.com/v1/foo"),
-    ).toBe(false);
-  });
-
-  it("matchesAnyAuthorizedUriPrefix returns true on first match", () => {
-    expect(
-      matchesAnyAuthorizedUriPrefix("https://api.example.com/foo", [
-        "https://other.com/*",
-        "https://api.example.com/*",
-      ]),
-    ).toBe(true);
-  });
-
-  it("matchesAnyAuthorizedUriPrefix returns false when no pattern matches", () => {
-    expect(matchesAnyAuthorizedUriPrefix("https://foo.com", ["https://bar.com/*"])).toBe(false);
   });
 });
 
