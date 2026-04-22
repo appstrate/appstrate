@@ -4,7 +4,7 @@
 import { parseArgs } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { zipSync } from "fflate";
-import { loadBundleFromBuffer } from "../../bundle/loader.ts";
+import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
 import { canonicalBundleDigest, signBundle, type TrustChainEntry } from "../../bundle/signing.ts";
 import type { CliIO } from "../index.ts";
 
@@ -91,7 +91,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadBundleFromBuffer(bundleBytes);
+  const bundle = loadAnyBundleFromBuffer(bundleBytes);
 
   const canonical = canonicalBundleDigest(bundle.files);
   const signature = signBundle(canonical, {

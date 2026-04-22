@@ -52,7 +52,7 @@ export interface BundleValidationResult {
   issues: readonly BundleValidationIssue[];
 }
 
-export interface ValidateBundleV2Options {
+export interface ValidateBundleOptions {
   /** Accepted schemaVersion MAJORs. Default: `[1]`. */
   supportedMajors?: readonly number[];
   /**
@@ -65,7 +65,7 @@ export interface ValidateBundleV2Options {
 
 export function validateBundle(
   bundle: Bundle,
-  opts: ValidateBundleV2Options = {},
+  opts: ValidateBundleOptions = {},
 ): BundleValidationResult {
   const supportedMajors = opts.supportedMajors ?? [1];
   const agentOnlyRoot = opts.agentOnlyRoot ?? true;

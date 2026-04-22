@@ -3,7 +3,7 @@
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { loadBundleFromBuffer } from "../../bundle/loader.ts";
+import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
 import { readBundleSignature } from "../../bundle/signing.ts";
 import type { CliIO } from "../index.ts";
 
@@ -48,7 +48,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadBundleFromBuffer(bundleBytes);
+  const bundle = loadAnyBundleFromBuffer(bundleBytes);
   const signature = readBundleSignature(bundle);
 
   if (parsed.values.json) {

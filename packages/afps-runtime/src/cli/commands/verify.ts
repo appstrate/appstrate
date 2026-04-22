@@ -3,8 +3,8 @@
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { loadBundleFromBuffer } from "../../bundle/loader.ts";
-import { validateBundle } from "../../bundle/validator.ts";
+import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
+import { validateAfpsManifest } from "../../bundle/validator.ts";
 import {
   canonicalBundleDigest,
   readBundleSignature,
@@ -61,9 +61,9 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadBundleFromBuffer(bundleBytes);
+  const bundle = loadAnyBundleFromBuffer(bundleBytes);
 
-  const validation = validateBundle(bundle);
+  const validation = validateAfpsManifest(bundle);
   if (!validation.valid) {
     io.stderr(`afps verify: ${validation.issues.length} validation issue(s):\n`);
     for (const issue of validation.issues) {

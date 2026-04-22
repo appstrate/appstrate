@@ -16,7 +16,7 @@ import { describe, it, expect } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
-import { validateBundle } from "../../src/bundle/validator.ts";
+import { validateAfpsManifest } from "../../src/bundle/validator.ts";
 import {
   canonicalBundleDigest,
   readBundleSignature,
@@ -50,7 +50,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
   it("loads and validates the signed bundle without issues", async () => {
     const bytes = await readFile(join(FIXTURE, "bundle.afps"));
     const bundle = loadBundleFromBuffer(bytes);
-    const result = validateBundle(bundle);
+    const result = validateAfpsManifest(bundle);
     expect(result.valid).toBe(true);
     expect(result.issues).toEqual([]);
     expect(bundle.manifest["name"]).toBe("@afps/conformance-ref");

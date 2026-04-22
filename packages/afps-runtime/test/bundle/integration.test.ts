@@ -4,7 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import { zipSync } from "fflate";
 import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
-import { validateBundle } from "../../src/bundle/validator.ts";
+import { validateAfpsManifest } from "../../src/bundle/validator.ts";
 import { computeIntegrity, verifyIntegrity } from "../../src/bundle/hash.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
 
@@ -40,7 +40,7 @@ describe("bundle integration — build → load → validate → render", () => 
   it("round-trips through loader + validator with no issues", () => {
     const bundle = loadBundleFromBuffer(zip);
     expect(bundle.manifest.name).toBe("@acme/research");
-    const result = validateBundle(bundle);
+    const result = validateAfpsManifest(bundle);
     expect(result.valid).toBe(true);
     expect(result.issues).toEqual([]);
   });

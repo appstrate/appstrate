@@ -5,7 +5,7 @@ import { agentManifestSchema } from "@afps-spec/schema";
 import type { LoadedBundle } from "./loader.ts";
 import { validateTemplate } from "../template/mustache.ts";
 
-export interface ValidationIssue {
+export interface AfpsManifestValidationIssue {
   /**
    * Stable machine-readable code. Consumers may switch on this to
    * render locale-aware UI messages or translate to error types.
@@ -26,13 +26,13 @@ export interface ValidationIssue {
   message: string;
 }
 
-export interface ValidationResult {
+export interface AfpsManifestValidationResult {
   /** `true` iff every issue is non-fatal (currently empty list). */
   valid: boolean;
-  issues: readonly ValidationIssue[];
+  issues: readonly AfpsManifestValidationIssue[];
 }
 
-export interface ValidateBundleOptions {
+export interface ValidateAfpsManifestOptions {
   /**
    * Accept only these schemaVersion majors. Default: `[1]` (AFPS v1 —
    * the only released major). An entry of `1` accepts any `1.x`.
@@ -64,13 +64,18 @@ export interface ValidateBundleOptions {
  * synthetic view is available via
  * {@link import("./prompt-renderer.ts").buildPromptView} if needed.
  */
-export function validateBundle(
+/**
+ * Validates the manifest + prompt of a single AFPS package (the flat
+ * LoadedBundle surface). For validating a multi-package Bundle contract,
+ * use {@link import("./validate-bundle.ts").validateBundle} instead.
+ */
+export function validateAfpsManifest(
   bundle: LoadedBundle,
-  opts: ValidateBundleOptions = {},
-): ValidationResult {
+  opts: ValidateAfpsManifestOptions = {},
+): AfpsManifestValidationResult {
   const supportedMajors = opts.supportedMajors ?? [1];
   const agentOnly = opts.agentOnly ?? true;
-  const issues: ValidationIssue[] = [];
+  const issues: AfpsManifestValidationIssue[] = [];
 
   const rawType = bundle.manifest["type"];
   if (agentOnly && rawType !== "agent") {
