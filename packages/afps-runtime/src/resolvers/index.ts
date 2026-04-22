@@ -45,6 +45,7 @@ export { toBundle, type BundleAdapter } from "./bundle-adapter.ts";
 // Provider-resolver surface — tool factory + concrete impls.
 export {
   makeProviderTool,
+  matchesAuthorizedUriSpec,
   providerToolName,
   readProviderMeta,
   resolveBodyStream,

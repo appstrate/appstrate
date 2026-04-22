@@ -295,18 +295,21 @@ function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
     );
   }
   for (const pattern of patterns) {
-    if (matchesUriPattern(pattern, target)) return;
+    if (matchesAuthorizedUriSpec(pattern, target)) return;
   }
   throw new Error(`Provider ${meta.name}: target ${target} is not in authorizedUris allowlist`);
 }
 
 /**
- * Minimal glob matcher for URIs: `**` matches any substring (including
- * path separators); `*` matches any substring within a single path
- * segment. Sufficient for the authorizedUris patterns the AFPS spec
- * documents (e.g. `https://gmail.googleapis.com/**`).
+ * AFPS 1.3-spec URL allowlist matcher:
+ *   - literal URLs (no wildcards)   → exact equality
+ *   - `*`  (single path segment)    → regex `[^/]*`
+ *   - `**` (any substring)          → regex `.*`
+ *
+ * All regex metacharacters in the pattern are escaped so pattern
+ * authors cannot accidentally inject a regex.
  */
-function matchesUriPattern(pattern: string, target: string): boolean {
+export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
   const regex = new RegExp(
     "^" +
       pattern

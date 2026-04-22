@@ -13,6 +13,7 @@
     "test": "bun test test/"
   },
   "dependencies": {
+    "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",

@@ -274,6 +274,7 @@
       "name": "@appstrate/connect",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",

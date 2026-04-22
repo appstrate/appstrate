@@ -33,26 +33,12 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 }
 
 /**
- * AFPS 1.3 spec-compliant URL pattern matcher. Supports:
- *   - literal URLs (no wildcards)   → exact equality
- *   - `*`  (single path segment)    → regex `[^/]*`
- *   - `**` (any substring)          → regex `.*`
- *
- * All regex metacharacters in the pattern are escaped so the pattern
- * author cannot accidentally inject a regex.
+ * AFPS 1.3 spec-compliant URL allowlist matcher. Re-exported from
+ * `@appstrate/afps-runtime/resolvers` so the credential-proxy route,
+ * the sidecar, and the in-bundle `provider-tool` all enforce the exact
+ * same glob semantics by construction.
  */
-export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
-  const regex = new RegExp(
-    "^" +
-      pattern
-        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "§§DOUBLESTAR§§")
-        .replace(/\*/g, "[^/]*")
-        .replace(/§§DOUBLESTAR§§/g, ".*") +
-      "$",
-  );
-  return regex.test(target);
-}
+export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
  * RFC 7230 §6.1 hop-by-hop headers — MUST NOT be forwarded by a proxy.
