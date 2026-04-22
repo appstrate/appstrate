@@ -9,6 +9,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   usePackageDetail,
   useVersionDetail,
+  useAgentBundleExport,
   usePackageDownload,
   useDeletePackage,
   useAgents,
@@ -213,6 +214,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       hasActualChanges(latestVersionForDiff, currentManifest, currentContent));
 
   const downloadPackage = usePackageDownload(scope, name);
+  const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
   const uninstallMutation = useTogglePackageInstall();
@@ -391,6 +393,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
+              downloadBundle={downloadBundle}
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
             />

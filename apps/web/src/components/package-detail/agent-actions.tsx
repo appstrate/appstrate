@@ -26,6 +26,7 @@ export function AgentActions({
   isHistoricalVersion,
   downloadVersion,
   downloadPackage,
+  downloadBundle,
   onCreateVersion,
   onFork,
 }: {
@@ -37,6 +38,8 @@ export function AgentActions({
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
+  /** Export the agent + transitive deps as a single .afps-bundle. */
+  downloadBundle?: (v?: string) => void;
   onCreateVersion: () => void;
   onFork?: () => void;
 }) {
@@ -99,6 +102,7 @@ export function AgentActions({
         isHistoricalVersion={isHistoricalVersion}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
+        onDownloadBundle={downloadBundle}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         runningRuns={detail.runningRuns}

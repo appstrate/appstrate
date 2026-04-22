@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import {
   MoreHorizontal,
   Download,
+  Package,
   GitBranchPlus,
   GitFork,
   Pencil,
@@ -40,6 +41,8 @@ interface PackageActionsDropdownProps {
   isHistoricalVersion: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
+  /** Agent-only: export the full transitive bundle (.afps-bundle). */
+  onDownloadBundle?: (version?: string) => void;
   onCreateVersion?: () => void;
   onFork?: () => void;
   // Agent-specific
@@ -73,6 +76,7 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   downloadVersion,
   onDownload,
+  onDownloadBundle,
   onCreateVersion,
   onFork,
   runningRuns = 0,
@@ -134,6 +138,14 @@ export function PackageActionsDropdown({
             <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
               <Download size={14} />
               {t("btn.download", { ns: "common" })}
+            </DropdownMenuItem>
+          )}
+
+          {/* ── Download bundle (agent only — multi-package, transitive) ── */}
+          {isAgent && onDownloadBundle && (
+            <DropdownMenuItem onSelect={() => onDownloadBundle(downloadVersion)}>
+              <Package size={14} />
+              {t("bundle.download")}
             </DropdownMenuItem>
           )}
 

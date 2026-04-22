@@ -152,6 +152,39 @@ export function usePackageDownload(scope: string | undefined, name: string | und
   );
 }
 
+/**
+ * Export an agent as a multi-package `.afps-bundle` (its transitive
+ * dependency graph in one self-contained archive). Triggers a browser
+ * download via `URL.createObjectURL` + an invisible `<a>`. Optional
+ * `version` pins the export to a specific release; defaults to the
+ * version installed in the current application.
+ */
+export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
+  const { t } = useTranslation("common");
+  return useCallback(
+    async (version?: string) => {
+      if (!scope || !name) return;
+      try {
+        const path =
+          `/agents/${scope}/${name}/bundle` +
+          (version ? `?version=${encodeURIComponent(version)}` : "");
+        const blob = await apiBlob(path);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${scope.replace(/^@/, "")}-${name}.afps-bundle`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {
+        toast.error(t("error.downloadFailed"));
+      }
+    },
+    [scope, name, t],
+  );
+}
+
 // --- Version queries ---
 
 export type { VersionDetailResponse, VersionListItem };

@@ -55,7 +55,10 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
 
   const validateFile = useCallback(
     (f: File): string => {
-      if (!f.name.endsWith(".afps") && !f.name.endsWith(".zip")) return t("import.errZip");
+      const lower = f.name.toLowerCase();
+      if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
+        return t("import.errZip");
+      }
       if (f.size > MAX_SIZE) return t("import.errSize");
       return "";
     },
@@ -195,7 +198,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".afps,.zip"
+          accept=".afps,.afps-bundle,.zip"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
