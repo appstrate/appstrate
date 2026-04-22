@@ -65,11 +65,11 @@ describe("AppstrateEventSink", () => {
     expect(sink.current.state).toEqual({ counter: 42 });
   });
 
-  it("wraps non-object state.set payloads under `value`", async () => {
+  it("projects non-object state.set payloads to null (runtime stores raw, projection drops)", async () => {
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
     await sink.handle(event("state.set", { state: "just a string" }));
 
-    expect(sink.current.state).toEqual({ value: "just a string" });
+    expect(sink.current.state).toBeNull();
   });
 
   it("merges object outputs JSON-merge-patch style + writes a run log", async () => {
@@ -86,20 +86,20 @@ describe("AppstrateEventSink", () => {
     expect(outputLogs[0]!.data).toEqual({ a: 1, b: 2 });
   });
 
-  it("replaces output wholesale for non-object payloads", async () => {
+  it("projects non-object output replacement to empty object (runtime stores raw, projection drops)", async () => {
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
     await sink.handle(event("output.emitted", { data: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: [1, 2, 3] }));
 
-    expect(sink.current.output).toEqual({ value: [1, 2, 3] });
+    expect(sink.current.output).toEqual({});
   });
 
-  it("concatenates report.appended events with \\n\\n + writes a run log per line", async () => {
+  it("concatenates report.appended events with \\n (runtime-canonical) + writes a run log per line", async () => {
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
     await sink.handle(event("report.appended", { content: "line one" }));
     await sink.handle(event("report.appended", { content: "line two" }));
 
-    expect(sink.current.report).toBe("line one\n\nline two");
+    expect(sink.current.report).toBe("line one\nline two");
 
     const logs = await loadLogs();
     const reportLogs = logs.filter((l) => l.event === "report");

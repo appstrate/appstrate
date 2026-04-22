@@ -1,35 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} — consumes {@link RunEvent}s emitted
- * by the run adapter and fans them out to the platform's persistence layer:
- *
- *   - `run_logs` table (one row per observable event, same shape the
- *     legacy in-route switch produced — preserves SSE + log history UI)
- *   - internal aggregator (output / state / memories / report / usage /
- *     cost / lastAdapterError) which the route handler reads when the
- *     run ends to compute the final `result`, `state`, memory write-back,
- *     and failure reason.
- *
- * The sink itself performs NO status update, NO webhook dispatch, and NO
- * post-run metadata collection. Those remain the route handler's
- * responsibility.
+ * Appstrate-backed {@link EventSink} — composition of the runtime
+ * reducer (source of truth for canonical AFPS aggregation) with a
+ * platform write-through that persists `run_logs` and accumulates
+ * platform-specific metrics (token usage, cost, adapter error).
  *
  * Event routing:
  *
- *   AFPS canonical (reserved domains):
- *     memory.added    → aggregate.memories
- *     state.set       → aggregate.state
- *     output.emitted  → aggregate.output + run_logs (result/output)
- *     report.appended → aggregate.report + run_logs (result/report)
- *     log.written     → run_logs (progress) with level
+ *   AFPS canonical (reserved domains) → reducer snapshot:
+ *     memory.added / state.set / output.emitted / report.appended / log.written
  *
- *   Platform-specific (appstrate.* namespace):
+ *   Platform write-through (always, independent of reducer):
+ *     output.emitted  → run_logs (result/output)
+ *     report.appended → run_logs (result/report)
+ *     log.written     → run_logs (progress/progress) with level
+ *
+ *   Platform-specific (`appstrate.*` namespace):
  *     appstrate.progress → run_logs (progress/progress) with message/data/level
- *     appstrate.error    → aggregate.lastAdapterError + run_logs (system/adapter_error)
- *     appstrate.metric   → aggregate.usage / aggregate.cost (no run_logs row)
+ *     appstrate.error    → run_logs (system/adapter_error) + lastAdapterError
+ *     appstrate.metric   → usage + cost accumulators (no run_logs row)
+ *
+ * The sink performs NO status update, NO webhook dispatch, and NO
+ * post-run metadata collection — those remain the route handler's
+ * responsibility.
  */
 
+import { createReducerSink, type ReducerSinkHandle } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -38,18 +35,19 @@ import { appendRunLog } from "../state/runs.ts";
 import type { TokenUsage } from "./types.ts";
 
 /**
- * Mutable projection the route handler reads after the run completes.
- * Mirrors the legacy local aggregators in `routes/runs.ts` so the
- * migration is drop-in — shape, semantics, and defaults are preserved.
+ * Platform-facing projection of the runtime {@link RunResult} + the
+ * platform-specific accumulators. Shapes match the DB persistence
+ * expectations (memories as `string[]`, state/output as plain objects,
+ * report as string, never null).
  */
 export interface AggregatedRunState {
-  /** Deep-merged `output.emitted` payloads (object-only merge; non-object replaces). */
+  /** Deep-merged `output.emitted` object payloads. Non-object payloads are ignored. */
   output: Record<string, unknown>;
-  /** Last `state.set` payload. `null` if the agent never called `set_state`. */
+  /** Last object `state.set` payload. `null` if never set or set to non-object. */
   state: Record<string, unknown> | null;
-  /** All `memory.added` contents, in arrival order. */
+  /** All `memory.added` contents projected from the reducer, in arrival order. */
   memories: string[];
-  /** Concatenated `report.appended` contents, separated by `\n\n`. */
+  /** Concatenated `report.appended` contents (runtime-canonical `\n` separator). */
   report: string;
   /** Accumulated token usage from `appstrate.metric` events. */
   usage: TokenUsage;
@@ -67,15 +65,10 @@ export interface AppstrateEventSinkOptions {
 export class AppstrateEventSink implements EventSink {
   readonly runId: string;
   private readonly scope: OrgScope;
-  private readonly aggregate: AggregatedRunState = {
-    output: {},
-    state: null,
-    memories: [],
-    report: "",
-    usage: { input_tokens: 0, output_tokens: 0 },
-    cost: 0,
-    lastAdapterError: null,
-  };
+  private readonly reducer: ReducerSinkHandle = createReducerSink();
+  private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+  private accumulatedCost = 0;
+  private lastAdapterError: string | null = null;
   private finalResult: RunResult | null = null;
 
   constructor(opts: AppstrateEventSinkOptions) {
@@ -84,32 +77,12 @@ export class AppstrateEventSink implements EventSink {
   }
 
   async handle(event: RunEvent): Promise<void> {
+    // Delegate canonical events to the runtime reducer.
+    await this.reducer.sink.handle(event);
+
+    // Platform write-through + metrics accumulation.
     switch (event.type) {
-      case "memory.added": {
-        if (typeof event.content === "string") {
-          this.aggregate.memories.push(event.content);
-        }
-        break;
-      }
-
-      case "state.set": {
-        this.aggregate.state = isPlainObject(event.state)
-          ? event.state
-          : event.state === undefined
-            ? this.aggregate.state
-            : // Preserve the route handler's long-standing behaviour of
-              // accepting any JSON value via `set_state` by wrapping scalars
-              // under a `value` key rather than discarding them.
-              { value: event.state };
-        break;
-      }
-
       case "output.emitted": {
-        if (isPlainObject(event.data)) {
-          Object.assign(this.aggregate.output, event.data);
-        } else if (event.data !== undefined) {
-          this.aggregate.output = { value: event.data };
-        }
         await appendRunLog(
           this.scope,
           this.runId,
@@ -124,7 +97,6 @@ export class AppstrateEventSink implements EventSink {
 
       case "report.appended": {
         if (typeof event.content === "string") {
-          this.aggregate.report += (this.aggregate.report ? "\n\n" : "") + event.content;
           await appendRunLog(
             this.scope,
             this.runId,
@@ -161,7 +133,7 @@ export class AppstrateEventSink implements EventSink {
       case "appstrate.error": {
         const message = typeof event.message === "string" ? event.message : null;
         const data = isPlainObject(event.data) ? event.data : null;
-        if (message) this.aggregate.lastAdapterError = message;
+        if (message) this.lastAdapterError = message;
         await appendRunLog(
           this.scope,
           this.runId,
@@ -176,34 +148,43 @@ export class AppstrateEventSink implements EventSink {
 
       case "appstrate.metric": {
         if (isPlainObject(event.usage)) {
-          accumulateUsage(this.aggregate.usage, event.usage as TokenUsage);
+          accumulateUsage(this.usage, event.usage as TokenUsage);
         }
         if (typeof event.cost === "number") {
-          this.aggregate.cost += event.cost;
+          this.accumulatedCost += event.cost;
         }
         break;
       }
 
       default:
-        // Third-party event — no canonical projection. Runners that want
-        // to observe third-party events can compose with CompositeSink.
+        // memory.added / state.set / third-party — reducer-only, no run_logs row.
         break;
     }
   }
 
   async finalize(result: RunResult): Promise<void> {
+    await this.reducer.sink.finalize(result);
     this.finalResult = result;
   }
 
-  /** Snapshot of the aggregated mutable state. */
+  /**
+   * Platform-facing projection of the runtime snapshot + platform accumulators.
+   * Safe to read at any point during or after a run.
+   */
   get current(): Readonly<AggregatedRunState> {
-    return this.aggregate;
+    const snapshot = this.reducer.snapshot();
+    return {
+      output: isPlainObject(snapshot.output) ? snapshot.output : {},
+      state: isPlainObject(snapshot.state) ? snapshot.state : null,
+      memories: snapshot.memories.map((m) => m.content),
+      report: snapshot.report ?? "",
+      usage: this.usage,
+      cost: this.accumulatedCost,
+      lastAdapterError: this.lastAdapterError,
+    };
   }
 
-  /**
-   * The canonical {@link RunResult} produced by the runtime reducer.
-   * `null` until `finalize` has been called.
-   */
+  /** Canonical {@link RunResult} — `null` until `finalize` has been called. */
   get result(): RunResult | null {
     return this.finalResult;
   }

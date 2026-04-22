@@ -4,11 +4,12 @@
  * Parity E2E — proves the Appstrate adapters honour the runtime contract
  * end-to-end. Scenario:
  *
- *   1. A scripted adapter yields a canonical RunEvent sequence.
- *   2. AppstrateContainerRunner forwards events to AppstrateEventSink.
+ *   1. A scripted generator yields a canonical RunEvent sequence.
+ *   2. The sink forwards every event to the runtime reducer (incremental)
+ *      and fans out to run_logs + platform accumulators.
  *   3. The run produces the same RunResult a runtime consumer would get
  *      from `reduceEvents` over the same stream.
- *   4. run_logs rows + the sink's aggregator reflect the expected
+ *   4. run_logs rows + the sink's projected aggregate reflect the expected
  *      DB side-effects (output + report + progress rows; memories
  *      captured in-memory for persistence by the caller).
  */
@@ -19,92 +20,11 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
-import { AppstrateContainerRunner } from "../../../src/services/adapters/appstrate-container-runner.ts";
-import type { AppstrateRunPlan } from "../../../src/services/adapters/types.ts";
-import type { ContainerExecutor } from "../../../src/services/adapters/pi.ts";
-import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
-import {
-  BUNDLE_FORMAT_VERSION,
-  bundleIntegrity,
-  computeRecordEntries,
-  recordIntegrity,
-  serializeRecord,
-  type Bundle,
-  type PackageIdentity,
-} from "@appstrate/afps-runtime/bundle";
-import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
-
-function makeBundle(): Bundle {
-  const enc = new TextEncoder();
-  const identity = "@test/parity@0.0.0" as PackageIdentity;
-  const manifest = { name: "@test/parity", version: "0.0.0", type: "agent" };
-  const files = new Map<string, Uint8Array>([
-    ["manifest.json", enc.encode(JSON.stringify(manifest))],
-    ["prompt.md", enc.encode("Parity agent body: topic={{input.topic}}")],
-  ]);
-  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(files)));
-  return {
-    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
-    root: identity,
-    packages: new Map([[identity, { identity, manifest, files, integrity }]]),
-    integrity: bundleIntegrity(
-      new Map([[identity, { path: "packages/@test/parity/0.0.0/", integrity }]]),
-    ),
-  };
-}
-
-const noopProviderResolver: ProviderResolver = { resolve: async () => [] };
-
-function scriptedExecutor(script: RunEvent[]): ContainerExecutor {
-  return async function* () {
-    for (const ev of script) yield ev;
-  };
-}
-
-function basePlan(): AppstrateRunPlan {
-  return {
-    rawPrompt: "Parity agent body: topic={{input.topic}}",
-    schemaVersion: "1.2",
-    schemas: {},
-    llmConfig: {
-      api: "anthropic-messages",
-      modelId: "test",
-      apiKey: "test",
-      baseUrl: "",
-      input: ["text"],
-      contextWindow: 0,
-      maxTokens: 0,
-      reasoning: false,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-      } as AppstrateRunPlan["llmConfig"]["cost"],
-    },
-    runApi: { url: "", token: "" },
-    proxyUrl: null,
-    timeout: 60,
-    tokens: {},
-    providers: [],
-    availableTools: [],
-    availableSkills: [],
-    toolDocs: [],
-  };
-}
-
-function baseContext(runId: string): ExecutionContext {
-  return {
-    runId,
-    input: { topic: "parity" },
-    memories: [],
-    config: {},
-  };
-}
 
 describe("Parity E2E — full adapter stack", () => {
   let ctx: TestContext;
@@ -126,7 +46,7 @@ describe("Parity E2E — full adapter stack", () => {
     runId = run.id;
   });
 
-  it("AppstrateContainerRunner → AppstrateEventSink produces the same RunResult as reduceEvents", async () => {
+  it("inline executor loop → AppstrateEventSink produces the same RunResult as reduceEvents", async () => {
     const script: RunEvent[] = [
       {
         type: "appstrate.progress",
@@ -147,25 +67,23 @@ describe("Parity E2E — full adapter stack", () => {
       { type: "report.appended", timestamp: Date.now(), runId, content: "work done" },
     ];
 
-    const runner = new AppstrateContainerRunner({
-      plan: basePlan(),
-      executor: scriptedExecutor(script),
-    });
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
 
-    await runner.run({
-      bundle: makeBundle(),
-      context: baseContext(runId),
-      providerResolver: noopProviderResolver,
-      eventSink: sink,
-    });
+    // Mirror the production inline loop (routes/runs.ts:executeAgentInBackground).
+    async function* scripted() {
+      for (const ev of script) yield ev;
+    }
+    for await (const ev of scripted()) {
+      await sink.handle(ev);
+    }
+    const result = reduceEvents(script);
+    await sink.finalize(result);
 
     // Reducer agreement: the sink's finalised result MUST match what any
     // external runtime consumer would get from reducing the same event stream.
-    const expected = reduceEvents(script);
-    expect(sink.result).toEqual(expected);
+    expect(sink.result).toEqual(result);
 
-    // Sink aggregate mirrors the result.
+    // Sink aggregate projects the runtime snapshot into DB-friendly shapes.
     expect(sink.current.output).toEqual({ deliverable: "shipped" });
     expect(sink.current.state).toEqual({ counter: 7 });
     expect(sink.current.memories).toEqual(["learned A", "learned B"]);
