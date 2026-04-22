@@ -43,6 +43,11 @@ interface PackageActionsDropdownProps {
   onDownload?: (version: string) => void;
   /** Agent-only: export the full transitive bundle (.afps-bundle). */
   onDownloadBundle?: (version?: string) => void;
+  /** Agent-only: true when the package has at least one published version.
+   *  The bundle export endpoint resolves versions from the registry; a
+   *  draft-only agent (versionCount === 0) would 404, so we disable the
+   *  menu item and surface a tooltip pointing to "Créer une version". */
+  hasPublishedVersion?: boolean;
   onCreateVersion?: () => void;
   onFork?: () => void;
   // Agent-specific
@@ -77,6 +82,7 @@ export function PackageActionsDropdown({
   downloadVersion,
   onDownload,
   onDownloadBundle,
+  hasPublishedVersion,
   onCreateVersion,
   onFork,
   runningRuns = 0,
@@ -141,9 +147,16 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Download bundle (agent only — multi-package, transitive) ── */}
+          {/* ── Download bundle (agent only — multi-package, transitive).
+              Disabled when no version has been published: the export
+              endpoint resolves `(packageId, version)` from the registry,
+              so a draft-only package would 404. */}
           {isAgent && onDownloadBundle && (
-            <DropdownMenuItem onSelect={() => onDownloadBundle(downloadVersion)}>
+            <DropdownMenuItem
+              onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
+              disabled={!hasPublishedVersion}
+              title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
+            >
               <Package size={14} />
               {t("bundle.download")}
             </DropdownMenuItem>

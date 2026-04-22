@@ -143,7 +143,9 @@ export async function resolveExportVersion(
     if (row) return row.version;
   }
 
-  throw notFound(`No exportable version found for '${packageId}'`);
+  throw notFound(
+    `No exportable version found for '${packageId}' — publish a version first, then retry`,
+  );
 }
 
 /**

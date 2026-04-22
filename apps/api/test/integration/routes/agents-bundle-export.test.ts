@@ -275,6 +275,23 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns an actionable 404 when the agent has no published versions", async () => {
+    const rootPkgId = "@exportorg/draft-only" as const;
+    // Package row exists + installed, but no `packageVersions` row and no
+    // `latest` dist-tag — the classic "draft agent" state that trips the
+    // export endpoint. The error message should tell the caller how to
+    // proceed rather than just saying "not found".
+    await seedPackage({ id: rootPkgId, type: "agent", orgId: ctx.orgId });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+
+    const res = await app.request(`/api/agents/@exportorg/draft-only/bundle`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { detail: string };
+    expect(body.detail).toContain("publish a version first");
+  });
+
   it("returns 404 when the agent is not accessible to the app", async () => {
     const rootPkgId = "@exportorg/uninstalled" as const;
     // Seeded in the org catalog but NOT installed in the default app.

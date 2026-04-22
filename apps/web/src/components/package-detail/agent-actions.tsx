@@ -103,6 +103,7 @@ export function AgentActions({
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
+        hasPublishedVersion={(detail.versionCount ?? 0) > 0}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         runningRuns={detail.runningRuns}

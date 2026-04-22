@@ -107,6 +107,7 @@
   "import.submit": "Import",
   "import.errZip": "Only .afps, .afps-bundle, and .zip files are accepted",
   "bundle.download": "Download bundle (with deps)",
+  "bundle.requiresVersion": "Publish a version of the agent first",
   "import.errSize": "File exceeds 10 MB",
   "import.confirmOverwrite": "This package has unarchived changes (active version v{{activeVersion}}). The import will overwrite them.",
   "import.forceSubmit": "Overwrite and import",

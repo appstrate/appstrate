@@ -107,6 +107,7 @@
   "import.submit": "Importer",
   "import.errZip": "Seuls les fichiers .afps, .afps-bundle et .zip sont acceptés",
   "bundle.download": "Télécharger le bundle (avec dépendances)",
+  "bundle.requiresVersion": "Publiez d'abord une version de l'agent",
   "import.errSize": "Le fichier dépasse 10 MB",
   "import.confirmOverwrite": "Ce package a des modifications non archivées (version active v{{activeVersion}}). L'import les écrasera.",
   "import.forceSubmit": "Écraser et importer",
