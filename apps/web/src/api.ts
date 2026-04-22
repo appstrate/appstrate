@@ -6,8 +6,6 @@ import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
 
-const UPLOADS_PATH = `${API_BASE}/uploads`;
-
 interface UploadDescriptor {
   id: string;
   uri: string;
@@ -17,16 +15,14 @@ interface UploadDescriptor {
 }
 
 /**
- * Authed uploader for `<SchemaForm upload={...} />`. The default UI-package
- * uploader uses raw fetch (no org context), which the `/api/uploads` middleware
- * rejects with "X-Org-Id header is required". This variant injects the same
- * org/app headers as `apiFetch`.
+ * Authed uploader for `<SchemaForm upload={...} />`. The UI package's default
+ * uploader uses raw fetch (no org context); this variant goes through `api()`
+ * so `/api/uploads` gets the same `X-Org-Id` / `X-App-Id` headers as every
+ * other call.
  */
 export const uploadClient: UploadFn = async (file, signal) => {
-  const descRes = await fetch(UPLOADS_PATH, {
+  const desc = await api<UploadDescriptor>("/uploads", {
     method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify({
       name: file.name,
       size: file.size,
@@ -34,13 +30,6 @@ export const uploadClient: UploadFn = async (file, signal) => {
     }),
     signal,
   });
-  if (!descRes.ok) {
-    const body = (await descRes.json().catch(() => ({ detail: descRes.statusText }))) as {
-      detail?: string;
-    };
-    throw new Error(body.detail ?? `upload init failed: ${descRes.status}`);
-  }
-  const desc = (await descRes.json()) as UploadDescriptor;
 
   const putRes = await fetch(desc.url, {
     method: desc.method,
