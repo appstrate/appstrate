@@ -64,9 +64,8 @@ export interface LlmConfig {
 /**
  * Platform-specific run configuration — everything that does NOT fit in the
  * AFPS {@link ExecutionContext} (auth material, infrastructure wiring,
- * container inputs). Split from the AFPS context so {@link AppstrateContainerRunner}
- * consumes a canonical {@link ExecutionContext} via `RunOptions` while
- * receiving platform concerns as constructor-time configuration.
+ * container inputs). Passed alongside the AFPS context to the Pi container
+ * executor so the canonical {@link ExecutionContext} stays platform-agnostic.
  */
 export interface AppstrateRunPlan {
   // --- Bundle-derived (needed for prompt building + validation) ---

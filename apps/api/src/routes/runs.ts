@@ -18,24 +18,10 @@ import {
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { TimeoutError } from "../services/adapters/index.ts";
 import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.ts";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
-import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
-import {
-  BUNDLE_FORMAT_VERSION,
-  bundleIntegrity,
-  computeRecordEntries,
-  readBundleFromBuffer,
-  recordIntegrity,
-  serializeRecord,
-  type Bundle,
-  type PackageIdentity,
-} from "@appstrate/afps-runtime/bundle";
-import {
-  BundledToolResolver,
-  BundledSkillResolver,
-  SidecarProviderResolver,
-} from "@appstrate/afps-runtime/resolvers";
+import { createPiContainerExecutor } from "../services/adapters/pi.ts";
+import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -59,40 +45,6 @@ import {
   type InlineRunBody,
 } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-
-/**
- * Build a {@link Bundle} for the Runner contract. When the route
- * already has the packaged ZIP (produced by `buildAgentPackage`, the
- * multi-package `.afps-bundle` format), we parse it via
- * `readBundleFromBuffer`. Otherwise we synthesise a minimal one-package
- * bundle from the in-memory agent — sufficient for the contract since
- * `AppstrateContainerRunner` delegates execution to the Pi container,
- * which reads the bundle from `/workspace/agent-package.afps`.
- */
-function buildRunnerBundle(agent: LoadedPackage, agentPackage: Buffer | null): Bundle {
-  if (agentPackage) {
-    return readBundleFromBuffer(new Uint8Array(agentPackage));
-  }
-  const encoder = new TextEncoder();
-  const manifest = agent.manifest as Record<string, unknown>;
-  const files = new Map<string, Uint8Array>([
-    ["manifest.json", encoder.encode(JSON.stringify(manifest, null, 2))],
-    ["prompt.md", encoder.encode(agent.prompt)],
-  ]);
-  const recordBody = serializeRecord(computeRecordEntries(files));
-  const integrity = recordIntegrity(recordBody);
-  const name = (manifest.name as string | undefined) ?? agent.id;
-  const version = (manifest.version as string | undefined) ?? "0.0.0";
-  const identity = `${name}@${version}` as PackageIdentity;
-  return {
-    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
-    root: identity,
-    packages: new Map([[identity, { identity, manifest, files, integrity }]]),
-    integrity: bundleIntegrity(
-      new Map([[identity, { path: `packages/${name}/${version}/`, integrity }]]),
-    ),
-  };
-}
 
 async function collectAfterRunMetadata(
   params: RunStatusChangeParams,
@@ -142,38 +94,41 @@ export async function executeAgentInBackground(
       packageEphemeral,
     });
 
-    const runner = new AppstrateContainerRunner({
-      plan: {
-        ...plan,
-        agentPackage: agentPackage ?? undefined,
-        inputFiles,
-      },
-    });
-
-    const bundle = buildRunnerBundle(agent, agentPackage ?? null);
-
-    // Spec-aligned resolvers — the runtime ships bundled + sidecar defaults
-    // that read from the loaded bundle and from the in-container sidecar
-    // (http://sidecar:8080). They are handed to the Runner so the
-    // AFPS 1.3 contract is honoured; the current container-delegating
-    // executor doesn't consume them (the Pi SDK inside the container
-    // resolves its own tools), but an in-container Runner (Phase 7) will.
-    const toolResolver = new BundledToolResolver();
-    const skillResolver = new BundledSkillResolver();
-    const providerResolver = new SidecarProviderResolver({
-      sidecarUrl: "http://sidecar:8080",
-    });
+    const runPlan: AppstrateRunPlan = {
+      ...plan,
+      agentPackage: agentPackage ?? undefined,
+      inputFiles,
+    };
+    const executor = createPiContainerExecutor();
+    const events: RunEvent[] = [];
 
     try {
-      await runner.run({
-        bundle,
-        context,
-        providerResolver,
-        toolResolver,
-        skillResolver,
-        eventSink: sink,
-        signal,
-      });
+      try {
+        for await (const ev of executor(runId, context, runPlan, signal)) {
+          events.push(ev);
+          await sink.handle(ev);
+        }
+        await sink.finalize(reduceEvents(events));
+      } catch (err) {
+        // Signal aborts + timeouts bubble to the outer catch for dedicated
+        // handling. Any other failure is surfaced as an `appstrate.error`
+        // event so the success path can reconcile it via `lastAdapterError`.
+        if (signal.aborted || err instanceof TimeoutError) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        const errorEvent: RunEvent = {
+          type: "appstrate.error",
+          timestamp: Date.now(),
+          runId,
+          message,
+        };
+        events.push(errorEvent);
+        await sink.handle(errorEvent);
+        await sink.finalize(
+          reduceEvents(events, {
+            error: { message, stack: err instanceof Error ? err.stack : undefined },
+          }),
+        );
+      }
     } catch (err) {
       if (signal.aborted) {
         // Cancelled by user — cancel route already wrote DB status

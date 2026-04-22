@@ -4,9 +4,9 @@
  * Pi-container execution function — produces a {@link RunEvent} stream
  * by orchestrating a Docker workload + sidecar for a single run.
  *
- * Exported as a function (not a class) so {@link AppstrateContainerRunner}
- * composes it via constructor injection. Tests inject a fake
- * {@link ContainerExecutor} to run without Docker.
+ * Exported as a function (not a class) so the route handler composes
+ * it directly via `for await` over the yielded events. Tests inject a
+ * fake {@link ContainerExecutor} to run without Docker.
  */
 
 import { logger } from "../../lib/logger.ts";
@@ -27,7 +27,7 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { getEnv } from "@appstrate/env";
 
 /**
- * The container-execution seam used by {@link AppstrateContainerRunner}.
+ * The container-execution seam used by `executeAgentInBackground`.
  * A `ContainerExecutor` yields {@link RunEvent}s for the duration of a
  * single run and cleans up container resources on return / throw.
  */
