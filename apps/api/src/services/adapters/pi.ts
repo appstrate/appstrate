@@ -97,6 +97,7 @@ export function createPiContainerExecutor(orchestrator?: ContainerOrchestrator):
           cost: llmConfig.cost,
         },
         agentPrompt: prompt,
+        runId,
         sidecarProxyLlmUrl: llmApiKey ? "http://sidecar:8080/llm" : undefined,
         connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
         outputSchema: hasOutputSchema ? plan.schemas.output : undefined,

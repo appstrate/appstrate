@@ -32,6 +32,10 @@ export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
+  /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */
+  runId?: string;
+  /** JSON-encoded user input passed to the agent (`AGENT_INPUT`). */
+  agentInput?: unknown;
   /** Sidecar URL reachable from the agent container (default `http://sidecar:8080`). */
   sidecarUrl?: string;
   /**
@@ -68,6 +72,9 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     MODEL_ID: model.modelId,
     SIDECAR_URL: sidecarUrl,
   };
+
+  if (opts.runId) env.AGENT_RUN_ID = opts.runId;
+  if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
 
   if (opts.connectedProviders && opts.connectedProviders.length > 0) {
     env.CONNECTED_PROVIDERS = opts.connectedProviders.join(",");

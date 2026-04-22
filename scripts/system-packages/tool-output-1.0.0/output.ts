@@ -14,8 +14,10 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
+
 function emit(obj: Record<string, unknown>): void {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
 }
 
 function buildDataSchema() {
@@ -56,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params) {
       const { data } = params as { data: Record<string, unknown> };
-      emit({ type: "output", data });
+      emit({ type: "output.emitted", data });
       return {
         content: [{ type: "text", text: "Output recorded" }],
         details: { data },
