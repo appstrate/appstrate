@@ -48,36 +48,34 @@ function readIntEnv(name: string): number | null {
 }
 
 /**
- * Resolve limits by taking the max of (default, env override). Env can
- * only raise — never lower.
+ * Resolve limits from (in order of precedence):
+ *   1. explicit per-call `overrides` — used as-is
+ *   2. env vars — raise-only from the default
+ *   3. default
+ *
+ * Per spec §10.8 env vars MAY raise caps but MUST NOT silently lower
+ * them. Explicit overrides are an opt-in caller decision (tests lower
+ * caps to trigger LIMITS_EXCEEDED; trusted loaders raise them) and
+ * override env + default directly.
  */
 export function resolveBundleLimits(overrides?: Partial<BundleLimits>): BundleLimits {
   const envMaxCompressed = readIntEnv("APPSTRATE_BUNDLE_MAX_SIZE");
   const envMaxDecompressed = readIntEnv("APPSTRATE_BUNDLE_MAX_DECOMPRESSED");
   const envMaxFiles = readIntEnv("APPSTRATE_BUNDLE_MAX_FILES");
   const envMaxPackages = readIntEnv("APPSTRATE_BUNDLE_MAX_PACKAGES");
-  return {
-    maxCompressedBytes: Math.max(
-      DEFAULT_BUNDLE_LIMITS.maxCompressedBytes,
-      envMaxCompressed ?? 0,
-      overrides?.maxCompressedBytes ?? 0,
-    ),
+
+  const base: BundleLimits = {
+    maxCompressedBytes: Math.max(DEFAULT_BUNDLE_LIMITS.maxCompressedBytes, envMaxCompressed ?? 0),
     maxDecompressedBytes: Math.max(
       DEFAULT_BUNDLE_LIMITS.maxDecompressedBytes,
       envMaxDecompressed ?? 0,
-      overrides?.maxDecompressedBytes ?? 0,
     ),
-    maxFileBytes: Math.max(DEFAULT_BUNDLE_LIMITS.maxFileBytes, overrides?.maxFileBytes ?? 0),
-    maxFiles: Math.max(DEFAULT_BUNDLE_LIMITS.maxFiles, envMaxFiles ?? 0, overrides?.maxFiles ?? 0),
-    maxPathDepth: Math.max(DEFAULT_BUNDLE_LIMITS.maxPathDepth, overrides?.maxPathDepth ?? 0),
-    maxIdentityBytes: Math.max(
-      DEFAULT_BUNDLE_LIMITS.maxIdentityBytes,
-      overrides?.maxIdentityBytes ?? 0,
-    ),
-    maxPackages: Math.max(
-      DEFAULT_BUNDLE_LIMITS.maxPackages,
-      envMaxPackages ?? 0,
-      overrides?.maxPackages ?? 0,
-    ),
+    maxFileBytes: DEFAULT_BUNDLE_LIMITS.maxFileBytes,
+    maxFiles: Math.max(DEFAULT_BUNDLE_LIMITS.maxFiles, envMaxFiles ?? 0),
+    maxPathDepth: DEFAULT_BUNDLE_LIMITS.maxPathDepth,
+    maxIdentityBytes: DEFAULT_BUNDLE_LIMITS.maxIdentityBytes,
+    maxPackages: Math.max(DEFAULT_BUNDLE_LIMITS.maxPackages, envMaxPackages ?? 0),
   };
+
+  return { ...base, ...(overrides ?? {}) };
 }
