@@ -21,7 +21,7 @@ import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
-import { loadBundleFromBuffer, type LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import { loadAnyBundleFromBuffer, type LoadedBundle } from "@appstrate/afps-runtime/bundle";
 import {
   BundledToolResolver,
   BundledSkillResolver,
@@ -53,19 +53,20 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 
 /**
  * Build a {@link LoadedBundle} for the Runner contract. When the route
- * already has the packaged ZIP (produced by `buildAgentPackage`), we
- * parse it via the runtime loader so the shape matches what an external
- * consumer would see. Otherwise we synthesise a minimal bundle from the
- * in-memory agent — sufficient for the contract since
- * AppstrateContainerRunner delegates execution to the Pi container,
- * which reads the bundle from `/workspace/agent-package.afps`.
+ * already has the packaged ZIP (produced by `buildAgentPackage`, now
+ * the multi-package `.afps-bundle` format), we parse it via the
+ * format-detecting loader so the shape matches what an external consumer
+ * would see. Otherwise we synthesise a minimal bundle from the in-memory
+ * agent — sufficient for the contract since AppstrateContainerRunner
+ * delegates execution to the Pi container, which reads the bundle from
+ * `/workspace/agent-package.afps`.
  */
 async function buildRunnerBundle(
   agent: LoadedPackage,
   agentPackage: Buffer | null,
 ): Promise<LoadedBundle> {
   if (agentPackage) {
-    return loadBundleFromBuffer(agentPackage);
+    return loadAnyBundleFromBuffer(new Uint8Array(agentPackage));
   }
   const encoder = new TextEncoder();
   const files: Record<string, Uint8Array> = {

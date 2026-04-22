@@ -6,11 +6,13 @@ import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import {
-  getPackageDepFiles,
-  SKILL_CONFIG,
-  TOOL_CONFIG,
-  PROVIDER_CONFIG,
-} from "./package-items/index.ts";
+  buildBundleFromCatalog,
+  formatPackageIdentity,
+  parsePackageIdentity,
+  writeBundleToBuffer,
+  type BundlePackage,
+} from "@appstrate/afps-runtime/bundle";
+import { DraftPackageCatalog } from "./adapters/draft-package-catalog.ts";
 import { loadAndVerifyBundle } from "./adapters/bundle-signature-policy.ts";
 
 const BUCKET = "agent-packages";
@@ -104,51 +106,66 @@ interface AgentPackageResult {
   toolDocs: Array<{ id: string; content: string }>;
 }
 
-/** Build an agent package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
+/**
+ * Build a multi-package `.afps-bundle` for the run hot path and
+ * extract TOOL.md docs in a single pass.
+ *
+ * The returned ZIP is the canonical bundle format (bundle.json root +
+ * per-package dirs under `packages/@scope/name/version/`). The
+ * container-side loader (`loadAnyBundleFromFile` in runtime-pi) detects
+ * the format by the presence of `bundle.json` and projects it back onto
+ * a flat LoadedBundle for the PiRunner + resolvers.
+ *
+ * Dependency resolution uses {@link DraftPackageCatalog}, which reads
+ * draft manifests + the `package-items` storage bucket — NOT published
+ * versions. This preserves the legacy "edit tool → next run sees it"
+ * behaviour on the dev loop.
+ */
 export async function buildAgentPackage(
   agent: LoadedPackage,
   orgId: string,
 ): Promise<AgentPackageResult> {
-  const entries: Zippable = {
-    "manifest.json": new TextEncoder().encode(JSON.stringify(agent.manifest, null, 2)),
-    "prompt.md": new TextEncoder().encode(agent.prompt),
+  const manifest = agent.manifest as Record<string, unknown>;
+  const name = typeof manifest.name === "string" ? manifest.name : null;
+  const version = typeof manifest.version === "string" ? manifest.version : null;
+  if (!name || !version || !name.startsWith("@") || !name.includes("/")) {
+    throw new Error(
+      `buildAgentPackage: agent ${agent.id} has no valid scoped name/version in its manifest`,
+    );
+  }
+
+  const rootFiles = new Map<string, Uint8Array>([
+    ["manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2))],
+    ["prompt.md", new TextEncoder().encode(agent.prompt)],
+  ]);
+  const root: BundlePackage = {
+    identity: formatPackageIdentity(name as `@${string}/${string}`, version),
+    manifest,
+    files: rootFiles,
+    integrity: "",
   };
 
-  // Fetch skill, tool, and provider files in parallel
-  const [skillFiles, toolFiles, providerFiles] = await Promise.all([
-    getPackageDepFiles(agent.id, orgId, SKILL_CONFIG),
-    getPackageDepFiles(agent.id, orgId, TOOL_CONFIG),
-    getPackageDepFiles(agent.id, orgId, PROVIDER_CONFIG),
-  ]);
+  const bundle = await buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId }), {
+    onWarn: (message) => {
+      logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
+    },
+  });
 
-  for (const [skillId, files] of skillFiles) {
-    for (const [filePath, content] of Object.entries(files)) {
-      entries[`skills/${skillId}/${filePath}`] = content;
-    }
-  }
+  const zipBuffer = writeBundleToBuffer(bundle);
 
-  for (const [toolId, files] of toolFiles) {
-    for (const [filePath, content] of Object.entries(files)) {
-      entries[`tools/${toolId}/${filePath}`] = content;
-    }
-  }
-
-  for (const [providerId, files] of providerFiles) {
-    for (const [filePath, content] of Object.entries(files)) {
-      entries[`providers/${providerId}/${filePath}`] = content;
-    }
-  }
-
-  // Extract TOOL.md content from tool files (avoids a second S3 fetch)
   const toolDocs: Array<{ id: string; content: string }> = [];
-  for (const [toolId, files] of toolFiles) {
-    const md = files["TOOL.md"];
-    if (md) {
-      toolDocs.push({ id: toolId, content: new TextDecoder().decode(md) });
-    }
+  const decoder = new TextDecoder();
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    if ((pkg.manifest as { type?: unknown }).type !== "tool") continue;
+    const md = pkg.files.get("TOOL.md");
+    if (!md) continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) continue;
+    toolDocs.push({ id: parsed.packageId, content: decoder.decode(md) });
   }
 
-  return { zip: Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL)), toolDocs };
+  return { zip: Buffer.from(zipBuffer), toolDocs };
 }
 
 /** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */
