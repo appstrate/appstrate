@@ -57,6 +57,3 @@ export function buildPlatformSystemPrompt(
     runHistoryApi: Boolean(plan.runApi),
   });
 }
-
-/** @deprecated Use {@link buildPlatformSystemPrompt}. Kept for call-site churn. */
-export const buildEnrichedPrompt = buildPlatformSystemPrompt;

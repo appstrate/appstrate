@@ -10,7 +10,9 @@
  * passed through silently — the sink still sees them, but they do not
  * contribute to the aggregated result.
  *
- * Pure function — no IO, no mutation of inputs.
+ * `foldEvent` is the single switch that knows how each canonical event
+ * contributes to the aggregate. Both the batch reducer `reduceEvents`
+ * and the incremental `createReducerSink` consume it.
  */
 
 import type { RunEvent } from "../types/run-event.ts";
@@ -31,53 +33,55 @@ export function emptyRunResult(): RunResult {
   };
 }
 
+/**
+ * Fold a single event into a mutable result accumulator. Consumers that
+ * want an immutable pipeline can seed a fresh accumulator per call.
+ */
+export function foldEvent(result: RunResult, event: RunEvent): void {
+  switch (event.type) {
+    case "memory.added": {
+      if (typeof event.content === "string") {
+        result.memories.push({ content: event.content });
+      }
+      return;
+    }
+    case "state.set": {
+      result.state = event.state ?? null;
+      return;
+    }
+    case "output.emitted": {
+      result.output = mergeOutput(result.output, event.data);
+      return;
+    }
+    case "report.appended": {
+      if (typeof event.content === "string") {
+        result.report =
+          result.report === null ? event.content : `${result.report}\n${event.content}`;
+      }
+      return;
+    }
+    case "log.written": {
+      const level = event.level;
+      const message = event.message;
+      if (
+        (level === "info" || level === "warn" || level === "error") &&
+        typeof message === "string"
+      ) {
+        result.logs.push({ level, message, timestamp: event.timestamp });
+      }
+      return;
+    }
+    default:
+      // Third-party / unknown event types do not contribute — the sink
+      // still sees them, they just do not fold into the summary.
+      return;
+  }
+}
+
 export function reduceEvents(events: Iterable<RunEvent>, opts: ReduceOptions = {}): RunResult {
   const result = emptyRunResult();
-
-  for (const event of events) {
-    switch (event.type) {
-      case "memory.added": {
-        if (typeof event.content === "string") {
-          result.memories.push({ content: event.content });
-        }
-        break;
-      }
-      case "state.set": {
-        result.state = event.state ?? null;
-        break;
-      }
-      case "output.emitted": {
-        result.output = mergeOutput(result.output, event.data);
-        break;
-      }
-      case "report.appended": {
-        if (typeof event.content === "string") {
-          result.report =
-            result.report === null ? event.content : `${result.report}\n${event.content}`;
-        }
-        break;
-      }
-      case "log.written": {
-        const level = event.level;
-        const message = event.message;
-        if (
-          (level === "info" || level === "warn" || level === "error") &&
-          typeof message === "string"
-        ) {
-          result.logs.push({ level, message, timestamp: event.timestamp });
-        }
-        break;
-      }
-      default:
-        // Third-party / unknown event types do not contribute — the sink
-        // still sees them, they just do not fold into the summary.
-        break;
-    }
-  }
-
-  if (opts.error) {
-    result.error = opts.error;
-  }
+  for (const event of events) foldEvent(result, event);
+  if (opts.error) result.error = opts.error;
   return result;
 }
 

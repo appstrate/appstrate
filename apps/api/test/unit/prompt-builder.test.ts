@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEnrichedPrompt as _buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
+import { buildPlatformSystemPrompt } from "../../src/services/adapters/prompt-builder.ts";
 import type {
   AppstrateRunPlan,
   FileReference,
@@ -71,7 +71,7 @@ function splitLegacy(ctx: PromptContext): {
 
 function buildEnrichedPrompt(ctx: PromptContext): string {
   const { context, plan } = splitLegacy(ctx);
-  return _buildEnrichedPrompt(context, plan);
+  return buildPlatformSystemPrompt(context, plan);
 }
 
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {

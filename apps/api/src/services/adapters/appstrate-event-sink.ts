@@ -30,6 +30,7 @@ import { createReducerSink, type ReducerSinkHandle } from "@appstrate/afps-runti
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
+import { isPlainObject } from "@appstrate/core/safe-json";
 import type { OrgScope } from "../../lib/scope.ts";
 import { appendRunLog } from "../state/runs.ts";
 import type { TokenUsage } from "./types.ts";
@@ -188,10 +189,6 @@ export class AppstrateEventSink implements EventSink {
   get result(): RunResult | null {
     return this.finalResult;
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {

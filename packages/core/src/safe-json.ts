@@ -18,3 +18,8 @@ export function asRecordOrNull(val: unknown): Record<string, unknown> | null {
     ? (val as Record<string, unknown>)
     : null;
 }
+
+/** Type guard — `true` for values that are plain objects (not arrays, not null). */
+export function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === "object" && val !== null && !Array.isArray(val);
+}
