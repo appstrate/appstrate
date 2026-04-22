@@ -3,7 +3,7 @@
 
 import { parseArgs } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
-import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
+import { readBundleFromBuffer } from "../../bundle/read.ts";
 import { ConsoleSink } from "../../sinks/console-sink.ts";
 import { FileSink } from "../../sinks/file-sink.ts";
 import { CompositeSink } from "../../sinks/composite-sink.ts";
@@ -76,7 +76,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   // by scripted replay — the sink + reducer contract is independent of
   // the bundle's prompt content.
   const bundleBytes = await readFile(bundlePath);
-  loadAnyBundleFromBuffer(bundleBytes);
+  readBundleFromBuffer(new Uint8Array(bundleBytes));
 
   const sink = await buildSink(parsed.values, bundlePath, io);
   if (!sink) return 1;

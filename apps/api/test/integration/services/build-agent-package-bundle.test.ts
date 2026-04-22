@@ -31,7 +31,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
-import { bundleToLoadedBundle, readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -156,18 +156,16 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     expect(bundle.packages.has("@bundlehost/calc-tool@2.1.0")).toBe(true);
     expect(bundle.packages.has("@bundlehost/svc-provider@0.5.0")).toBe(true);
 
-    // ─── 5. Project back through the adapter — the shape the runtime ─
-    //       resolvers + entrypoint expect.
-    const loaded = bundleToLoadedBundle(bundle);
-    expect(loaded.prompt).toBe("You are the agent.");
-    expect(dec(loaded.files["skills/@bundlehost/md-skill/SKILL.md"])).toContain("markdown");
-    expect(dec(loaded.files["tools/@bundlehost/calc-tool/TOOL.md"])).toBe(
-      "Calculator tool documentation",
-    );
-    expect(dec(loaded.files["tools/@bundlehost/calc-tool/index.ts"])).toContain("export default");
-    expect(dec(loaded.files["providers/@bundlehost/svc-provider/PROVIDER.md"])).toBe(
-      "Provider doc",
-    );
+    // ─── 5. Assert dep package contents match the uploaded files ────
+    const skillPkg = bundle.packages.get("@bundlehost/md-skill@1.0.0")!;
+    expect(dec(skillPkg.files.get("SKILL.md"))).toContain("markdown");
+
+    const toolPkg = bundle.packages.get("@bundlehost/calc-tool@2.1.0")!;
+    expect(dec(toolPkg.files.get("TOOL.md"))).toBe("Calculator tool documentation");
+    expect(dec(toolPkg.files.get("index.ts"))).toContain("export default");
+
+    const providerPkg = bundle.packages.get("@bundlehost/svc-provider@0.5.0")!;
+    expect(dec(providerPkg.files.get("PROVIDER.md"))).toBe("Provider doc");
   });
 
   it("produces a deterministic bundle — two builds yield byte-identical ZIPs", async () => {

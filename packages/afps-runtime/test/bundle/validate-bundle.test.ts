@@ -10,9 +10,7 @@ import {
   serializeRecord,
 } from "../../src/bundle/integrity.ts";
 import { validateBundle } from "../../src/bundle/validate-bundle.ts";
-import { loadedBundleToBundle } from "../../src/bundle/bridge.ts";
 import type { BundlePackage, PackageIdentity } from "../../src/bundle/types.ts";
-import type { LoadedBundle } from "../../src/bundle/loader.ts";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -177,35 +175,5 @@ describe("validateBundle (v2)", () => {
     };
     const result = validateBundle(spliced);
     expect(result.issues.some((i) => i.code === "VERSION_DIVERGENCE")).toBe(true);
-  });
-});
-
-describe("loadedBundleToBundle", () => {
-  it("converts a LoadedBundle-of-1 to a Bundle-of-1", () => {
-    const legacy: LoadedBundle = {
-      manifest: VALID_AGENT,
-      prompt: "hi",
-      files: {
-        "manifest.json": enc(JSON.stringify(VALID_AGENT)),
-        "prompt.md": enc("hi"),
-      },
-      compressedSize: 0,
-      decompressedSize: 0,
-    };
-    const bundle = loadedBundleToBundle(legacy);
-    expect(bundle.root).toBe("@me/root@1.0.0");
-    expect(bundle.packages.size).toBe(1);
-    expect(bundle.integrity).toMatch(/^sha256-/);
-  });
-
-  it("throws on manifest missing name/version", () => {
-    const legacy: LoadedBundle = {
-      manifest: { type: "agent" },
-      prompt: "x",
-      files: {},
-      compressedSize: 0,
-      decompressedSize: 0,
-    };
-    expect(() => loadedBundleToBundle(legacy)).toThrow(/name/);
   });
 });

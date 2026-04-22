@@ -121,7 +121,9 @@ describe("BundleSignaturePolicy", () => {
       const bytes = buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
-      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
+      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
+        "@testorg/sig-test",
+      );
     });
 
     it("rejects a bundle signed by an untrusted key with code=chain_missing", async () => {
@@ -144,7 +146,9 @@ describe("BundleSignaturePolicy", () => {
       const bytes = buildBundleBytes();
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
-      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
+      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
+        "@testorg/sig-test",
+      );
     });
 
     it("accepts a signed bundle with an invalid signature (warn only)", async () => {
@@ -152,14 +156,18 @@ describe("BundleSignaturePolicy", () => {
       const bytes = buildBundleBytes({ sign: foreignKey });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
-      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
+      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
+        "@testorg/sig-test",
+      );
     });
 
     it("accepts a bundle signed by a trusted key", async () => {
       const bytes = buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
-      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
+      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
+        "@testorg/sig-test",
+      );
     });
   });
 

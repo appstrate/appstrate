@@ -3,14 +3,15 @@
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
-import { validateAfpsManifest } from "../../bundle/validator.ts";
+import { readBundleFromBuffer } from "../../bundle/read.ts";
+import { validateBundle } from "../../bundle/validate-bundle.ts";
 import {
   canonicalBundleDigest,
   readBundleSignature,
   verifyBundleSignature,
   type TrustRoot,
 } from "../../bundle/signing.ts";
+import type { Bundle } from "../../bundle/types.ts";
 import type { CliIO } from "../index.ts";
 
 const HELP = `afps verify — validate a bundle and verify its signature
@@ -30,6 +31,18 @@ Exit codes:
   2   usage error
   3   signature verification failed
 `;
+
+function rootFilesRecord(bundle: Bundle): Record<string, Uint8Array> {
+  const rootPkg = bundle.packages.get(bundle.root);
+  if (!rootPkg) throw new Error(`bundle root ${bundle.root} is not in packages map`);
+  const out: Record<string, Uint8Array> = {};
+  for (const [p, bytes] of rootPkg.files) {
+    if (p === "RECORD") continue;
+    if (p === "signature.sig") continue;
+    out[p] = bytes;
+  }
+  return out;
+}
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   let parsed;
@@ -61,9 +74,9 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadAnyBundleFromBuffer(bundleBytes);
+  const bundle = readBundleFromBuffer(new Uint8Array(bundleBytes));
 
-  const validation = validateAfpsManifest(bundle);
+  const validation = validateBundle(bundle);
   if (!validation.valid) {
     io.stderr(`afps verify: ${validation.issues.length} validation issue(s):\n`);
     for (const issue of validation.issues) {
@@ -71,7 +84,8 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     }
     return 1;
   }
-  io.stdout(`✓ manifest + template valid (${Object.keys(bundle.files).length} files)\n`);
+  const totalFiles = [...bundle.packages.values()].reduce((n, p) => n + p.files.size, 0);
+  io.stdout(`✓ bundle valid (${bundle.packages.size} packages, ${totalFiles} files)\n`);
 
   const signature = readBundleSignature(bundle);
   const requireSig = parsed.values["require-signature"] === true;
@@ -103,7 +117,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     return 2;
   }
 
-  const canonical = canonicalBundleDigest(bundle.files);
+  const canonical = canonicalBundleDigest(rootFilesRecord(bundle));
   const result = verifyBundleSignature(canonical, signature, trustRoot);
   if (!result.ok) {
     io.stderr(`✗ signature verification failed: ${result.reason}`);

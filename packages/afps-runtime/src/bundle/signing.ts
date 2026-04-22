@@ -42,7 +42,7 @@ import {
   verify as nodeVerify,
   type KeyObject,
 } from "node:crypto";
-import type { LoadedBundle } from "./loader.ts";
+import type { Bundle } from "./types.ts";
 
 export interface BundleSignature {
   alg: "ed25519";
@@ -248,13 +248,14 @@ export function verifyBundleSignature(
 }
 
 /**
- * Read and parse `signature.sig` from a loaded bundle. Returns `null`
- * when no signature is present or the file is not a valid signature
- * document (callers who require signing should treat `null` as
- * "unsigned" and apply their policy).
+ * Read and parse `signature.sig` from a bundle's root package. Returns
+ * `null` when no signature is present or the file is not a valid
+ * signature document (callers who require signing should treat `null`
+ * as "unsigned" and apply their policy).
  */
-export function readBundleSignature(bundle: LoadedBundle): BundleSignature | null {
-  const raw = bundle.files["signature.sig"];
+export function readBundleSignature(bundle: Bundle): BundleSignature | null {
+  const rootPkg = bundle.packages.get(bundle.root);
+  const raw = rootPkg?.files.get("signature.sig");
   if (!raw) return null;
   let parsed: unknown;
   try {

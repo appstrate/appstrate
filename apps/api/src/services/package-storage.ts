@@ -112,9 +112,8 @@ interface AgentPackageResult {
  *
  * The returned ZIP is the canonical bundle format (bundle.json root +
  * per-package dirs under `packages/@scope/name/version/`). The
- * container-side loader (`loadAnyBundleFromFile` in runtime-pi) detects
- * the format by the presence of `bundle.json` and projects it back onto
- * a flat LoadedBundle for the PiRunner + resolvers.
+ * container-side loader (`readBundleFromFile` in runtime-pi) parses
+ * it directly into a {@link Bundle} the PiRunner + resolvers consume.
  *
  * Dependency resolution uses {@link DraftPackageCatalog}, which reads
  * draft manifests + the `package-items` storage bucket — NOT published

@@ -19,11 +19,12 @@
 
 import { z } from "zod";
 import {
+  buildBundleFromAfps,
   canonicalBundleDigest,
-  loadBundleFromBuffer,
+  emptyPackageCatalog,
   readBundleSignature,
   verifyBundleSignature,
-  type LoadedBundle,
+  type Bundle,
   type TrustRoot,
   type TrustedKey,
   type VerifySignatureFailureReason,
@@ -110,15 +111,18 @@ export function _resetTrustRootCacheForTesting(): void {
 export async function loadAndVerifyBundle(
   buffer: Uint8Array,
   packageId: string,
-): Promise<LoadedBundle | null> {
+): Promise<Bundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  // Short-circuit when no policy is in effect — avoids invoking the
-  // legacy single-package loader (which assumes prompt.md) on skill /
-  // tool / provider archives. The bundle catalog fetch path needs to
-  // pull every package type; signature verification is gated by the
-  // policy env, not by every storage read.
+  // Short-circuit when no policy is in effect — avoids the ingestion
+  // cost on skill / tool / provider archives. The bundle catalog fetch
+  // path needs to pull every package type; signature verification is
+  // gated by the policy env, not by every storage read.
   if (policy === "off") return null;
-  const bundle = await loadBundleFromBuffer(buffer);
+  // Ingest the single-package `.afps` archive as a Bundle-of-1 so
+  // signature + verification share one code path with the multi-package
+  // flow. `emptyPackageCatalog` guarantees we do no dep walking — this
+  // helper operates on the archive bytes alone.
+  const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog);
 
   const signature = readBundleSignature(bundle);
   if (!signature) {
@@ -134,7 +138,14 @@ export async function loadAndVerifyBundle(
     return bundle;
   }
 
-  const digest = canonicalBundleDigest(bundle.files);
+  const rootPkg = bundle.packages.get(bundle.root)!;
+  const rootFiles: Record<string, Uint8Array> = {};
+  for (const [p, bytes] of rootPkg.files) {
+    if (p === "RECORD") continue;
+    if (p === "signature.sig") continue;
+    rootFiles[p] = bytes;
+  }
+  const digest = canonicalBundleDigest(rootFiles);
   const result = verifyBundleSignature(digest, signature, getTrustRoot());
   if (!result.ok) {
     if (policy === "required") {

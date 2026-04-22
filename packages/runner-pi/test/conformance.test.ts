@@ -24,7 +24,7 @@ import {
   type ConformanceAdapter,
   type RunScriptedOutput,
 } from "@appstrate/afps-runtime/conformance";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { InternalSink } from "../src/pi-runner.ts";
@@ -75,7 +75,7 @@ function makePiConformanceAdapter(): ConformanceAdapter {
     renderPrompt: baseline.renderPrompt.bind(baseline),
     verifySignature: baseline.verifySignature.bind(baseline),
     async runScripted(
-      _bundle: LoadedBundle,
+      _bundle: Bundle,
       context: ExecutionContext,
       scriptedEvents: readonly RunEvent[],
     ): Promise<RunScriptedOutput> {
