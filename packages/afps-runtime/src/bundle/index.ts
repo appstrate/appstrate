@@ -81,6 +81,23 @@ export {
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
+export {
+  renderPlatformPrompt,
+  type PlatformPromptOptions,
+  type PlatformPromptProvider,
+  type PlatformPromptTool,
+  type PlatformPromptSchema,
+} from "./platform-prompt.ts";
+
+// ─── Signature policy ───────────────────────────────────────────────
+export {
+  verifyBundleWithPolicy,
+  BundleSignaturePolicyError,
+  type SignaturePolicy,
+  type SignaturePolicyReason,
+  type VerifyBundlePolicyOptions,
+  type VerifyBundlePolicyOutcome,
+} from "./signature-policy.ts";
 
 // ─── Signing / trust root ───────────────────────────────────────────
 export {

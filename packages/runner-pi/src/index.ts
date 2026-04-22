@@ -21,3 +21,11 @@ export {
   afpsToolToPiExtension,
   type ProviderEventEmitter,
 } from "./provider-bridge.ts";
+
+export { parsePiStreamLine, processPiLogs } from "./stream-parser.ts";
+
+export {
+  buildRuntimePiEnv,
+  type RuntimePiEnvOptions,
+  type RuntimePiModelConfig,
+} from "./container-env.ts";
