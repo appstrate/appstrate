@@ -68,14 +68,14 @@ const DEFAULT_LABELS: Required<FileWidgetLabels> = {
  *   - `{ type: "array", items: { type: "string", format: "uri", … } }` → multi
  *
  * The binary is uploaded directly to storage via the endpoint resolved from
- * `formContext.uploadPath` (POST), and `onChange` writes back an
+ * `registry.formContext.uploadPath` (POST), and `onChange` writes back an
  * `upload://upl_xxx` URI (or array of URIs). RJSF then validates the schema
  * on this URI — the server re-validates when the run is triggered.
  */
 export function FileWidget(props: WidgetProps) {
-  const { id, value, onChange, required, label, schema, disabled, readonly, options, formContext } =
+  const { id, value, onChange, required, label, schema, disabled, readonly, options, registry } =
     props;
-  const ctx = (formContext ?? {}) as SchemaFormContext;
+  const ctx = (registry?.formContext ?? {}) as SchemaFormContext;
   const labels = useMemo<Required<FileWidgetLabels>>(
     () => ({ ...DEFAULT_LABELS, ...(ctx.labels ?? {}) }),
     [ctx.labels],

@@ -1,12 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { UploadFn } from "@appstrate/ui/schema-form";
 import { getCurrentOrgId } from "./hooks/use-org";
 import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
 
-/** Direct-upload endpoint consumed by `<SchemaForm uploadPath={...} />`. */
-export const UPLOADS_PATH = `${API_BASE}/uploads`;
+interface UploadDescriptor {
+  id: string;
+  uri: string;
+  url: string;
+  method: "PUT";
+  headers: Record<string, string>;
+}
+
+/**
+ * Authed uploader for `<SchemaForm upload={...} />`. The UI package's default
+ * uploader uses raw fetch (no org context); this variant goes through `api()`
+ * so `/api/uploads` gets the same `X-Org-Id` / `X-App-Id` headers as every
+ * other call.
+ */
+export const uploadClient: UploadFn = async (file, signal) => {
+  const desc = await api<UploadDescriptor>("/uploads", {
+    method: "POST",
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+    }),
+    signal,
+  });
+
+  const putRes = await fetch(desc.url, {
+    method: desc.method,
+    headers: desc.headers,
+    body: file,
+    signal,
+  });
+  if (!putRes.ok) {
+    throw new Error(`upload failed: ${putRes.status} ${putRes.statusText}`);
+  }
+  return desc.uri;
+};
 
 export class ApiError extends Error {
   constructor(
