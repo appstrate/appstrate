@@ -21,15 +21,15 @@
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "^0.67.2",
+    "@mariozechner/pi-ai": "^0.68.1",
     "@readme/openapi-parser": "^6.0.1",
-    "@redocly/openapi-core": "^2.28.0",
+    "@redocly/openapi-core": "^2.29.1",
     "@types/bun": "latest",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.7.1",
-    "eslint": "^10.2.0",
+    "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.0",
     "globals": "^17.5.0",
     "husky": "^9.1.7",
@@ -37,7 +37,7 @@
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "turbo": "^2",
-    "typescript-eslint": "^8.58.2"
+    "typescript-eslint": "^8.59.0"
   },
   "peerDependencies": {
     "typescript": "^5"
