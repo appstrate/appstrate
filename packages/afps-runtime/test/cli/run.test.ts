@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,9 @@ import {
 import { runCli } from "../../src/cli/index.ts";
 import { captureIo, writeBundleFile, writeJsonFile } from "./helpers.ts";
 import { generateKeyPair } from "../../src/bundle/signing.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
+import type { ExecutionContext } from "../../src/types/execution-context.ts";
+import type { EventSink } from "../../src/interfaces/event-sink.ts";
 
 /**
  * Minimal stub module — Phase 1 never invokes PiRunner, so the shapes
@@ -105,13 +108,12 @@ describe("afps run — arg parsing (Phase 1)", () => {
     process.env.AFPS_API_KEY = "sk-from-env";
     const handler = createRunHandler(stubDeps());
     const io = captureIo();
-    // Phase 1 early-returns 1 after arg validation succeeds — confirms
-    // the key resolution path didn't short-circuit on arg validation.
+    // Arg validation + stub runner happy path → exit 0.
     const code = await handler([bundle, "--api", "anthropic-messages", "--model", "x"], io);
-    expect(code).toBe(1);
-    expect(io.stderrText()).toContain("not yet wired");
+    expect(code).toBe(0);
     // Critical: env-sourced API key never appears in stderr.
     expect(io.stderrText()).not.toContain("sk-from-env");
+    expect(io.stdoutText()).not.toContain("sk-from-env");
   });
 
   it("rejects unknown flags with exit 2", async () => {
@@ -205,9 +207,8 @@ describe("afps run — runner-pi loading (Phase 1)", () => {
     const handler = createRunHandler(stubDeps());
     const io = captureIo();
     const code = await handler(validArgs(bundle), io);
-    // Phase 1 placeholder — execution not yet wired.
-    expect(code).toBe(1);
-    expect(io.stderrText()).toContain("not yet wired");
+    // Stub runner emits no events and returns — exit 0.
+    expect(code).toBe(0);
   });
 });
 
@@ -306,8 +307,8 @@ describe("afps run — bundle load + signature + context (Phase 2)", () => {
     const handler = createRunHandler(stubDeps());
     const io = captureIo();
     const code = await handler(validArgs(bundle, ["--trust-root", trustRoot]), io);
-    expect(code).toBe(1);
-    expect(io.stderrText()).toContain("not yet wired");
+    // Signature verified → stub runner runs → exit 0.
+    expect(code).toBe(0);
   });
 
   it("exits 3 when --trust-root file cannot be read", async () => {
@@ -370,8 +371,7 @@ describe("afps run — bundle load + signature + context (Phase 2)", () => {
       validArgs(bundle, ["--context", context, "--snapshot", snapshot]),
       io,
     );
-    expect(code).toBe(1);
-    expect(io.stderrText()).toContain("not yet wired");
+    expect(code).toBe(0);
   });
 });
 
@@ -417,5 +417,321 @@ describe("assembleExecutionContext — pure helper", () => {
     expect(ctx.memories).toBeUndefined();
     expect(ctx.history).toBeUndefined();
     expect(ctx.state).toBeUndefined();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 3 — Runner orchestration
+// ──────────────────────────────────────────────────────────────────────
+
+interface StubBehavior {
+  events?: RunEvent[];
+  blockOnSignal?: boolean;
+  captureOpts?: (opts: unknown) => void;
+  captureRunOpts?: (opts: Record<string, unknown>) => void;
+  preparedWorkspaceCallback?: (workspaceDir: string) => void;
+}
+
+function stubModuleFor(behavior: StubBehavior): RunnerPiModule {
+  return {
+    PiRunner: class {
+      readonly name = "stub-pi-runner";
+      opts: unknown;
+      constructor(opts: unknown) {
+        this.opts = opts;
+        behavior.captureOpts?.(opts);
+      }
+      async run(opts: Record<string, unknown>): Promise<void> {
+        behavior.captureRunOpts?.(opts);
+        const sink = opts.eventSink as EventSink;
+        const signal = opts.signal as AbortSignal | undefined;
+        for (const ev of behavior.events ?? []) {
+          signal?.throwIfAborted();
+          await sink.handle(ev);
+        }
+        if (behavior.blockOnSignal && signal) {
+          await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+              once: true,
+            });
+          });
+        }
+      }
+    },
+    prepareBundleForPi: async (_bundle, prepOpts) => {
+      behavior.preparedWorkspaceCallback?.(prepOpts.workspaceDir);
+      return {
+        extensionFactories: [],
+        cleanup: async () => {},
+      };
+    },
+  };
+}
+
+describe("afps run — orchestration (Phase 3)", () => {
+  let dir: string;
+  let bundle: string;
+  const validArgs = (extra: string[] = []): string[] => [
+    bundle,
+    "--api",
+    "anthropic-messages",
+    "--model",
+    "claude-haiku-4-5-20251001",
+    "--api-key",
+    "sk-test",
+    ...extra,
+  ];
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "afps-cli-run-phase3-"));
+    bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("streams events through the ConsoleSink and returns exit 0", async () => {
+    const behavior: StubBehavior = {
+      events: [
+        { type: "log.written", timestamp: 1, runId: "cli-run", level: "info", message: "hello" },
+        { type: "memory.added", timestamp: 2, runId: "cli-run", content: "seen" },
+      ],
+    };
+    const handler = createRunHandler({ loadRunnerPi: async () => stubModuleFor(behavior) });
+    const io = captureIo();
+    const code = await handler(validArgs(), io);
+    expect(code).toBe(0);
+    expect(io.stdoutText()).toContain("hello");
+    expect(io.stdoutText()).toContain("seen");
+  });
+
+  it("writes the final RunResult to --output (JSON)", async () => {
+    const outputPath = join(dir, "result.json");
+    const behavior: StubBehavior = {
+      events: [
+        { type: "memory.added", timestamp: 1, runId: "cli-run", content: "m1" },
+        { type: "state.set", timestamp: 2, runId: "cli-run", state: { done: true } },
+        { type: "output.emitted", timestamp: 3, runId: "cli-run", data: { value: 42 } },
+      ],
+    };
+    const handler = createRunHandler({ loadRunnerPi: async () => stubModuleFor(behavior) });
+    const io = captureIo();
+    const code = await handler(validArgs(["--output", outputPath]), io);
+    expect(code).toBe(0);
+    const written = JSON.parse(await readFile(outputPath, "utf-8"));
+    expect(written.memories).toEqual([{ content: "m1" }]);
+    expect(written.state).toEqual({ done: true });
+    expect(written.output).toEqual({ value: 42 });
+    expect(io.stdoutText()).toContain(`→ wrote RunResult to ${outputPath}`);
+  });
+
+  it("passes the assembled ExecutionContext and systemPrompt to PiRunner", async () => {
+    const contextPath = join(dir, "ctx.json");
+    await writeJsonFile(contextPath, { runId: "r-7", input: { task: "brief" } });
+    const snapshotPath = join(dir, "snap.json");
+    await writeJsonFile(snapshotPath, { memories: [{ content: "m0", createdAt: 0 }] });
+
+    let capturedCtor: unknown = null;
+    let capturedRun: Record<string, unknown> | null = null;
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          captureOpts: (opts) => {
+            capturedCtor = opts;
+          },
+          captureRunOpts: (opts) => {
+            capturedRun = opts;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(
+      validArgs(["--context", contextPath, "--snapshot", snapshotPath]),
+      io,
+    );
+    expect(code).toBe(0);
+
+    const ctor = capturedCtor as {
+      systemPrompt: string;
+      model: { api: string; id: string };
+    } | null;
+    expect(ctor).not.toBeNull();
+    expect(ctor!.model.api).toBe("anthropic-messages");
+    expect(ctor!.model.id).toBe("claude-haiku-4-5-20251001");
+    // renderPlatformPrompt always includes a "## System" section header.
+    expect(ctor!.systemPrompt).toContain("## System");
+    expect(ctor!.systemPrompt).toContain("afps run");
+
+    const ctx = (capturedRun as { context: ExecutionContext } | null)?.context;
+    expect(ctx?.runId).toBe("r-7");
+    expect(ctx?.input).toEqual({ task: "brief" });
+    expect(ctx?.memories).toEqual([{ content: "m0", createdAt: 0 }]);
+  });
+
+  it("passes --base-url through to PiRunner model config", async () => {
+    let captured: unknown = null;
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          captureOpts: (opts) => {
+            captured = opts;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(validArgs(["--base-url", "https://openrouter.ai/api/v1"]), io);
+    expect(code).toBe(0);
+    expect((captured as { model: { baseUrl?: string } }).model.baseUrl).toBe(
+      "https://openrouter.ai/api/v1",
+    );
+  });
+
+  it("creates a tempdir workspace and cleans it up when --workspace is not provided", async () => {
+    let observed: string | null = null;
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          preparedWorkspaceCallback: (dir) => {
+            observed = dir;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(validArgs(), io);
+    expect(code).toBe(0);
+    expect(observed).not.toBeNull();
+    // Post-run, the tempdir must be gone.
+    const stat = await import("node:fs/promises").then((fs) =>
+      fs.stat(observed!).catch((e: unknown) => (e as { code?: string }).code),
+    );
+    expect(stat).toBe("ENOENT");
+  });
+
+  it("respects --workspace and leaves the user-provided directory intact", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "afps-user-workspace-"));
+    try {
+      let observed = null as string | null;
+      const handler = createRunHandler({
+        loadRunnerPi: async () =>
+          stubModuleFor({
+            preparedWorkspaceCallback: (dir) => {
+              observed = dir;
+            },
+          }),
+      });
+      const io = captureIo();
+      const code = await handler(validArgs(["--workspace", workspace]), io);
+      expect(code).toBe(0);
+      expect(observed).toBe(workspace);
+      // The user-owned directory MUST survive — its contents may be
+      // inspected for debugging.
+      const fs = await import("node:fs/promises");
+      const stat = await fs.stat(workspace);
+      expect(stat.isDirectory()).toBe(true);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("persists a JSONL stream when --sink=file", async () => {
+    const sinkFile = join(dir, "stream.jsonl");
+    const behavior: StubBehavior = {
+      events: [
+        { type: "memory.added", timestamp: 1, runId: "cli-run", content: "one" },
+        { type: "memory.added", timestamp: 2, runId: "cli-run", content: "two" },
+      ],
+    };
+    const handler = createRunHandler({ loadRunnerPi: async () => stubModuleFor(behavior) });
+    const io = captureIo();
+    const code = await handler(validArgs(["--sink", "file", "--sink-file", sinkFile]), io);
+    expect(code).toBe(0);
+    const body = await readFile(sinkFile, "utf-8");
+    const lines = body.split("\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2);
+    const first = JSON.parse(lines[0]!);
+    expect(first.content).toBe("one");
+  });
+
+  it("rejects an unknown --sink mode with exit 2", async () => {
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(["--sink", "webhook"]), io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("unknown --sink 'webhook'");
+  });
+
+  it("rejects --timeout=0 / non-positive with exit 2", async () => {
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(["--timeout", "0"]), io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("--timeout must be a positive number");
+  });
+
+  it("rejects an invalid --thinking-level with exit 2", async () => {
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(["--thinking-level", "paranoid"]), io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("--thinking-level must be low|medium|high");
+  });
+
+  it("returns exit 4 on --timeout expiry (stub blocks on signal)", async () => {
+    const handler = createRunHandler({
+      loadRunnerPi: async () => stubModuleFor({ blockOnSignal: true }),
+    });
+    const io = captureIo();
+    // --timeout accepts fractional seconds — use 0.15s for a fast test.
+    const code = await handler(validArgs(["--timeout", "0.15"]), io);
+    expect(code).toBe(4);
+    expect(io.stderrText()).toContain("run timed out after 0.15s");
+  });
+
+  it("redacts --api-key from runner error messages", async () => {
+    const SECRET = "sk-do-not-leak";
+    const handler = createRunHandler({
+      loadRunnerPi: async () => ({
+        PiRunner: class {
+          readonly name = "leaky";
+          async run(): Promise<void> {
+            throw new Error(`upstream responded with key=${SECRET}`);
+          }
+        },
+        prepareBundleForPi: async () => ({ extensionFactories: [], cleanup: async () => {} }),
+      }),
+    });
+    const io = captureIo();
+    const code = await handler(
+      [bundle, "--api", "anthropic-messages", "--model", "x", "--api-key", SECRET],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(io.stderrText()).not.toContain(SECRET);
+    expect(io.stderrText()).toContain("***");
+  });
+
+  it("surfaces a prepareBundleForPi failure as exit 1 with redaction", async () => {
+    const SECRET = "sk-also-redact";
+    const handler = createRunHandler({
+      loadRunnerPi: async () => ({
+        PiRunner: class {
+          readonly name = "unused";
+          async run(): Promise<void> {
+            /* never reached */
+          }
+        },
+        prepareBundleForPi: async () => {
+          throw new Error(`bad token ${SECRET}`);
+        },
+      }),
+    });
+    const io = captureIo();
+    const code = await handler(
+      [bundle, "--api", "anthropic-messages", "--model", "x", "--api-key", SECRET],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("prepareBundleForPi failed");
+    expect(io.stderrText()).not.toContain(SECRET);
   });
 });

@@ -23,13 +23,21 @@
  */
 
 import { parseArgs } from "node:util";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CliIO } from "../index.ts";
 import { readBundleFromBuffer } from "../../bundle/read.ts";
 import type { Bundle } from "../../bundle/types.ts";
 import { verifyBundleWithPolicy } from "../../bundle/signature-policy.ts";
 import type { TrustRoot } from "../../bundle/signing.ts";
+import { renderPlatformPrompt } from "../../bundle/platform-prompt.ts";
 import type { ExecutionContext } from "../../types/execution-context.ts";
+import type { EventSink } from "../../interfaces/event-sink.ts";
+import { createReducerSink } from "../../sinks/reducer-sink.ts";
+import { ConsoleSink } from "../../sinks/console-sink.ts";
+import { FileSink } from "../../sinks/file-sink.ts";
+import { CompositeSink } from "../../sinks/composite-sink.ts";
 
 /**
  * Structural shape of the `@appstrate/runner-pi` exports this command
@@ -45,15 +53,9 @@ import type { ExecutionContext } from "../../types/execution-context.ts";
 export interface RunnerPiModule {
   PiRunner: new (opts: RunnerPiOptions) => {
     readonly name: string;
-    run(opts: {
-      bundle: unknown;
-      context: unknown;
-      providerResolver: unknown;
-      toolResolver: unknown;
-      skillResolver: unknown;
-      eventSink: unknown;
-      signal?: AbortSignal;
-    }): Promise<void>;
+    // Intentionally permissive — PiRunner's RunOptions requires
+    // resolvers it never reads at runtime. We pass no-ops.
+    run(opts: Record<string, unknown>): Promise<void>;
   };
   prepareBundleForPi: (
     bundle: unknown,
@@ -264,17 +266,217 @@ export function createRunHandler(
 
     const context = assembleExecutionContext(contextFile, snapshot);
 
-    // Phase 2 scaffolding: bundle loaded, signature verified, context
-    // assembled. Real execution lands in Phase 3.
-    void api;
-    void model;
-    void apiKey;
-    void runnerPi;
-    void bundle;
-    void context;
-    io.stderr("afps run: runner orchestration not yet wired (Phase 3)\n");
-    return 1;
+    const timeoutSeconds = parseTimeout(parsed.values.timeout, io);
+    if (timeoutSeconds === null) return 2;
+
+    const thinkingLevel = parsed.values["thinking-level"] as "low" | "medium" | "high" | undefined;
+    if (
+      thinkingLevel !== undefined &&
+      thinkingLevel !== "low" &&
+      thinkingLevel !== "medium" &&
+      thinkingLevel !== "high"
+    ) {
+      io.stderr(
+        `afps run: --thinking-level must be low|medium|high (got '${String(thinkingLevel)}')\n`,
+      );
+      return 2;
+    }
+
+    const sinkMode = (parsed.values.sink as string | undefined) ?? "console";
+    if (!["console", "file", "both", "none"].includes(sinkMode)) {
+      io.stderr(`afps run: unknown --sink '${sinkMode}' (console|file|both|none)\n`);
+      return 2;
+    }
+
+    // Reducer sink is ALWAYS composed — it produces the final RunResult
+    // for --output. Observation sinks (console/file) stream alongside.
+    const reducer = createReducerSink();
+    const sinks: EventSink[] = [reducer.sink];
+    if (sinkMode === "console" || sinkMode === "both") {
+      sinks.push(new ConsoleSink({ out: { write: (chunk) => io.stdout(chunk) } }));
+    }
+    if (sinkMode === "file" || sinkMode === "both") {
+      const sinkFile =
+        (parsed.values["sink-file"] as string | undefined) ?? `${bundlePath}.events.jsonl`;
+      sinks.push(new FileSink({ path: sinkFile }));
+    }
+    const eventSink: EventSink = sinks.length === 1 ? sinks[0]! : new CompositeSink(sinks);
+
+    // Extract the raw prompt.md template from the bundle's root package
+    // so the platform prompt can wrap it with the standard preamble.
+    const rootPkg = bundle.packages.get(bundle.root);
+    const promptBytes = rootPkg?.files.get("prompt.md");
+    const template = promptBytes ? new TextDecoder().decode(promptBytes) : "";
+    const manifest = (rootPkg?.manifest ?? {}) as Record<string, unknown>;
+    const schemaVersion =
+      typeof manifest.schemaVersion === "string" ? manifest.schemaVersion : undefined;
+
+    const systemPrompt = renderPlatformPrompt({
+      template,
+      context,
+      ...(schemaVersion ? { schemaVersion } : {}),
+      platformName: "afps run",
+      timeoutSeconds,
+    });
+
+    // Workspace: user-provided dirs are respected and NEVER cleaned up
+    // (debug ergonomics). Tempdirs created here are auto-removed in
+    // the finally block.
+    const userWorkspace = parsed.values.workspace as string | undefined;
+    const workspaceDir = userWorkspace ?? (await mkdtemp(join(tmpdir(), "afps-run-")));
+    const ownsWorkspace = userWorkspace === undefined;
+
+    const cleanupTasks: Array<() => Promise<void>> = [];
+    if (ownsWorkspace) {
+      cleanupTasks.push(async () => rm(workspaceDir, { recursive: true, force: true }));
+    }
+
+    // Abort plumbing: timeout OR SIGINT aborts the controller, the
+    // PiRunner aborts its session, the sink observes an appstrate.error
+    // event, finalize runs, and we surface the right exit code.
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(
+      () => controller.abort(new TimeoutAbort()),
+      timeoutSeconds * 1000,
+    );
+    timeoutHandle.unref?.();
+    const onSigint = (): void => controller.abort(new SigintAbort());
+    process.on("SIGINT", onSigint);
+    cleanupTasks.push(async () => {
+      clearTimeout(timeoutHandle);
+      process.off("SIGINT", onSigint);
+    });
+
+    try {
+      let prepared: Awaited<ReturnType<RunnerPiModule["prepareBundleForPi"]>>;
+      try {
+        prepared = await runnerPi.prepareBundleForPi(bundle, {
+          workspaceDir,
+          onError: (msg) => io.stderr(`afps run: prepareBundleForPi: ${msg}\n`),
+        });
+      } catch (err) {
+        io.stderr(`afps run: prepareBundleForPi failed: ${redact(errorMessage(err), apiKey)}\n`);
+        return 1;
+      }
+      cleanupTasks.push(async () => prepared.cleanup());
+
+      const runner = new runnerPi.PiRunner({
+        model: {
+          api,
+          id: model,
+          ...(parsed.values["base-url"] ? { baseUrl: parsed.values["base-url"] } : {}),
+        },
+        apiKey,
+        systemPrompt,
+        extensionFactories: prepared.extensionFactories,
+        ...(thinkingLevel ? { thinkingLevel } : {}),
+      });
+
+      try {
+        await runner.run({
+          bundle,
+          context,
+          providerResolver: noopProviderResolver,
+          toolResolver: noopToolResolver,
+          skillResolver: noopSkillResolver,
+          eventSink,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (controller.signal.aborted) {
+          const reason = controller.signal.reason;
+          if (reason instanceof TimeoutAbort) {
+            io.stderr(`afps run: run timed out after ${timeoutSeconds}s\n`);
+            return 4;
+          }
+          if (reason instanceof SigintAbort) {
+            io.stderr("afps run: interrupted\n");
+            return 130;
+          }
+        }
+        io.stderr(`afps run: runner error: ${redact(errorMessage(err), apiKey)}\n`);
+        return 1;
+      }
+
+      const result = reducer.snapshot();
+
+      const outputPath = parsed.values.output as string | undefined;
+      if (outputPath) {
+        await writeFile(outputPath, JSON.stringify(result, null, 2) + "\n");
+        io.stdout(`→ wrote RunResult to ${outputPath}\n`);
+      }
+
+      if (result.error) {
+        io.stderr(`afps run: run finished with error: ${redact(result.error.message, apiKey)}\n`);
+        return 1;
+      }
+      return 0;
+    } finally {
+      // Run cleanups in reverse order so the workspace (created first)
+      // is removed last — after prepareBundleForPi.cleanup — to avoid
+      // double-unlink races on shared subtrees.
+      for (const task of cleanupTasks.reverse()) {
+        try {
+          await task();
+        } catch {
+          /* swallow cleanup errors — the primary exit code is already set */
+        }
+      }
+    }
   };
+}
+
+class TimeoutAbort {
+  readonly kind = "timeout";
+}
+
+class SigintAbort {
+  readonly kind = "sigint";
+}
+
+const noopProviderResolver = {
+  async resolve(): Promise<unknown[]> {
+    return [];
+  },
+};
+const noopToolResolver = {
+  async resolve(): Promise<unknown[]> {
+    return [];
+  },
+};
+const noopSkillResolver = {
+  async resolve(): Promise<unknown[]> {
+    return [];
+  },
+};
+
+function parseTimeout(raw: string | undefined, io: CliIO): number | null {
+  if (raw === undefined) return 300;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    io.stderr(`afps run: --timeout must be a positive number of seconds (got '${raw}')\n`);
+    return null;
+  }
+  return n;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Remove substrings matching the current `apiKey` from a message before
+ * surfacing it to the user. The API key ALWAYS flows through `--api-key`
+ * or `$AFPS_API_KEY` under the caller's control, so global leakage is
+ * not a risk here — this is belt-and-suspenders for logs pasted into
+ * bug reports.
+ *
+ * Skip redaction for the empty-string edge case (not possible given the
+ * earlier validation, but defensive).
+ */
+function redact(message: string, apiKey: string): string {
+  if (!apiKey) return message;
+  return message.split(apiKey).join("***");
 }
 
 interface ContextFile {

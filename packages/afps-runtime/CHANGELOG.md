@@ -11,9 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`afps run --events <path>` renamed to `afps test --events <path>`.** The
   scripted replay validates the sink + reducer contract — a conformance test,
-  not an agent execution. The `test` verb reflects that. `afps run` is now
-  free to designate real execution against an LLM (see "Added" below when it
-  lands).
+  not an agent execution. The `test` verb reflects that.
+
+### Added — `afps run` live execution
+
+- **`afps run <bundle> --api <api> --model <id>`** executes a bundle against a
+  real LLM via `@appstrate/runner-pi` (Pi Coding Agent SDK), in-process, with
+  no Docker and no sidecar. Provider-authenticated tools are NOT supported —
+  the Appstrate platform is the right place for those.
+- `@appstrate/runner-pi` is dynamic-imported so the base `afps-runtime`
+  package remains hermetically free of Pi SDK types and code. Missing
+  `runner-pi` or missing `@mariozechner/pi-coding-agent` peer dep each surface
+  a dedicated install hint.
+- Supports `--api-key` / `$AFPS_API_KEY`, `--base-url`, `--context`,
+  `--snapshot`, `--trust-root` (enforces signature verification),
+  `--timeout`, `--thinking-level`, `--workspace` (auto-tempdir with cleanup),
+  `--sink console|file|both|none`, `--sink-file`, `--output` (JSON RunResult
+  dump). Exit codes: 0 success, 1 runtime, 2 usage, 3 bundle/signature,
+  4 timeout, 130 SIGINT. API key is redacted from every surfaced error.
+- Exported helpers: `createRunHandler(deps)` for DI-based testing and
+  `assembleExecutionContext(contextFile, snapshot)` for direct unit tests.
 
 ### Added — Bundle format v1
 
