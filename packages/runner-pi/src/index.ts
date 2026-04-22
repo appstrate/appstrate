@@ -21,3 +21,5 @@ export {
   afpsToolToPiExtension,
   type ProviderEventEmitter,
 } from "./provider-bridge.ts";
+
+export { parsePiStreamLine, processPiLogs } from "./stream-parser.ts";

@@ -14,6 +14,7 @@ import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { TimeoutError } from "./types.ts";
 import { runContainerLifecycle, RunTimeoutError } from "@appstrate/afps-runtime/runner";
+import { processPiLogs } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
@@ -222,129 +223,5 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
-async function* processPiLogs(
-  logs: AsyncIterable<string>,
-  runId: string,
-): AsyncGenerator<RunEvent> {
-  let textBuffer = "";
-  let inCodeBlock = false;
-
-  const emitBuffer = (): RunEvent | null => {
-    const text = textBuffer.trim();
-    textBuffer = "";
-    return text.length > 0 ? progressEvent(runId, text) : null;
-  };
-
-  for await (const line of logs) {
-    const msg = parsePiStreamLine(line, runId);
-    if (!msg) continue;
-
-    // Text-delta-style progress streaming — accumulate short chunks and
-    // flush on fence / size threshold. Only plain text messages without
-    // structured `data` go through this path; structured events flush
-    // the buffer first and then pass through unchanged.
-    const isPlainProgress =
-      msg.type === "appstrate.progress" &&
-      msg.message !== undefined &&
-      msg.data === undefined &&
-      msg.level === undefined;
-
-    if (isPlainProgress) {
-      textBuffer += String(msg.message ?? "");
-
-      if (inCodeBlock) {
-        const closeIdx = textBuffer.indexOf("```");
-        if (closeIdx !== -1) {
-          inCodeBlock = false;
-          textBuffer = textBuffer.substring(closeIdx + 3);
-        } else {
-          textBuffer = "";
-        }
-        continue;
-      }
-
-      const fenceIdx = textBuffer.indexOf("```");
-      if (fenceIdx !== -1) {
-        const before = textBuffer.substring(0, fenceIdx);
-        textBuffer = before;
-        const flushed = emitBuffer();
-        if (flushed) yield flushed;
-        inCodeBlock = true;
-        textBuffer = "";
-        continue;
-      }
-
-      if (textBuffer.length >= 300 && !textBuffer.endsWith("`") && !textBuffer.endsWith("``")) {
-        const flushed = emitBuffer();
-        if (flushed) yield flushed;
-      }
-      continue;
-    }
-
-    const flushed = emitBuffer();
-    if (flushed) yield flushed;
-
-    yield msg;
-  }
-
-  const remaining = emitBuffer();
-  if (remaining) yield remaining;
-}
-
-/** @internal Exported for testing */
-export { processPiLogs as _processPiLogsForTesting };
-
 /** @internal Exported for testing */
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
-
-/**
- * Parse a single stdout line from the agent container.
- *
- * Post-Phase-7, `runtime-pi/entrypoint.ts` drives a {@link PiRunner} that
- * emits canonical AFPS {@link RunEvent}s directly on stdout. The parser
- * is therefore a thin JSON-shape validator — any line that decodes to
- * an object with `{ type: string, timestamp: number, runId: string }`
- * is passed through verbatim; everything else is wrapped as a
- * `[container]` progress event to preserve observability of stray
- * stderr forwarded onto stdout.
- *
- * @internal Exported for testing
- */
-export function parsePiStreamLine(line: string, runId: string): RunEvent | null {
-  const trimmed = line.trim();
-  if (trimmed.length === 0) return null;
-
-  try {
-    const obj = JSON.parse(trimmed) as Record<string, unknown>;
-
-    if (
-      typeof obj.type === "string" &&
-      typeof obj.timestamp === "number" &&
-      typeof obj.runId === "string"
-    ) {
-      return obj as RunEvent;
-    }
-
-    // Legit JSON, but not an AFPS RunEvent — surface as a plain
-    // progress breadcrumb rather than dropping silently.
-    return progressEvent(runId, `[container] ${trimmed}`);
-  } catch {
-    return progressEvent(runId, `[container] ${trimmed}`);
-  }
-}
-
-function progressEvent(
-  runId: string,
-  message: string,
-  extra?: { data?: unknown; level?: string },
-): RunEvent {
-  const event: RunEvent = {
-    type: "appstrate.progress",
-    timestamp: Date.now(),
-    runId,
-    message,
-  };
-  if (extra?.data !== undefined) event.data = extra.data;
-  if (extra?.level !== undefined) event.level = extra.level;
-  return event;
-}
