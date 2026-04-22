@@ -23,7 +23,7 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
 } from "@appstrate/runner-pi";
-import { loadBundleFromFile } from "@appstrate/afps-runtime/bundle";
+import { loadAnyBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfile } from "../lib/config.ts";
@@ -86,7 +86,12 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   } catch {
     throw new Error(`Bundle not found: ${bundlePath}`);
   }
-  const bundle = await loadBundleFromFile(bundlePath);
+  // Accept both legacy `.afps` (single-package) and the new multi-package
+  // `.afps-bundle` format. `loadAnyBundleFromFile` peeks at the archive
+  // once, dispatches to the right reader, and projects multi-package
+  // bundles onto the LoadedBundle surface that `prepareBundleForPi` +
+  // the resolvers expect.
+  const bundle = await loadAnyBundleFromFile(bundlePath);
 
   // ─── 5. Parse input + config ───────────────────────────────────────
   const input = await resolveInput(opts);
