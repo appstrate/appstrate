@@ -14,7 +14,7 @@ import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { TimeoutError } from "./types.ts";
 import { runContainerLifecycle, RunTimeoutError } from "@appstrate/afps-runtime/runner";
-import { processPiLogs } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv, processPiLogs } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
@@ -78,53 +78,30 @@ export function createPiContainerExecutor(orchestrator?: ContainerOrchestrator):
           : undefined,
       };
 
-      // Build agent env — NO RUN_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
-      const containerEnv: Record<string, string> = {
-        AGENT_PROMPT: prompt,
-        MODEL_API: llmConfig.api,
-        MODEL_ID: modelId,
-        SIDECAR_URL: "http://sidecar:8080",
-      };
-
-      const connectedProviderIds = plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id);
-      if (connectedProviderIds.length > 0) {
-        containerEnv.CONNECTED_PROVIDERS = connectedProviderIds.join(",");
-      }
-
-      // Route LLM calls through sidecar proxy (agent never sees real API keys)
-      if (llmApiKey) {
-        containerEnv.MODEL_BASE_URL = "http://sidecar:8080/llm";
-        containerEnv.MODEL_API_KEY = llmPlaceholder;
-      }
-
-      // Model capabilities (conditional — only set if defined)
-      if (llmConfig.input) containerEnv.MODEL_INPUT = JSON.stringify(llmConfig.input);
-      if (llmConfig.contextWindow != null)
-        containerEnv.MODEL_CONTEXT_WINDOW = String(llmConfig.contextWindow);
-      if (llmConfig.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
-      if (llmConfig.reasoning != null)
-        containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
-      if (llmConfig.cost) {
-        containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
-      }
-
-      // Output schema injection (optional — enables constrained decoding when present)
+      // Build agent env — NO RUN_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts.
+      // Route LLM calls through sidecar proxy (agent never sees real API keys);
+      // all outbound HTTP traffic routed through the sidecar forward proxy.
       const hasOutputSchema =
         plan.schemas.output?.properties && Object.keys(plan.schemas.output.properties).length > 0;
-
-      if (hasOutputSchema) {
-        containerEnv.OUTPUT_SCHEMA = JSON.stringify(plan.schemas.output);
-      }
-
-      // All outbound HTTP traffic routed through sidecar forward proxy.
-      // The run network is internal (no NAT) — clients that ignore
-      // HTTP_PROXY simply get connection failures, which is the desired behavior.
-      containerEnv.HTTP_PROXY = "http://sidecar:8081";
-      containerEnv.HTTPS_PROXY = "http://sidecar:8081";
-      containerEnv.http_proxy = "http://sidecar:8081";
-      containerEnv.https_proxy = "http://sidecar:8081";
-      containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
-      containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
+      const containerEnv = buildRuntimePiEnv({
+        model: {
+          api: llmConfig.api,
+          modelId,
+          baseUrl: llmConfig.baseUrl,
+          apiKey: llmApiKey,
+          apiKeyPlaceholder: llmPlaceholder,
+          input: llmConfig.input,
+          contextWindow: llmConfig.contextWindow,
+          maxTokens: llmConfig.maxTokens,
+          reasoning: llmConfig.reasoning,
+          cost: llmConfig.cost,
+        },
+        agentPrompt: prompt,
+        sidecarProxyLlmUrl: llmApiKey ? "http://sidecar:8080/llm" : undefined,
+        connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
+        outputSchema: hasOutputSchema ? plan.schemas.output : undefined,
+        forwardProxyUrl: "http://sidecar:8081",
+      });
 
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
