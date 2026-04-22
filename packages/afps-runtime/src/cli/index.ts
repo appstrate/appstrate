@@ -4,10 +4,11 @@
 /**
  * `afps` command-line entry point.
  *
- * The CLI exposes the runtime primitives (load, validate, sign,
- * verify, render) as portable subcommands so any machine with Bun can
- * exercise the same code paths Appstrate uses internally. Execution of
- * bundles against a real LLM (Pi Coding Agent) ships in Phase 10.
+ * The CLI exposes the runtime primitives (load, validate, sign, verify,
+ * render, test, run) as portable subcommands so any machine with Bun can
+ * exercise the same code paths Appstrate uses internally. Live execution
+ * (`afps run`) dynamic-imports `@appstrate/runner-pi`; every other command
+ * runs with zero extra dependencies.
  *
  * All commands receive a {@link CliIO} for stdout/stderr so tests can
  * capture output without touching the real process streams.
@@ -65,6 +66,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     inspect: async () => (await import("./commands/inspect.ts")).run(rest, io),
     render: async () => (await import("./commands/render.ts")).run(rest, io),
     test: async () => (await import("./commands/test.ts")).run(rest, io),
+    run: async () => (await import("./commands/run.ts")).run(rest, io),
     conformance: async () => (await import("./commands/conformance.ts")).run(rest, io),
   };
 
