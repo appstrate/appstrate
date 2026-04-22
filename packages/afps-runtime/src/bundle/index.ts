@@ -81,6 +81,13 @@ export {
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
+export {
+  renderPlatformPrompt,
+  type PlatformPromptOptions,
+  type PlatformPromptProvider,
+  type PlatformPromptTool,
+  type PlatformPromptSchema,
+} from "./platform-prompt.ts";
 
 // ─── Signature policy ───────────────────────────────────────────────
 export {

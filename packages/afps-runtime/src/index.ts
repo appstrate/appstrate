@@ -84,6 +84,15 @@ export {
   type RenderPromptOptions,
 } from "./bundle/index.ts";
 
+// Platform-style prompt composition (optional preamble).
+export {
+  renderPlatformPrompt,
+  type PlatformPromptOptions,
+  type PlatformPromptProvider,
+  type PlatformPromptTool,
+  type PlatformPromptSchema,
+} from "./bundle/index.ts";
+
 // Archive-level SRI integrity helpers (orthogonal to Bundle.integrity).
 export { computeIntegrity, type IntegrityCheckResult } from "./bundle/index.ts";
 
