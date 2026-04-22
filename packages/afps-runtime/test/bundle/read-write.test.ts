@@ -167,6 +167,27 @@ describe("writeBundleToBuffer — determinism", () => {
     expect(a).toEqual(b);
   });
 
+  it("writes successfully in negative-UTC timezones (fflate local-year check)", () => {
+    // fflate rejects mtimes whose LOCAL year resolves to <1980. A UTC-anchored
+    // epoch like Date.UTC(1980,0,1) lands in 1979 local time in the Americas
+    // and trips the writer. Anchor must clear the TZ offset band.
+    const originalTZ = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles"; // UTC-8 / UTC-7 DST
+    try {
+      const pkg = makeBundlePackage("@me/root@1.0.0" as PackageIdentity, ROOT_MANIFEST, {
+        "prompt.md": enc("p"),
+      });
+      const bundle = makeBundle({
+        root: "@me/root@1.0.0" as PackageIdentity,
+        packages: [pkg],
+      });
+      expect(() => writeBundleToBuffer(bundle)).not.toThrow();
+    } finally {
+      if (originalTZ === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTZ;
+    }
+  });
+
   it("metadata.builder does not affect bundle.json.integrity", () => {
     const pkg = makeBundlePackage("@me/root@1.0.0" as PackageIdentity, ROOT_MANIFEST, {
       "prompt.md": enc("p"),
@@ -200,7 +221,9 @@ describe("readBundleFromBuffer — tampering detection", () => {
     const zipped = writeBundleToBuffer(bundle);
     const entries = unzipSync(zipped);
     mutate(entries);
-    return zipSync(entries, { level: 0, mtime: Date.UTC(1980, 0, 1) });
+    // Must match the writer's DOS_EPOCH_MS exactly (1980-01-02T12:00Z — safe
+    // across UTC-12..UTC+14 TZs for fflate's local-year check).
+    return zipSync(entries, { level: 0, mtime: Date.UTC(1980, 0, 2, 12, 0, 0) });
   }
 
   it("detects a byte flip in a package file (RECORD_MISMATCH)", () => {

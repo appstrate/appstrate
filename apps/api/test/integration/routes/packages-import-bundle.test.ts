@@ -47,7 +47,9 @@ function enc(s: string): Uint8Array {
 // purely because of ZIP encoding artifacts: deflate vs store, default
 // mtime vs pinned mtime, key order — none of which reflect content
 // difference).
-const DOS_EPOCH_MS = Date.UTC(1980, 0, 1, 0, 0, 0);
+// Keep in lockstep with `reconstructPackageZip` / `writeBundleToBuffer` —
+// 1980-01-02T12:00Z survives fflate's local-TZ year check in UTC-12..UTC+14.
+const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 /**
  * Build a deterministic AFPS for a given package type. The content file
  * name varies by type (agent/prompt.md, skill/SKILL.md, etc) — that's
@@ -448,6 +450,47 @@ describe("POST /api/packages/import-bundle — import", () => {
       body: JSON.stringify({ foo: "bar" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("reuses existing version without overwriting storage on same-org re-import", async () => {
+    // Regression: on same-instance round-trip (publish → export → import),
+    // the importer must detect the matching row via the content-hash
+    // conflict check and skip uploading the reconstructed STORE-ZIP over
+    // the originally-published deflated ZIP. Overwriting would leave the
+    // DB-stored envelope integrity out of sync with storage and break
+    // /download's integrity gate.
+    const { bytes } = await seedAndExportBundle({
+      ctx,
+      rootId: "@srcself/a",
+      skillA: "@srcself/b",
+      skillB: "@srcself/c",
+    });
+
+    // Capture the pre-import storage bytes for the seeded version.
+    const preImportZip = await storage.downloadFile(BUCKET, "@srcself/a/1.0.0.afps");
+    expect(preImportZip).not.toBeNull();
+    const preImportHash = computeIntegrity(new Uint8Array(preImportZip!));
+
+    // Import the exported bundle back into the same org — every package
+    // has a pre-existing version row, so every entry should reuse.
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      imported: Array<{ identity: string; status: string }>;
+    };
+    expect(body.imported.every((i) => i.status === "reused")).toBe(true);
+
+    // Storage must be byte-identical — not clobbered by the reconstructed ZIP.
+    const postImportZip = await storage.downloadFile(BUCKET, "@srcself/a/1.0.0.afps");
+    expect(postImportZip).not.toBeNull();
+    const postImportHash = computeIntegrity(new Uint8Array(postImportZip!));
+    expect(postImportHash).toBe(preImportHash);
   });
 
   it("end-to-end parity: re-export after import yields byte-identical bundle", async () => {

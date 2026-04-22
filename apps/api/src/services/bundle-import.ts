@@ -34,7 +34,6 @@ import {
   readBundleFromBuffer,
 } from "@appstrate/afps-runtime/bundle";
 import { parsePackageZip } from "@appstrate/core/zip";
-import { computeIntegrity } from "@appstrate/core/integrity";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -43,11 +42,14 @@ import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
 import { installPackage } from "./application-packages.ts";
+import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 
-// Pinned DOS epoch (1980-01-01) matches the bundle writer — keeps the
-// per-package ZIP reconstruction deterministic on import.
-const DOS_EPOCH_MS = Date.UTC(1980, 0, 1, 0, 0, 0);
+// Pinned mtime — must match the bundle writer exactly for cross-format
+// integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
+// year check stays in 1980 across UTC-12..UTC+14; see
+// `packages/afps-runtime/src/bundle/write.ts`.
+const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
 /**
  * Reconstruct a deterministic per-package AFPS ZIP from a
@@ -166,23 +168,31 @@ export async function detectBundleConflicts(
       continue;
     }
 
-    // Per-version integrity check against the reconstructed ZIP — two
-    // imports of the same bundle yield byte-identical ZIPs, so reuse
-    // is stable and divergence is a real content conflict.
-    const reconstructed = reconstructPackageZip(pkg);
-    const incomingIntegrity = computeIntegrity(reconstructed);
+    // Per-version content check. The bundle carries a RECORD-based
+    // content integrity (`pkg.integrity`); the DB stores the AFPS ZIP
+    // envelope integrity. They have different inputs, so we can't
+    // compare them directly — decode the stored ZIP back into a
+    // BundlePackage (which recomputes the RECORD hash the same way),
+    // then compare content hashes. Two round-trips of the same content
+    // yield the same RECORD integrity regardless of ZIP envelope.
     const [existingVer] = await db
-      .select({ integrity: packageVersions.integrity })
+      .select({ integrity: packageVersions.integrity, version: packageVersions.version })
       .from(packageVersions)
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
       .limit(1);
-    if (existingVer && existingVer.integrity !== incomingIntegrity) {
-      conflicts.push({
-        identity,
-        reason: "integrity_mismatch",
-        existingIntegrity: existingVer.integrity,
-        incomingIntegrity,
-      });
+    if (existingVer) {
+      const storedZip = await downloadVersionZip(packageId, existingVer.version);
+      if (storedZip) {
+        const storedPkg = extractRootFromAfps(new Uint8Array(storedZip));
+        if (storedPkg.integrity !== pkg.integrity) {
+          conflicts.push({
+            identity,
+            reason: "integrity_mismatch",
+            existingIntegrity: storedPkg.integrity,
+            incomingIntegrity: pkg.integrity,
+          });
+        }
+      }
     }
   }
 
@@ -232,19 +242,23 @@ export async function importBundle(
       continue;
     }
 
-    const reconstructed = reconstructPackageZip(pkg);
-    const incomingIntegrity = computeIntegrity(reconstructed);
-
-    // Reuse path — version already present with matching integrity.
+    // Reuse path — version already present. The caller MUST have called
+    // `detectBundleConflicts` first, so if a row exists here the content
+    // is guaranteed equivalent (RECORD integrity match). Skip the upload
+    // to avoid clobbering the storage ZIP with our reconstructed bytes
+    // (which use STORE + pinned mtime and therefore a different envelope
+    // SHA than the original publish).
     const [existingVer] = await db
-      .select({ id: packageVersions.id, integrity: packageVersions.integrity })
+      .select({ id: packageVersions.id })
       .from(packageVersions)
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
       .limit(1);
-    if (existingVer && existingVer.integrity === incomingIntegrity) {
+    if (existingVer) {
       imported.push({ identity, status: "reused", versionId: existingVer.id });
       continue;
     }
+
+    const reconstructed = reconstructPackageZip(pkg);
 
     // Parse the reconstructed ZIP through the shared platform primitive
     // so we get the same manifest/content/files/type shape used by
