@@ -11,6 +11,7 @@ import { packages, profiles, applicationProviderCredentials } from "@appstrate/d
 import { encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
+import { handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
@@ -1417,6 +1418,33 @@ export function createPackagesRouter() {
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);
   }
+
+  // POST /api/packages/import-bundle — import a multi-package .afps-bundle
+  // (or a raw .afps, promoted to a bundle-of-one via the catalog).
+  router.post("/import-bundle", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      throw invalidRequest("Request must be multipart/form-data with a file field", "file");
+    }
+    const file = formData.get("file") ?? formData.get("bundle");
+    if (!file || !(file instanceof File)) {
+      throw invalidRequest("File is required", "file");
+    }
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
+      throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
+    const userId = c.get("user").id;
+
+    const result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    return c.json(result, 201);
+  });
 
   // POST /api/packages/import — import any package type from ZIP
   router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {

@@ -6,7 +6,7 @@
  * policies against signed, unsigned, and tampered bundles.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { zipArtifact } from "@appstrate/core/zip";
 import { canonicalBundleDigest, generateKeyPair, signBundle } from "@appstrate/afps-runtime/bundle";
 import {
@@ -68,8 +68,12 @@ describe("BundleSignaturePolicy", () => {
     });
   });
 
-  // Restore env after the describe block — other tests may rely on the
-  // defaults (`"off"`, `"[]"`).
+  // Restore env after each test — `policy=required` cases would
+  // otherwise leak into adjacent files in the same `bun test` run and
+  // cause every other catalog/bundle path to crash with `unsigned_required`.
+  afterEach(() => {
+    setEnv({ AFPS_TRUST_ROOT: originalTrustRoot, AFPS_SIGNATURE_POLICY: originalPolicy });
+  });
   afterAll(() => {
     setEnv({ AFPS_TRUST_ROOT: originalTrustRoot, AFPS_SIGNATURE_POLICY: originalPolicy });
   });
@@ -77,17 +81,22 @@ describe("BundleSignaturePolicy", () => {
   describe("policy=off", () => {
     beforeEach(() => setEnv({ AFPS_SIGNATURE_POLICY: "off" }));
 
-    it("accepts an unsigned bundle", async () => {
+    // Under policy=off the function short-circuits BEFORE invoking the
+    // legacy single-package loader so callers can ingest non-agent
+    // archives (skills, tools, providers) through the same pathway
+    // without tripping the prompt.md requirement. The return value
+    // signals "skipped" with `null`.
+    it("skips loading and returns null for an unsigned bundle", async () => {
       const bytes = buildBundleBytes();
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).toBeNull();
     });
 
-    it("accepts a bundle with an invalid signature", async () => {
+    it("skips loading and returns null for a bundle with a foreign signature", async () => {
       const foreignKey = generateKeyPair();
       const bytes = buildBundleBytes({ sign: foreignKey });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).toBeNull();
     });
   });
 
@@ -111,7 +120,8 @@ describe("BundleSignaturePolicy", () => {
     it("accepts a bundle signed by a trusted key", async () => {
       const bytes = buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).not.toBeNull();
+      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
     });
 
     it("rejects a bundle signed by an untrusted key with code=chain_missing", async () => {
@@ -133,20 +143,23 @@ describe("BundleSignaturePolicy", () => {
     it("accepts an unsigned bundle (warn only)", async () => {
       const bytes = buildBundleBytes();
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).not.toBeNull();
+      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
     });
 
     it("accepts a signed bundle with an invalid signature (warn only)", async () => {
       const foreignKey = generateKeyPair();
       const bytes = buildBundleBytes({ sign: foreignKey });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).not.toBeNull();
+      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
     });
 
     it("accepts a bundle signed by a trusted key", async () => {
       const bytes = buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle.manifest.name).toBe("@testorg/sig-test");
+      expect(bundle).not.toBeNull();
+      expect(bundle!.manifest.name).toBe("@testorg/sig-test");
     });
   });
 

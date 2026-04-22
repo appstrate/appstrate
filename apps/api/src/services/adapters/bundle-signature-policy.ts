@@ -110,10 +110,15 @@ export function _resetTrustRootCacheForTesting(): void {
 export async function loadAndVerifyBundle(
   buffer: Uint8Array,
   packageId: string,
-): Promise<LoadedBundle> {
-  const bundle = await loadBundleFromBuffer(buffer);
+): Promise<LoadedBundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  if (policy === "off") return bundle;
+  // Short-circuit when no policy is in effect — avoids invoking the
+  // legacy single-package loader (which assumes prompt.md) on skill /
+  // tool / provider archives. The bundle catalog fetch path needs to
+  // pull every package type; signature verification is gated by the
+  // policy env, not by every storage read.
+  if (policy === "off") return null;
+  const bundle = await loadBundleFromBuffer(buffer);
 
   const signature = readBundleSignature(bundle);
   if (!signature) {
