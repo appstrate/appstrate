@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   );
 
   process.stdout.write(`✓ wrote agent.afps (keyId: ${key.keyId})\n`);
-  process.stdout.write(`  run:  afps run ${join(HERE, "agent.afps")} \\\n`);
+  process.stdout.write(`  test: afps test ${join(HERE, "agent.afps")} \\\n`);
   process.stdout.write(`          --events ${join(HERE, "events.json")} \\\n`);
   process.stdout.write(`          --context ${join(HERE, "context.json")} \\\n`);
   process.stdout.write(`          --snapshot ${join(HERE, "snapshot.json")}\n`);

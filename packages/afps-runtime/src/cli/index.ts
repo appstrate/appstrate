@@ -35,7 +35,8 @@ Commands:
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  run <bundle>        Execute a bundle using the MockRunner
+  test <bundle>       Replay scripted events through the sink+reducer
+  run <bundle>        Execute a bundle against a real LLM (Pi SDK)
   conformance         Run the AFPS conformance suite (L1–L4)
 
 Run 'afps <command> --help' for per-command options.
@@ -63,7 +64,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     verify: async () => (await import("./commands/verify.ts")).run(rest, io),
     inspect: async () => (await import("./commands/inspect.ts")).run(rest, io),
     render: async () => (await import("./commands/render.ts")).run(rest, io),
-    run: async () => (await import("./commands/run.ts")).run(rest, io),
+    test: async () => (await import("./commands/test.ts")).run(rest, io),
     conformance: async () => (await import("./commands/conformance.ts")).run(rest, io),
   };
 

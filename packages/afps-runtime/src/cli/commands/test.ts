@@ -12,10 +12,10 @@ import type { RunEvent } from "../../types/run-event.ts";
 import type { EventSink } from "../../interfaces/event-sink.ts";
 import type { CliIO } from "../index.ts";
 
-const HELP = `afps run — replay a scripted agent run through a bundle
+const HELP = `afps test — replay scripted events through the sink+reducer contract
 
 Usage:
-  afps run <bundle> --events <path> [options]
+  afps test <bundle> --events <path> [options]
 
 Options:
   --events <path>     JSON array of RunEvent to replay through the sink.
@@ -27,9 +27,10 @@ Options:
                       <bundle>.events.jsonl).
   --quiet             Suppress ConsoleSink output even when selected.
 
-Scripted replay exercises the sink + reducer contract only. No LLM is
-invoked and no network call is made — the command is suitable for
-deterministic fixtures, conformance demos, and regression tests.
+Deterministic replay for conformance testing and fixture-based regression.
+No LLM, no network, no tool execution — validates the AFPS event pipeline
+(EventSink.handle → reduceEvents → EventSink.finalize). For real execution
+against an LLM, use \`afps run\`.
 `;
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
@@ -49,7 +50,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
       allowPositionals: true,
     });
   } catch (err) {
-    io.stderr(`afps run: ${(err as Error).message}\n`);
+    io.stderr(`afps test: ${(err as Error).message}\n`);
     io.stderr(HELP);
     return 2;
   }
@@ -60,12 +61,12 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
 
   const [bundlePath] = parsed.positionals;
   if (!bundlePath) {
-    io.stderr("afps run: missing <bundle> argument\n");
+    io.stderr("afps test: missing <bundle> argument\n");
     io.stderr(HELP);
     return 2;
   }
   if (!parsed.values.events) {
-    io.stderr("afps run: --events <path> is required\n");
+    io.stderr("afps test: --events <path> is required\n");
     return 2;
   }
 
@@ -99,11 +100,11 @@ async function readEvents(path: string, io: CliIO): Promise<RunEvent[] | null> {
   try {
     raw = JSON.parse(await readFile(path, "utf-8"));
   } catch (err) {
-    io.stderr(`afps run: cannot read events file: ${(err as Error).message}\n`);
+    io.stderr(`afps test: cannot read events file: ${(err as Error).message}\n`);
     return null;
   }
   if (!Array.isArray(raw)) {
-    io.stderr("afps run: --events file must contain a JSON array\n");
+    io.stderr("afps test: --events file must contain a JSON array\n");
     return null;
   }
   const events: RunEvent[] = [];
@@ -117,7 +118,7 @@ async function readEvents(path: string, io: CliIO): Promise<RunEvent[] | null> {
       typeof (ev as { timestamp?: unknown }).timestamp !== "number" ||
       typeof (ev as { runId?: unknown }).runId !== "string"
     ) {
-      io.stderr(`afps run: invalid event at index ${i}: expected { type, timestamp, runId, … }\n`);
+      io.stderr(`afps test: invalid event at index ${i}: expected { type, timestamp, runId, … }\n`);
       return null;
     }
     events.push(ev as RunEvent);
@@ -142,7 +143,7 @@ async function buildSink(
     sinks.push(new FileSink({ path: sinkFile }));
   }
   if (mode !== "console" && mode !== "file" && mode !== "both") {
-    io.stderr(`afps run: unknown --sink '${mode}' (console|file|both)\n`);
+    io.stderr(`afps test: unknown --sink '${mode}' (console|file|both)\n`);
     return null;
   }
   if (sinks.length === 0) {

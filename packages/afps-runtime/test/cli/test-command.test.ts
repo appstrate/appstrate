@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { runCli } from "../../src/cli/index.ts";
 import { captureIo, writeBundleFile, writeJsonFile } from "./helpers.ts";
 
-describe("afps run", () => {
+describe("afps test", () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "afps-cli-run-"));
@@ -27,7 +27,7 @@ describe("afps run", () => {
       { type: "output.emitted", timestamp: 0, runId: "r", data: { ok: true } },
     ]);
     const io = captureIo();
-    const code = await runCli(["run", bundle, "--events", events], io);
+    const code = await runCli(["test", bundle, "--events", events], io);
     expect(code).toBe(0);
     const text = io.stdoutText();
     expect(text).toContain("start");
@@ -45,7 +45,7 @@ describe("afps run", () => {
       { type: "state.set", timestamp: 0, runId: "r", state: { done: true } },
     ]);
     const code = await runCli(
-      ["run", bundle, "--events", events, "--output", output, "--quiet"],
+      ["test", bundle, "--events", events, "--output", output, "--quiet"],
       captureIo(),
     );
     expect(code).toBe(0);
@@ -64,7 +64,7 @@ describe("afps run", () => {
       { type: "memory.added", timestamp: 0, runId: "r", content: "two" },
     ]);
     const code = await runCli(
-      ["run", bundle, "--events", events, "--sink", "file", "--sink-file", sinkFile],
+      ["test", bundle, "--events", events, "--sink", "file", "--sink-file", sinkFile],
       captureIo(),
     );
     expect(code).toBe(0);
@@ -85,7 +85,7 @@ describe("afps run", () => {
     await writeBundleFile(bundle);
     await writeJsonFile(events, [{ type: "unknown", weird: true }]);
     const io = captureIo();
-    const code = await runCli(["run", bundle, "--events", events], io);
+    const code = await runCli(["test", bundle, "--events", events], io);
     expect(code).toBe(1);
     expect(io.stderrText()).toContain("invalid event at index 0");
   });
@@ -94,7 +94,7 @@ describe("afps run", () => {
     const bundle = join(dir, "a.afps");
     await writeBundleFile(bundle);
     const io = captureIo();
-    const code = await runCli(["run", bundle], io);
+    const code = await runCli(["test", bundle], io);
     expect(code).toBe(2);
     expect(io.stderrText()).toContain("--events");
   });
@@ -105,7 +105,7 @@ describe("afps run", () => {
     await writeBundleFile(bundle);
     await writeJsonFile(events, []);
     const io = captureIo();
-    const code = await runCli(["run", bundle, "--events", events, "--sink", "slack"], io);
+    const code = await runCli(["test", bundle, "--events", events, "--sink", "slack"], io);
     expect(code).toBe(1);
     expect(io.stderrText()).toContain("unknown --sink");
   });

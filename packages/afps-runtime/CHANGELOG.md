@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — CLI verbs
+
+- **`afps run --events <path>` renamed to `afps test --events <path>`.** The
+  scripted replay validates the sink + reducer contract — a conformance test,
+  not an agent execution. The `test` verb reflects that. `afps run` is now
+  free to designate real execution against an LLM (see "Added" below when it
+  lands).
+
 ### Added — Bundle format v1
 
 - Multi-package `Bundle` contract per [`BUNDLE_FORMAT_SPEC.md`](../../docs/architecture/BUNDLE_FORMAT_SPEC.md) §4:

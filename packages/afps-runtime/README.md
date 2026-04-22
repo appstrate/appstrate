@@ -14,7 +14,7 @@ locally.
   ships its own sink (`AppstrateEventSink`) and resolvers against the
   runtime's open surface.
 - **Reproducible.** A run can be recorded (file sink → `.jsonl`) and
-  replayed via `afps run --events <file>` with identical structural
+  replayed via `afps test --events <file>` with identical structural
   behaviour.
 - **Apache-2.0.** Toolbox, not a platform — build whatever you want on top.
 
@@ -37,7 +37,8 @@ afps <command> [options]
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  run <bundle>        Replay a scripted RunEvent[] through the sink + reducer
+  test <bundle>       Replay a scripted RunEvent[] through the sink + reducer
+  run <bundle>        Execute a bundle against a real LLM (Pi Coding Agent SDK)
   conformance         Run the AFPS conformance suite (L1–L4)
 ```
 
@@ -64,7 +65,7 @@ afps verify my-agent.afps --trust-root trust.json
 afps inspect my-agent.afps --json | jq
 
 # 6. Replay a recorded run
-afps run my-agent.afps --events events.json --output result.json
+afps test my-agent.afps --events events.json --output result.json
 
 # 7. Contract-test your implementation
 afps conformance --json | jq '.summary'
