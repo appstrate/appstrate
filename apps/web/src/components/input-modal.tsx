@@ -9,7 +9,7 @@ import { Spinner } from "./spinner";
 import { SchemaForm } from "@appstrate/ui/schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { UPLOADS_PATH } from "../api";
+import { uploadClient } from "../api";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
@@ -82,7 +82,7 @@ function InputModalForm({
         ref={formRef}
         wrapper={wrapper}
         formData={formData}
-        uploadPath={UPLOADS_PATH}
+        upload={uploadClient}
         labels={labels}
         onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
         onSubmit={(e) => onSubmit(e.formData as Record<string, unknown>)}

@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
-import { UPLOADS_PATH } from "../../api";
+import { uploadClient } from "../../api";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
@@ -55,7 +55,7 @@ function ConfigSection({
       <SchemaForm
         wrapper={wrapper}
         formData={values}
-        uploadPath={UPLOADS_PATH}
+        upload={uploadClient}
         labels={labels}
         onChange={(e) => setValues(e.formData as Record<string, unknown>)}
       />
