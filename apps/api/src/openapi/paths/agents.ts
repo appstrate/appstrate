@@ -698,4 +698,53 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/bundle": {
+    get: {
+      operationId: "exportAgentBundle",
+      tags: ["Agents"],
+      summary: "Export an agent as an .afps-bundle",
+      description:
+        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies at pinned versions. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). By default exports the version installed for this application; pass `?version=` to pin to a different release or dist-tag.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          in: "query",
+          name: "version",
+          required: false,
+          description:
+            "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag).",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The .afps-bundle archive",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            "Content-Disposition": {
+              description: "Attachment filename for the downloaded archive",
+              schema: { type: "string" },
+            },
+            "X-Bundle-Integrity": {
+              description:
+                "Bundle-level SRI digest (`sha256-<base64>`) over the canonical packages map — clients may compare this against a client-side recompute to validate the transfer without unzipping.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/vnd.appstrate.bundle+zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
 } as const;

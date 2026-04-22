@@ -69,6 +69,7 @@ const expectedEndpoints = [
   "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
+  "GET /api/agents/{scope}/{name}/bundle",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",

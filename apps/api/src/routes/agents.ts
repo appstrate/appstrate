@@ -30,6 +30,9 @@ import { z } from "zod";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
+import { buildBundleForAgentExport } from "../services/bundle-assembly.ts";
+import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { rateLimit } from "../middleware/rate-limit.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
@@ -272,6 +275,42 @@ export function createAgentsRouter() {
         throw notFound("Memory not found");
       }
       return c.json({ deleted: true });
+    },
+  );
+
+  // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
+  // (multi-package archive with pinned versions of every transitive dep).
+  router.get(
+    "/:scope{@[^/]+}/:name/bundle",
+    rateLimit(30),
+    requireAgent(),
+    requirePermission("agents", "read"),
+    async (c) => {
+      const agent = c.get("agent");
+      const scope = getAppScope(c);
+      const versionQuery = c.req.query("version") ?? null;
+
+      // Omit time-varying metadata (createdAt) so two exports of the same
+      // (package, version) produce byte-identical archives — this makes
+      // the export cache-friendly and the determinism contract explicit.
+      const bundle = await buildBundleForAgentExport(agent.id, scope, {
+        versionQuery,
+        metadata: { builder: "appstrate-platform" },
+      });
+
+      const bytes = writeBundleToBuffer(bundle);
+      const parsed = parseScopedName(agent.id);
+      const safeName = parsed ? `${parsed.scope}-${parsed.name}` : "bundle";
+
+      return new Response(new Uint8Array(bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.appstrate.bundle+zip",
+          "Content-Length": String(bytes.byteLength),
+          "Content-Disposition": `attachment; filename="${safeName}.afps-bundle"`,
+          "X-Bundle-Integrity": bundle.integrity,
+        },
+      });
     },
   );
 

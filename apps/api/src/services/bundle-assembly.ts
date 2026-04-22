@@ -18,6 +18,7 @@ import {
   buildBundleFromAfps,
   buildBundleFromCatalog,
   composeCatalogs,
+  extractRootFromAfps,
   InMemoryPackageCatalog,
   type Bundle,
   type BundleMetadata,
@@ -25,6 +26,12 @@ import {
   type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./adapters/db-package-catalog.ts";
+import { downloadVersionZip } from "./package-storage.ts";
+import { resolveVersion } from "./package-versions.ts";
+import { db } from "@appstrate/db/client";
+import { packageVersions, applicationPackages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { notFound } from "../lib/errors.ts";
 
 export interface BundleAssemblyScope {
   orgId: string;
@@ -74,4 +81,90 @@ export async function buildBundleFromUploadedAfps(
 ): Promise<Bundle> {
   const catalog = new DbPackageCatalog({ orgId: scope.orgId });
   return buildBundleFromAfps(archive, catalog, { metadata });
+}
+
+// ---------------------------------------------------------------------------
+// Export path — build a Bundle for GET /api/agents/:scope/:name/bundle
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the version of a package that should be exported.
+ *
+ * Resolution order:
+ *   1. Explicit `versionQuery` (exact / dist-tag / semver range) — fails
+ *      with 404 if unresolvable.
+ *   2. The version currently installed in the app (`application_packages.version_id`).
+ *   3. The `"latest"` dist-tag of the package.
+ *
+ * Returns the resolved `version` string. Throws `notFound` if no version
+ * exists for the package.
+ */
+export async function resolveExportVersion(
+  packageId: string,
+  scope: BundleAssemblyScope,
+  versionQuery?: string | null,
+): Promise<string> {
+  if (versionQuery) {
+    const versionId = await resolveVersion(packageId, versionQuery);
+    if (!versionId) {
+      throw notFound(`Version '${versionQuery}' not found for '${packageId}'`);
+    }
+    const [row] = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.id, versionId))
+      .limit(1);
+    if (!row) throw notFound(`Version '${versionQuery}' not found for '${packageId}'`);
+    return row.version;
+  }
+
+  // Installed version pin
+  const [installed] = await db
+    .select({ version: packageVersions.version })
+    .from(applicationPackages)
+    .innerJoin(packageVersions, eq(packageVersions.id, applicationPackages.versionId))
+    .where(
+      and(
+        eq(applicationPackages.applicationId, scope.applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
+  if (installed) return installed.version;
+
+  // Fall back to "latest"
+  const latestId = await resolveVersion(packageId, "latest");
+  if (latestId) {
+    const [row] = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.id, latestId))
+      .limit(1);
+    if (row) return row.version;
+  }
+
+  throw notFound(`No exportable version found for '${packageId}'`);
+}
+
+/**
+ * Build an export Bundle for the given package at the resolved version.
+ *
+ * Downloads the AFPS ZIP for `(packageId, version)` from storage, runs it
+ * through the same extraction primitive as ingestion (`extractRootFromAfps`),
+ * and walks transitive dependencies via {@link DbPackageCatalog}. The result
+ * is a canonical multi-package Bundle that can be serialised to bytes via
+ * {@link writeBundleToBuffer} and streamed to the caller.
+ */
+export async function buildBundleForAgentExport(
+  packageId: string,
+  scope: BundleAssemblyScope,
+  opts: { versionQuery?: string | null; metadata?: BundleMetadata } = {},
+): Promise<Bundle> {
+  const version = await resolveExportVersion(packageId, scope, opts.versionQuery);
+  const zip = await downloadVersionZip(packageId, version);
+  if (!zip) {
+    throw notFound(`Artifact missing for '${packageId}@${version}'`);
+  }
+  const root = extractRootFromAfps(new Uint8Array(zip));
+  return buildBundleFromDb(root, scope, opts.metadata);
 }
