@@ -138,14 +138,7 @@ export async function loadAndVerifyBundle(
     return bundle;
   }
 
-  const rootPkg = bundle.packages.get(bundle.root)!;
-  const rootFiles: Record<string, Uint8Array> = {};
-  for (const [p, bytes] of rootPkg.files) {
-    if (p === "RECORD") continue;
-    if (p === "signature.sig") continue;
-    rootFiles[p] = bytes;
-  }
-  const digest = canonicalBundleDigest(rootFiles);
+  const digest = canonicalBundleDigest(bundle);
   const result = verifyBundleSignature(digest, signature, getTrustRoot());
   if (!result.ok) {
     if (policy === "required") {

@@ -11,7 +11,6 @@ import {
   verifyBundleSignature,
   type TrustRoot,
 } from "../../bundle/signing.ts";
-import type { Bundle } from "../../bundle/types.ts";
 import type { CliIO } from "../index.ts";
 
 const HELP = `afps verify — validate a bundle and verify its signature
@@ -31,18 +30,6 @@ Exit codes:
   2   usage error
   3   signature verification failed
 `;
-
-function rootFilesRecord(bundle: Bundle): Record<string, Uint8Array> {
-  const rootPkg = bundle.packages.get(bundle.root);
-  if (!rootPkg) throw new Error(`bundle root ${bundle.root} is not in packages map`);
-  const out: Record<string, Uint8Array> = {};
-  for (const [p, bytes] of rootPkg.files) {
-    if (p === "RECORD") continue;
-    if (p === "signature.sig") continue;
-    out[p] = bytes;
-  }
-  return out;
-}
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   let parsed;
@@ -117,7 +104,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     return 2;
   }
 
-  const canonical = canonicalBundleDigest(rootFilesRecord(bundle));
+  const canonical = canonicalBundleDigest(bundle);
   const result = verifyBundleSignature(canonical, signature, trustRoot);
   if (!result.ok) {
     io.stderr(`✗ signature verification failed: ${result.reason}`);

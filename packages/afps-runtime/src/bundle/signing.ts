@@ -173,21 +173,22 @@ export function signBundle(bundleBytes: Uint8Array, opts: SignBundleOptions): Bu
  * central-directory ordering all vary by tool) so signatures taken
  * over raw ZIP bytes break under legitimate re-packing. This helper
  * reduces the bundle to `JSON([ [sortedPath, "sha256-<b64>"], … ])`
- * — a plain-text canonical form that every conforming runner can
- * reproduce from the same file set.
+ * over the root package's non-reserved files — a plain-text canonical
+ * form that every conforming runner can reproduce from the same file
+ * set.
  *
- * `signature.sig` is excluded by default so signing/verifying are
+ * `RECORD` and `signature.sig` are excluded so signing/verifying are
  * symmetrical (the signer computes this before writing the signature,
  * the verifier strips it from the loaded bundle).
  */
-export function canonicalBundleDigest(
-  files: Record<string, Uint8Array>,
-  exclude: readonly string[] = ["signature.sig"],
-): Uint8Array {
-  const excludeSet = new Set(exclude);
+export function canonicalBundleDigest(bundle: Bundle): Uint8Array {
+  const rootPkg = bundle.packages.get(bundle.root);
+  if (!rootPkg) {
+    throw new Error(`canonicalBundleDigest: bundle root ${bundle.root} not in packages map`);
+  }
   const entries: Array<[string, string]> = [];
-  for (const [path, content] of Object.entries(files)) {
-    if (excludeSet.has(path)) continue;
+  for (const [path, content] of rootPkg.files) {
+    if (path === "RECORD" || path === "signature.sig") continue;
     const hash = createHash("sha256").update(content).digest("base64");
     entries.push([path, `sha256-${hash}`]);
   }

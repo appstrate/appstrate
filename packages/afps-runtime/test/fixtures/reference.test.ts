@@ -20,17 +20,6 @@ import { emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import { validateBundle } from "../../src/bundle/validate-bundle.ts";
 import type { Bundle } from "../../src/bundle/types.ts";
 
-function rootFilesOf(bundle: Bundle): Record<string, Uint8Array> {
-  const rootPkg = bundle.packages.get(bundle.root)!;
-  const out: Record<string, Uint8Array> = {};
-  for (const [p, bytes] of rootPkg.files) {
-    if (p === "RECORD") continue;
-    if (p === "signature.sig") continue;
-    out[p] = bytes;
-  }
-  return out;
-}
-
 function rootPromptOf(bundle: Bundle): string {
   const rootPkg = bundle.packages.get(bundle.root)!;
   const bytes = rootPkg.files.get("prompt.md");
@@ -82,7 +71,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
     const trustRoot = await readJson<TrustRoot>("trust-root.json");
     const signature = readBundleSignature(bundle);
     expect(signature).not.toBeNull();
-    const digest = canonicalBundleDigest(rootFilesOf(bundle));
+    const digest = canonicalBundleDigest(bundle);
     const result = verifyBundleSignature(digest, signature!, trustRoot);
     expect(result.ok).toBe(true);
   });

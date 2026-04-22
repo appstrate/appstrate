@@ -20,22 +20,6 @@ import type { Bundle } from "../bundle/types.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { ConformanceAdapter } from "./adapter.ts";
 
-/**
- * Extract the root package's non-reserved files as a flat record —
- * the input shape {@link canonicalBundleDigest} and legacy prompt
- * assertions expect.
- */
-function rootFilesOf(bundle: Bundle): Record<string, Uint8Array> {
-  const rootPkg = bundle.packages.get(bundle.root);
-  if (!rootPkg) throw new Error(`bundle root ${bundle.root} not present in packages map`);
-  const out: Record<string, Uint8Array> = {};
-  for (const [p, bytes] of rootPkg.files) {
-    if (p === "RECORD") continue;
-    out[p] = bytes;
-  }
-  return out;
-}
-
 function rootManifestOf(bundle: Bundle): Record<string, unknown> {
   const rootPkg = bundle.packages.get(bundle.root);
   if (!rootPkg) throw new Error(`bundle root ${bundle.root} not present in packages map`);
@@ -268,7 +252,7 @@ const L3_VERIFY_DIRECT: ConformanceCase = {
     const kp = generateKeyPair();
     const bundleBytes = buildReferenceBundle();
     const loaded = adapter.loadBundle(bundleBytes);
-    const canonical = canonicalBundleDigest(rootFilesOf(loaded));
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: kp.privateKey, keyId: kp.keyId });
     const trust: TrustRoot = { keys: [{ keyId: kp.keyId, publicKey: kp.publicKey }] };
     const r = adapter.verifySignature(canonical, sig, trust);
@@ -284,7 +268,7 @@ const L3_DETECT_TAMPER: ConformanceCase = {
   run: (adapter) => {
     const kp = generateKeyPair();
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(rootFilesOf(loaded));
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: kp.privateKey, keyId: kp.keyId });
     const tampered = new Uint8Array(canonical);
     tampered[0] = tampered[0]! ^ 0xff;
@@ -306,7 +290,7 @@ const L3_UNKNOWN_KEY: ConformanceCase = {
     const signer = generateKeyPair();
     const other = generateKeyPair();
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(rootFilesOf(loaded));
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: signer.privateKey, keyId: signer.keyId });
     const trust: TrustRoot = { keys: [{ keyId: other.keyId, publicKey: other.publicKey }] };
     const r = adapter.verifySignature(canonical, sig, trust);
@@ -334,7 +318,7 @@ const L3_CHAIN_ACCEPTED: ConformanceCase = {
       }),
     ];
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(rootFilesOf(loaded));
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, {
       privateKey: publisher.privateKey,
       keyId: publisher.keyId,
@@ -364,7 +348,7 @@ const L3_UNTRUSTED_ROOT: ConformanceCase = {
       }),
     ];
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(rootFilesOf(loaded));
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, {
       privateKey: publisher.privateKey,
       keyId: publisher.keyId,

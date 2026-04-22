@@ -8,7 +8,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { zipArtifact } from "@appstrate/core/zip";
-import { canonicalBundleDigest, generateKeyPair, signBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  emptyPackageCatalog,
+  generateKeyPair,
+  signBundle,
+} from "@appstrate/afps-runtime/bundle";
 import {
   BundleSignatureError,
   loadAndVerifyBundle,
@@ -24,7 +30,7 @@ const MINIMAL_MANIFEST = JSON.stringify({
   schemaVersion: "1.1",
 });
 
-function buildBundleBytes(opts?: {
+async function buildBundleBytes(opts?: {
   prompt?: string;
   sign?: { keyId: string; privateKey: string };
 }) {
@@ -33,7 +39,9 @@ function buildBundleBytes(opts?: {
     "prompt.md": new TextEncoder().encode(opts?.prompt ?? "Hello {{runId}}"),
   };
   if (opts?.sign) {
-    const digest = canonicalBundleDigest(files);
+    const unsignedZip = zipArtifact(files, 6);
+    const unsignedBundle = await buildBundleFromAfps(unsignedZip, emptyPackageCatalog);
+    const digest = canonicalBundleDigest(unsignedBundle);
     const signature = signBundle(digest, {
       keyId: opts.sign.keyId,
       privateKey: opts.sign.privateKey,
@@ -87,14 +95,14 @@ describe("BundleSignaturePolicy", () => {
     // without tripping the prompt.md requirement. The return value
     // signals "skipped" with `null`.
     it("skips loading and returns null for an unsigned bundle", async () => {
-      const bytes = buildBundleBytes();
+      const bytes = await buildBundleBytes();
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).toBeNull();
     });
 
     it("skips loading and returns null for a bundle with a foreign signature", async () => {
       const foreignKey = generateKeyPair();
-      const bytes = buildBundleBytes({ sign: foreignKey });
+      const bytes = await buildBundleBytes({ sign: foreignKey });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).toBeNull();
     });
@@ -104,7 +112,7 @@ describe("BundleSignaturePolicy", () => {
     beforeEach(() => setEnv({ AFPS_SIGNATURE_POLICY: "required" }));
 
     it("rejects an unsigned bundle with code=unsigned_required", async () => {
-      const bytes = buildBundleBytes();
+      const bytes = await buildBundleBytes();
       await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow(
         BundleSignatureError,
       );
@@ -118,7 +126,7 @@ describe("BundleSignaturePolicy", () => {
     });
 
     it("accepts a bundle signed by a trusted key", async () => {
-      const bytes = buildBundleBytes({ sign: keypair });
+      const bytes = await buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
       expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
@@ -128,7 +136,7 @@ describe("BundleSignaturePolicy", () => {
 
     it("rejects a bundle signed by an untrusted key with code=chain_missing", async () => {
       const foreignKey = generateKeyPair();
-      const bytes = buildBundleBytes({ sign: foreignKey });
+      const bytes = await buildBundleBytes({ sign: foreignKey });
       try {
         await loadAndVerifyBundle(bytes, "@testorg/sig-test");
         throw new Error("expected throw");
@@ -143,7 +151,7 @@ describe("BundleSignaturePolicy", () => {
     beforeEach(() => setEnv({ AFPS_SIGNATURE_POLICY: "warn" }));
 
     it("accepts an unsigned bundle (warn only)", async () => {
-      const bytes = buildBundleBytes();
+      const bytes = await buildBundleBytes();
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
       expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
@@ -153,7 +161,7 @@ describe("BundleSignaturePolicy", () => {
 
     it("accepts a signed bundle with an invalid signature (warn only)", async () => {
       const foreignKey = generateKeyPair();
-      const bytes = buildBundleBytes({ sign: foreignKey });
+      const bytes = await buildBundleBytes({ sign: foreignKey });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
       expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
@@ -162,7 +170,7 @@ describe("BundleSignaturePolicy", () => {
     });
 
     it("accepts a bundle signed by a trusted key", async () => {
-      const bytes = buildBundleBytes({ sign: keypair });
+      const bytes = await buildBundleBytes({ sign: keypair });
       const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
       expect(bundle).not.toBeNull();
       expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
@@ -177,7 +185,7 @@ describe("BundleSignaturePolicy", () => {
         AFPS_TRUST_ROOT: JSON.stringify([{ keyId: "k1" /* publicKey missing */ }]),
         AFPS_SIGNATURE_POLICY: "required",
       });
-      const bytes = buildBundleBytes({ sign: keypair });
+      const bytes = await buildBundleBytes({ sign: keypair });
       await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow(
         /AFPS_TRUST_ROOT/,
       );
@@ -190,7 +198,7 @@ describe("BundleSignaturePolicy", () => {
         ]),
         AFPS_SIGNATURE_POLICY: "required",
       });
-      const bytes = buildBundleBytes({ sign: keypair });
+      const bytes = await buildBundleBytes({ sign: keypair });
       await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow(/32 bytes/);
     });
   });

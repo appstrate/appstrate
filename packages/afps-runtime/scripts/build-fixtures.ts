@@ -28,6 +28,8 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { zipSync } from "fflate";
 import { dirname, join } from "node:path";
+import { buildBundleFromAfps } from "../src/bundle/build.ts";
+import { emptyPackageCatalog } from "../src/bundle/catalog.ts";
 import { canonicalBundleDigest, generateKeyPair, signBundle } from "../src/bundle/signing.ts";
 
 const FIXTURE_DIR = new URL("../fixtures/reference/", import.meta.url).pathname;
@@ -111,7 +113,8 @@ async function main(): Promise<void> {
   await writeFile(join(FIXTURE_DIR, "bundle-unsigned.afps"), unsignedZip);
 
   const key = generateKeyPair();
-  const canonical = canonicalBundleDigest(unsignedFiles);
+  const unsignedBundle = await buildBundleFromAfps(unsignedZip, emptyPackageCatalog);
+  const canonical = canonicalBundleDigest(unsignedBundle);
   const signature = signBundle(canonical, {
     privateKey: key.privateKey,
     keyId: key.keyId,

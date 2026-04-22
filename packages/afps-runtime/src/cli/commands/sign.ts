@@ -28,22 +28,6 @@ interface KeyFile {
   privateKey: string;
 }
 
-/**
- * Flatten a Bundle's root package files into the `Record<string, Uint8Array>`
- * shape `canonicalBundleDigest` expects. The signature semantics cover the
- * root package — deps get their own per-package integrity via RECORD.
- */
-function rootFilesRecord(bundle: Bundle): Record<string, Uint8Array> {
-  const rootPkg = bundle.packages.get(bundle.root);
-  if (!rootPkg) throw new Error(`bundle root ${bundle.root} is not in packages map`);
-  const out: Record<string, Uint8Array> = {};
-  for (const [p, bytes] of rootPkg.files) {
-    if (p === "RECORD") continue;
-    out[p] = bytes;
-  }
-  return out;
-}
-
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   let parsed;
   try {
@@ -111,7 +95,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   const bundleBytes = await readFile(bundlePath);
   const bundle = readBundleFromBuffer(new Uint8Array(bundleBytes));
 
-  const canonical = canonicalBundleDigest(rootFilesRecord(bundle));
+  const canonical = canonicalBundleDigest(bundle);
   const signature = signBundle(canonical, {
     privateKey: keyFile.privateKey,
     keyId: parsed.values["key-id"] ?? keyFile.keyId,
