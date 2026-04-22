@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 import { describe, it, expect, mock } from "bun:test";
-import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
-import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";
-import { runContainerLifecycle } from "../../src/services/adapters/container-lifecycle.ts";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import {
+  runContainerLifecycle,
+  RunTimeoutError,
+  type WorkloadOrchestrator,
+} from "../../src/runner/container-lifecycle.ts";
+import type { RunEvent } from "../../src/types/run-event.ts";
+
+interface TestHandle {
+  id: string;
+  runId: string;
+  role: string;
+}
 
 const RUN_ID = "exec-1";
 
-function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
+function createMockOrchestrator(
+  overrides?: Partial<WorkloadOrchestrator<TestHandle>>,
+): WorkloadOrchestrator<TestHandle> {
   return {
-    initialize: mock(() => Promise.resolve()),
-    shutdown: mock(() => Promise.resolve()),
-    cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
-    ensureImages: mock(() => Promise.resolve()),
-    createIsolationBoundary: mock(() =>
-      Promise.resolve({ id: "boundary-1", name: "test-boundary" }),
-    ),
-    removeIsolationBoundary: mock(() => Promise.resolve()),
-    createSidecar: mock(() => Promise.resolve({ id: "sidecar-1", runId: RUN_ID, role: "sidecar" })),
-    createWorkload: mock(() => Promise.resolve({ id: "agent-1", runId: RUN_ID, role: "agent" })),
     startWorkload: mock(() => Promise.resolve()),
     stopWorkload: mock(() => Promise.resolve()),
     removeWorkload: mock(() => Promise.resolve()),
@@ -27,12 +28,11 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     streamLogs: mock(async function* () {
       yield '{"type": "text_delta", "text": "hello"}';
     }),
-    stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,
   };
 }
 
-function createHandle(overrides?: Partial<WorkloadHandle>): WorkloadHandle {
+function createHandle(overrides?: Partial<TestHandle>): TestHandle {
   return {
     id: "container-1",
     runId: RUN_ID,
@@ -70,11 +70,7 @@ describe("runContainerLifecycle", () => {
         adapterName: "pi",
         runId: RUN_ID,
         timeout: 30,
-        processLogs: async function* (logs) {
-          for await (const line of logs) {
-            yield progressEvent(line);
-          }
-        },
+        processLogs: async function* () {},
       }),
     );
 
@@ -286,5 +282,38 @@ describe("runContainerLifecycle", () => {
     } catch (err) {
       expect((err as Error).message).toBe("OOM killed");
     }
+  });
+
+  it("throws RunTimeoutError when the timeout fires before exit", async () => {
+    const orchestrator = createMockOrchestrator({
+      streamLogs: async function* () {
+        // Stream completes without yielding, so waitForExit runs next.
+      },
+      waitForExit: mock(
+        () =>
+          new Promise<number>((resolve) => {
+            setTimeout(() => resolve(0), 50);
+          }),
+      ),
+    });
+    const handle = createHandle();
+
+    let caught: unknown;
+    try {
+      await collectEvents(
+        runContainerLifecycle({
+          orchestrator,
+          handle,
+          adapterName: "pi",
+          runId: RUN_ID,
+          timeout: 0.001,
+          processLogs: async function* () {},
+        }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(RunTimeoutError);
   });
 });

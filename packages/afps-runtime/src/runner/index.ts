@@ -3,6 +3,12 @@
 
 export { type Runner, type RunOptions } from "./types.ts";
 export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
+export {
+  runContainerLifecycle,
+  RunTimeoutError,
+  type WorkloadOrchestrator,
+  type ContainerLifecycleOptions,
+} from "./container-lifecycle.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
 // typically import it alongside the runner surface.
 export type { RunResult, RunError, LogEntry, LogLevel } from "../types/run-result.ts";

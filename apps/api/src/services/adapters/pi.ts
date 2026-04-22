@@ -12,7 +12,8 @@
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
-import { runContainerLifecycle } from "./container-lifecycle.ts";
+import { TimeoutError } from "./types.ts";
+import { runContainerLifecycle, RunTimeoutError } from "@appstrate/afps-runtime/runner";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
@@ -162,17 +163,30 @@ export function createPiContainerExecutor(orchestrator?: ContainerOrchestrator):
       sidecarHandle = sidecar;
 
       // Phase 3: Run agent container lifecycle (start + stream + wait + cleanup)
-      yield* runContainerLifecycle({
-        orchestrator: orch,
-        handle: agent,
-        adapterName: "pi",
-        runId,
-        timeout: plan.timeout,
-        extraData: { api: llmConfig.api, model: modelId },
-        signal,
-        stopOnTimeout: [sidecarHandle],
-        processLogs: (logs) => processPiLogs(logs, runId),
-      });
+      try {
+        yield* runContainerLifecycle<WorkloadHandle>({
+          orchestrator: orch,
+          handle: agent,
+          adapterName: "pi",
+          runId,
+          timeout: plan.timeout,
+          extraData: { api: llmConfig.api, model: modelId },
+          signal,
+          stopOnTimeout: [sidecarHandle],
+          processLogs: (logs) => processPiLogs(logs, runId),
+          onRemoveError: (h, err) => {
+            logger.error("Failed to remove workload", {
+              workloadId: h.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          },
+        });
+      } catch (err) {
+        if (err instanceof RunTimeoutError) {
+          throw new TimeoutError(err.message);
+        }
+        throw err;
+      }
     } finally {
       // Cleanup sidecar first, then boundary (network requires all containers disconnected)
       if (sidecarHandle) {
@@ -209,7 +223,7 @@ function deriveKeyPlaceholder(key: string | undefined): string {
 }
 
 async function* processPiLogs(
-  logs: AsyncGenerator<string>,
+  logs: AsyncIterable<string>,
   runId: string,
 ): AsyncGenerator<RunEvent> {
   let textBuffer = "";
