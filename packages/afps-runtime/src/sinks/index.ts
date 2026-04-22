@@ -5,3 +5,4 @@ export { ConsoleSink, type ConsoleSinkOptions, type ConsoleWritable } from "./co
 export { FileSink, type FileSinkOptions } from "./file-sink.ts";
 export { HttpSink, type HttpSinkOptions } from "./http-sink.ts";
 export { CompositeSink } from "./composite-sink.ts";
+export { createReducerSink, type ReducerSinkHandle } from "./reducer-sink.ts";
