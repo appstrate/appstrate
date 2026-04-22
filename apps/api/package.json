@@ -29,6 +29,7 @@
     "bullmq": "^5.74.1",
     "cron-parser": "4",
     "drizzle-orm": "^0.45.2",
+    "fflate": "^0.8.2",
     "file-type": "^22.0.1",
     "hono": "^4.12.14",
     "ioredis": "^5.10.0",
