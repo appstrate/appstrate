@@ -27,11 +27,13 @@ import { BundleError } from "./errors.ts";
 import { parsePackageIdentity } from "./types.ts";
 
 /**
- * Pinned DOS epoch (1980-01-01T00:00:00Z) for ZIP mtime. Any earlier
- * value crashes fflate; any later value makes outputs depend on wall
- * clock. This is the canonical "zero" for ZIP determinism.
+ * Pinned mtime for ZIP entries. fflate rejects mtimes that resolve to
+ * a local year <1980 or >2099, and reads `mtime` via `new Date(ms)`
+ * which applies the runtime's TZ offset. Anchor at 1980-01-02 12:00 UTC
+ * so every TZ between UTC-12 and UTC+14 lands on a 1980 local date.
+ * Deterministic across hosts — the value is a constant.
  */
-const DOS_EPOCH_MS = Date.UTC(1980, 0, 1, 0, 0, 0);
+const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
 export async function writeBundleToFile(bundle: Bundle, path: string): Promise<void> {
   const buf = writeBundleToBuffer(bundle);

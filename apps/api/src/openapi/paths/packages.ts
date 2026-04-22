@@ -1,6 +1,100 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const packagesPaths = {
+  "/api/packages/import-bundle": {
+    post: {
+      operationId: "importBundle",
+      tags: ["Packages"],
+      summary: "Import a multi-package .afps-bundle",
+      description:
+        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current application. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              required: ["file"],
+              properties: {
+                file: {
+                  type: "string",
+                  format: "binary",
+                  description:
+                    ".afps-bundle (preferred) or .afps archive — detected automatically via the bundle.json marker.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Bundle imported",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["imported", "rootInstalled", "rootPackageId", "rootVersion"],
+                properties: {
+                  imported: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["identity", "status"],
+                      properties: {
+                        identity: {
+                          type: "string",
+                          description: "Bundle package identity (@scope/name@version)",
+                        },
+                        status: {
+                          type: "string",
+                          enum: ["inserted", "reused"],
+                          description:
+                            "`inserted` means the version is new; `reused` means the version already existed with matching integrity.",
+                        },
+                        versionId: {
+                          type: ["integer", "null"],
+                          description: "DB row id for the version; null for system packages.",
+                        },
+                      },
+                    },
+                  },
+                  rootInstalled: {
+                    type: "boolean",
+                    description:
+                      "Whether the root was installed in the calling application (false if it was already installed).",
+                  },
+                  rootPackageId: { type: "string" },
+                  rootVersion: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org). Error code: `bundle_conflict`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/packages/import": {
     post: {
       operationId: "importPackage",
