@@ -30,6 +30,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
+import type { AgentManifest } from "../../../src/types/index.ts";
 import { bundleToLoadedBundle, readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 
 function enc(s: string): Uint8Array {
@@ -128,7 +129,7 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     const result = await buildAgentPackage(
       {
         id: "@bundlehost/root-agent",
-        manifest: agentManifest,
+        manifest: agentManifest as unknown as AgentManifest,
         prompt: "You are the agent.",
         skills: [],
         tools: [],
@@ -186,7 +187,7 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     const a = await buildAgentPackage(
       {
         id: "@bundlehost/solo-agent",
-        manifest,
+        manifest: manifest as unknown as AgentManifest,
         prompt: "Deterministic please.",
         skills: [],
         tools: [],
@@ -197,7 +198,7 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     const b = await buildAgentPackage(
       {
         id: "@bundlehost/solo-agent",
-        manifest,
+        manifest: manifest as unknown as AgentManifest,
         prompt: "Deterministic please.",
         skills: [],
         tools: [],
@@ -230,7 +231,7 @@ describe("buildAgentPackage — multi-package bundle output", () => {
       buildAgentPackage(
         {
           id: "@bundlehost/broken-agent",
-          manifest,
+          manifest: manifest as unknown as AgentManifest,
           prompt: "nope",
           skills: [],
           tools: [],

@@ -4,13 +4,17 @@
 /**
  * Public surface for `@appstrate/afps-runtime/bundle`.
  *
- * The new multi-package {@link Bundle} contract (spec §4) is the primary
- * API from Phase 1 onwards. The legacy single-package {@link LoadedBundle}
- * surface is kept during the migration — callers should prefer the new
- * API and use {@link loadedBundleToBundle} when bridging.
+ * The multi-package {@link Bundle} contract (spec §4) is the primary
+ * API. {@link LoadedBundle} is a flat path-keyed projection used by
+ * runtime consumers that prefer single-map file access — both are
+ * first-class and stable.
+ *
+ * Interop utilities at the bottom (`bundleToLoadedBundle`,
+ * `loadedBundleToBundle`, `loadAnyBundleFrom*`) let callers move between
+ * the two representations without re-decoding the archive.
  */
 
-// ─── New Bundle contract ────────────────────────────────────────────
+// ─── Core types + errors ────────────────────────────────────────────
 export {
   BUNDLE_FORMAT_VERSION,
   parsePackageIdentity,
@@ -28,6 +32,8 @@ export {
 export { BundleError, type BundleErrorCode } from "./errors.ts";
 export { DEFAULT_BUNDLE_LIMITS, resolveBundleLimits, type BundleLimits } from "./limits.ts";
 export { canonicalJsonStringify } from "./canonical-json.ts";
+
+// ─── Integrity primitives (RECORD + bundle.json merkle) ─────────────
 export {
   bundleIntegrity,
   computeRecordEntries,
@@ -38,6 +44,12 @@ export {
   serializeRecord,
   type RecordEntry,
 } from "./integrity.ts";
+// Byte-level SRI over a whole archive (used by platform storage layer
+// to detect at-rest corruption — orthogonal to the Merkle integrity
+// that ships inside Bundle.integrity).
+export { computeIntegrity, type IntegrityCheckResult } from "./hash.ts";
+
+// ─── Read / write / build ───────────────────────────────────────────
 export { readBundleFromBuffer, readBundleFromFile, type ReadBundleOptions } from "./read.ts";
 export { writeBundleToBuffer, writeBundleToFile } from "./write.ts";
 export {
@@ -52,12 +64,26 @@ export {
   emptyPackageCatalog,
   type InMemoryCatalogOptions,
 } from "./catalog.ts";
+
+// ─── Validation ─────────────────────────────────────────────────────
+// Primary: multi-package Bundle validator.
 export {
-  validateBundle as validateBundleV2,
+  validateBundle,
   type BundleValidationIssue,
   type BundleValidationResult,
-  type ValidateBundleV2Options,
+  type ValidateBundleOptions,
 } from "./validate-bundle.ts";
+// Secondary: AFPS single-package manifest validator — used when you
+// only have a `LoadedBundle` (tooling, CLI inspect/verify paths).
+export {
+  validateAfpsManifest,
+  type AfpsManifestValidationIssue,
+  type AfpsManifestValidationResult,
+  type ValidateAfpsManifestOptions,
+} from "./validator.ts";
+
+// ─── LoadedBundle flat surface + interop adapters ───────────────────
+export { loadBundleFromBuffer, type LoadedBundle } from "./loader.ts";
 export {
   bundleOfOneFromAfps,
   bundleToLoadedBundle,
@@ -67,7 +93,7 @@ export {
   type LoadAnyBundleOptions,
 } from "./bridge.ts";
 
-// ─── Legacy single-package surface (deprecated, kept for migration) ─
+// ─── Prompt rendering ───────────────────────────────────────────────
 export {
   renderPrompt,
   buildPromptView,
@@ -76,20 +102,8 @@ export {
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
-export { computeIntegrity, verifyIntegrity, type IntegrityCheckResult } from "./hash.ts";
-export {
-  loadBundleFromBuffer,
-  loadBundleFromFile,
-  BundleLoadError,
-  type LoadedBundle,
-  type LoadBundleOptions,
-} from "./loader.ts";
-export {
-  validateBundle,
-  type ValidationResult,
-  type ValidationIssue,
-  type ValidateBundleOptions,
-} from "./validator.ts";
+
+// ─── Signing / trust root ───────────────────────────────────────────
 export {
   canonicalBundleDigest,
   signBundle,

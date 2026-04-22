@@ -3,7 +3,7 @@
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { loadBundleFromBuffer } from "../../bundle/loader.ts";
+import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
 import { renderPrompt } from "../../bundle/prompt-renderer.ts";
 import type { ExecutionContext } from "../../types/execution-context.ts";
 import type { CliIO } from "../index.ts";
@@ -65,7 +65,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadBundleFromBuffer(bundleBytes);
+  const bundle = loadAnyBundleFromBuffer(bundleBytes);
 
   let contextFile: RenderContextFile = {};
   if (parsed.values.context) {

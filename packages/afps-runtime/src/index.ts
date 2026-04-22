@@ -9,6 +9,11 @@
  * import the narrow surface they need; the top-level re-exports the
  * full public API for convenience.
  *
+ * The multi-package {@link Bundle} contract (spec §4) is the primary
+ * API. {@link LoadedBundle} remains a first-class flat projection for
+ * consumers that prefer path-keyed access — `bundleToLoadedBundle`
+ * bridges the two without re-decoding.
+ *
  * AFPS 1.3 introduces three spec-aligned resolver interfaces
  * (ToolResolver, ProviderResolver, SkillResolver). They live under
  * `@appstrate/afps-runtime/resolvers`.
@@ -22,7 +27,7 @@ export * from "./events/index.ts";
 export * from "./sinks/index.ts";
 export * from "./template/index.ts";
 
-// New multi-package Bundle contract (spec §4)
+// Multi-package Bundle contract (spec §4) — primary API.
 export {
   BUNDLE_FORMAT_VERSION,
   BundleError,
@@ -48,7 +53,7 @@ export {
   recordIntegrity,
   resolveBundleLimits,
   serializeRecord,
-  validateBundleV2,
+  validateBundle,
   writeBundleToBuffer,
   writeBundleToFile,
   type AfpsManifest,
@@ -68,10 +73,28 @@ export {
   type ReadBundleOptions,
   type RecordEntry,
   type ResolvedPackage,
-  type ValidateBundleV2Options,
+  type ValidateBundleOptions,
 } from "./bundle/index.ts";
 
-// Legacy single-package surface (deprecated — prefer the Bundle API above)
+// LoadedBundle flat projection + interop adapters.
+export {
+  bundleToLoadedBundle,
+  loadAnyBundleFromBuffer,
+  loadAnyBundleFromFile,
+  loadBundleFromBuffer,
+  type LoadAnyBundleOptions,
+  type LoadedBundle,
+} from "./bundle/index.ts";
+
+// AFPS single-package manifest validator (flat LoadedBundle input).
+export {
+  validateAfpsManifest,
+  type AfpsManifestValidationIssue,
+  type AfpsManifestValidationResult,
+  type ValidateAfpsManifestOptions,
+} from "./bundle/index.ts";
+
+// Prompt rendering.
 export {
   renderPrompt,
   buildPromptView,
@@ -79,21 +102,12 @@ export {
   type PromptViewProvider,
   type PromptViewUpload,
   type RenderPromptOptions,
-} from "./bundle/prompt-renderer.ts";
-export { computeIntegrity, verifyIntegrity, type IntegrityCheckResult } from "./bundle/hash.ts";
-export {
-  loadBundleFromBuffer,
-  loadBundleFromFile,
-  BundleLoadError,
-  type LoadedBundle,
-  type LoadBundleOptions,
-} from "./bundle/loader.ts";
-export {
-  validateBundle,
-  type ValidationResult,
-  type ValidationIssue,
-  type ValidateBundleOptions,
-} from "./bundle/validator.ts";
+} from "./bundle/index.ts";
+
+// Archive-level SRI integrity helpers (orthogonal to Bundle.integrity).
+export { computeIntegrity, type IntegrityCheckResult } from "./bundle/index.ts";
+
+// Signing + trust root.
 export {
   canonicalBundleDigest,
   signBundle,
@@ -112,7 +126,7 @@ export {
   type SignChildKeyOptions,
   type VerifySignatureResult,
   type VerifySignatureFailureReason,
-} from "./bundle/signing.ts";
+} from "./bundle/index.ts";
 
 export * from "./runner/index.ts";
 export * from "./conformance/index.ts";
