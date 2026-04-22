@@ -87,6 +87,16 @@ export {
 // Archive-level SRI integrity helpers (orthogonal to Bundle.integrity).
 export { computeIntegrity, type IntegrityCheckResult } from "./bundle/index.ts";
 
+// Signature policy wrapper (3-state off/warn/required).
+export {
+  verifyBundleWithPolicy,
+  BundleSignaturePolicyError,
+  type SignaturePolicy,
+  type SignaturePolicyReason,
+  type VerifyBundlePolicyOptions,
+  type VerifyBundlePolicyOutcome,
+} from "./bundle/index.ts";
+
 // Signing + trust root.
 export {
   canonicalBundleDigest,

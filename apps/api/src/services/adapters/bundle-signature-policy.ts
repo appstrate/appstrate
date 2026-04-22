@@ -5,25 +5,21 @@
  * configuration (`AFPS_TRUST_ROOT` + `AFPS_SIGNATURE_POLICY` env vars)
  * and the runtime's signing primitives.
  *
- * Policies:
- *   - "off"       — no verification. Unsigned and invalid bundles load.
- *   - "warn"      — verify if the bundle carries a signature; log a
- *                   warning on unsigned or invalid bundles but still
- *                   return the loaded bundle.
- *   - "required"  — reject unsigned and invalid bundles at load time
- *                   (throws `BundleSignatureError`).
+ * The 3-state policy (off / warn / required) lives in the runtime — see
+ * `verifyBundleWithPolicy` in `@appstrate/afps-runtime/bundle`. This
+ * wrapper owns trust-root parsing, logging wiring, and translation of
+ * the runtime's `BundleSignaturePolicyError` into a platform-typed
+ * error that carries the offending `packageId`.
  *
- * See docs/adr/ADR-009-afps-bundle-signing-ed25519-to-sigstore.md for
- * the design rationale (Ed25519 v1 → Sigstore keyless v2).
+ * See docs/adr/ADR-009-afps-bundle-signing-ed25519-to-sigstore.md.
  */
 
 import { z } from "zod";
 import {
   buildBundleFromAfps,
-  canonicalBundleDigest,
   emptyPackageCatalog,
-  readBundleSignature,
-  verifyBundleSignature,
+  verifyBundleWithPolicy,
+  BundleSignaturePolicyError,
   type Bundle,
   type TrustRoot,
   type TrustedKey,
@@ -113,50 +109,45 @@ export async function loadAndVerifyBundle(
   packageId: string,
 ): Promise<Bundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  // Short-circuit when no policy is in effect — avoids the ingestion
-  // cost on skill / tool / provider archives. The bundle catalog fetch
-  // path needs to pull every package type; signature verification is
-  // gated by the policy env, not by every storage read.
   if (policy === "off") return null;
-  // Ingest the single-package `.afps` archive as a Bundle-of-1 so
-  // signature + verification share one code path with the multi-package
-  // flow. `emptyPackageCatalog` guarantees we do no dep walking — this
-  // helper operates on the archive bytes alone.
+
   const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog);
 
-  const signature = readBundleSignature(bundle);
-  if (!signature) {
-    if (policy === "required") {
-      throw new BundleSignatureError(
-        "unsigned_required",
-        packageId,
-        `Bundle for ${packageId} is unsigned and AFPS_SIGNATURE_POLICY=required`,
-      );
-    }
-    // warn mode
-    logger.warn("AFPS bundle is unsigned", { packageId });
-    return bundle;
-  }
-
-  const digest = canonicalBundleDigest(bundle);
-  const result = verifyBundleSignature(digest, signature, getTrustRoot());
-  if (!result.ok) {
-    if (policy === "required") {
-      throw new BundleSignatureError(
-        result.reason,
-        packageId,
-        `Bundle signature verification failed for ${packageId}: ${result.reason}`,
-        result.detail,
-      );
-    }
-    logger.warn("AFPS bundle signature invalid", {
-      packageId,
-      reason: result.reason,
-      detail: result.detail,
+  try {
+    verifyBundleWithPolicy(bundle, {
+      policy,
+      trustRoot: getTrustRoot(),
+      onWarn: (reason, detail) => {
+        if (reason === "unsigned") {
+          logger.warn("AFPS bundle is unsigned", { packageId });
+        } else {
+          logger.warn("AFPS bundle signature invalid", { packageId, reason, detail });
+        }
+      },
+      onVerified: (keyId) => {
+        logger.debug("AFPS bundle signature verified", { packageId, keyId });
+      },
     });
-    return bundle;
+  } catch (err) {
+    if (err instanceof BundleSignaturePolicyError) {
+      // Runtime's "unsigned" code only surfaces via onWarn (warn mode);
+      // "required" mode raises "unsigned_required" instead — so the only
+      // codes that can land here are signature failure reasons or
+      // "unsigned_required". The fallback narrows the runtime's broader
+      // union to the platform error contract.
+      const code =
+        err.code === "unsigned"
+          ? "unsigned_required"
+          : (err.code as VerifySignatureFailureReason | "unsigned_required");
+      throw new BundleSignatureError(
+        code,
+        packageId,
+        `Bundle signature verification failed for ${packageId}: ${err.message}`,
+        err.detail,
+      );
+    }
+    throw err;
   }
 
-  logger.debug("AFPS bundle signature verified", { packageId, keyId: result.keyId });
   return bundle;
 }

@@ -82,6 +82,16 @@ export {
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
 
+// ─── Signature policy ───────────────────────────────────────────────
+export {
+  verifyBundleWithPolicy,
+  BundleSignaturePolicyError,
+  type SignaturePolicy,
+  type SignaturePolicyReason,
+  type VerifyBundlePolicyOptions,
+  type VerifyBundlePolicyOutcome,
+} from "./signature-policy.ts";
+
 // ─── Signing / trust root ───────────────────────────────────────────
 export {
   canonicalBundleDigest,
