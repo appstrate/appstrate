@@ -555,7 +555,7 @@ registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profi
 program
   .command("run")
   .description("Execute an AFPS bundle locally via PiRunner (CLI mode — no platform preamble)")
-  .argument("<bundle>", "Path to the .afps bundle (or .zip)")
+  .argument("<bundle>", "Path to the bundle — .afps (single-package) or .afps-bundle (with deps)")
   .option(
     "--providers <mode>",
     "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",

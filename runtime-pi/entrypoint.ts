@@ -32,7 +32,7 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
 } from "@appstrate/runner-pi";
-import { loadBundleFromFile } from "@appstrate/afps-runtime/bundle";
+import { loadAnyBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
@@ -127,7 +127,7 @@ const hasPackage = await exists(packagePath);
 
 const [, bundle] = await Promise.all([
   initGitWorkspace(),
-  hasPackage ? loadBundleFromFile(packagePath) : Promise.resolve(null),
+  hasPackage ? loadAnyBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---

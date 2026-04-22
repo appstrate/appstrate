@@ -2,8 +2,11 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
+import { zipSync } from "fflate";
 import {
   bundleToLoadedBundle,
+  loadAnyBundleFromBuffer,
+  writeBundleToBuffer,
   BUNDLE_FORMAT_VERSION,
   type Bundle,
   type BundlePackage,
@@ -205,6 +208,54 @@ describe("bundleToLoadedBundle", () => {
     );
     const loaded = bundleToLoadedBundle(makeBundle({ root: root.identity, packages: [root] }));
     expect(loaded.prompt).toBe("");
+  });
+
+  it("accepts a multi-package bundle via loadAnyBundleFromBuffer", () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { name: "@me/root", version: "1.0.0", type: "agent" },
+      { "prompt.md": enc("Hello") },
+    );
+    const tool = makePkg(
+      "@vendor/t@1.0.0" as PackageIdentity,
+      { name: "@vendor/t", version: "1.0.0", type: "tool" },
+      { "TOOL.md": enc("tool doc") },
+    );
+    const bundle = makeBundle({ root: root.identity, packages: [root, tool] });
+    const archive = writeBundleToBuffer(bundle);
+
+    const loaded = loadAnyBundleFromBuffer(archive);
+    expect(loaded.prompt).toBe("Hello");
+    expect(dec(loaded.files["tools/@vendor/t/TOOL.md"])).toBe("tool doc");
+  });
+
+  it("accepts a legacy single-package .afps via loadAnyBundleFromBuffer", () => {
+    // A classic AFPS is just a ZIP with manifest.json + prompt.md at root.
+    const archive = zipSync({
+      "manifest.json": enc(
+        JSON.stringify({
+          name: "@me/legacy",
+          version: "1.0.0",
+          type: "agent",
+          schemaVersion: "1.1",
+        }),
+      ),
+      "prompt.md": enc("Legacy prompt"),
+    });
+
+    const loaded = loadAnyBundleFromBuffer(archive);
+    expect(loaded.prompt).toBe("Legacy prompt");
+    expect((loaded.manifest as { name?: string }).name).toBe("@me/legacy");
+    // No dep prefixes since legacy is flat — files stay at top level.
+    expect(Object.keys(loaded.files).every((k) => !k.startsWith("tools/"))).toBe(true);
+  });
+
+  it("surfaces the legacy MISSING_MANIFEST error when a non-bundle ZIP has no manifest.json", () => {
+    // An archive that has neither bundle.json nor manifest.json — detect
+    // as "not multi-package" then let the legacy loader throw the
+    // specific MISSING_MANIFEST error (not a generic one).
+    const archive = zipSync({ "random.txt": enc("hi") });
+    expect(() => loadAnyBundleFromBuffer(archive)).toThrow(/manifest\.json/);
   });
 
   it("throws BUNDLE_JSON_INVALID when the root identity is missing from packages", () => {

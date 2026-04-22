@@ -11,10 +11,13 @@
  * other during the transition.
  */
 
+import { readFile } from "node:fs/promises";
+import { unzipSync } from "fflate";
 import { extractRootFromAfps } from "./build.ts";
 import { buildBundleFromCatalog } from "./build.ts";
 import { emptyPackageCatalog } from "./catalog.ts";
-import type { LoadedBundle } from "./loader.ts";
+import { loadBundleFromBuffer, type LoadBundleOptions, type LoadedBundle } from "./loader.ts";
+import { readBundleFromBuffer, type ReadBundleOptions } from "./read.ts";
 import { computeRecordEntries, recordIntegrity, serializeRecord } from "./integrity.ts";
 import { BUNDLE_FORMAT_VERSION, formatPackageIdentity, parsePackageIdentity } from "./types.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "./types.ts";
@@ -159,4 +162,59 @@ function prefixForType(type: unknown): string | null {
   if (type === "skill") return "skills/";
   if (type === "provider") return "providers/";
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Format-detecting loader (for CLI entrypoints that accept either format)
+// ---------------------------------------------------------------------------
+
+export interface LoadAnyBundleOptions {
+  /** Passed through to the legacy `.afps` loader when that path is taken. */
+  legacy?: LoadBundleOptions;
+  /** Passed through to the new `.afps-bundle` reader when that path is taken. */
+  multi?: ReadBundleOptions;
+}
+
+/**
+ * Accept either the legacy single-package `.afps` format or the new
+ * multi-package `.afps-bundle` format and produce a {@link LoadedBundle}
+ * suitable for `prepareBundleForPi` + resolvers.
+ *
+ * Detection: the presence of `bundle.json` at the archive root is the
+ * canonical discriminant — `.afps-bundle` requires it (spec §4.1),
+ * `.afps` never has it. The check peeks at a single archive decompress
+ * and dispatches; no double-read on either path.
+ */
+export async function loadAnyBundleFromFile(
+  path: string,
+  opts: LoadAnyBundleOptions = {},
+): Promise<LoadedBundle> {
+  const buffer = await readFile(path);
+  return loadAnyBundleFromBuffer(new Uint8Array(buffer), opts);
+}
+
+export function loadAnyBundleFromBuffer(
+  bytes: Uint8Array,
+  opts: LoadAnyBundleOptions = {},
+): LoadedBundle {
+  if (isMultiPackageBundle(bytes)) {
+    const bundle = readBundleFromBuffer(bytes, opts.multi);
+    return bundleToLoadedBundle(bundle);
+  }
+  return loadBundleFromBuffer(bytes, opts.legacy);
+}
+
+/**
+ * Quick format check: decompress the archive (once) and look for
+ * `bundle.json` at the root. Malformed archives fall back to "legacy" so
+ * the subsequent `loadBundleFromBuffer` surfaces its specific error
+ * code (ZIP_INVALID / MISSING_MANIFEST) instead of a generic one here.
+ */
+function isMultiPackageBundle(bytes: Uint8Array): boolean {
+  try {
+    const entries = unzipSync(bytes);
+    return Object.prototype.hasOwnProperty.call(entries, "bundle.json");
+  } catch {
+    return false;
+  }
 }
