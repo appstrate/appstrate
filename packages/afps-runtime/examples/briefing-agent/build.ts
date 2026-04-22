@@ -22,6 +22,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { zipSync } from "fflate";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildBundleFromAfps } from "../../src/bundle/build.ts";
+import { emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import { canonicalBundleDigest, generateKeyPair, signBundle } from "../../src/bundle/signing.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -38,7 +40,8 @@ async function main(): Promise<void> {
   };
 
   const key = generateKeyPair();
-  const canonical = canonicalBundleDigest(unsignedFiles);
+  const unsignedBundle = await buildBundleFromAfps(zipSync(unsignedFiles), emptyPackageCatalog);
+  const canonical = canonicalBundleDigest(unsignedBundle);
   const signature = signBundle(canonical, {
     privateKey: key.privateKey,
     keyId: key.keyId,

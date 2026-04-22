@@ -8,7 +8,6 @@
 
 import { describe, it, expect } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
 import type {
   Bundle,
   ProviderRef,
@@ -20,25 +19,14 @@ import {
   buildProviderExtensionFactories,
   readProviderRefs,
 } from "../src/provider-bridge.ts";
+import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────
 
-function makeBundle(providers: Record<string, string> | null = null): LoadedBundle {
-  const manifest: Record<string, unknown> = { name: "test", version: "1.0.0" };
-  if (providers) {
-    manifest.dependencies = { providers };
-  }
-  const encoder = new TextEncoder();
-  return {
-    manifest,
-    prompt: "test prompt",
-    files: {
-      "manifest.json": encoder.encode(JSON.stringify(manifest)),
-      "prompt.md": encoder.encode("test prompt"),
-    },
-    compressedSize: 0,
-    decompressedSize: 0,
-  } as LoadedBundle;
+function makeBundle(providers: Record<string, string> | null = null): Bundle {
+  const extra: Record<string, unknown> = {};
+  if (providers) extra.dependencies = { providers };
+  return makeTestBundle(makeBundlePackage("@acme/agent", "1.0.0", "agent", {}, extra));
 }
 
 function makeFakePi(): {
@@ -234,10 +222,9 @@ describe("buildProviderExtensionFactories", () => {
       { name: "@appstrate/gmail", version: "1.0.0" },
       { name: "@appstrate/clickup", version: "^2.0.0" },
     ]);
-    // bundle adapter surface must expose the minimal Bundle shape
-    expect(typeof seen.bundle.read).toBe("function");
-    expect(typeof seen.bundle.readText).toBe("function");
-    expect(typeof seen.bundle.exists).toBe("function");
+    // Resolver receives the full spec Bundle it can introspect.
+    expect(seen.bundle.packages instanceof Map).toBe(true);
+    expect(seen.bundle.root).toBe("@acme/agent@1.0.0");
 
     const { api, tools } = makeFakePi();
     for (const f of factories) f(api);

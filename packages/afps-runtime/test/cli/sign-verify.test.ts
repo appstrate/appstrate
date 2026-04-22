@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { runCli } from "../../src/cli/index.ts";
 import { captureIo, writeBundleFile, writeJsonFile } from "./helpers.ts";
 import { generateKeyPair, readBundleSignature, signChildKey } from "../../src/bundle/signing.ts";
-import { loadBundleFromFile } from "../../src/bundle/loader.ts";
+import { readBundleFromFile } from "../../src/bundle/read.ts";
 
 describe("afps sign + verify — round trip", () => {
   let dir: string;
@@ -32,7 +32,7 @@ describe("afps sign + verify — round trip", () => {
     expect(code).toBe(0);
     expect(io.stdoutText()).toContain(`keyId: ${kp.keyId}`);
 
-    const loaded = await loadBundleFromFile(bundlePath);
+    const loaded = await readBundleFromFile(bundlePath);
     const sig = readBundleSignature(loaded);
     expect(sig).not.toBeNull();
     expect(sig!.keyId).toBe(kp.keyId);
@@ -53,9 +53,9 @@ describe("afps sign + verify — round trip", () => {
     );
     expect(code).toBe(0);
 
-    const originalSig = readBundleSignature(await loadBundleFromFile(bundlePath));
+    const originalSig = readBundleSignature(await readBundleFromFile(bundlePath));
     expect(originalSig).toBeNull();
-    const copySig = readBundleSignature(await loadBundleFromFile(outPath));
+    const copySig = readBundleSignature(await readBundleFromFile(outPath));
     expect(copySig).not.toBeNull();
   });
 
@@ -75,7 +75,7 @@ describe("afps sign + verify — round trip", () => {
     const io = captureIo();
     const code = await runCli(["verify", bundlePath, "--trust-root", trustPath], io);
     expect(code).toBe(0);
-    expect(io.stdoutText()).toContain("manifest + template valid");
+    expect(io.stdoutText()).toContain("bundle valid");
     expect(io.stdoutText()).toContain("signature valid");
     expect(io.stdoutText()).toContain(kp.keyId);
   });
@@ -93,16 +93,36 @@ describe("afps sign + verify — round trip", () => {
     await runCli(["sign", bundlePath, "--key", keyPath], captureIo());
 
     // Re-pack with tampered prompt but keep the old signature.sig.
-    const loaded = await loadBundleFromFile(bundlePath);
-    const sigBytes = loaded.files["signature.sig"]!;
-    const { zipSync } = await import("fflate");
+    // Build a fresh .afps-bundle with the tampered prompt + preserved sig.
+    const loaded = await readBundleFromFile(bundlePath);
+    const rootPkg = loaded.packages.get(loaded.root)!;
+    const sigBytes = rootPkg.files.get("signature.sig")!;
     const encode = (s: string): Uint8Array => new TextEncoder().encode(s);
-    const tampered = zipSync({
-      "manifest.json": encode(JSON.stringify({ ...loaded.manifest })),
-      "prompt.md": encode("TAMPERED — different content than what was signed."),
-      "signature.sig": sigBytes,
-    });
-    await writeFile(bundlePath, tampered);
+    const { writeBundleToBuffer } = await import("../../src/bundle/write.ts");
+    const { BUNDLE_FORMAT_VERSION } = await import("../../src/bundle/types.ts");
+    const { bundleIntegrity, computeRecordEntries, recordIntegrity, serializeRecord } =
+      await import("../../src/bundle/integrity.ts");
+    const tamperedFiles = new Map(rootPkg.files);
+    tamperedFiles.set("prompt.md", encode("TAMPERED — different content than what was signed."));
+    tamperedFiles.set("signature.sig", sigBytes);
+    const integrity = recordIntegrity(serializeRecord(computeRecordEntries(tamperedFiles)));
+    const tamperedBundle = {
+      bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+      root: loaded.root,
+      packages: new Map([[loaded.root, { ...rootPkg, files: tamperedFiles, integrity }]]),
+      integrity: bundleIntegrity(
+        new Map([
+          [
+            loaded.root,
+            {
+              path: `packages/${(rootPkg.manifest as { name: string }).name}/${(rootPkg.manifest as { version: string }).version}/`,
+              integrity,
+            },
+          ],
+        ]),
+      ),
+    };
+    await writeFile(bundlePath, writeBundleToBuffer(tamperedBundle));
 
     const io = captureIo();
     const code = await runCli(["verify", bundlePath, "--trust-root", trustPath], io);
@@ -178,8 +198,18 @@ describe("afps sign + verify — round trip", () => {
 
   it("fails verify when the bundle's manifest is invalid", async () => {
     const bundlePath = join(dir, "agent.afps");
+    // Scoped name (required by the Bundle reader) but invalid
+    // schemaVersion pattern — validateBundle surfaces this as
+    // MANIFEST_SCHEMA.
     await writeBundleFile(bundlePath, {
-      manifest: { ...{ name: "bad-name", version: "v1", type: "agent" }, schemaVersion: "1.1" },
+      manifest: {
+        name: "@acme/bad",
+        version: "1.0.0",
+        type: "agent",
+        schemaVersion: "9.0",
+        displayName: "Bad",
+        author: "tester",
+      },
     });
     const io = captureIo();
     const code = await runCli(["verify", bundlePath], io);

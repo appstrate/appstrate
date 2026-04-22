@@ -15,7 +15,7 @@
  * the type.
  */
 
-import type { LoadedBundle } from "../bundle/loader.ts";
+import type { Bundle } from "../bundle/types.ts";
 import type { TrustRoot, VerifySignatureResult } from "../bundle/signing.ts";
 import type { ExecutionContext, HistoryEntry, MemorySnapshot } from "../types/execution-context.ts";
 import type { RunEvent } from "../types/run-event.ts";
@@ -38,11 +38,12 @@ export interface ConformanceAdapter {
   readonly name: string;
 
   /**
-   * Parse a ZIP buffer into a LoadedBundle. MUST throw on malformed
-   * input (non-ZIP, missing manifest.json, missing prompt.md, etc.);
-   * the suite treats "did not throw" as a pass for the negative cases.
+   * Parse a ZIP buffer into a {@link Bundle}. MUST throw on malformed
+   * input (non-ZIP, missing bundle.json, missing per-package
+   * manifest.json, etc.); the suite treats "did not throw" as a pass
+   * for the negative cases.
    */
-  loadBundle(bytes: Uint8Array): LoadedBundle;
+  loadBundle(bytes: Uint8Array): Bundle;
 
   /**
    * Render a bundle's prompt template against a context + snapshot.
@@ -80,7 +81,7 @@ export interface ConformanceAdapter {
    * this undefined and L4 cases skip.
    */
   runScripted?(
-    bundle: LoadedBundle,
+    bundle: Bundle,
     context: ExecutionContext,
     scriptedEvents: readonly RunEvent[],
   ): Promise<RunScriptedOutput>;

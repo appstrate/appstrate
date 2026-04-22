@@ -32,7 +32,7 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
 } from "@appstrate/runner-pi";
-import { loadAnyBundleFromFile } from "@appstrate/afps-runtime/bundle";
+import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
@@ -127,7 +127,7 @@ const hasPackage = await exists(packagePath);
 
 const [, bundle] = await Promise.all([
   initGitWorkspace(),
-  hasPackage ? loadAnyBundleFromFile(packagePath) : Promise.resolve(null),
+  hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
@@ -281,21 +281,54 @@ const stdoutSink: EventSink = {
 };
 
 // --- 6. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
-// PiRunner needs a LoadedBundle-shaped value; when no agent-package.afps
-// was present, the platform pre-installed files directly so we hand it a
-// minimal stub whose content is never re-consumed.
+// PiRunner needs a Bundle; when no agent-package.afps was present, the
+// platform pre-installed files directly so we hand it a minimal stub
+// whose content is never re-consumed.
 
-const encoder = new TextEncoder();
-const runnerBundle = bundle ?? {
-  manifest: { name: "in-container", version: "0.0.0" } as Record<string, unknown>,
-  prompt: systemPrompt,
-  files: {
-    "manifest.json": encoder.encode(JSON.stringify({ name: "in-container", version: "0.0.0" })),
-    "prompt.md": encoder.encode(systemPrompt),
-  },
-  compressedSize: 0,
-  decompressedSize: 0,
-};
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
+
+function buildInContainerBundle(prompt: string): Bundle {
+  const encoder = new TextEncoder();
+  const manifestBytes = encoder.encode(
+    JSON.stringify({ name: "@appstrate/in-container", version: "0.0.0", type: "agent" }),
+  );
+  const promptBytes = encoder.encode(prompt);
+  const files = new Map<string, Uint8Array>([
+    ["manifest.json", manifestBytes],
+    ["prompt.md", promptBytes],
+  ]);
+  const recordBody = serializeRecord(computeRecordEntries(files));
+  const integrity = recordIntegrity(recordBody);
+  const identity = "@appstrate/in-container@0.0.0" as PackageIdentity;
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: identity,
+    packages: new Map([
+      [
+        identity,
+        {
+          identity,
+          manifest: { name: "@appstrate/in-container", version: "0.0.0", type: "agent" },
+          files,
+          integrity,
+        },
+      ],
+    ]),
+    integrity: bundleIntegrity(
+      new Map([[identity, { path: "packages/@appstrate/in-container/0.0.0/", integrity }]]),
+    ),
+  };
+}
+
+const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 
 // --- 7. Run via PiRunner ---
 

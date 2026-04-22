@@ -7,12 +7,12 @@
  * Spec-level contracts (Tool protocol, RunEvent envelope, manifest refs)
  * are re-exported from `@afps/types` — the vendor-neutral projection of
  * the AFPS spec. Everything declared here describes how THIS runtime
- * wires itself up internally (Bundle loader API, resolver dispatch,
- * sink composition, aggregated run state) and is intentionally not
- * part of the spec.
+ * wires itself up internally (resolver dispatch, sink composition,
+ * aggregated run state) and is intentionally not part of the spec.
  */
 
 import type { RunResult as LegacyRunResult } from "../types/run-result.ts";
+import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 export type {
   DependencyRef,
@@ -29,16 +29,12 @@ export type {
 import type { ToolRef, ProviderRef, SkillRef, Tool, RunEvent } from "@afps/types";
 
 // ─────────────────────────────────────────────
-// Bundle surface passed to resolvers (runtime-internal)
+// Bundle surface passed to resolvers — the spec {@link Bundle} is the
+// single contract. Each resolver looks up its dependencies via
+// {@link resolvePackageRef} against {@link Bundle.packages}.
 // ─────────────────────────────────────────────
 
-export interface Bundle {
-  manifest: unknown;
-  digest: string;
-  read(path: string): Promise<Uint8Array>;
-  readText(path: string): Promise<string>;
-  exists(path: string): Promise<boolean>;
-}
+export type { Bundle, BundlePackage };
 
 // ─────────────────────────────────────────────
 // Resolver outputs (runtime-internal)

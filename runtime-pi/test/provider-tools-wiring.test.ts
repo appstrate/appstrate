@@ -4,7 +4,7 @@
  * End-to-end wiring test for the container-runtime provider bridge.
  *
  * Exercises the exact flow entrypoint.ts now performs at boot:
- *   1. Loaded AFPS bundle with a `providers/` directory in memory.
+ *   1. Multi-package {@link Bundle} carrying a provider dep.
  *   2. Spin up a fake sidecar HTTP server.
  *   3. Build a `SidecarProviderResolver` pointing at it.
  *   4. `buildProviderExtensionFactories` → Pi extension factory list.
@@ -21,7 +21,16 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type BundlePackage,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import { SidecarProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import { buildProviderExtensionFactories } from "@appstrate/runner-pi";
 
@@ -49,7 +58,12 @@ function startFakeSidecar(
       req.headers.forEach((v, k) => {
         headers[k] = v;
       });
-      logs.push({ method: req.method, url: new URL(req.url).pathname, headers, body });
+      logs.push({
+        method: req.method,
+        url: new URL(req.url).pathname,
+        headers,
+        body,
+      });
       return respond(req);
     },
   });
@@ -61,32 +75,58 @@ function startFakeSidecar(
 
 // ─── Bundle fixture ────────────────────────────────────────────────────
 
-function makeBundle(providers: Record<string, string>): LoadedBundle {
-  const manifest = {
-    name: "test-agent",
-    version: "1.0.0",
-    dependencies: { providers },
-  };
-  const encoder = new TextEncoder();
-  const files: Record<string, Uint8Array> = {
-    "manifest.json": encoder.encode(JSON.stringify(manifest)),
-    "prompt.md": encoder.encode("test"),
-  };
+const enc = new TextEncoder();
+
+function makePackage(
+  name: `@${string}/${string}`,
+  version: string,
+  type: "agent" | "provider",
+  files: Record<string, string>,
+  extraManifest: Record<string, unknown> = {},
+): BundlePackage {
+  const identity = `${name}@${version}` as PackageIdentity;
+  const manifest = { name, version, type, ...extraManifest };
+  const filesMap = new Map<string, Uint8Array>();
+  filesMap.set("manifest.json", enc.encode(JSON.stringify(manifest)));
+  for (const [k, v] of Object.entries(files)) filesMap.set(k, enc.encode(v));
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(filesMap)));
+  return { identity, manifest, files: filesMap, integrity };
+}
+
+function makeBundle(providers: Record<string, string>): Bundle {
+  const root = makePackage(
+    "@test/agent",
+    "1.0.0",
+    "agent",
+    {},
+    {
+      dependencies: { providers },
+    },
+  );
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(root.identity, root);
   for (const name of Object.keys(providers)) {
-    files[`providers/${name}/provider.json`] = encoder.encode(
-      JSON.stringify({
+    const pkg = makePackage(name as `@${string}/${string}`, "1.0.0", "provider", {
+      "provider.json": JSON.stringify({
         name,
         authorizedUris: ["https://api.example.com/**"],
       }),
-    );
+    });
+    packages.set(pkg.identity, pkg);
+  }
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const p of packages.values()) {
+    pkgIndex.set(p.identity, {
+      path: `packages/${(p.manifest as { name: string }).name}/${(p.manifest as { version: string }).version}/`,
+      integrity: p.integrity,
+    });
   }
   return {
-    manifest,
-    prompt: "test",
-    files,
-    compressedSize: 0,
-    decompressedSize: 0,
-  } as unknown as LoadedBundle;
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: root.identity,
+    packages,
+    integrity: bundleIntegrity(pkgIndex),
+  };
 }
 
 function makeFakePi() {
@@ -126,10 +166,7 @@ describe("runtime-pi provider wiring (SidecarProviderResolver → runner-pi brid
 
   it("registers one <provider>_call tool per manifest provider and proxies via the sidecar", async () => {
     const bundle = makeBundle({ "@appstrate/gmail": "1.0.0" });
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: sidecar.url,
-      providerPrefix: "providers/",
-    });
+    const resolver = new SidecarProviderResolver({ sidecarUrl: sidecar.url });
 
     const events: Array<{ type: string; [k: string]: unknown }> = [];
     const factories = await buildProviderExtensionFactories({
@@ -152,8 +189,6 @@ describe("runtime-pi provider wiring (SidecarProviderResolver → runner-pi brid
       target: "https://api.example.com/messages",
     })) as { content: Array<{ type: string; text: string }> };
 
-    // The bridge returns a single text content with the JSON-serialised
-    // ProviderCallResponse. Parse to assert.
     const parsed = JSON.parse(result.content[0]!.text) as {
       status: number;
       body: { inline?: string };
@@ -161,23 +196,18 @@ describe("runtime-pi provider wiring (SidecarProviderResolver → runner-pi brid
     expect(parsed.status).toBe(200);
     expect(parsed.body.inline).toContain("messages");
 
-    // Sidecar saw the expected headers
     expect(sidecarLogs).toHaveLength(1);
     const hit = sidecarLogs[0]!;
     expect(hit.url).toBe("/proxy");
     expect(hit.headers["x-provider"]).toBe("@appstrate/gmail");
     expect(hit.headers["x-target"]).toBe("https://api.example.com/messages");
 
-    // Provider lifecycle event surfaced
     expect(events.some((e) => e.type === "provider.called")).toBe(true);
   });
 
   it("enforces authorizedUris before dispatching to the sidecar", async () => {
     const bundle = makeBundle({ "@appstrate/gmail": "1.0.0" });
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: sidecar.url,
-      providerPrefix: "providers/",
-    });
+    const resolver = new SidecarProviderResolver({ sidecarUrl: sidecar.url });
 
     const before = sidecarLogs.length;
     const factories = await buildProviderExtensionFactories({
@@ -197,7 +227,6 @@ describe("runtime-pi provider wiring (SidecarProviderResolver → runner-pi brid
       }),
     ).rejects.toThrow(/authorizedUris/);
 
-    // Sidecar MUST NOT have been contacted for the rejected target.
     expect(sidecarLogs.length).toBe(before);
   });
 

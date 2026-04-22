@@ -14,7 +14,8 @@ import {
   type BundleSignature,
   type TrustRoot,
 } from "../../src/bundle/signing.ts";
-import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
+import { buildBundleFromAfps } from "../../src/bundle/build.ts";
+import { emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -293,7 +294,7 @@ describe("verifyBundleSignature — malformed / unsupported", () => {
 });
 
 describe("readBundleSignature", () => {
-  it("reads and parses signature.sig from a loaded bundle", () => {
+  it("reads and parses signature.sig from a loaded bundle", async () => {
     const kp = generateKeyPair();
     const inner = enc("sentinel");
     const sig = signBundle(inner, { privateKey: kp.privateKey, keyId: kp.keyId });
@@ -303,39 +304,39 @@ describe("readBundleSignature", () => {
       "prompt.md": enc("p"),
       "signature.sig": enc(JSON.stringify(sig)),
     });
-    const bundle = loadBundleFromBuffer(zip);
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     const read = readBundleSignature(bundle);
     expect(read).not.toBeNull();
     expect(read!.keyId).toBe(kp.keyId);
     expect(read!.alg).toBe("ed25519");
   });
 
-  it("returns null when signature.sig is absent", () => {
+  it("returns null when signature.sig is absent", async () => {
     const zip = zipSync({
       "manifest.json": enc(JSON.stringify(MINIMAL_MANIFEST)),
       "prompt.md": enc("p"),
     });
-    const bundle = loadBundleFromBuffer(zip);
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     expect(readBundleSignature(bundle)).toBeNull();
   });
 
-  it("returns null when signature.sig is not valid JSON", () => {
+  it("returns null when signature.sig is not valid JSON", async () => {
     const zip = zipSync({
       "manifest.json": enc(JSON.stringify(MINIMAL_MANIFEST)),
       "prompt.md": enc("p"),
       "signature.sig": enc("{not-json"),
     });
-    const bundle = loadBundleFromBuffer(zip);
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     expect(readBundleSignature(bundle)).toBeNull();
   });
 
-  it("returns null when signature.sig is JSON but malformed", () => {
+  it("returns null when signature.sig is JSON but malformed", async () => {
     const zip = zipSync({
       "manifest.json": enc(JSON.stringify(MINIMAL_MANIFEST)),
       "prompt.md": enc("p"),
       "signature.sig": enc(JSON.stringify({ alg: "ed25519" })),
     });
-    const bundle = loadBundleFromBuffer(zip);
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     expect(readBundleSignature(bundle)).toBeNull();
   });
 });

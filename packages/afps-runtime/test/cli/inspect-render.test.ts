@@ -39,7 +39,12 @@ describe("afps inspect", () => {
     expect(code).toBe(0);
     const report = JSON.parse(io.stdoutText());
     expect(report.manifest.name).toBe("@acme/hello");
-    expect(report.files).toEqual(["manifest.json", "prompt.md"]);
+    expect(report.root).toBe("@acme/hello@1.0.0");
+    expect(report.packages).toHaveLength(1);
+    expect(report.packages[0].identity).toBe("@acme/hello@1.0.0");
+    expect(report.packages[0].files).toEqual(
+      expect.arrayContaining(["manifest.json", "prompt.md"]),
+    );
     expect(report.signature).toBeNull();
     expect(report.promptBytes).toBeGreaterThan(0);
   });

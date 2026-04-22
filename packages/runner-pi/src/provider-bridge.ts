@@ -15,8 +15,7 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
-import { toBundle } from "@appstrate/afps-runtime/resolvers";
+import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type {
   ProviderRef,
   ProviderResolver,
@@ -27,14 +26,14 @@ import type {
 export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 /**
- * Derive the list of `ProviderRef`s from the manifest's
+ * Derive the list of `ProviderRef`s from the bundle's root manifest
  * `dependencies.providers` record. Each key is a scoped package name,
  * each value a semver range — same shape used by the platform.
  */
-export function readProviderRefs(loaded: LoadedBundle): ProviderRef[] {
-  const manifest = loaded.manifest as {
-    dependencies?: { providers?: Record<string, string> };
-  };
+export function readProviderRefs(bundle: Bundle): ProviderRef[] {
+  const root = bundle.packages.get(bundle.root);
+  if (!root) return [];
+  const manifest = root.manifest as { dependencies?: { providers?: Record<string, string> } };
   const providers = manifest.dependencies?.providers ?? {};
   return Object.entries(providers).map(([name, version]) => ({ name, version }));
 }
@@ -96,7 +95,7 @@ export function afpsToolToPiExtension(
  * to splice unconditionally into the factory list.
  */
 export async function buildProviderExtensionFactories(opts: {
-  bundle: LoadedBundle;
+  bundle: Bundle;
   providerResolver: ProviderResolver;
   runId: string;
   workspace: string;
@@ -104,8 +103,7 @@ export async function buildProviderExtensionFactories(opts: {
 }): Promise<ExtensionFactory[]> {
   const refs = readProviderRefs(opts.bundle);
   if (refs.length === 0) return [];
-  const adapter = toBundle(opts.bundle);
-  const afpsTools = await opts.providerResolver.resolve(refs, adapter);
+  const afpsTools = await opts.providerResolver.resolve(refs, opts.bundle);
   return afpsTools.map((t) =>
     afpsToolToPiExtension(t, opts.runId, opts.workspace, opts.emitProvider),
   );

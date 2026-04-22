@@ -9,10 +9,9 @@
  * import the narrow surface they need; the top-level re-exports the
  * full public API for convenience.
  *
- * The multi-package {@link Bundle} contract (spec §4) is the primary
- * API. {@link LoadedBundle} remains a first-class flat projection for
- * consumers that prefer path-keyed access — `bundleToLoadedBundle`
- * bridges the two without re-decoding.
+ * The multi-package {@link Bundle} contract (spec §4) is the single
+ * runtime representation — every resolver, runner, and tool consumes
+ * Bundle directly via `Bundle.packages.get(identity)`.
  *
  * AFPS 1.3 introduces three spec-aligned resolver interfaces
  * (ToolResolver, ProviderResolver, SkillResolver). They live under
@@ -27,7 +26,8 @@ export * from "./events/index.ts";
 export * from "./sinks/index.ts";
 export * from "./template/index.ts";
 
-// Multi-package Bundle contract (spec §4) — primary API.
+// Multi-package Bundle contract (spec §4) — the single runtime
+// representation.
 export {
   BUNDLE_FORMAT_VERSION,
   BundleError,
@@ -36,7 +36,6 @@ export {
   buildBundleFromAfps,
   buildBundleFromCatalog,
   bundleIntegrity,
-  bundleOfOneFromAfps,
   canonicalJsonStringify,
   composeCatalogs,
   computeRecordEntries,
@@ -44,7 +43,6 @@ export {
   extractRootFromAfps,
   formatPackageIdentity,
   integrityEqual,
-  loadedBundleToBundle,
   parsePackageIdentity,
   parseRecord,
   readBundleFromBuffer,
@@ -74,24 +72,6 @@ export {
   type RecordEntry,
   type ResolvedPackage,
   type ValidateBundleOptions,
-} from "./bundle/index.ts";
-
-// LoadedBundle flat projection + interop adapters.
-export {
-  bundleToLoadedBundle,
-  loadAnyBundleFromBuffer,
-  loadAnyBundleFromFile,
-  loadBundleFromBuffer,
-  type LoadAnyBundleOptions,
-  type LoadedBundle,
-} from "./bundle/index.ts";
-
-// AFPS single-package manifest validator (flat LoadedBundle input).
-export {
-  validateAfpsManifest,
-  type AfpsManifestValidationIssue,
-  type AfpsManifestValidationResult,
-  type ValidateAfpsManifestOptions,
 } from "./bundle/index.ts";
 
 // Prompt rendering.

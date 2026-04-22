@@ -4,14 +4,13 @@
 /**
  * Public surface for `@appstrate/afps-runtime/bundle`.
  *
- * The multi-package {@link Bundle} contract (spec §4) is the primary
- * API. {@link LoadedBundle} is a flat path-keyed projection used by
- * runtime consumers that prefer single-map file access — both are
- * first-class and stable.
+ * The multi-package {@link Bundle} contract (spec §4) is the single
+ * runtime representation. Every ingestion path — in-memory construction,
+ * `.afps-bundle` archive, `.afps` single-package archive via the
+ * catalog builders — produces a `Bundle`.
  *
- * Interop utilities at the bottom (`bundleToLoadedBundle`,
- * `loadedBundleToBundle`, `loadAnyBundleFrom*`) let callers move between
- * the two representations without re-decoding the archive.
+ * Consumers read via `Bundle.packages.get(identity)` + `BundlePackage.files`.
+ * There is no flat path-keyed projection, no adapter, no dual surface.
  */
 
 // ─── Core types + errors ────────────────────────────────────────────
@@ -66,32 +65,12 @@ export {
 } from "./catalog.ts";
 
 // ─── Validation ─────────────────────────────────────────────────────
-// Primary: multi-package Bundle validator.
 export {
   validateBundle,
   type BundleValidationIssue,
   type BundleValidationResult,
   type ValidateBundleOptions,
 } from "./validate-bundle.ts";
-// Secondary: AFPS single-package manifest validator — used when you
-// only have a `LoadedBundle` (tooling, CLI inspect/verify paths).
-export {
-  validateAfpsManifest,
-  type AfpsManifestValidationIssue,
-  type AfpsManifestValidationResult,
-  type ValidateAfpsManifestOptions,
-} from "./validator.ts";
-
-// ─── LoadedBundle flat surface + interop adapters ───────────────────
-export { loadBundleFromBuffer, type LoadedBundle } from "./loader.ts";
-export {
-  bundleOfOneFromAfps,
-  bundleToLoadedBundle,
-  loadAnyBundleFromBuffer,
-  loadAnyBundleFromFile,
-  loadedBundleToBundle,
-  type LoadAnyBundleOptions,
-} from "./bridge.ts";
 
 // ─── Prompt rendering ───────────────────────────────────────────────
 export {

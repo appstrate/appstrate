@@ -21,7 +21,16 @@ import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
-import { loadAnyBundleFromBuffer, type LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  readBundleFromBuffer,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import {
   BundledToolResolver,
   BundledSkillResolver,
@@ -52,33 +61,36 @@ import {
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 
 /**
- * Build a {@link LoadedBundle} for the Runner contract. When the route
- * already has the packaged ZIP (produced by `buildAgentPackage`, now
- * the multi-package `.afps-bundle` format), we parse it via the
- * format-detecting loader so the shape matches what an external consumer
- * would see. Otherwise we synthesise a minimal bundle from the in-memory
- * agent — sufficient for the contract since AppstrateContainerRunner
- * delegates execution to the Pi container, which reads the bundle from
- * `/workspace/agent-package.afps`.
+ * Build a {@link Bundle} for the Runner contract. When the route
+ * already has the packaged ZIP (produced by `buildAgentPackage`, the
+ * multi-package `.afps-bundle` format), we parse it via
+ * `readBundleFromBuffer`. Otherwise we synthesise a minimal one-package
+ * bundle from the in-memory agent — sufficient for the contract since
+ * `AppstrateContainerRunner` delegates execution to the Pi container,
+ * which reads the bundle from `/workspace/agent-package.afps`.
  */
-async function buildRunnerBundle(
-  agent: LoadedPackage,
-  agentPackage: Buffer | null,
-): Promise<LoadedBundle> {
+function buildRunnerBundle(agent: LoadedPackage, agentPackage: Buffer | null): Bundle {
   if (agentPackage) {
-    return loadAnyBundleFromBuffer(new Uint8Array(agentPackage));
+    return readBundleFromBuffer(new Uint8Array(agentPackage));
   }
   const encoder = new TextEncoder();
-  const files: Record<string, Uint8Array> = {
-    "manifest.json": encoder.encode(JSON.stringify(agent.manifest, null, 2)),
-    "prompt.md": encoder.encode(agent.prompt),
-  };
+  const manifest = agent.manifest as Record<string, unknown>;
+  const files = new Map<string, Uint8Array>([
+    ["manifest.json", encoder.encode(JSON.stringify(manifest, null, 2))],
+    ["prompt.md", encoder.encode(agent.prompt)],
+  ]);
+  const recordBody = serializeRecord(computeRecordEntries(files));
+  const integrity = recordIntegrity(recordBody);
+  const name = (manifest.name as string | undefined) ?? agent.id;
+  const version = (manifest.version as string | undefined) ?? "0.0.0";
+  const identity = `${name}@${version}` as PackageIdentity;
   return {
-    manifest: agent.manifest as Record<string, unknown>,
-    prompt: agent.prompt,
-    files,
-    compressedSize: 0,
-    decompressedSize: Object.values(files).reduce((acc, buf) => acc + buf.byteLength, 0),
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: identity,
+    packages: new Map([[identity, { identity, manifest, files, integrity }]]),
+    integrity: bundleIntegrity(
+      new Map([[identity, { path: `packages/${name}/${version}/`, integrity }]]),
+    ),
   };
 }
 
@@ -138,7 +150,7 @@ export async function executeAgentInBackground(
       },
     });
 
-    const bundle = await buildRunnerBundle(agent, agentPackage ?? null);
+    const bundle = buildRunnerBundle(agent, agentPackage ?? null);
 
     // Spec-aligned resolvers — the runtime ships bundled + sidecar defaults
     // that read from the loaded bundle and from the in-container sidecar

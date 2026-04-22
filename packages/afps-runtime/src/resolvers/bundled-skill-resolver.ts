@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { Bundle, ResolvedSkill, SkillRef, SkillResolver } from "./types.ts";
+import { resolvePackageRef } from "./bundle-adapter.ts";
 
 export class BundledSkillResolutionError extends Error {
   constructor(
@@ -14,36 +15,40 @@ export class BundledSkillResolutionError extends Error {
 }
 
 /**
- * Default {@link SkillResolver}. Each skill ships as `SKILL.md` under
- * `.agent-package/skills/{scoped-name}/`. The file opens with a YAML
- * frontmatter block — parsed opportunistically so consumers that want
- * to inspect it (e.g. to enforce a skill allow-list) can do so without
- * re-parsing the file.
+ * Default {@link SkillResolver}. Each skill ships as a package in the
+ * {@link Bundle} whose root files include `SKILL.md`. The file opens
+ * with a YAML frontmatter block — parsed opportunistically so consumers
+ * that want to inspect it (e.g. to enforce a skill allow-list) can do
+ * so without re-parsing the file.
  */
 export class BundledSkillResolver implements SkillResolver {
   constructor(
     private readonly opts: {
-      /** Directory prefix inside the bundle. Defaults to `.agent-package/skills/`. */
-      prefix?: string;
       /** Override filename. Defaults to `SKILL.md`. */
       filename?: string;
     } = {},
   ) {}
 
   async resolve(refs: SkillRef[], bundle: Bundle): Promise<ResolvedSkill[]> {
-    const prefix = this.opts.prefix ?? ".agent-package/skills/";
     const filename = this.opts.filename ?? "SKILL.md";
     const out: ResolvedSkill[] = [];
 
     for (const ref of refs) {
-      const path = `${prefix}${ref.name}/${filename}`;
-      if (!(await bundle.exists(path))) {
+      const pkg = resolvePackageRef(bundle, ref);
+      if (!pkg) {
         throw new BundledSkillResolutionError(
           ref,
-          `bundled skill ${ref.name} has no ${filename} under ${prefix}${ref.name}/`,
+          `bundled skill ${ref.name} is not present in the bundle`,
         );
       }
-      const raw = await bundle.readText(path);
+      const bytes = pkg.files.get(filename);
+      if (!bytes) {
+        throw new BundledSkillResolutionError(
+          ref,
+          `bundled skill ${ref.name} has no ${filename} in package ${pkg.identity}`,
+        );
+      }
+      const raw = new TextDecoder().decode(bytes);
       const { body, frontmatter } = parseFrontmatter(raw);
       out.push({
         name: ref.name,

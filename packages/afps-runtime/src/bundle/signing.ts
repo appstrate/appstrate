@@ -42,7 +42,13 @@ import {
   verify as nodeVerify,
   type KeyObject,
 } from "node:crypto";
-import type { LoadedBundle } from "./loader.ts";
+import {
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+} from "./integrity.ts";
+import { parsePackageIdentity, type Bundle, type PackageIdentity } from "./types.ts";
 
 export interface BundleSignature {
   alg: "ed25519";
@@ -169,30 +175,59 @@ export function signBundle(bundleBytes: Uint8Array, opts: SignBundleOptions): Bu
  * Deterministic digest of a bundle's logical contents, suitable as
  * input to {@link signBundle} / {@link verifyBundleSignature}.
  *
- * ZIP container bytes are not stable (compression method, timestamps,
- * central-directory ordering all vary by tool) so signatures taken
- * over raw ZIP bytes break under legitimate re-packing. This helper
- * reduces the bundle to `JSON([ [sortedPath, "sha256-<b64>"], … ])`
- * — a plain-text canonical form that every conforming runner can
- * reproduce from the same file set.
+ * Signatures bind the bundle's full Merkle root: the digest is derived
+ * from `Bundle.integrity` — the SRI over the canonical packages map,
+ * which itself Merkle-roots per-package `RECORD` integrity, which in
+ * turn Merkle-roots per-file sha256 hashes. A tampered byte anywhere
+ * (any file, any package) invalidates the signature.
  *
- * `signature.sig` is excluded by default so signing/verifying are
- * symmetrical (the signer computes this before writing the signature,
- * the verifier strips it from the loaded bundle).
+ * `signature.sig` is excluded so signing and verifying are symmetric.
+ * Before computing the digest, the function rebuilds the bundle *as if
+ * `signature.sig` were absent*: it strips that file from the root
+ * package, recomputes the root package's integrity, and recomputes
+ * `bundle.integrity` over the adjusted packages map. The digest itself
+ * is the UTF-8 encoding of the canonical JSON document:
+ *
+ * ```
+ * { "bundleFormatVersion": "1.0", "root": "@scope/name@1.0.0",
+ *   "integrity": "sha256-…" }
+ * ```
+ *
+ * This form binds the format version + root identity + Merkle root,
+ * so a replay that swaps the root package for a different identity or
+ * ships mismatched bundleFormatVersion cannot reuse the signature.
  */
-export function canonicalBundleDigest(
-  files: Record<string, Uint8Array>,
-  exclude: readonly string[] = ["signature.sig"],
-): Uint8Array {
-  const excludeSet = new Set(exclude);
-  const entries: Array<[string, string]> = [];
-  for (const [path, content] of Object.entries(files)) {
-    if (excludeSet.has(path)) continue;
-    const hash = createHash("sha256").update(content).digest("base64");
-    entries.push([path, `sha256-${hash}`]);
+export function canonicalBundleDigest(bundle: Bundle): Uint8Array {
+  const rootPkg = bundle.packages.get(bundle.root);
+  if (!rootPkg) {
+    throw new Error(`canonicalBundleDigest: bundle root ${bundle.root} not in packages map`);
   }
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  return new TextEncoder().encode(JSON.stringify(entries));
+
+  const rootFilesWithoutSig = new Map(rootPkg.files);
+  rootFilesWithoutSig.delete("signature.sig");
+  const rootIntegrityWithoutSig = recordIntegrity(
+    serializeRecord(computeRecordEntries(rootFilesWithoutSig)),
+  );
+
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) {
+      throw new Error(`canonicalBundleDigest: invalid package identity ${identity}`);
+    }
+    pkgIndex.set(identity, {
+      path: `packages/@${parsed.scope}/${parsed.name}/${parsed.version}/`,
+      integrity: identity === bundle.root ? rootIntegrityWithoutSig : pkg.integrity,
+    });
+  }
+  const integrityWithoutSig = bundleIntegrity(pkgIndex);
+
+  const canonical = JSON.stringify({
+    bundleFormatVersion: bundle.bundleFormatVersion,
+    root: bundle.root,
+    integrity: integrityWithoutSig,
+  });
+  return new TextEncoder().encode(canonical);
 }
 
 /**
@@ -248,13 +283,14 @@ export function verifyBundleSignature(
 }
 
 /**
- * Read and parse `signature.sig` from a loaded bundle. Returns `null`
- * when no signature is present or the file is not a valid signature
- * document (callers who require signing should treat `null` as
- * "unsigned" and apply their policy).
+ * Read and parse `signature.sig` from a bundle's root package. Returns
+ * `null` when no signature is present or the file is not a valid
+ * signature document (callers who require signing should treat `null`
+ * as "unsigned" and apply their policy).
  */
-export function readBundleSignature(bundle: LoadedBundle): BundleSignature | null {
-  const raw = bundle.files["signature.sig"];
+export function readBundleSignature(bundle: Bundle): BundleSignature | null {
+  const rootPkg = bundle.packages.get(bundle.root);
+  const raw = rootPkg?.files.get("signature.sig");
   if (!raw) return null;
   let parsed: unknown;
   try {

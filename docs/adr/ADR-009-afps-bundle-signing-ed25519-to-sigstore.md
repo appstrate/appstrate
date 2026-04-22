@@ -33,8 +33,9 @@ Ship signing in **two phases**:
 
 **Phase v1 (immediate, ships with first runtime release):**
 
-- Ed25519 detached signatures, one `signature.sig` file at the root of each bundle
+- Ed25519 detached signatures, one `signature.sig` file in the root `BundlePackage` of each bundle
 - Format: `{ alg: "ed25519", keyId, signature: base64, chain?: [...] }`
+- Canonical digest: signatures cover `canonicalBundleDigest(bundle)` — the UTF-8 encoding of `JSON.stringify({ bundleFormatVersion, root, integrity })`, where `integrity` is `Bundle.integrity` recomputed as if `signature.sig` were absent (strip from root package → recompute root `RECORD` integrity → recompute bundle-level SRI over the packages map). This binds the full Merkle root (all files of all packages) to the signature — a tampered byte anywhere invalidates it, and a replay that swaps the root identity or bundle format version cannot reuse the signature.
 - Trust hierarchy: a single Appstrate root public key is embedded in the runtime; publisher keys are signed by the root; bundles are signed by the publisher key
 - Verification: fail-closed by default, `--trust-root file.json` for self-hosted publishers that do not chain to Appstrate
 

@@ -16,8 +16,21 @@ import {
   signChildKey,
   type TrustRoot,
 } from "../bundle/signing.ts";
+import type { Bundle } from "../bundle/types.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { ConformanceAdapter } from "./adapter.ts";
+
+function rootManifestOf(bundle: Bundle): Record<string, unknown> {
+  const rootPkg = bundle.packages.get(bundle.root);
+  if (!rootPkg) throw new Error(`bundle root ${bundle.root} not present in packages map`);
+  return rootPkg.manifest as Record<string, unknown>;
+}
+
+function rootPromptOf(bundle: Bundle): string {
+  const rootPkg = bundle.packages.get(bundle.root);
+  const bytes = rootPkg?.files.get("prompt.md");
+  return bytes ? new TextDecoder().decode(bytes) : "";
+}
 
 export type ConformanceLevel = "L1" | "L2" | "L3" | "L4";
 
@@ -86,10 +99,12 @@ const L1_LOAD_MINIMAL: ConformanceCase = {
   title: "loads a well-formed agent bundle",
   run: (adapter) => {
     const bundle = adapter.loadBundle(buildReferenceBundle());
-    if (bundle.manifest["name"] !== REFERENCE_MANIFEST.name) {
-      return fail(`manifest.name mismatch: ${String(bundle.manifest["name"])}`);
+    const manifest = rootManifestOf(bundle);
+    if (manifest["name"] !== REFERENCE_MANIFEST.name) {
+      return fail(`manifest.name mismatch: ${String(manifest["name"])}`);
     }
-    if (typeof bundle.prompt !== "string" || bundle.prompt.length === 0) {
+    const prompt = rootPromptOf(bundle);
+    if (prompt.length === 0) {
       return fail("prompt must be a non-empty string");
     }
     return pass();
@@ -134,8 +149,9 @@ const L1_STRIP_WRAPPER: ConformanceCase = {
       "wrap/prompt.md": enc("inside wrap"),
     });
     const bundle = adapter.loadBundle(bytes);
-    if (bundle.prompt !== "inside wrap") {
-      return fail(`wrapper not stripped: prompt=${bundle.prompt}`);
+    const prompt = rootPromptOf(bundle);
+    if (prompt !== "inside wrap") {
+      return fail(`wrapper not stripped: prompt=${prompt}`);
     }
     return pass();
   },
@@ -236,7 +252,7 @@ const L3_VERIFY_DIRECT: ConformanceCase = {
     const kp = generateKeyPair();
     const bundleBytes = buildReferenceBundle();
     const loaded = adapter.loadBundle(bundleBytes);
-    const canonical = canonicalBundleDigest(loaded.files);
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: kp.privateKey, keyId: kp.keyId });
     const trust: TrustRoot = { keys: [{ keyId: kp.keyId, publicKey: kp.publicKey }] };
     const r = adapter.verifySignature(canonical, sig, trust);
@@ -252,7 +268,7 @@ const L3_DETECT_TAMPER: ConformanceCase = {
   run: (adapter) => {
     const kp = generateKeyPair();
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(loaded.files);
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: kp.privateKey, keyId: kp.keyId });
     const tampered = new Uint8Array(canonical);
     tampered[0] = tampered[0]! ^ 0xff;
@@ -274,7 +290,7 @@ const L3_UNKNOWN_KEY: ConformanceCase = {
     const signer = generateKeyPair();
     const other = generateKeyPair();
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(loaded.files);
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, { privateKey: signer.privateKey, keyId: signer.keyId });
     const trust: TrustRoot = { keys: [{ keyId: other.keyId, publicKey: other.publicKey }] };
     const r = adapter.verifySignature(canonical, sig, trust);
@@ -302,7 +318,7 @@ const L3_CHAIN_ACCEPTED: ConformanceCase = {
       }),
     ];
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(loaded.files);
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, {
       privateKey: publisher.privateKey,
       keyId: publisher.keyId,
@@ -332,7 +348,7 @@ const L3_UNTRUSTED_ROOT: ConformanceCase = {
       }),
     ];
     const loaded = adapter.loadBundle(buildReferenceBundle());
-    const canonical = canonicalBundleDigest(loaded.files);
+    const canonical = canonicalBundleDigest(loaded);
     const sig = signBundle(canonical, {
       privateKey: publisher.privateKey,
       keyId: publisher.keyId,

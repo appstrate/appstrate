@@ -3,9 +3,11 @@
 
 import { parseArgs } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
-import { zipSync } from "fflate";
-import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
+import { readBundleFromBuffer } from "../../bundle/read.ts";
+import { writeBundleToBuffer } from "../../bundle/write.ts";
 import { canonicalBundleDigest, signBundle, type TrustChainEntry } from "../../bundle/signing.ts";
+import { recordIntegrity, serializeRecord, computeRecordEntries } from "../../bundle/integrity.ts";
+import type { Bundle } from "../../bundle/types.ts";
 import type { CliIO } from "../index.ts";
 
 const HELP = `afps sign — produce signature.sig for a bundle
@@ -91,20 +93,39 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadAnyBundleFromBuffer(bundleBytes);
+  const bundle = readBundleFromBuffer(new Uint8Array(bundleBytes));
 
-  const canonical = canonicalBundleDigest(bundle.files);
+  const canonical = canonicalBundleDigest(bundle);
   const signature = signBundle(canonical, {
     privateKey: keyFile.privateKey,
     keyId: parsed.values["key-id"] ?? keyFile.keyId,
     chain,
   });
 
+  // Inject signature.sig into the root package and rebuild the bundle.
+  const rootPkg = bundle.packages.get(bundle.root)!;
   const enc = new TextEncoder();
-  const outFiles: Record<string, Uint8Array> = { ...bundle.files };
-  outFiles["signature.sig"] = enc.encode(JSON.stringify(signature, null, 2) + "\n");
-  const newZip = zipSync(outFiles);
+  const updatedFiles = new Map(rootPkg.files);
+  updatedFiles.set("signature.sig", enc.encode(JSON.stringify(signature, null, 2) + "\n"));
+  // Re-compute RECORD + per-package integrity since files changed.
+  const recordBody = serializeRecord(computeRecordEntries(updatedFiles));
+  const updatedIntegrity = recordIntegrity(recordBody);
+  const updatedBundle: Bundle = {
+    ...bundle,
+    packages: new Map([
+      ...bundle.packages,
+      [
+        bundle.root,
+        {
+          ...rootPkg,
+          files: updatedFiles,
+          integrity: updatedIntegrity,
+        },
+      ],
+    ]),
+  };
 
+  const newZip = writeBundleToBuffer(updatedBundle);
   const outPath = parsed.values.out ?? bundlePath;
   await writeFile(outPath, newZip);
   io.stdout(`signed ${bundlePath} → ${outPath} (keyId: ${signature.keyId})\n`);

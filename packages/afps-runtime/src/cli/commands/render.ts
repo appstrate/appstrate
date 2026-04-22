@@ -3,7 +3,7 @@
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { loadAnyBundleFromBuffer } from "../../bundle/bridge.ts";
+import { readBundleFromBuffer } from "../../bundle/read.ts";
 import { renderPrompt } from "../../bundle/prompt-renderer.ts";
 import type { ExecutionContext } from "../../types/execution-context.ts";
 import type { CliIO } from "../index.ts";
@@ -65,7 +65,10 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   }
 
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadAnyBundleFromBuffer(bundleBytes);
+  const bundle = readBundleFromBuffer(new Uint8Array(bundleBytes));
+  const rootPkg = bundle.packages.get(bundle.root);
+  const promptBytes = rootPkg?.files.get("prompt.md");
+  const template = promptBytes ? new TextDecoder().decode(promptBytes) : "";
 
   let contextFile: RenderContextFile = {};
   if (parsed.values.context) {
@@ -96,7 +99,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
   };
   const rendered = await renderPrompt({
-    template: bundle.prompt,
+    template,
     context,
   });
   io.stdout(rendered);

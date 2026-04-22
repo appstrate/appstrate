@@ -8,8 +8,16 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { createCaptureSink, makeContext, ScriptedPiRunner } from "./helpers.ts";
+import {
+  createCaptureSink,
+  makeBundlePackage,
+  makeContext,
+  makeTestBundle,
+  ScriptedPiRunner,
+} from "./helpers.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+
+const STUB_BUNDLE = makeTestBundle(makeBundlePackage("@test/stub", "0.0.0", "agent", {}));
 
 describe("PiRunner.run — event forwarding", () => {
   it("forwards bridge-emitted events to the caller's EventSink before finalize", async () => {
@@ -23,13 +31,7 @@ describe("PiRunner.run — event forwarding", () => {
     });
 
     await runner.run({
-      bundle: {
-        manifest: {},
-        prompt: "",
-        files: {},
-        compressedSize: 0,
-        decompressedSize: 0,
-      },
+      bundle: STUB_BUNDLE,
       context: makeContext(),
       providerResolver: { resolve: async () => [] },
       eventSink: sink,
@@ -50,13 +52,7 @@ describe("PiRunner.run — event forwarding", () => {
     });
 
     await runner.run({
-      bundle: {
-        manifest: {},
-        prompt: "",
-        files: {},
-        compressedSize: 0,
-        decompressedSize: 0,
-      },
+      bundle: STUB_BUNDLE,
       context: makeContext(),
       providerResolver: { resolve: async () => [] },
       eventSink: sink,
@@ -94,13 +90,7 @@ describe("PiRunner.run — event forwarding", () => {
     });
 
     await runner.run({
-      bundle: {
-        manifest: {},
-        prompt: "",
-        files: {},
-        compressedSize: 0,
-        decompressedSize: 0,
-      },
+      bundle: STUB_BUNDLE,
       context: makeContext(),
       providerResolver: { resolve: async () => [] },
       eventSink: sink,
@@ -119,13 +109,7 @@ describe("PiRunner.run — error path", () => {
     });
 
     await runner.run({
-      bundle: {
-        manifest: {},
-        prompt: "",
-        files: {},
-        compressedSize: 0,
-        decompressedSize: 0,
-      },
+      bundle: STUB_BUNDLE,
       context: makeContext(),
       providerResolver: { resolve: async () => [] },
       eventSink: sink,
@@ -145,13 +129,7 @@ describe("PiRunner.run — error path", () => {
     });
 
     await runner.run({
-      bundle: {
-        manifest: {},
-        prompt: "",
-        files: {},
-        compressedSize: 0,
-        decompressedSize: 0,
-      },
+      bundle: STUB_BUNDLE,
       context: makeContext(),
       providerResolver: { resolve: async () => [] },
       eventSink: sink,
@@ -174,13 +152,7 @@ describe("PiRunner.run — cancellation", () => {
 
     await expect(
       runner.run({
-        bundle: {
-          manifest: {},
-          prompt: "",
-          files: {},
-          compressedSize: 0,
-          decompressedSize: 0,
-        },
+        bundle: STUB_BUNDLE,
         context: makeContext(),
         providerResolver: { resolve: async () => [] },
         eventSink: sink,
@@ -208,13 +180,7 @@ describe("PiRunner.run — cancellation", () => {
 
     await expect(
       runner.run({
-        bundle: {
-          manifest: {},
-          prompt: "",
-          files: {},
-          compressedSize: 0,
-          decompressedSize: 0,
-        },
+        bundle: STUB_BUNDLE,
         context: makeContext(),
         providerResolver: { resolve: async () => [] },
         eventSink: sink,
@@ -237,13 +203,7 @@ describe("PiRunner.run — cancellation", () => {
 
     try {
       await runner.run({
-        bundle: {
-          manifest: {},
-          prompt: "",
-          files: {},
-          compressedSize: 0,
-          decompressedSize: 0,
-        },
+        bundle: STUB_BUNDLE,
         context: makeContext(),
         providerResolver: { resolve: async () => [] },
         eventSink: sink,

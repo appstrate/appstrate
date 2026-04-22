@@ -2,11 +2,12 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { zipSync } from "fflate";
-import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
-import { validateAfpsManifest } from "../../src/bundle/validator.ts";
+import { buildBundleFromAfps } from "../../src/bundle/build.ts";
+import { emptyPackageCatalog } from "../../src/bundle/catalog.ts";
+import { validateBundle } from "../../src/bundle/validate-bundle.ts";
 import { computeIntegrity, verifyIntegrity } from "../../src/bundle/hash.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
+import { zipSync } from "fflate";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -31,16 +32,18 @@ const PROMPT = [
   "{{^memories}}(no prior findings)\n{{/memories}}",
 ].join("\n");
 
-describe("bundle integration — build → load → validate → render", () => {
+describe("bundle integration — ingest .afps → validate → render", () => {
   const zip = zipSync({
     "manifest.json": enc(JSON.stringify(MANIFEST)),
     "prompt.md": enc(PROMPT),
   });
 
-  it("round-trips through loader + validator with no issues", () => {
-    const bundle = loadBundleFromBuffer(zip);
-    expect(bundle.manifest.name).toBe("@acme/research");
-    const result = validateAfpsManifest(bundle);
+  it("ingests a single-package AFPS archive into a valid Bundle-of-1", async () => {
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
+    expect(bundle.root).toBe("@acme/research@1.0.0");
+    const rootPkg = bundle.packages.get(bundle.root)!;
+    expect(rootPkg.manifest.name).toBe("@acme/research");
+    const result = validateBundle(bundle);
     expect(result.valid).toBe(true);
     expect(result.issues).toEqual([]);
   });
@@ -48,17 +51,17 @@ describe("bundle integration — build → load → validate → render", () => 
   it("produces a deterministic integrity hash and verifies against it", () => {
     const sri = computeIntegrity(zip);
     expect(verifyIntegrity(zip, sri).valid).toBe(true);
-    // A one-byte mutation fails the check.
     const tampered = new Uint8Array(zip);
     tampered[0] = tampered[0]! ^ 0xff;
     expect(verifyIntegrity(tampered, sri).valid).toBe(false);
   });
 
   it("renders the prompt template with memories carried on the ExecutionContext", async () => {
-    const bundle = loadBundleFromBuffer(zip);
-
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
+    const rootPkg = bundle.packages.get(bundle.root)!;
+    const template = new TextDecoder().decode(rootPkg.files.get("prompt.md")!);
     const rendered = await renderPrompt({
-      template: bundle.prompt,
+      template,
       context: {
         runId: "run_abc",
         input: { topic: "biology" },
@@ -76,9 +79,11 @@ describe("bundle integration — build → load → validate → render", () => 
   });
 
   it("falls through the inverted section when no memories are provided", async () => {
-    const bundle = loadBundleFromBuffer(zip);
+    const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
+    const rootPkg = bundle.packages.get(bundle.root)!;
+    const template = new TextDecoder().decode(rootPkg.files.get("prompt.md")!);
     const rendered = await renderPrompt({
-      template: bundle.prompt,
+      template,
       context: { runId: "r", input: { topic: "x" } },
     });
     expect(rendered).toContain("(no prior findings)");

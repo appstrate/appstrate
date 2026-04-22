@@ -11,6 +11,16 @@ import { PiRunner } from "../src/pi-runner.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type BundlePackage,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 
 /** Fake Pi SDK session with driver methods the tests can invoke directly. */
 export interface FakeSession extends BridgeableSession {
@@ -90,6 +100,53 @@ export function makeContext(overrides: Partial<ExecutionContext> = {}): Executio
     memories: [],
     config: {},
     ...overrides,
+  };
+}
+
+// ─── Bundle construction ─────────────────────────────────────────────
+
+const TEST_ENC = new TextEncoder();
+
+/**
+ * Build a {@link BundlePackage} from a scoped name + version + file map.
+ * `type` is baked into the package manifest so {@link prepareBundleForPi}'s
+ * type-based partition (skill/provider/tool) picks up each dep correctly.
+ */
+export function makeBundlePackage(
+  name: `@${string}/${string}`,
+  version: string,
+  type: "agent" | "tool" | "skill" | "provider",
+  files: Record<string, string | Uint8Array> = {},
+  extraManifest: Record<string, unknown> = {},
+): BundlePackage {
+  const identity = `${name}@${version}` as PackageIdentity;
+  const manifest = { name, version, type, ...extraManifest };
+  const filesMap = new Map<string, Uint8Array>();
+  filesMap.set("manifest.json", TEST_ENC.encode(JSON.stringify(manifest)));
+  for (const [k, v] of Object.entries(files)) {
+    filesMap.set(k, typeof v === "string" ? TEST_ENC.encode(v) : v);
+  }
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(filesMap)));
+  return { identity, manifest, files: filesMap, integrity };
+}
+
+/** Build a {@link Bundle} from a root package + an arbitrary list of deps. */
+export function makeTestBundle(root: BundlePackage, deps: BundlePackage[] = []): Bundle {
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(root.identity, root);
+  for (const d of deps) packages.set(d.identity, d);
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const p of packages.values()) {
+    pkgIndex.set(p.identity, {
+      path: `packages/${(p.manifest as { name: string }).name}/${(p.manifest as { version: string }).version}/`,
+      integrity: p.integrity,
+    });
+  }
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: root.identity,
+    packages,
+    integrity: bundleIntegrity(pkgIndex),
   };
 }
 

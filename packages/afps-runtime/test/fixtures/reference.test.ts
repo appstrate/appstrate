@@ -15,8 +15,16 @@
 import { describe, it, expect } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadBundleFromBuffer } from "../../src/bundle/loader.ts";
-import { validateAfpsManifest } from "../../src/bundle/validator.ts";
+import { buildBundleFromAfps } from "../../src/bundle/build.ts";
+import { emptyPackageCatalog } from "../../src/bundle/catalog.ts";
+import { validateBundle } from "../../src/bundle/validate-bundle.ts";
+import type { Bundle } from "../../src/bundle/types.ts";
+
+function rootPromptOf(bundle: Bundle): string {
+  const rootPkg = bundle.packages.get(bundle.root)!;
+  const bytes = rootPkg.files.get("prompt.md");
+  return bytes ? new TextDecoder().decode(bytes) : "";
+}
 import {
   canonicalBundleDigest,
   readBundleSignature,
@@ -49,31 +57,32 @@ async function readJson<T>(name: string): Promise<T> {
 describe("fixtures/reference — end-to-end round trip", () => {
   it("loads and validates the signed bundle without issues", async () => {
     const bytes = await readFile(join(FIXTURE, "bundle.afps"));
-    const bundle = loadBundleFromBuffer(bytes);
-    const result = validateAfpsManifest(bundle);
+    const bundle = await buildBundleFromAfps(bytes, emptyPackageCatalog);
+    const result = validateBundle(bundle);
     expect(result.valid).toBe(true);
     expect(result.issues).toEqual([]);
-    expect(bundle.manifest["name"]).toBe("@afps/conformance-ref");
+    const rootPkg = bundle.packages.get(bundle.root)!;
+    expect(rootPkg.manifest["name"]).toBe("@afps/conformance-ref");
   });
 
   it("verifies the signature against the shipped trust-root", async () => {
     const bytes = await readFile(join(FIXTURE, "bundle.afps"));
-    const bundle = loadBundleFromBuffer(bytes);
+    const bundle = await buildBundleFromAfps(bytes, emptyPackageCatalog);
     const trustRoot = await readJson<TrustRoot>("trust-root.json");
     const signature = readBundleSignature(bundle);
     expect(signature).not.toBeNull();
-    const digest = canonicalBundleDigest(bundle.files);
+    const digest = canonicalBundleDigest(bundle);
     const result = verifyBundleSignature(digest, signature!, trustRoot);
     expect(result.ok).toBe(true);
   });
 
   it("renders the prompt template with the reference context + snapshot", async () => {
     const bytes = await readFile(join(FIXTURE, "bundle.afps"));
-    const bundle = loadBundleFromBuffer(bytes);
+    const bundle = await buildBundleFromAfps(bytes, emptyPackageCatalog);
     const context = await readJson<ExecutionContext>("context.json");
     const snapshot = await readJson<SnapshotFile>("snapshot.json");
     const rendered = await renderPrompt({
-      template: bundle.prompt,
+      template: rootPromptOf(bundle),
       context: {
         ...context,
         ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
@@ -116,7 +125,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
 
   it("rejects the unsigned bundle when --require-signature is emulated", async () => {
     const bytes = await readFile(join(FIXTURE, "bundle-unsigned.afps"));
-    const bundle = loadBundleFromBuffer(bytes);
+    const bundle = await buildBundleFromAfps(bytes, emptyPackageCatalog);
     expect(readBundleSignature(bundle)).toBeNull();
   });
 });
