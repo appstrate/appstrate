@@ -1,12 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { UploadFn } from "@appstrate/ui/schema-form";
 import { getCurrentOrgId } from "./hooks/use-org";
 import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
 
-/** Direct-upload endpoint consumed by `<SchemaForm uploadPath={...} />`. */
-export const UPLOADS_PATH = `${API_BASE}/uploads`;
+const UPLOADS_PATH = `${API_BASE}/uploads`;
+
+interface UploadDescriptor {
+  id: string;
+  uri: string;
+  url: string;
+  method: "PUT";
+  headers: Record<string, string>;
+}
+
+/**
+ * Authed uploader for `<SchemaForm upload={...} />`. The default UI-package
+ * uploader uses raw fetch (no org context), which the `/api/uploads` middleware
+ * rejects with "X-Org-Id header is required". This variant injects the same
+ * org/app headers as `apiFetch`.
+ */
+export const uploadClient: UploadFn = async (file, signal) => {
+  const descRes = await fetch(UPLOADS_PATH, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+    }),
+    signal,
+  });
+  if (!descRes.ok) {
+    const body = (await descRes.json().catch(() => ({ detail: descRes.statusText }))) as {
+      detail?: string;
+    };
+    throw new Error(body.detail ?? `upload init failed: ${descRes.status}`);
+  }
+  const desc = (await descRes.json()) as UploadDescriptor;
+
+  const putRes = await fetch(desc.url, {
+    method: desc.method,
+    headers: desc.headers,
+    body: file,
+    signal,
+  });
+  if (!putRes.ok) {
+    throw new Error(`upload failed: ${putRes.status} ${putRes.statusText}`);
+  }
+  return desc.uri;
+};
 
 export class ApiError extends Error {
   constructor(

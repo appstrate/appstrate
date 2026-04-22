@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { UPLOADS_PATH } from "../api";
+import { uploadClient } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
@@ -311,7 +311,7 @@ export function ScheduleForm({
           <SchemaForm
             wrapper={wrapper}
             formData={inputValues}
-            uploadPath={UPLOADS_PATH}
+            upload={uploadClient}
             labels={labels}
             onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
           />
