@@ -69,12 +69,7 @@ export function buildResolver(
           "Pass a JSON file with { version: 1, providers: {…} }",
         );
       }
-      return new LocalProviderResolver({
-        creds: local.credsFilePath,
-        // AFPS bundles put provider manifests at `providers/<name>/` — the
-        // default `.agent-package/providers/` is platform-internal.
-        providerPrefix: "providers/",
-      });
+      return new LocalProviderResolver({ creds: local.credsFilePath });
     }
 
     case "remote": {
@@ -91,14 +86,7 @@ export function buildResolver(
           "Ensure your profile has an appId set (run `appstrate app switch`) and a usable API key",
         );
       }
-      return new RemoteAppstrateProviderResolver({
-        ...remote,
-        // AFPS bundles store provider manifests under `providers/<name>/`
-        // (see `prepareBundleForPi`). The default `.agent-package/providers/`
-        // is the platform-internal prefix; remote resolution against a
-        // plain loaded bundle needs the canonical path.
-        providerPrefix: "providers/",
-      });
+      return new RemoteAppstrateProviderResolver({ ...remote });
     }
   }
 }

@@ -15,6 +15,7 @@
 
 export type {
   Bundle,
+  BundlePackage,
   DependencyRef,
   ToolRef,
   ProviderRef,
@@ -40,7 +41,7 @@ export {
   type BundledToolModule,
 } from "./bundled-tool-resolver.ts";
 export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
-export { toBundle, type BundleAdapter } from "./bundle-adapter.ts";
+export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
 
 // Provider-resolver surface — tool factory + concrete impls.
 export {

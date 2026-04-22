@@ -1,83 +1,62 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import type { Bundle } from "./types.ts";
-import type { LoadedBundle } from "../bundle/loader.ts";
-import { computeIntegrity } from "../bundle/hash.ts";
-
 /**
- * Adapter that lifts a {@link LoadedBundle} (the runtime's in-memory
- * representation of a decompressed `.afps` file) into the spec-level
- * {@link Bundle} surface that resolvers consume.
+ * Resolver helpers for looking up packages inside a {@link Bundle}.
  *
- * Kept as a function rather than an interface: loaders already produce
- * a concrete `LoadedBundle`, and exposing only the narrow `Bundle` view
- * to resolvers guarantees they cannot reach into runtime-private fields.
+ * The spec {@link Bundle} is keyed by {@link PackageIdentity}
+ * (`@scope/name@version`). Resolvers receive refs as `{ name, version }`
+ * where `version` may be a semver range — `resolvePackageRef` finds the
+ * single package in the bundle whose name matches, which is the
+ * resolved version the builder committed to.
  */
-export interface BundleAdapter extends Bundle {
-  /** The underlying runtime bundle, for advanced resolvers that need more. */
-  readonly loaded: LoadedBundle;
-}
 
-const TEXT_DECODER = new TextDecoder();
+import type { Bundle, BundlePackage } from "../bundle/types.ts";
+import type { DependencyRef } from "@afps/types";
 
 /**
- * Wrap a {@link LoadedBundle} as a spec-level {@link Bundle}. The digest
- * is computed lazily on first access so callers that do not need it
- * (e.g. tests, simple in-memory runners) do not pay the hash cost.
+ * Find the package in the bundle whose manifest name matches the ref.
+ * Returns `null` when no such package is present — callers decide the
+ * error shape (skill vs tool vs provider surface distinct errors).
+ *
+ * The bundle builder resolves each declared dep to exactly one version,
+ * so a single name should map to a single package. When multiple
+ * versions of the same name are present (not expected under AFPS 1.3
+ * but tolerated), the first one encountered wins — iteration order is
+ * deterministic (Map preserves insertion order).
  */
-export function toBundle(loaded: LoadedBundle): BundleAdapter {
-  let cachedDigest: string | undefined;
-
-  return {
-    loaded,
-    manifest: loaded.manifest,
-    get digest(): string {
-      if (cachedDigest === undefined) {
-        cachedDigest = computeIntegrity(toCanonicalBytes(loaded));
-      }
-      return cachedDigest;
-    },
-    async read(path: string): Promise<Uint8Array> {
-      const entry = loaded.files[normalisePath(path)];
-      if (!entry) throw new Error(`bundle entry not found: ${path}`);
-      return entry;
-    },
-    async readText(path: string): Promise<string> {
-      const entry = loaded.files[normalisePath(path)];
-      if (!entry) throw new Error(`bundle entry not found: ${path}`);
-      return TEXT_DECODER.decode(entry);
-    },
-    async exists(path: string): Promise<boolean> {
-      return Object.prototype.hasOwnProperty.call(loaded.files, normalisePath(path));
-    },
-  };
-}
-
-function normalisePath(path: string): string {
-  return path.replace(/^\.\//, "").replace(/\\/g, "/");
+export function resolvePackageRef(bundle: Bundle, ref: DependencyRef): BundlePackage | null {
+  for (const pkg of bundle.packages.values()) {
+    const name = (pkg.manifest as { name?: unknown }).name;
+    if (name === ref.name) return pkg;
+  }
+  return null;
 }
 
 /**
- * Deterministic canonical byte sequence of a LoadedBundle suitable for
- * hashing — entries sorted by path, joined with length-prefixed framing.
+ * Read a text file from a package, throwing when absent. Convenience
+ * over the raw `Map.get` + decode dance that every resolver would
+ * otherwise duplicate.
  */
-function toCanonicalBytes(bundle: LoadedBundle): Uint8Array {
-  const keys = Object.keys(bundle.files).sort();
-  const chunks: Uint8Array[] = [];
-  const encoder = new TextEncoder();
-  for (const key of keys) {
-    const pathBytes = encoder.encode(`${key}\n`);
-    const entry = bundle.files[key]!;
-    const lengthBytes = encoder.encode(`${entry.length}\n`);
-    chunks.push(pathBytes, lengthBytes, entry, encoder.encode("\n"));
+export function readPackageText(pkg: BundlePackage, relativePath: string): string {
+  const bytes = pkg.files.get(relativePath);
+  if (!bytes) {
+    throw new Error(
+      `package ${pkg.identity}: file ${relativePath} not found (have: ${[...pkg.files.keys()].join(", ")})`,
+    );
   }
-  const total = chunks.reduce((n, c) => n + c.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Read raw bytes from a package, throwing when absent.
+ */
+export function readPackageBytes(pkg: BundlePackage, relativePath: string): Uint8Array {
+  const bytes = pkg.files.get(relativePath);
+  if (!bytes) {
+    throw new Error(
+      `package ${pkg.identity}: file ${relativePath} not found (have: ${[...pkg.files.keys()].join(", ")})`,
+    );
   }
-  return out;
+  return bytes;
 }

@@ -24,19 +24,36 @@ import type { AppstrateRunPlan } from "../../../src/services/adapters/types.ts";
 import type { ContainerExecutor } from "../../../src/services/adapters/pi.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
-function makeBundle(): LoadedBundle {
+function makeBundle(): Bundle {
+  const enc = new TextEncoder();
+  const identity = "@test/parity@0.0.0" as PackageIdentity;
+  const manifest = { name: "@test/parity", version: "0.0.0", type: "agent" };
+  const files = new Map<string, Uint8Array>([
+    ["manifest.json", enc.encode(JSON.stringify(manifest))],
+    ["prompt.md", enc.encode("Parity agent body: topic={{input.topic}}")],
+  ]);
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(files)));
   return {
-    manifest: { name: "parity", version: "0.0.0" },
-    prompt: "Parity agent body: topic={{input.topic}}",
-    files: {},
-    compressedSize: 0,
-    decompressedSize: 0,
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: identity,
+    packages: new Map([[identity, { identity, manifest, files, integrity }]]),
+    integrity: bundleIntegrity(
+      new Map([[identity, { path: "packages/@test/parity/0.0.0/", integrity }]]),
+    ),
   };
 }
 

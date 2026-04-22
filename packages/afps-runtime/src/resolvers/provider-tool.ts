@@ -11,6 +11,7 @@
  */
 
 import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
+import { resolvePackageRef } from "./bundle-adapter.ts";
 
 /**
  * Metadata the resolver extracts from the provider manifest shipped in
@@ -267,22 +268,28 @@ export async function serializeFetchResponse(res: Response): Promise<ProviderCal
  * transport to enforce the allowlist, while the local path refuses to
  * call an un-manifested provider. Shared implementation lets all three
  * resolvers fix bugs and add manifest fields in one place.
+ *
+ * Resolution order inside the provider's package:
+ *   1. `provider.json` (AFPS 1.x convention)
+ *   2. `manifest.json` (falls back to the package manifest when a
+ *      dedicated provider.json is absent)
  */
-export async function readProviderMeta(
+export function readProviderMeta(
   bundle: Bundle,
   ref: ProviderRef,
-  prefix: string,
   fallbackAllowAllUris: boolean,
-): Promise<ProviderMeta> {
-  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
-  for (const path of candidates) {
-    if (await bundle.exists(path)) {
-      const raw = await bundle.readText(path);
-      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
-      return { name: ref.name, ...parsed };
-    }
+): ProviderMeta {
+  const pkg = resolvePackageRef(bundle, ref);
+  if (!pkg) return { name: ref.name, allowAllUris: fallbackAllowAllUris };
+  for (const candidate of ["provider.json", "manifest.json"] as const) {
+    const bytes = pkg.files.get(candidate);
+    if (!bytes) continue;
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ProviderMeta>;
+    return { name: ref.name, ...parsed };
   }
-  return { name: ref.name, allowAllUris: fallbackAllowAllUris };
+  // Package present but no manifest file — fall back to the in-memory
+  // package manifest that the bundle builder already parsed for us.
+  return { name: ref.name, ...(pkg.manifest as Partial<ProviderMeta>) };
 }
 
 function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {

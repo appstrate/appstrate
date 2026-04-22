@@ -37,8 +37,6 @@ export interface LocalProviderResolverOptions {
   creds: string | LocalCredentialsFile;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
-  /** Directory prefix for provider manifests in the bundle. */
-  providerPrefix?: string;
 }
 
 /**
@@ -49,13 +47,11 @@ export interface LocalProviderResolverOptions {
  */
 export class LocalProviderResolver implements ProviderResolver {
   private readonly fetchImpl: typeof fetch;
-  private readonly providerPrefix: string;
   private creds: LocalCredentialsFile | null;
   private readonly credsPath: string | null;
 
   constructor(opts: LocalProviderResolverOptions) {
     this.fetchImpl = opts.fetch ?? fetch;
-    this.providerPrefix = opts.providerPrefix ?? ".agent-package/providers/";
     if (typeof opts.creds === "string") {
       this.creds = null;
       this.credsPath = opts.creds;
@@ -69,7 +65,7 @@ export class LocalProviderResolver implements ProviderResolver {
     const creds = await this.loadCreds();
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, false);
+      const meta = readProviderMeta(bundle, ref, false);
       const entry = creds.providers[ref.name];
       if (!entry) {
         throw new Error(

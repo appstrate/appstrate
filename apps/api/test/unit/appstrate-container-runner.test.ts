@@ -13,7 +13,15 @@ import type { AppstrateRunPlan } from "../../src/services/adapters/types.ts";
 import type { ContainerExecutor } from "../../src/services/adapters/pi.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 
 function makePlan(): AppstrateRunPlan {
@@ -46,13 +54,22 @@ function makeContext(runId: string): ExecutionContext {
   };
 }
 
-function makeBundle(): LoadedBundle {
+function makeBundle(): Bundle {
+  const enc = new TextEncoder();
+  const identity = "@test/agent@0.0.0" as PackageIdentity;
+  const manifest = { name: "@test/agent", version: "0.0.0", type: "agent" };
+  const files = new Map<string, Uint8Array>([
+    ["manifest.json", enc.encode(JSON.stringify(manifest))],
+    ["prompt.md", enc.encode("unused")],
+  ]);
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(files)));
   return {
-    manifest: { name: "test", version: "0.0.0" },
-    prompt: "unused",
-    files: {},
-    compressedSize: 0,
-    decompressedSize: 0,
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: identity,
+    packages: new Map([[identity, { identity, manifest, files, integrity }]]),
+    integrity: bundleIntegrity(
+      new Map([[identity, { path: "packages/@test/agent/0.0.0/", integrity }]]),
+    ),
   };
 }
 

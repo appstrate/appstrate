@@ -25,8 +25,6 @@ export interface SidecarProviderResolverOptions {
    * set per-call by the LLM override these.
    */
   baseHeaders?: Record<string, string>;
-  /** Directory prefix for provider manifests in the bundle. */
-  providerPrefix?: string;
 }
 
 /**
@@ -42,20 +40,18 @@ export class SidecarProviderResolver implements ProviderResolver {
   private readonly sidecarUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly baseHeaders: Record<string, string>;
-  private readonly providerPrefix: string;
 
   constructor(opts: SidecarProviderResolverOptions) {
     if (!opts.sidecarUrl) throw new Error("SidecarProviderResolver: sidecarUrl is required");
     this.sidecarUrl = opts.sidecarUrl.replace(/\/$/, "");
     this.fetchImpl = opts.fetch ?? fetch;
     this.baseHeaders = opts.baseHeaders ?? {};
-    this.providerPrefix = opts.providerPrefix ?? ".agent-package/providers/";
   }
 
   async resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, true);
+      const meta = readProviderMeta(bundle, ref, true);
       const call = this.buildCall(ref, meta);
       tools.push(makeProviderTool(meta, call));
     }

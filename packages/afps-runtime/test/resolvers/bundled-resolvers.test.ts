@@ -7,30 +7,68 @@ import {
   BundledSkillResolver,
   BundledToolResolutionError,
   BundledSkillResolutionError,
-  toBundle,
   type Bundle,
+  type BundlePackage,
   type Tool,
 } from "../../src/resolvers/index.ts";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type PackageIdentity,
+} from "../../src/bundle/index.ts";
 
-/** Minimal in-memory bundle suitable for resolver unit tests. */
-function makeBundle(entries: Record<string, string | Uint8Array>): Bundle {
-  const files: Record<string, Uint8Array> = {};
-  const enc = new TextEncoder();
-  for (const [key, value] of Object.entries(entries)) {
-    files[key] = typeof value === "string" ? enc.encode(value) : value;
+const enc = new TextEncoder();
+
+/**
+ * Build a {@link BundlePackage} from a name + in-memory file map. The
+ * integrity is computed canonically so the returned package round-trips
+ * through `readBundleFromBuffer`.
+ */
+function makePackage(
+  name: `@${string}/${string}`,
+  version: string,
+  type: "agent" | "tool" | "skill" | "provider",
+  files: Record<string, string | Uint8Array>,
+  extraManifest: Record<string, unknown> = {},
+): BundlePackage {
+  const identity = `${name}@${version}` as PackageIdentity;
+  const manifest = { name, version, type, ...extraManifest };
+  const filesMap = new Map<string, Uint8Array>();
+  filesMap.set("manifest.json", enc.encode(JSON.stringify(manifest)));
+  for (const [k, v] of Object.entries(files)) {
+    filesMap.set(k, typeof v === "string" ? enc.encode(v) : v);
   }
-  return toBundle({
-    manifest: {},
-    prompt: "",
-    files,
-    compressedSize: 0,
-    decompressedSize: 0,
-  });
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(filesMap)));
+  return { identity, manifest, files: filesMap, integrity };
+}
+
+/** Build a {@link Bundle} from a root package + an arbitrary list of deps. */
+function makeBundle(root: BundlePackage, deps: BundlePackage[] = []): Bundle {
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(root.identity, root);
+  for (const d of deps) packages.set(d.identity, d);
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const p of packages.values()) {
+    pkgIndex.set(p.identity, {
+      path: `packages/${(p.manifest as { name: string }).name}/${(p.manifest as { version: string }).version}/`,
+      integrity: p.integrity,
+    });
+  }
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: root.identity,
+    packages,
+    integrity: bundleIntegrity(pkgIndex),
+  };
 }
 
 describe("BundledToolResolver", () => {
-  it("throws BundledToolResolutionError when no entrypoint exists", async () => {
-    const bundle = makeBundle({});
+  it("throws BundledToolResolutionError when the tool is absent from the bundle", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root);
     const resolver = new BundledToolResolver();
     await expect(
       resolver.resolve([{ name: "@afps/memory", version: "^1" }], bundle),
@@ -38,9 +76,11 @@ describe("BundledToolResolver", () => {
   });
 
   it("materialises a tool from a captured import (test seam)", async () => {
-    const bundle = makeBundle({
-      ".agent-package/tools/@afps/memory/index.js": "// stub — loader bypassed via importModule",
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const toolPkg = makePackage("@afps/memory", "1.0.0", "tool", {
+      "index.js": "// stub — loader bypassed via importModule",
     });
+    const bundle = makeBundle(root, [toolPkg]);
     const fake: Tool = {
       name: "add_memory",
       description: "stub",
@@ -56,9 +96,11 @@ describe("BundledToolResolver", () => {
   });
 
   it("rejects tool exports missing required fields", async () => {
-    const bundle = makeBundle({
-      ".agent-package/tools/@afps/bad/index.js": "// stub",
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const toolPkg = makePackage("@afps/bad", "1.0.0", "tool", {
+      "index.js": "// stub",
     });
+    const bundle = makeBundle(root, [toolPkg]);
     const resolver = new BundledToolResolver({
       // Missing execute → materialiseTool succeeds but validateTool should reject.
       importModule: async () => ({ name: "bad", description: "x", parameters: {} }) as Tool,
@@ -71,10 +113,11 @@ describe("BundledToolResolver", () => {
 
 describe("BundledSkillResolver", () => {
   it("loads SKILL.md and parses frontmatter", async () => {
-    const bundle = makeBundle({
-      ".agent-package/skills/@acme/recon/SKILL.md":
-        "---\nname: recon\ndescription: Look around\n---\n\n# Body\n",
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const skillPkg = makePackage("@acme/recon", "1.0.0", "skill", {
+      "SKILL.md": "---\nname: recon\ndescription: Look around\n---\n\n# Body\n",
     });
+    const bundle = makeBundle(root, [skillPkg]);
     const resolver = new BundledSkillResolver();
     const out = await resolver.resolve([{ name: "@acme/recon", version: "^1" }], bundle);
     expect(out).toHaveLength(1);
@@ -83,45 +126,22 @@ describe("BundledSkillResolver", () => {
     expect(out[0]!.frontmatter).toEqual({ name: "recon", description: "Look around" });
   });
 
-  it("throws BundledSkillResolutionError when file missing", async () => {
+  it("throws BundledSkillResolutionError when the package is absent from the bundle", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root);
     const resolver = new BundledSkillResolver();
     await expect(
-      resolver.resolve([{ name: "@acme/missing", version: "^1" }], makeBundle({})),
+      resolver.resolve([{ name: "@acme/missing", version: "^1" }], bundle),
     ).rejects.toBeInstanceOf(BundledSkillResolutionError);
   });
-});
 
-describe("toBundle", () => {
-  it("resolves read/readText/exists against the sanitized file map", async () => {
-    const bundle = toBundle({
-      manifest: {},
-      prompt: "",
-      files: { "foo.txt": new TextEncoder().encode("bar") },
-      compressedSize: 0,
-      decompressedSize: 0,
-    });
-    expect(await bundle.exists("foo.txt")).toBe(true);
-    expect(await bundle.exists("missing.txt")).toBe(false);
-    expect(await bundle.readText("foo.txt")).toBe("bar");
-    const bytes = await bundle.read("foo.txt");
-    expect(new TextDecoder().decode(bytes)).toBe("bar");
-  });
-
-  it("computes a stable digest that changes when file contents change", async () => {
-    const a = toBundle({
-      manifest: {},
-      prompt: "",
-      files: { "a.txt": new TextEncoder().encode("x") },
-      compressedSize: 0,
-      decompressedSize: 0,
-    });
-    const b = toBundle({
-      manifest: {},
-      prompt: "",
-      files: { "a.txt": new TextEncoder().encode("y") },
-      compressedSize: 0,
-      decompressedSize: 0,
-    });
-    expect(a.digest).not.toBe(b.digest);
+  it("throws BundledSkillResolutionError when SKILL.md is missing from the package", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const skillPkg = makePackage("@acme/empty", "1.0.0", "skill", {});
+    const bundle = makeBundle(root, [skillPkg]);
+    const resolver = new BundledSkillResolver();
+    await expect(
+      resolver.resolve([{ name: "@acme/empty", version: "^1" }], bundle),
+    ).rejects.toBeInstanceOf(BundledSkillResolutionError);
   });
 });

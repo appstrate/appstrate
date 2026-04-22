@@ -17,7 +17,16 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type BundlePackage,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import { buildProviderExtensionFactories } from "@appstrate/runner-pi";
 import { buildResolver } from "../src/commands/run/resolver.ts";
 
@@ -35,29 +44,56 @@ async function scratchDir(): Promise<string> {
   return dir;
 }
 
-function makeBundle(providerName: string): LoadedBundle {
-  const manifest = {
-    name: "test-agent",
-    version: "1.0.0",
-    dependencies: { providers: { [providerName]: "1.0.0" } },
-  };
-  const encoder = new TextEncoder();
-  return {
-    manifest,
-    prompt: "test",
-    files: {
-      "manifest.json": encoder.encode(JSON.stringify(manifest)),
-      [`providers/${providerName}/provider.json`]: encoder.encode(
-        JSON.stringify({
-          name: providerName,
-          authorizedUris: ["https://api.example.com/**"],
-        }),
-      ),
-      "prompt.md": encoder.encode("test"),
+const enc = new TextEncoder();
+
+function makePackage(
+  name: `@${string}/${string}`,
+  version: string,
+  type: "agent" | "provider",
+  files: Record<string, string>,
+  extraManifest: Record<string, unknown> = {},
+): BundlePackage {
+  const identity = `${name}@${version}` as PackageIdentity;
+  const manifest = { name, version, type, ...extraManifest };
+  const filesMap = new Map<string, Uint8Array>();
+  filesMap.set("manifest.json", enc.encode(JSON.stringify(manifest)));
+  for (const [k, v] of Object.entries(files)) filesMap.set(k, enc.encode(v));
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(filesMap)));
+  return { identity, manifest, files: filesMap, integrity };
+}
+
+function makeBundle(providerName: `@${string}/${string}`): Bundle {
+  const root = makePackage(
+    "@test/agent",
+    "1.0.0",
+    "agent",
+    {},
+    {
+      dependencies: { providers: { [providerName]: "1.0.0" } },
     },
-    compressedSize: 0,
-    decompressedSize: 0,
-  } as unknown as LoadedBundle;
+  );
+  const provider = makePackage(providerName, "1.0.0", "provider", {
+    "provider.json": JSON.stringify({
+      name: providerName,
+      authorizedUris: ["https://api.example.com/**"],
+    }),
+  });
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(root.identity, root);
+  packages.set(provider.identity, provider);
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const p of packages.values()) {
+    pkgIndex.set(p.identity, {
+      path: `packages/${(p.manifest as { name: string }).name}/${(p.manifest as { version: string }).version}/`,
+      integrity: p.integrity,
+    });
+  }
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: root.identity,
+    packages,
+    integrity: bundleIntegrity(pkgIndex),
+  };
 }
 
 function makeFakePi(): {

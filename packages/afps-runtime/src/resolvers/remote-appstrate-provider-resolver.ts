@@ -28,8 +28,6 @@ export interface RemoteAppstrateProviderResolverOptions {
   sessionId?: string;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
-  /** Directory prefix for provider manifests in the bundle. */
-  providerPrefix?: string;
 }
 
 /**
@@ -50,7 +48,6 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
   private readonly fetchImpl: typeof fetch;
-  private readonly providerPrefix: string;
 
   constructor(opts: RemoteAppstrateProviderResolverOptions) {
     if (!opts.instance) throw new Error("RemoteAppstrateProviderResolver: instance is required");
@@ -62,13 +59,12 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
     this.fetchImpl = opts.fetch ?? fetch;
-    this.providerPrefix = opts.providerPrefix ?? ".agent-package/providers/";
   }
 
   async resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, true);
+      const meta = readProviderMeta(bundle, ref, true);
       tools.push(makeProviderTool(meta, this.buildCall(ref, meta)));
     }
     return tools;

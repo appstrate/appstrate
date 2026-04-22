@@ -28,7 +28,7 @@ import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { InternalSink } from "../src/pi-runner.ts";
-import { createCaptureSink } from "./helpers.ts";
+import { createCaptureSink, makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 /**
  * Adapter subclass that routes raw scripted RunEvents straight through
@@ -75,14 +75,19 @@ function makePiConformanceAdapter(): ConformanceAdapter {
     renderPrompt: baseline.renderPrompt.bind(baseline),
     verifySignature: baseline.verifySignature.bind(baseline),
     async runScripted(
-      bundle: LoadedBundle,
+      _bundle: LoadedBundle,
       context: ExecutionContext,
       scriptedEvents: readonly RunEvent[],
     ): Promise<RunScriptedOutput> {
       const sink = createCaptureSink();
       const runner = new ScriptedEventRunner(scriptedEvents);
+      // The scripted runner never touches `bundle` — pass a minimal
+      // spec Bundle to satisfy the type contract.
+      const specBundle = makeTestBundle(
+        makeBundlePackage("@afps/conformance", "1.0.0", "agent", {}),
+      );
       await runner.run({
-        bundle,
+        bundle: specBundle,
         context,
         providerResolver: { resolve: async () => [] },
         eventSink: sink,

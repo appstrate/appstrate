@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * prepareBundleForPi — takes a {@link LoadedBundle} and materialises
- * the on-disk layout the Pi SDK expects (`.pi/skills/`, `.pi/providers/`,
+ * prepareBundleForPi — takes a {@link Bundle} and materialises the
+ * on-disk layout the Pi SDK expects (`.pi/skills/`, `.pi/providers/`,
  * `.pi/tools/<id>/TOOL.md`), dynamic-imports every `dependencies.tools`
  * entrypoint, and returns the resulting {@link ExtensionFactory}s.
  *
@@ -16,24 +16,25 @@
  * wrapper chain. A bug fix lands in both places simultaneously.
  *
  * The helper is FS-bound because Bun/Node only supports dynamic
- * `import()` on file paths. We write any tool-scoped file
- * (`tools/<id>/**`) into the workspace `.agent-tools/<id>/` subtree so
- * multi-file tools (shared helpers, fixtures, etc.) resolve correctly
- * relative to their entrypoint.
+ * `import()` on file paths. We write any tool-scoped file into the
+ * workspace `.agent-tools/<id>/` subtree so multi-file tools (shared
+ * helpers, fixtures, etc.) resolve correctly relative to their
+ * entrypoint.
  */
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
+import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 
 export interface PrepareBundleOptions {
   /**
    * Agent workspace directory. The helper writes:
-   *   - `{workspaceDir}/.pi/skills/**`           (for Pi SDK skill discovery)
-   *   - `{workspaceDir}/.pi/providers/**`        (for Pi SDK provider discovery)
-   *   - `{workspaceDir}/.pi/tools/<id>/TOOL.md`  (for Pi SDK tool docs)
-   *   - `{workspaceDir}/.agent-tools/<id>/**`    (tool source, dynamic-imported)
+   *   - `{workspaceDir}/.pi/skills/<packageId>/**`      (for Pi SDK skill discovery)
+   *   - `{workspaceDir}/.pi/providers/<packageId>/**`   (for Pi SDK provider discovery)
+   *   - `{workspaceDir}/.pi/tools/<packageId>/TOOL.md`  (for Pi SDK tool docs)
+   *   - `{workspaceDir}/.agent-tools/<packageId>/**`    (tool source, dynamic-imported)
    */
   workspaceDir: string;
   /**
@@ -64,31 +65,42 @@ export interface PreparedBundle {
 }
 
 /**
- * Parse bundle manifest and materialise the `.pi/` + `.agent-tools/`
- * layout required by the Pi SDK, then dynamic-import each tool's
- * entrypoint into an ExtensionFactory.
+ * Parse bundle, partition packages by type, materialise the `.pi/` +
+ * `.agent-tools/` layout required by the Pi SDK, then dynamic-import
+ * each tool's entrypoint into an ExtensionFactory.
  *
  * Idempotent on `workspaceDir`: safe to call against an existing
  * workspace — files are overwritten, directories created with
  * `{ recursive: true }`.
  */
 export async function prepareBundleForPi(
-  bundle: LoadedBundle,
+  bundle: Bundle,
   opts: PrepareBundleOptions,
 ): Promise<PreparedBundle> {
   const onError = opts.onError ?? (() => {});
   const piDir = path.join(opts.workspaceDir, ".pi");
   const toolsScratchDir = path.join(opts.workspaceDir, ".agent-tools");
 
-  // ─── Step 1: install skills/ and providers/ under .pi/ ───────────
-  await Promise.all([
-    materialiseDir(bundle, "skills/", path.join(piDir, "skills")),
-    materialiseDir(bundle, "providers/", path.join(piDir, "providers")),
-  ]);
+  // ─── Step 1: materialise each dep package under its .pi/ subtree ───
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) continue;
+    const type = (pkg.manifest as { type?: unknown }).type;
+    if (type === "skill") {
+      await materialisePackage(pkg, path.join(piDir, "skills", parsed.packageId));
+    } else if (type === "provider") {
+      await materialisePackage(pkg, path.join(piDir, "providers", parsed.packageId));
+    }
+    // tool packages are handled in step 2 (need scratch + TOOL.md + dynamic import)
+  }
 
-  // ─── Step 2: resolve tool dependency list from manifest ──────────
-  const manifest = bundle.manifest as { dependencies?: { tools?: Record<string, string> } };
-  const toolDeps = manifest.dependencies?.tools ?? {};
+  // ─── Step 2: load each declared tool dep ─────────────────────────
+  const rootPkg = bundle.packages.get(bundle.root);
+  const rootManifest = (rootPkg?.manifest ?? {}) as {
+    dependencies?: { tools?: Record<string, string> };
+  };
+  const toolDeps = rootManifest.dependencies?.tools ?? {};
   const toolIds = Object.keys(toolDeps);
 
   const factories: ExtensionFactory[] = [];
@@ -96,12 +108,9 @@ export async function prepareBundleForPi(
 
   for (const toolId of toolIds) {
     try {
-      const { factory, resolvedId } = await loadToolFromBundle(
-        bundle,
-        toolId,
-        toolsScratchDir,
-        piDir,
-      );
+      const pkg = findPackageByName(bundle, toolId);
+      if (!pkg) continue;
+      const { factory, resolvedId } = await loadToolFromPackage(pkg, toolsScratchDir, piDir);
       if (factory === null) continue;
       if (loadedIds.has(resolvedId)) continue;
       loadedIds.add(resolvedId);
@@ -124,21 +133,22 @@ export async function prepareBundleForPi(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Write every bundle entry whose path starts with `prefix` into `destDir`,
- * stripping the prefix. No-op when the bundle has no matching entries.
- */
-async function materialiseDir(
-  bundle: LoadedBundle,
-  prefix: string,
-  destDir: string,
-): Promise<void> {
-  const entries = Object.entries(bundle.files).filter(([p]) => p.startsWith(prefix));
-  if (entries.length === 0) return;
+function findPackageByName(bundle: Bundle, name: string): BundlePackage | null {
+  for (const pkg of bundle.packages.values()) {
+    if ((pkg.manifest as { name?: unknown }).name === name) return pkg;
+  }
+  return null;
+}
 
+/**
+ * Write every file of a {@link BundlePackage} into `destDir`. The
+ * `RECORD` file is stripped since it is a packaging artefact, not part
+ * of the executable surface.
+ */
+async function materialisePackage(pkg: BundlePackage, destDir: string): Promise<void> {
   await fs.mkdir(destDir, { recursive: true });
-  for (const [p, bytes] of entries) {
-    const relative = p.slice(prefix.length);
+  for (const [relative, bytes] of pkg.files) {
+    if (relative === "RECORD") continue;
     if (!relative || relative.endsWith("/")) continue;
     const target = path.join(destDir, relative);
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -147,13 +157,13 @@ async function materialiseDir(
 }
 
 /**
- * Load a single tool from the bundle:
- *   1. Copy every `tools/<toolId>/**` file into `.agent-tools/<toolId>/`
- *      so the dynamic-imported entrypoint can resolve relative deps.
- *   2. Parse `tools/<toolId>/manifest.json` to find the entrypoint file
- *      and the canonical name for dedup (manifest.tool.name || toolId).
- *   3. Copy `tools/<toolId>/TOOL.md` (when present) under
- *      `.pi/tools/<toolId>/` for Pi SDK docs discovery.
+ * Load a single tool from its {@link BundlePackage}:
+ *   1. Copy every file into `.agent-tools/<packageId>/` so dynamic-
+ *      imported entrypoint can resolve relative deps.
+ *   2. Parse `manifest.json` to find the entrypoint file and the
+ *      canonical tool name for dedup.
+ *   3. Copy `TOOL.md` (when present) under `.pi/tools/<packageId>/`
+ *      for Pi SDK docs discovery.
  *   4. Dynamic-import the entrypoint absolute path, verify `default`
  *      is a function, return it as the ExtensionFactory.
  *
@@ -161,48 +171,40 @@ async function materialiseDir(
  * missing entrypoint) so the caller counts them separately from loader
  * failures (which throw).
  */
-async function loadToolFromBundle(
-  bundle: LoadedBundle,
-  toolId: string,
+async function loadToolFromPackage(
+  pkg: BundlePackage,
   toolsScratchDir: string,
   piDir: string,
 ): Promise<{ factory: ExtensionFactory | null; resolvedId: string }> {
-  const toolPrefix = `tools/${toolId}/`;
-  const toolFiles = Object.entries(bundle.files).filter(([p]) => p.startsWith(toolPrefix));
-  if (toolFiles.length === 0) {
-    return { factory: null, resolvedId: toolId };
-  }
+  const parsed = parsePackageIdentity(pkg.identity);
+  const fallbackId = parsed?.packageId ?? pkg.identity;
 
   // 1. Write tool files to scratch dir
-  const toolScratchRoot = path.join(toolsScratchDir, toolId);
+  const toolScratchRoot = path.join(toolsScratchDir, fallbackId);
   await fs.mkdir(toolScratchRoot, { recursive: true });
-  for (const [p, bytes] of toolFiles) {
-    const relative = p.slice(toolPrefix.length);
+  for (const [relative, bytes] of pkg.files) {
+    if (relative === "RECORD") continue;
     if (!relative || relative.endsWith("/")) continue;
     const target = path.join(toolScratchRoot, relative);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, bytes);
   }
 
-  // 2. Read manifest
-  const manifestBytes = bundle.files[`${toolPrefix}manifest.json`];
-  if (!manifestBytes) {
-    return { factory: null, resolvedId: toolId };
-  }
-  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+  // 2. Read manifest (prefer in-memory over file bytes — same content)
+  const manifest = pkg.manifest as {
     entrypoint?: string;
     tool?: { name?: string };
   };
   const entrypoint = manifest.entrypoint;
   if (!entrypoint) {
-    return { factory: null, resolvedId: toolId };
+    return { factory: null, resolvedId: fallbackId };
   }
-  const resolvedId = manifest.tool?.name ?? toolId;
+  const resolvedId = manifest.tool?.name ?? fallbackId;
 
-  // 3. Copy TOOL.md (if present) to .pi/tools/<toolId>/TOOL.md
-  const toolMdBytes = bundle.files[`${toolPrefix}TOOL.md`];
+  // 3. Copy TOOL.md (if present) to .pi/tools/<packageId>/TOOL.md
+  const toolMdBytes = pkg.files.get("TOOL.md");
   if (toolMdBytes) {
-    const toolMdDir = path.join(piDir, "tools", toolId);
+    const toolMdDir = path.join(piDir, "tools", fallbackId);
     await fs.mkdir(toolMdDir, { recursive: true });
     await fs.writeFile(path.join(toolMdDir, "TOOL.md"), toolMdBytes);
   }
@@ -213,7 +215,7 @@ async function loadToolFromBundle(
   const factory = (mod as { default?: unknown }).default;
   if (typeof factory !== "function") {
     throw new Error(
-      `Tool '${toolId}' entrypoint '${entrypoint}' default export is not a function (got ${typeof factory})`,
+      `Tool '${fallbackId}' entrypoint '${entrypoint}' default export is not a function (got ${typeof factory})`,
     );
   }
   return { factory: factory as ExtensionFactory, resolvedId };

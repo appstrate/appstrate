@@ -7,26 +7,56 @@ import {
   SidecarProviderResolver,
   LocalProviderResolver,
   RemoteAppstrateProviderResolver,
-  toBundle,
   type Bundle,
+  type BundlePackage,
   type ProviderMeta,
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  recordIntegrity,
+  serializeRecord,
+  type PackageIdentity,
+} from "../../src/bundle/index.ts";
 
-function makeBundle(entries: Record<string, string>): Bundle {
-  const files: Record<string, Uint8Array> = {};
-  const enc = new TextEncoder();
-  for (const [key, value] of Object.entries(entries)) {
-    files[key] = enc.encode(value);
+const enc = new TextEncoder();
+
+function makePackage(
+  name: `@${string}/${string}`,
+  version: string,
+  type: "agent" | "provider",
+  files: Record<string, string>,
+  extraManifest: Record<string, unknown> = {},
+): BundlePackage {
+  const identity = `${name}@${version}` as PackageIdentity;
+  const manifest = { name, version, type, ...extraManifest };
+  const filesMap = new Map<string, Uint8Array>();
+  filesMap.set("manifest.json", enc.encode(JSON.stringify(manifest)));
+  for (const [k, v] of Object.entries(files)) filesMap.set(k, enc.encode(v));
+  const integrity = recordIntegrity(serializeRecord(computeRecordEntries(filesMap)));
+  return { identity, manifest, files: filesMap, integrity };
+}
+
+function makeBundle(root: BundlePackage, deps: BundlePackage[] = []): Bundle {
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(root.identity, root);
+  for (const d of deps) packages.set(d.identity, d);
+  const pkgIndex = new Map<PackageIdentity, { path: string; integrity: string }>();
+  for (const p of packages.values()) {
+    pkgIndex.set(p.identity, {
+      path: `packages/${(p.manifest as { name: string }).name}/${(p.manifest as { version: string }).version}/`,
+      integrity: p.integrity,
+    });
   }
-  return toBundle({
-    manifest: {},
-    prompt: "",
-    files,
-    compressedSize: 0,
-    decompressedSize: 0,
-  });
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: root.identity,
+    packages,
+    integrity: bundleIntegrity(pkgIndex),
+  };
 }
 
 function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
@@ -111,11 +141,13 @@ describe("SidecarProviderResolver", () => {
       calls.push(init ?? {});
       return init ?? {};
     };
-    const bundle = makeBundle({
-      ".agent-package/providers/@afps/gmail/provider.json": JSON.stringify({
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const providerPkg = makePackage("@afps/gmail", "1.0.0", "provider", {
+      "provider.json": JSON.stringify({
         authorizedUris: ["https://gmail.googleapis.com/**"],
       }),
     });
+    const bundle = makeBundle(root, [providerPkg]);
     const resolver = new SidecarProviderResolver({
       sidecarUrl: "http://sidecar:8080",
       fetch: ((_url: string, init: RequestInit) => {
@@ -142,11 +174,11 @@ describe("SidecarProviderResolver", () => {
 describe("LocalProviderResolver", () => {
   it("substitutes {{field}} placeholders and injects credentials", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
-    const bundle = makeBundle({
-      ".agent-package/providers/@acme/api/provider.json": JSON.stringify({
-        allowAllUris: true,
-      }),
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const providerPkg = makePackage("@acme/api", "1.0.0", "provider", {
+      "provider.json": JSON.stringify({ allowAllUris: true }),
     });
+    const bundle = makeBundle(root, [providerPkg]);
     const resolver = new LocalProviderResolver({
       creds: {
         version: 1,
@@ -174,7 +206,8 @@ describe("LocalProviderResolver", () => {
   });
 
   it("fails clearly when no credentials exist for a referenced provider", async () => {
-    const bundle = makeBundle({});
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root);
     const resolver = new LocalProviderResolver({ creds: { version: 1, providers: {} } });
     await expect(resolver.resolve([{ name: "@missing/x", version: "^1" }], bundle)).rejects.toThrow(
       /no credentials found/,
@@ -185,11 +218,11 @@ describe("LocalProviderResolver", () => {
 describe("RemoteAppstrateProviderResolver", () => {
   it("POSTs to /api/credential-proxy/proxy with Authorization + X-App-Id", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
-    const bundle = makeBundle({
-      ".agent-package/providers/@afps/clickup/provider.json": JSON.stringify({
-        allowAllUris: true,
-      }),
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const providerPkg = makePackage("@afps/clickup", "1.0.0", "provider", {
+      "provider.json": JSON.stringify({ allowAllUris: true }),
     });
+    const bundle = makeBundle(root, [providerPkg]);
     const resolver = new RemoteAppstrateProviderResolver({
       instance: "https://app.appstrate.com",
       apiKey: "ask_test",

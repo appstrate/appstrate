@@ -18,13 +18,13 @@
  */
 
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { LoadedBundle } from "../bundle/loader.ts";
+import type { Bundle } from "../bundle/types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type { ProviderResolver, SkillResolver, Tool, ToolResolver } from "../resolvers/types.ts";
 
 export interface RunOptions {
-  /** Already-loaded bundle (manifest + prompt + files). */
-  bundle: LoadedBundle;
+  /** Already-loaded {@link Bundle} (root package + transitively resolved deps). */
+  bundle: Bundle;
   /** Per-run execution context — runId, input, template vars. */
   context: ExecutionContext;
 

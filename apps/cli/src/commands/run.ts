@@ -23,7 +23,7 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
 } from "@appstrate/runner-pi";
-import { loadAnyBundleFromFile } from "@appstrate/afps-runtime/bundle";
+import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfile } from "../lib/config.ts";
@@ -86,12 +86,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   } catch {
     throw new Error(`Bundle not found: ${bundlePath}`);
   }
-  // Accept both legacy `.afps` (single-package) and the new multi-package
-  // `.afps-bundle` format. `loadAnyBundleFromFile` peeks at the archive
-  // once, dispatches to the right reader, and projects multi-package
-  // bundles onto the LoadedBundle surface that `prepareBundleForPi` +
-  // the resolvers expect.
-  const bundle = await loadAnyBundleFromFile(bundlePath);
+  const bundle = await readBundleFromFile(bundlePath);
 
   // ─── 5. Parse input + config ───────────────────────────────────────
   const input = await resolveInput(opts);
@@ -138,8 +133,11 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     memories: [],
     config,
   };
+  const rootPkg = bundle.packages.get(bundle.root);
+  const promptBytes = rootPkg?.files.get("prompt.md");
+  const promptTemplate = promptBytes ? new TextDecoder().decode(promptBytes) : "";
   const systemPrompt = await renderPrompt({
-    template: bundle.prompt,
+    template: promptTemplate,
     context,
   });
 
