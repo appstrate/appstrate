@@ -14,11 +14,17 @@
  * catalog queries. Collisions are prevented by the 128-bit UUID payload.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { packages, runs } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { Actor } from "../lib/actor.ts";
+import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
+import { runInlinePreflight, type InlineRunBody } from "./inline-run-preflight.ts";
+import { prepareAndExecuteRun } from "./run-pipeline.ts";
+
+export type { InlineRunBody };
 
 /** Reserved scope for inline-run shadow packages. Never publishable. */
 export const INLINE_SHADOW_SCOPE = "inline";
@@ -112,20 +118,138 @@ export function buildShadowLoadedPackage(
 }
 
 /**
+ * Trigger an inline agent run end-to-end.
+ *
+ * Mirrors the route-handler body of `POST /api/runs/inline`: preflight ->
+ * insert shadow package -> fire pipeline -> return `{ runId, packageId }`.
+ * Both the HTTP route and `PlatformServices.inline.run` call this single
+ * implementation so the contract stays in lockstep across surfaces.
+ *
+ * Throws `ApiError` on validation / pipeline failures (same shape the route
+ * already emits). Infrastructure errors bubble as-is so the caller's error
+ * handler can surface them as 5xx.
+ */
+export async function triggerInlineRun(params: {
+  orgId: string;
+  applicationId: string;
+  actor: Actor | null;
+  body: InlineRunBody;
+  apiKeyId?: string;
+}): Promise<{ runId: string; packageId: string }> {
+  const { orgId, applicationId, actor, body, apiKeyId } = params;
+
+  // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+  const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+  const {
+    manifest,
+    prompt,
+    effectiveConfig,
+    effectiveInput,
+    providerProfiles,
+    modelIdOverride,
+    proxyIdOverride,
+    resolvedDeps,
+  } = preflight;
+
+  // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
+  const createdBy = actor?.type === "member" ? actor.id : null;
+  const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
+  const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
+
+  // ----- 3. Fire the pipeline. -----
+  const runId = `run_${crypto.randomUUID()}`;
+  let pipelineResult;
+  try {
+    pipelineResult = await prepareAndExecuteRun({
+      runId,
+      agent: shadowAgent,
+      providerProfiles,
+      orgId,
+      actor,
+      input: effectiveInput,
+      config: effectiveConfig,
+      modelId: modelIdOverride,
+      proxyId: proxyIdOverride,
+      applicationId,
+      apiKeyId,
+    });
+  } catch (err) {
+    await deleteOrphanShadowPackage(shadowId);
+    throw err;
+  }
+
+  if (!pipelineResult.ok) {
+    await deleteOrphanShadowPackage(shadowId);
+    const { error } = pipelineResult;
+    if (error.code === "model_not_configured") {
+      throw new ApiError({
+        status: 400,
+        code: "model_not_configured",
+        title: "Bad Request",
+        detail: error.message,
+      });
+    }
+    if ("status" in error && typeof error.status === "number") {
+      throw new ApiError({
+        status: error.status,
+        code: error.code,
+        title: error.message,
+        detail: error.message,
+      });
+    }
+    throw new ApiError({
+      status: 500,
+      code: "inline_run_failed",
+      title: "Inline run failed",
+      detail: error.message,
+    });
+  }
+
+  return { runId, packageId: shadowId };
+}
+
+/**
  * Purge-on-failure. Called when the pipeline rejects BEFORE creating the
  * `runs` row — the shadow row would otherwise leak forever.
  *
- * ⚠️ Do NOT call this once a `runs` row references the shadow:
- * `runs.package_id` has `ON DELETE CASCADE`, so deleting the shadow would
- * cascade-wipe the run history. After the run record is created, the
- * compaction worker (manifest/prompt NULL-out, row preserved) is the only
- * legitimate cleanup path.
+ * Defensive guard: `runs.package_id` has `ON DELETE CASCADE`, so deleting
+ * a shadow once any `runs` row references it would cascade-wipe the run
+ * history. The pipeline contract is "return !ok without creating a runs
+ * row", but we cannot rely on that invariant alone — any future refactor
+ * could introduce a late failure path that inserts `runs` first and then
+ * returns `!ok`. The pre-check below is a belt-and-suspenders: if a
+ * `runs` row already points at this shadow, skip the delete entirely and
+ * emit an error-level log so operators see the leak instead of losing
+ * the history silently.
+ *
+ * After the pipeline has promoted the shadow into a tracked run, the
+ * compaction worker (manifest/prompt NULL-out, row preserved) is the
+ * only legitimate cleanup path.
  */
 export async function deleteOrphanShadowPackage(id: string): Promise<void> {
   try {
-    await db.delete(packages).where(eq(packages.id, id));
+    // Belt: refuse to delete if any run already references the shadow.
+    // Cheap single-row probe — `runs.package_id` is indexed.
+    const referencing = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.packageId, id))
+      .limit(1);
+    if (referencing.length > 0) {
+      logger.error(
+        "Refusing to delete inline shadow package with existing run references — pipeline invariant violated",
+        { shadowId: id, referencingRunId: referencing[0]!.id },
+      );
+      return;
+    }
+
+    // Suspenders: scope the DELETE to ephemeral-only so any future
+    // accidental call with a non-shadow id is a no-op instead of a wipe.
+    await db.delete(packages).where(and(eq(packages.id, id), eq(packages.ephemeral, true)));
   } catch (err) {
-    // Best-effort cleanup — log and move on.
+    // Best-effort cleanup — log and move on. A leaked shadow is reclaimed
+    // by the retention worker; a propagated error here would mask the
+    // original pipeline failure the caller is already re-throwing.
     logger.warn("Failed to delete orphan shadow package", {
       id,
       error: err instanceof Error ? err.message : String(err),

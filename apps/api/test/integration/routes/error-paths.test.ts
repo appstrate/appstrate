@@ -126,6 +126,59 @@ describe("404 — non-existent resources", () => {
   });
 });
 
+// ─── 404 — unknown /api/* paths (no SPA fallback) ──────────
+
+describe("404 — unknown /api/* paths", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "testorg" });
+  });
+
+  it("GET /api/me returns 404 problem+json (not SPA HTML)", async () => {
+    const res = await app.request("/api/me", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    const body = (await res.json()) as any;
+    expect(body.status).toBe(404);
+    expect(body.code).toBe("not_found");
+    expect(body.detail).toContain("/api/me");
+  });
+
+  it("POST /api/does-not-exist returns 404 problem+json", async () => {
+    const res = await app.request("/api/does-not-exist", {
+      method: "POST",
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    const body = (await res.json()) as any;
+    expect(body.code).toBe("not_found");
+  });
+
+  it("GET /api/unknown-nested/path/segment returns 404 problem+json", async () => {
+    const res = await app.request("/api/unknown-nested/path/segment", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+  });
+
+  it("unknown /api/* response includes Request-Id header", async () => {
+    const res = await app.request("/api/me", { headers: authHeaders(ctx) });
+    expect(res.headers.get("Request-Id")).toBeTruthy();
+  });
+
+  it("detail message includes the HTTP method and path", async () => {
+    const res = await app.request("/api/typo", { method: "PUT", headers: authHeaders(ctx) });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as any;
+    expect(body.detail).toContain("PUT");
+    expect(body.detail).toContain("/api/typo");
+  });
+});
+
 // ─── 403 — cross-org access ────────────────────────────────
 
 describe("403 — cross-org access prevention", () => {

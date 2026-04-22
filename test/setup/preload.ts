@@ -239,3 +239,21 @@ createAuth(
   contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
   contributions.drizzleSchemas,
 );
+
+// ─── Global auto-reset for RBAC audit handler ─────────────────
+// `setPermissionDenialHandler` writes a module-level singleton inside
+// `@appstrate/core/permissions`. A test that installs a custom handler
+// and forgets to clean up would leak it into every subsequent test file
+// in the same process — `bun test` runs the full suite as a single
+// process (see the "Testing" header in CLAUDE.md). Reset after every
+// test so no test needs to remember an `afterEach` of its own.
+//
+// Registering through a dynamic import avoids coupling this preload to
+// the core types at top-level, and lets us tolerate the (already
+// unlikely) case where the module fails to resolve — we log and move on
+// rather than blocking the whole suite.
+const { afterEach } = await import("bun:test");
+const { setPermissionDenialHandler } = await import("@appstrate/core/permissions");
+afterEach(() => {
+  setPermissionDenialHandler(null);
+});

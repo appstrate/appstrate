@@ -33,6 +33,7 @@ import { createConnectionsRouter } from "./routes/connections.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
+import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
@@ -47,7 +48,7 @@ import {
   getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
-import { ApiError } from "./lib/errors.ts";
+import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
@@ -212,6 +213,11 @@ const schedulesRouter = createSchedulesRouter();
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
 
+// User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
+// (it is the prerequisite to setting `X-Org-Id`); `/api/me/models` runs
+// inside org context.
+app.route("/api/me", meRouter);
+
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
@@ -253,6 +259,14 @@ app.route("/internal", internalRouter);
 // catch-all below, otherwise the static fallback shadows module paths.
 // No-op when no module exposes `createRouter()`.
 registerModuleRoutes(app);
+
+// Unknown /api/* → 404 problem+json. Without this the SPA fallback below would
+// match every unknown API path and return index.html with a 200, breaking
+// pass-through clients (CLI, curl, SDKs).
+app.all("/api/*", (c) => {
+  const pathname = new URL(c.req.url).pathname;
+  throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+});
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
 app.use(

@@ -32,7 +32,7 @@ import {
   webhookEventSchema,
 } from "./service.ts";
 import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
-import { requirePermission } from "../../middleware/require-permission.ts";
+import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
 
 /**
@@ -103,7 +103,7 @@ export function createWebhooksRouter() {
     "/api/webhooks",
     rateLimit(10),
     idempotency(),
-    requirePermission("webhooks", "write"),
+    requireModulePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
       const body = await c.req.json();
@@ -151,33 +151,38 @@ export function createWebhooksRouter() {
   );
 
   // GET /api/webhooks[?applicationId=...&all=true] — list webhooks visible to the caller
-  router.get("/api/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
-    const scope = webhookScope(c);
+  router.get(
+    "/api/webhooks",
+    rateLimit(300),
+    requireModulePermission("webhooks", "read"),
+    async (c) => {
+      const scope = webhookScope(c);
 
-    // AppScope callers (API keys) are fully narrowed inside listWebhooks —
-    // it ignores `opts` and returns only webhooks pinned to the key's app.
-    if ("applicationId" in scope) {
-      const result = await listWebhooks(scope);
-      return c.json({ object: "list", data: result });
-    }
-
-    const all = c.req.query("all") === "true";
-    const applicationId = c.req.query("applicationId") || undefined;
-    if (applicationId) {
-      if (!applicationId.startsWith("app_")) {
-        throw invalidRequest("applicationId must start with 'app_' prefix", "applicationId");
+      // AppScope callers (API keys) are fully narrowed inside listWebhooks —
+      // it ignores `opts` and returns only webhooks pinned to the key's app.
+      if ("applicationId" in scope) {
+        const result = await listWebhooks(scope);
+        return c.json({ object: "list", data: result });
       }
-      await assertAppBelongsToOrg(applicationId, scope.orgId);
-    }
-    const result = await listWebhooks(scope, { applicationId, all });
-    return c.json({ object: "list", data: result });
-  });
+
+      const all = c.req.query("all") === "true";
+      const applicationId = c.req.query("applicationId") || undefined;
+      if (applicationId) {
+        if (!applicationId.startsWith("app_")) {
+          throw invalidRequest("applicationId must start with 'app_' prefix", "applicationId");
+        }
+        await assertAppBelongsToOrg(applicationId, scope.orgId);
+      }
+      const result = await listWebhooks(scope, { applicationId, all });
+      return c.json({ object: "list", data: result });
+    },
+  );
 
   // GET /api/webhooks/:id — get webhook detail
   router.get(
     "/api/webhooks/:id",
     rateLimit(300),
-    requirePermission("webhooks", "read"),
+    requireModulePermission("webhooks", "read"),
     async (c) => {
       const result = await getWebhook(webhookScope(c), c.req.param("id")!);
       return c.json(result);
@@ -188,7 +193,7 @@ export function createWebhooksRouter() {
   router.put(
     "/api/webhooks/:id",
     rateLimit(10),
-    requirePermission("webhooks", "write"),
+    requireModulePermission("webhooks", "write"),
     async (c) => {
       const body = await c.req.json();
       const data = parseBody(updateWebhookSchema, body);
@@ -202,7 +207,7 @@ export function createWebhooksRouter() {
   router.delete(
     "/api/webhooks/:id",
     rateLimit(10),
-    requirePermission("webhooks", "delete"),
+    requireModulePermission("webhooks", "delete"),
     async (c) => {
       await deleteWebhook(webhookScope(c), c.req.param("id")!);
       return c.body(null, 204);
@@ -213,7 +218,7 @@ export function createWebhooksRouter() {
   router.post(
     "/api/webhooks/:id/test",
     rateLimit(5),
-    requirePermission("webhooks", "write"),
+    requireModulePermission("webhooks", "write"),
     async (c) => {
       const webhookId = c.req.param("id")!;
       const wh = await getWebhook(webhookScope(c), webhookId);
@@ -233,7 +238,7 @@ export function createWebhooksRouter() {
   router.post(
     "/api/webhooks/:id/rotate",
     rateLimit(5),
-    requirePermission("webhooks", "write"),
+    requireModulePermission("webhooks", "write"),
     async (c) => {
       const result = await rotateSecret(webhookScope(c), c.req.param("id")!);
       return c.json(result);
@@ -244,7 +249,7 @@ export function createWebhooksRouter() {
   router.get(
     "/api/webhooks/:id/deliveries",
     rateLimit(300),
-    requirePermission("webhooks", "read"),
+    requireModulePermission("webhooks", "read"),
     async (c) => {
       const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
       const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);

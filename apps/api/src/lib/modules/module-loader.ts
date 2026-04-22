@@ -8,7 +8,14 @@ import type {
   ModuleHooks,
   ModuleEvents,
   AuthStrategy,
+  ModulePermissionContribution,
 } from "@appstrate/core/module";
+import {
+  CORE_RESOURCE_NAMES,
+  setModulePermissionsProvider,
+  type OrgRole,
+  type ModulePermissionsSnapshot,
+} from "@appstrate/core/permissions";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
@@ -135,6 +142,25 @@ async function initSortedModules(
 ): Promise<void> {
   const sorted = topoSort(modules);
   validateNoDuplicatePrefixes(sorted);
+  validateModuleOidcScopes(sorted);
+  // Compute the RBAC snapshot from module contributions and register it
+  // BEFORE init() runs, so any module that calls `resolvePermissions(...)`
+  // during init (e.g. seeding default API keys with module-owned scopes)
+  // sees the merged view.
+  const rbacSnapshot = collectModulePermissions(sorted);
+  setModulePermissionsProvider(() => rbacSnapshot);
+  // Audit trace: `endUserGrantable` permissions are reachable through
+  // end-user OAuth/OIDC tokens issued by embedding apps — a much broader
+  // blast radius than session or API-key scopes. Surface the full list at
+  // boot so operators can review in a single log line whether a new
+  // external module opted anything risky in. Silent when no module opted
+  // in (OSS baseline, OIDC+webhooks only).
+  if (rbacSnapshot.endUserAllowed.size > 0) {
+    logger.info("Module contributions reachable via end-user OIDC tokens", {
+      count: rbacSnapshot.endUserAllowed.size,
+      scopes: [...rbacSnapshot.endUserAllowed].sort(),
+    });
+  }
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
@@ -151,6 +177,157 @@ async function initSortedModules(
     logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
   }
   _initialized = true;
+}
+
+/**
+ * Format enforced on module-contributed OIDC scopes: lowercase
+ * `namespace:action`, alphanumeric + `_` + `-`, both halves required.
+ *
+ * The compile-time `${string}:${string}` template literal on
+ * `AppstrateModule.oidcScopes` already forbids single-word scopes (which
+ * are reserved for the OIDC identity vocabulary `openid|profile|email|
+ * offline_access`). This regex tightens the runtime contract — rejects
+ * uppercase, whitespace, and exotic characters that a `string`-typed
+ * value coming from JSON config or a JS module could still smuggle in.
+ */
+const MODULE_OIDC_SCOPE_PATTERN = /^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$/;
+
+/**
+ * Fail-fast at boot if any module declares an `oidcScopes` entry that
+ * doesn't match `MODULE_OIDC_SCOPE_PATTERN`. The OIDC module is exempt:
+ * its canonical vocabulary (identity + permission scopes) lives in
+ * `modules/oidc/auth/scopes.ts` and follows its own rules — single-word
+ * identity scopes are intentional there.
+ *
+ * Errors name the offending module + scope so the operator can fix the
+ * declaration without grepping. Run alongside `validateNoDuplicatePrefixes`
+ * in `initSortedModules` so the platform refuses to boot rather than
+ * silently shipping malformed scopes into discovery / `assertValidScopes`.
+ */
+export function validateModuleOidcScopes(modules: readonly AppstrateModule[]): void {
+  for (const mod of modules) {
+    if (mod.manifest.id === "oidc") continue;
+    const scopes = mod.oidcScopes;
+    if (!scopes) continue;
+    for (const scope of scopes) {
+      if (typeof scope !== "string" || !MODULE_OIDC_SCOPE_PATTERN.test(scope)) {
+        throw new Error(
+          `Module "${mod.manifest.id}" declared invalid oidcScope ${JSON.stringify(scope)}. ` +
+            `Expected lowercase "namespace:action" matching ${MODULE_OIDC_SCOPE_PATTERN}.`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Format enforced on module-contributed RBAC names (resources + actions).
+ * Same shape as the OIDC scope guard — lowercase identifier with optional
+ * `_`/`-` separators. Validated at boot for both halves.
+ */
+const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
+/**
+ * Aggregate `permissionsContribution()` from every loaded module into a
+ * single snapshot consumable by `apps/api/src/lib/permissions.ts`. Runs
+ * fail-fast validation:
+ *   - resource name format
+ *   - resource collision with a core resource (`org`, `agents`, …)
+ *   - resource collision between two modules
+ *   - action name format
+ *   - empty `actions` (would contribute nothing)
+ *   - empty `grantTo` (legal — declares the resource without granting it,
+ *     useful when API-key-only access is intended; we just warn-log)
+ *
+ * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
+ * by role plus the API-key allowlist union.
+ */
+export function collectModulePermissions(
+  modules: readonly AppstrateModule[],
+): ModulePermissionsSnapshot {
+  const byRole: Record<OrgRole, Set<string>> = {
+    owner: new Set(),
+    admin: new Set(),
+    member: new Set(),
+    viewer: new Set(),
+  };
+  const apiKeyAllowed = new Set<string>();
+  const endUserAllowed = new Set<string>();
+  const ownerByResource = new Map<string, string>(); // resource → first module that claimed it
+
+  for (const mod of modules) {
+    const contributions = mod.permissionsContribution?.();
+    if (!contributions) continue;
+    for (const entry of contributions) {
+      validateContribution(entry, mod.manifest.id, ownerByResource);
+      for (const action of entry.actions) {
+        const perm = `${entry.resource}:${action}`;
+        for (const role of entry.grantTo) byRole[role].add(perm);
+        if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
+        if (entry.endUserGrantable) endUserAllowed.add(perm);
+      }
+    }
+  }
+
+  return { byRole, apiKeyAllowed, endUserAllowed };
+}
+
+function validateContribution(
+  entry: ModulePermissionContribution,
+  moduleId: string,
+  ownerByResource: Map<string, string>,
+): void {
+  const { resource, actions, grantTo } = entry;
+
+  if (!MODULE_RBAC_NAME_PATTERN.test(resource)) {
+    throw new Error(
+      `Module "${moduleId}" declared invalid permission resource ${JSON.stringify(resource)}. ` +
+        `Expected lowercase identifier matching ${MODULE_RBAC_NAME_PATTERN}.`,
+    );
+  }
+  if (CORE_RESOURCE_NAMES.has(resource)) {
+    throw new Error(
+      `Module "${moduleId}" cannot redefine core resource ${JSON.stringify(resource)}. ` +
+        `Pick a namespaced resource name (e.g. "${moduleId}-${resource}") or a unique name.`,
+    );
+  }
+  const previousOwner = ownerByResource.get(resource);
+  if (previousOwner && previousOwner !== moduleId) {
+    throw new Error(
+      `Modules "${previousOwner}" and "${moduleId}" both declared resource ` +
+        `${JSON.stringify(resource)}. Resource names must be unique across loaded modules.`,
+    );
+  }
+  ownerByResource.set(resource, moduleId);
+
+  if (!Array.isArray(actions) || actions.length === 0) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with no actions.`,
+    );
+  }
+  for (const action of actions) {
+    if (typeof action !== "string" || !MODULE_RBAC_NAME_PATTERN.test(action)) {
+      throw new Error(
+        `Module "${moduleId}" declared invalid action ${JSON.stringify(action)} on resource ` +
+          `${JSON.stringify(resource)}. Expected lowercase identifier matching ${MODULE_RBAC_NAME_PATTERN}.`,
+      );
+    }
+  }
+
+  if (!Array.isArray(grantTo)) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array grantTo.`,
+    );
+  }
+  const allowedRoles = new Set<string>(["owner", "admin", "member", "viewer"]);
+  for (const role of grantTo) {
+    if (!allowedRoles.has(role)) {
+      throw new Error(
+        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown role ` +
+          `${JSON.stringify(role)}. Expected one of owner|admin|member|viewer.`,
+      );
+    }
+  }
 }
 
 /**
@@ -239,6 +416,29 @@ export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
     if (moduleSchemas) Object.assign(schemas, moduleSchemas);
   }
   return schemas;
+}
+
+/**
+ * Aggregate OIDC scopes contributed by every loaded module (excluding the
+ * OIDC module itself, whose canonical vocabulary lives in
+ * `modules/oidc/auth/scopes.ts`). The OIDC module reads this at boot via
+ * `betterAuthPlugins()` so the aggregated list reaches:
+ *   1. `oauthProvider({ scopes })` — feeds discovery `scopes_supported`
+ *   2. `assertValidScopes` — gates `OIDC_INSTANCE_CLIENTS` registration
+ *   3. `GET /api/oauth/scopes` — admin tooling
+ *
+ * Returns deduplicated entries in load order. Empty when no module
+ * contributes — preserves the OSS zero-footprint invariant.
+ */
+export function getModuleOidcScopes(): string[] {
+  const seen = new Set<string>();
+  for (const mod of _modules.values()) {
+    if (mod.manifest.id === "oidc") continue;
+    for (const scope of mod.oidcScopes ?? []) {
+      if (typeof scope === "string" && scope.length > 0) seen.add(scope);
+    }
+  }
+  return Array.from(seen);
 }
 
 /** Collect OpenAPI tags contributed by all loaded modules. */
@@ -473,6 +673,7 @@ function clearAllState(): void {
   _modules.clear();
   _builtinCache = null;
   _initialized = false;
+  setModulePermissionsProvider(null);
 }
 
 // ---------------------------------------------------------------------------

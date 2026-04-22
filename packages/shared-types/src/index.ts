@@ -97,8 +97,14 @@ export type EnrichedSchedule = Schedule & {
 
 // --- Organization Types ---
 
-import { orgRoleEnum } from "@appstrate/db/schema";
-export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
+// `OrgRole` is owned by `@appstrate/core/permissions` (the RBAC vocabulary
+// source of truth). The pgEnum in `packages/db/src/schema/enums.ts` lists
+// the same values; any drift is caught at typecheck by the
+// `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
+// `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
+// role is added to one side and not the other).
+import type { OrgRole } from "@appstrate/core/permissions";
+export type { OrgRole };
 
 export const orgSettingsSchema = z.object({
   apiVersion: z.string().optional(),
@@ -495,4 +501,33 @@ export interface EndUserListResponse {
   data: EndUserInfo[];
   hasMore: boolean;
   limit: number;
+}
+
+// --- OIDC Module — per-application auth config view types ---
+
+// Wire shape for `/api/applications/:id/smtp-config` and
+// `/api/applications/:id/social-providers/:provider`. Lives here so
+// backend services, OpenAPI schemas, and frontend hooks stay in lockstep.
+
+export type SocialProviderId = "google" | "github";
+
+export interface SmtpConfigView {
+  applicationId: string;
+  host: string;
+  port: number;
+  username: string;
+  fromAddress: string;
+  fromName: string | null;
+  secureMode: "auto" | "tls" | "starttls" | "none";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SocialProviderView {
+  applicationId: string;
+  provider: SocialProviderId;
+  clientId: string;
+  scopes: string[] | null;
+  createdAt: string;
+  updatedAt: string;
 }

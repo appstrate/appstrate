@@ -56,7 +56,7 @@ import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
-import { APPSTRATE_SCOPES } from "./scopes.ts";
+import { getAppstrateScopes } from "./scopes.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
 export type OrgRoleClaim = "owner" | "admin" | "member" | "viewer";
@@ -197,7 +197,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
-      scopes: [...APPSTRATE_SCOPES],
+      // Snapshot the full vocabulary at plugin construction time —
+      // `betterAuthPlugins()` runs after `loadModules()` populates the
+      // module registry, so module-contributed scopes are included in
+      // discovery `scopes_supported` and accepted by the oauth-provider
+      // plugin's own scope filter.
+      scopes: [...getAppstrateScopes()],
       validAudiences,
       cachedTrustedClients,
       storeClientSecret: {
