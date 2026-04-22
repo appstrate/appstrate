@@ -16,7 +16,7 @@ import { buildBundleFromCatalog } from "./build.ts";
 import { emptyPackageCatalog } from "./catalog.ts";
 import type { LoadedBundle } from "./loader.ts";
 import { computeRecordEntries, recordIntegrity, serializeRecord } from "./integrity.ts";
-import { BUNDLE_FORMAT_VERSION, formatPackageIdentity } from "./types.ts";
+import { BUNDLE_FORMAT_VERSION, formatPackageIdentity, parsePackageIdentity } from "./types.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "./types.ts";
 import { bundleIntegrity } from "./integrity.ts";
 import { BundleError } from "./errors.ts";
@@ -77,4 +77,86 @@ export function loadedBundleToBundle(legacy: LoadedBundle): Bundle {
 export async function bundleOfOneFromAfps(archive: Uint8Array): Promise<Bundle> {
   const root = extractRootFromAfps(archive);
   return buildBundleFromCatalog(root, emptyPackageCatalog);
+}
+
+/**
+ * Virtual-path adapter: project a multi-package {@link Bundle} onto the
+ * legacy flat {@link LoadedBundle} surface that resolvers + `prepareBundleForPi`
+ * consume today.
+ *
+ * Layout produced:
+ *   - root package files go to the top level (manifest.json, prompt.md, …)
+ *   - each non-root package's files go under `<type>/<packageId>/…`
+ *     where `type ∈ {tool, skill, provider}` comes from the package's
+ *     manifest, and `packageId` is the scoped name (e.g. `@appstrate/report`)
+ *
+ * This matches the paths hardcoded by:
+ *   - `bundled-tool-resolver.ts`       → `tools/<id>/index.{mjs,js,ts}`
+ *   - `bundled-skill-resolver.ts`      → `skills/<id>/SKILL.md`
+ *   - `sidecar-provider-resolver.ts`   → `providers/<id>/provider.json`
+ *   - `runner-pi/bundle-extensions.ts` → iterates `tools/<id>/*`, `skills/*`, `providers/*`
+ *
+ * Unknown package types are skipped (not an error — lets a Bundle carry
+ * future package kinds without breaking the adapter). `RECORD` files are
+ * stripped (runtime metadata, not part of the executable surface).
+ *
+ * Contract: the returned `LoadedBundle` is a READ-ONLY view — mutating
+ * its `files` record has no effect on the source Bundle.
+ */
+export function bundleToLoadedBundle(bundle: Bundle): LoadedBundle {
+  const rootPkg = bundle.packages.get(bundle.root);
+  if (!rootPkg) {
+    throw new BundleError(
+      "BUNDLE_JSON_INVALID",
+      `bundleToLoadedBundle: root ${bundle.root} not present in packages map`,
+    );
+  }
+
+  const files: Record<string, Uint8Array> = {};
+  let decompressedSize = 0;
+
+  // Root package files flattened to the top level.
+  for (const [p, bytes] of rootPkg.files) {
+    if (p === "RECORD") continue;
+    files[p] = bytes;
+    decompressedSize += bytes.byteLength;
+  }
+
+  // Dependency packages laid out under their type prefix, keyed by
+  // scoped id so resolver lookups match `dependencies.<type>.<id>`.
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) continue;
+    const manifestType = (pkg.manifest as { type?: unknown }).type;
+    const prefix = prefixForType(manifestType);
+    if (!prefix) continue;
+    const basePath = `${prefix}${parsed.packageId}/`;
+    for (const [p, bytes] of pkg.files) {
+      if (p === "RECORD") continue;
+      files[`${basePath}${p}`] = bytes;
+      decompressedSize += bytes.byteLength;
+    }
+  }
+
+  const promptBytes = rootPkg.files.get("prompt.md");
+  const prompt = promptBytes ? new TextDecoder().decode(promptBytes) : "";
+
+  return {
+    manifest: rootPkg.manifest as Record<string, unknown>,
+    prompt,
+    files,
+    // The projection has no underlying ZIP — callers that need these for
+    // telemetry (quota gating, logging) should use `Bundle.integrity` or
+    // re-serialize via `writeBundleToBuffer`.
+    compressedSize: 0,
+    decompressedSize,
+  };
+}
+
+function prefixForType(type: unknown): string | null {
+  if (type === "tool") return "tools/";
+  if (type === "skill") return "skills/";
+  if (type === "provider") return "providers/";
+  return null;
 }

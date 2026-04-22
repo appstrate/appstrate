@@ -58,7 +58,7 @@ export {
   type BundleValidationResult,
   type ValidateBundleV2Options,
 } from "./validate-bundle.ts";
-export { bundleOfOneFromAfps, loadedBundleToBundle } from "./bridge.ts";
+export { bundleOfOneFromAfps, bundleToLoadedBundle, loadedBundleToBundle } from "./bridge.ts";
 
 // ─── Legacy single-package surface (deprecated, kept for migration) ─
 export {
