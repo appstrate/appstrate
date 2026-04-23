@@ -12,13 +12,19 @@
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
  *
- *   - API key auth required (cookie auth rejected with 401)
+ *   - Bearer auth only — API keys (headless / GitHub Action) and
+ *     device-flow JWTs (`oauth2-instance`, `oauth2-dashboard`). Cookie
+ *     sessions are rejected because the drive-by CSRF threat model
+ *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
- *   - Per-application scope (key cannot reach providers in another app)
- *   - Rate-limit: 100 req/min per API key (configurable via
+ *   - Per-application scope (principal cannot reach providers in another app)
+ *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
- *   - Audit log on every call (requestId, apiKeyId, endUserId, providerId,
- *     target, status)
+ *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
+ *     or `user:<id>`) — cookie jars can never be shared between a bearer
+ *     JWT and an API key, nor between two API keys of the same org.
+ *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
+ *     endUserId, providerId, target, status)
  *   - URL allowlist enforced via the provider manifest
  *     (`authorizedUris` / `allowAllUris`)
  *   - Request / response size caps
@@ -84,6 +90,21 @@ async function resolveProfileId(args: {
   return rows[0]?.id ?? null;
 }
 
+/**
+ * Auth methods the credential proxy accepts. The value is the
+ * `c.get("authMethod")` string set by the auth pipeline — `"api_key"` for
+ * headless `ask_` bearers, `"oauth2-instance"` for device-flow JWTs minted
+ * by the interactive CLI (`/api/auth/cli/token`), `"oauth2-dashboard"`
+ * for dashboard-session JWTs obtained via the OIDC authorization-code
+ * flow. Cookie sessions (`"session"`) and any unknown strategy id are
+ * rejected.
+ */
+const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
+  "api_key",
+  "oauth2-instance",
+  "oauth2-dashboard",
+]);
+
 /** Defaults aligned with the spec §10.3. Override via env var. */
 interface CredentialProxyLimits {
   rate_per_min: number;
@@ -130,9 +151,15 @@ export function createCredentialProxyRouter() {
     rateLimit(limits.rate_per_min),
     requirePermission("credential-proxy", "call"),
     async (c: Context<AppEnv>) => {
+      // Accept headless API keys and bearer JWTs from the interactive CLI
+      // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
+      // Cookie sessions are refused — they would let a drive-by CSRF
+      // trigger arbitrary provider calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      if (authMethod !== "api_key") {
-        throw forbidden("Credential proxy is API-key only (cookie sessions cannot call it)");
+      if (!ACCEPTED_AUTH_METHODS.has(authMethod)) {
+        throw forbidden(
+          `Credential proxy does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
+        );
       }
 
       const providerId = c.req.header("X-Provider");
@@ -149,23 +176,20 @@ export function createCredentialProxyRouter() {
 
       const applicationIdEarly = c.get("applicationId");
       const apiKeyIdEarly = c.get("apiKeyId");
-      if (!apiKeyIdEarly) {
-        // authMethod === "api_key" guarantees this, but defend anyway
-        throw forbidden("Credential proxy requires an API key");
-      }
-      const binding = await bindOrCheckSession(
-        sessionId,
-        apiKeyIdEarly,
-        limits.session_ttl_seconds,
-      );
+      const userIdEarly = c.get("user").id;
+      // Namespaced principal id — keeps JWT-user and API-key buckets
+      // disjoint even when the underlying UUIDs happen to match.
+      const principalId = apiKeyIdEarly ? `apikey:${apiKeyIdEarly}` : `user:${userIdEarly}`;
+      const binding = await bindOrCheckSession(sessionId, principalId, limits.session_ttl_seconds);
       if (binding.kind === "mismatch") {
-        logger.warn("credential-proxy: session reuse across API keys", {
+        logger.warn("credential-proxy: session reuse across principals", {
           sessionId,
-          apiKeyId: apiKeyIdEarly,
+          principalId,
           boundTo: binding.boundTo,
+          authMethod,
           applicationId: applicationIdEarly,
         });
-        throw forbidden("X-Session-Id is bound to a different API key");
+        throw forbidden("X-Session-Id is bound to a different principal");
       }
 
       // Optional request body cap
@@ -179,6 +203,7 @@ export function createCredentialProxyRouter() {
       const applicationId = c.get("applicationId");
       const orgId = c.get("orgId");
       const apiKeyId = c.get("apiKeyId");
+      const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
       // Resolve the profile that owns the credentials: end-user profile
@@ -247,7 +272,9 @@ export function createCredentialProxyRouter() {
 
         logger.info("credential-proxy call", {
           requestId: c.get("requestId"),
+          authMethod,
           apiKeyId,
+          userId,
           endUserId: endUser?.id,
           applicationId,
           providerId,
@@ -272,7 +299,9 @@ export function createCredentialProxyRouter() {
       } catch (err) {
         if (err instanceof ProxyAuthorizationError) {
           logger.warn("credential-proxy: target not in allowlist", {
+            authMethod,
             apiKeyId,
+            userId,
             applicationId,
             providerId,
             target,
@@ -283,7 +312,9 @@ export function createCredentialProxyRouter() {
           throw notFound(err.message);
         }
         logger.error("credential-proxy: unexpected failure", {
+          authMethod,
           apiKeyId,
+          userId,
           applicationId,
           providerId,
           error: err instanceof Error ? err.message : String(err),

@@ -27,6 +27,7 @@ import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfile } from "../lib/config.ts";
+import { resolveAuthContext, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
 import { resolveModel, ModelResolutionError } from "./run/model.ts";
 import { createConsoleSink } from "./run/sink.ts";
@@ -203,13 +204,33 @@ async function buildResolverInputs(
     return { credsFilePath: path.resolve(opts.credsFile) };
   }
 
-  // remote — resolve from flags > env > profile
-  const envInstance = process.env.APPSTRATE_INSTANCE;
-  const envApiKey = opts.apiKey ?? process.env.APPSTRATE_API_KEY;
-  const envAppId = process.env.APPSTRATE_APP_ID;
+  // Remote mode — two independent credential paths, checked in order:
+  //
+  //   1. Headless: an explicit `ask_…` API key via `--api-key` or
+  //      `APPSTRATE_API_KEY`. Pair with `APPSTRATE_INSTANCE` /
+  //      `APPSTRATE_APP_ID` (or a profile for fallback). This is the
+  //      flow CI runners and the GitHub Action take.
+  //   2. Interactive: a device-flow JWT from `appstrate login`, pulled
+  //      from the keyring via `resolveAuthContext` (silent refresh
+  //      against `/api/auth/cli/token` included). The profile also
+  //      supplies `instance` + `appId`.
+  //
+  // Mixing the two is rejected — an explicit env-var API key overrides
+  // the profile credential entirely so there's no ambiguity about which
+  // principal the platform audit log will record.
+  const headlessApiKey = opts.apiKey ?? process.env.APPSTRATE_API_KEY;
+  if (headlessApiKey) {
+    return buildHeadlessRemoteInputs(headlessApiKey, opts);
+  }
+  return buildInteractiveRemoteInputs(opts);
+}
 
-  let instance = envInstance;
-  let appId = envAppId;
+async function buildHeadlessRemoteInputs(
+  apiKey: string,
+  opts: RunCommandOptions,
+): Promise<RemoteResolverInputs> {
+  let instance = process.env.APPSTRATE_INSTANCE;
+  let appId = process.env.APPSTRATE_APP_ID;
 
   if (!instance || !appId) {
     const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
@@ -220,26 +241,57 @@ async function buildResolverInputs(
     }
   }
 
-  if (!envApiKey) {
-    throw new ResolverConfigError(
-      "--providers=remote requires an API key (ask_...)",
-      "Set APPSTRATE_API_KEY (from your dashboard) — CLI JWTs are not accepted by /credential-proxy",
-    );
-  }
   if (!instance) {
     throw new ResolverConfigError(
       "No Appstrate instance URL",
-      "Either `appstrate login` first, or set APPSTRATE_INSTANCE",
+      "Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile",
     );
   }
   if (!appId) {
     throw new ResolverConfigError(
       "No application id pinned",
-      "Run `appstrate app switch` or set APPSTRATE_APP_ID",
+      "Set APPSTRATE_APP_ID, or run `appstrate app switch` from a logged-in profile",
     );
   }
 
-  return { instance, apiKey: envApiKey, appId };
+  return { instance, bearerToken: apiKey, appId };
+}
+
+async function buildInteractiveRemoteInputs(
+  opts: RunCommandOptions,
+): Promise<RemoteResolverInputs> {
+  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  const profile = resolved?.profile;
+  if (!resolved || !profile) {
+    throw new ResolverConfigError(
+      "--providers=remote requires a logged-in profile or an API key",
+      "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
+    );
+  }
+  if (!profile.appId) {
+    throw new ResolverConfigError(
+      `Profile "${resolved.profileName}" has no application pinned`,
+      "Run `appstrate app switch` to select one",
+    );
+  }
+
+  // `resolveAuthContext` performs a proactive silent refresh when the
+  // access token is within the expiry margin, and scrubs the keyring on
+  // terminal `invalid_grant`. A transient network failure bubbles as an
+  // AuthError and stops the run before any bundle work starts.
+  try {
+    const ctx = await resolveAuthContext(resolved.profileName);
+    return {
+      instance: ctx.instance,
+      bearerToken: ctx.accessToken,
+      appId: profile.appId,
+    };
+  } catch (err) {
+    if (err instanceof AuthError) {
+      throw new ResolverConfigError(err.message, "Run `appstrate login` to re-authenticate");
+    }
+    throw err;
+  }
 }
 
 async function resolveInput(opts: RunCommandOptions): Promise<Record<string, unknown>> {
@@ -269,3 +321,16 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 
 // Re-export error types for the CLI's formatError pipeline.
 export { ModelResolutionError, ResolverConfigError };
+
+/**
+ * Test-only access to the resolver-input builder. Exercised by
+ * `apps/cli/test/run-resolver-inputs.test.ts` under `XDG_CONFIG_HOME` +
+ * FakeKeyring isolation so each credential-priority branch can be
+ * asserted without spinning up a real profile / browser / instance.
+ */
+export async function _buildResolverInputsForTesting(
+  mode: ProviderMode,
+  opts: RunCommandOptions,
+): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
+  return buildResolverInputs(mode, opts);
+}

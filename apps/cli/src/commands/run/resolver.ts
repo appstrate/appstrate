@@ -8,8 +8,14 @@
  *   - `remote` — default. Delegates every provider call through the
  *     pinned Appstrate instance's `/api/credential-proxy/proxy`
  *     endpoint. Credentials stay server-side; the CLI sends only
- *     scope markers. Requires a prior `appstrate login` (API key,
- *     not JWT — see notes in the command file).
+ *     scope markers. Accepts either:
+ *       * an `ask_…` API key (headless CI / GitHub Action) with the
+ *         `credential-proxy:call` scope, or
+ *       * a device-flow JWT access token from `appstrate login`
+ *         (interactive CLI) whose user role grants the same permission.
+ *     Either way the credential flows as a single `Authorization:
+ *     Bearer <token>` header — see `apps/cli/src/commands/run.ts` for
+ *     the resolution priority.
  *
  *   - `local`  — reads a local JSON creds file for offline runs.
  *     Credentials are plaintext on disk; the CLI never refreshes
@@ -29,7 +35,14 @@ export type ProviderMode = "remote" | "local" | "none";
 
 export interface RemoteResolverInputs {
   instance: string;
-  apiKey: string;
+  /**
+   * Bearer token used to authenticate against the Appstrate instance.
+   * Either an `ask_…` API key (headless) or a device-flow JWT access
+   * token (interactive CLI). The afps-runtime resolver treats both
+   * identically — it forwards the value as-is in the `Authorization:
+   * Bearer …` header and lets the platform decide.
+   */
+  bearerToken: string;
   appId: string;
   endUserId?: string;
 }
@@ -76,17 +89,22 @@ export function buildResolver(
       const remote = inputs as RemoteResolverInputs | null;
       if (!remote) {
         throw new ResolverConfigError(
-          "--providers=remote requires a logged-in profile",
+          "--providers=remote requires a logged-in profile or an API key",
           "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
         );
       }
-      if (!remote.instance || !remote.apiKey || !remote.appId) {
+      if (!remote.instance || !remote.bearerToken || !remote.appId) {
         throw new ResolverConfigError(
-          "--providers=remote requires instance + apiKey + appId",
-          "Ensure your profile has an appId set (run `appstrate app switch`) and a usable API key",
+          "--providers=remote requires instance + bearerToken + appId",
+          "Ensure your profile has an appId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
         );
       }
-      return new RemoteAppstrateProviderResolver({ ...remote });
+      return new RemoteAppstrateProviderResolver({
+        instance: remote.instance,
+        apiKey: remote.bearerToken,
+        appId: remote.appId,
+        endUserId: remote.endUserId,
+      });
     }
   }
 }

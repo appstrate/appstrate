@@ -151,6 +151,8 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "end-users:delete",
   // Credential proxy (BYOI — see API_KEY_ALLOWED_SCOPES note below)
   "credential-proxy:call",
+  // LLM proxy (remote-backed CLI execution — see API_KEY_ALLOWED_SCOPES note below)
+  "llm-proxy:call",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -291,6 +293,11 @@ const API_KEY_ALLOWED_SCOPES_CORE: ReadonlySet<Permission> = new Set<Permission>
   // provider in the application. NOT granted by default; callers must
   // explicitly add it when minting the key.
   "credential-proxy:call",
+  // LLM proxy — server-side LLM model injection for remote-backed
+  // `appstrate run` and headless CI (GitHub Action). Scopes metered
+  // per-call in `llm_proxy_usage`. NOT granted by default; callers must
+  // explicitly add it when minting the key.
+  "llm-proxy:call",
 ]);
 
 /**

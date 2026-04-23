@@ -86,21 +86,21 @@ describe("buildResolver — remote", () => {
     expect(() =>
       buildResolver("remote", {
         instance: "",
-        apiKey: "ask_x",
+        bearerToken: "ask_x",
         appId: "app_x",
       }),
     ).toThrow(ResolverConfigError);
     expect(() =>
       buildResolver("remote", {
         instance: "https://x.com",
-        apiKey: "",
+        bearerToken: "",
         appId: "app_x",
       }),
     ).toThrow(ResolverConfigError);
     expect(() =>
       buildResolver("remote", {
         instance: "https://x.com",
-        apiKey: "ask_x",
+        bearerToken: "ask_x",
         appId: "",
       }),
     ).toThrow(ResolverConfigError);
@@ -109,7 +109,16 @@ describe("buildResolver — remote", () => {
   it("constructs a resolver with all three fields", () => {
     const resolver = buildResolver("remote", {
       instance: "https://x.com",
-      apiKey: "ask_x",
+      bearerToken: "ask_x",
+      appId: "app_x",
+    });
+    expect(typeof resolver.resolve).toBe("function");
+  });
+
+  it("accepts a JWT bearer alongside the ask_… shape", () => {
+    const resolver = buildResolver("remote", {
+      instance: "https://x.com",
+      bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
       appId: "app_x",
     });
     expect(typeof resolver.resolve).toBe("function");
@@ -118,7 +127,7 @@ describe("buildResolver — remote", () => {
   it("accepts optional endUserId", () => {
     const resolver = buildResolver("remote", {
       instance: "https://x.com",
-      apiKey: "ask_x",
+      bearerToken: "ask_x",
       appId: "app_x",
       endUserId: "eu_x",
     });

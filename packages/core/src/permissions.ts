@@ -78,6 +78,7 @@ export interface CoreResources {
   applications: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
   "credential-proxy": "call";
+  "llm-proxy": "call";
 }
 
 /** Core resource names. */
@@ -122,6 +123,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "applications",
   "end-users",
   "credential-proxy",
+  "llm-proxy",
 ]);
 
 /**

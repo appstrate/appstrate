@@ -205,6 +205,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       applications: true,
       "end-users": true,
       "credential-proxy": true,
+      "llm-proxy": true,
     };
     for (const name of Object.keys(allCoreResources)) {
       expect(CORE_RESOURCE_NAMES.has(name)).toBe(true);
@@ -232,6 +233,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       applications: true,
       "end-users": true,
       "credential-proxy": true,
+      "llm-proxy": true,
     };
     const interfaceNames = new Set(Object.keys(allCoreResources));
     for (const name of CORE_RESOURCE_NAMES) {

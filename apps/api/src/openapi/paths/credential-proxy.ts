@@ -3,8 +3,10 @@
 /**
  * Credential proxy endpoint (AFPS 1.3 — BYOI for external runners).
  *
- * Wire-compatible with the runtime-pi sidecar `/proxy` contract but
- * authenticated via API key scoped with `credential-proxy:call`.
+ * Wire-compatible with the runtime-pi sidecar `/proxy` contract. Accepts
+ * bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs
+ * (interactive CLI device-flow, dashboard second-party apps). Cookie
+ * sessions are rejected.
  */
 
 export const credentialProxyPaths = {
@@ -17,13 +19,17 @@ export const credentialProxyPaths = {
         "High-value endpoint. Accepts an upstream HTTP request and forwards it to the " +
         "provider after injecting the stored credentials server-side. Credentials never " +
         "leave Appstrate.\n\n" +
-        "Authentication: API key only (cookie auth rejected). The API key must be minted " +
-        "with the `credential-proxy:call` scope — NOT granted by default. Optional " +
-        "`Appstrate-User` header scopes the call to an end-user's connection profile.\n\n" +
+        "Authentication: bearer only — either an API key with the `credential-proxy:call` " +
+        "scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token " +
+        "for the interactive CLI, dashboard access token for second-party apps). Cookie " +
+        "sessions are rejected. Session binding pins the `X-Session-Id` to the first " +
+        "principal (API key or JWT user) that used it.\n\n" +
+        "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
+        "profile (API-key auth only).\n\n" +
         "The request method + body are forwarded as-is. URL and headers can contain " +
         "`{{credential_field}}` placeholders substituted against the provider's credential " +
         "schema. Set `X-Substitute-Body: true` to run the same substitution on the body.",
-      security: [{ bearerApiKey: [] }],
+      security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
       parameters: [
         {
           name: "X-App-Id",
@@ -84,8 +90,8 @@ export const credentialProxyPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — API key lacks `credential-proxy:call` scope, target not in " +
-            "`authorizedUris`, or cookie session used instead of API key.",
+            "Forbidden — principal lacks `credential-proxy:call`, target not in " +
+            "`authorizedUris`, session bound to a different principal, or cookie session used.",
         },
         "404": {
           description: "No credentials or connection profile for the requested provider.",

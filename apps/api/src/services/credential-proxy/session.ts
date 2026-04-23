@@ -2,11 +2,17 @@
 
 /**
  * Credential-proxy session binding — pins an X-Session-Id to the first
- * API key that used it, for the session TTL. Subsequent requests carrying
- * the same session id MUST come from the same API key.
+ * principal that used it, for the session TTL. Subsequent requests carrying
+ * the same session id MUST come from the same principal.
  *
- * Prevents a low-privilege key within the same organisation from
- * piggy-backing on another key's cookie jar (OAuth flow hijack). The
+ * A **principal** is whatever identity the auth pipeline resolved the call
+ * with — an API key (headless / GitHub Action flow) or a bearer JWT user
+ * (interactive CLI device-flow). Callers pass a namespaced identifier
+ * (`apikey:<id>`, `user:<id>`) so the two identity kinds can never collide
+ * on the same bucket.
+ *
+ * Prevents a low-privilege principal within the same organisation from
+ * piggy-backing on another principal's cookie jar (OAuth flow hijack). The
  * store is Redis when configured, in-memory otherwise — same KeyValueCache
  * abstraction used by idempotency.
  *
@@ -30,23 +36,27 @@ export type SessionBindResult =
   | { kind: "mismatch"; boundTo: string };
 
 /**
- * Atomically bind a session to an API key, or confirm a pre-existing
+ * Atomically bind a session to a principal, or confirm a pre-existing
  * binding. Returns:
  *   - `bound`      — fresh binding, session was unknown
- *   - `reused`     — same API key had already bound this session
- *   - `mismatch`   — another API key owns the session → caller MUST 403
+ *   - `reused`     — same principal had already bound this session
+ *   - `mismatch`   — another principal owns the session → caller MUST 403
+ *
+ * `principalId` is expected to be a namespaced string such as
+ * `apikey:<id>` or `user:<id>` so API-key and JWT-user identities can't
+ * collide on the same bucket even when their underlying IDs happen to match.
  */
 export async function bindOrCheckSession(
   sessionId: string,
-  apiKeyId: string,
+  principalId: string,
   ttlSeconds: number,
 ): Promise<SessionBindResult> {
   const cache = await getCache();
   const key = `cp:session:${sessionId}`;
-  const setNx = await cache.set(key, apiKeyId, { ttlSeconds, nx: true });
+  const setNx = await cache.set(key, principalId, { ttlSeconds, nx: true });
   if (setNx) return { kind: "bound" };
 
   const existing = await cache.get(key);
-  if (existing === apiKeyId) return { kind: "reused" };
+  if (existing === principalId) return { kind: "reused" };
   return { kind: "mismatch", boundTo: existing ?? "unknown" };
 }
