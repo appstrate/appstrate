@@ -32,11 +32,11 @@ describe("createReducerSink", () => {
     expect(snapshot().state).toEqual({ b: 2 });
   });
 
-  it("deep-merges objects via output.emitted, replaces non-objects", async () => {
+  it("replaces output on each output.emitted event", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("output.emitted", { data: { x: 1 } }));
     await sink.handle(event("output.emitted", { data: { y: 2 } }));
-    expect(snapshot().output).toEqual({ x: 1, y: 2 });
+    expect(snapshot().output).toEqual({ y: 2 });
 
     await sink.handle(event("output.emitted", { data: [1, 2, 3] }));
     expect(snapshot().output).toEqual([1, 2, 3]);

@@ -378,8 +378,8 @@ const SAMPLE_SCRIPT: RunEvent[] = [
   scriptEvent("memory.added", { content: "second" }),
   scriptEvent("state.set", { state: { counter: 1 } }),
   scriptEvent("state.set", { state: { counter: 2 } }),
-  scriptEvent("output.emitted", { data: { answer: 42, partial: true } }),
-  scriptEvent("output.emitted", { data: { partial: false, extra: "done" } }),
+  scriptEvent("output.emitted", { data: { answer: 0, partial: true } }),
+  scriptEvent("output.emitted", { data: { answer: 42, partial: false, extra: "done" } }),
   scriptEvent("report.appended", { content: "line 1" }),
   scriptEvent("report.appended", { content: "line 2" }),
 ];
@@ -462,7 +462,7 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     }
     const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
-      return fail(`output merge-patch failed: ${JSON.stringify(out)}`);
+      return fail(`output replace-on-emit failed: ${JSON.stringify(out)}`);
     }
     if (r.report !== "line 1\nline 2") {
       return fail(`report should concat with \\n, got ${JSON.stringify(r.report)}`);

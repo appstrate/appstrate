@@ -100,7 +100,7 @@ describe("reduceEvents", () => {
     const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "a" }, { content: "b" }]);
     expect(result.state).toEqual({ x: 1 });
-    expect(result.output).toEqual({ a: 1, b: 2 });
+    expect(result.output).toEqual({ b: 2 });
     expect(result.report).toBe("line 1\nline 2");
     expect(result.logs).toHaveLength(1);
     expect(result.logs[0]!.timestamp).toBe(8);

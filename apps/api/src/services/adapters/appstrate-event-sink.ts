@@ -42,7 +42,7 @@ import type { TokenUsage } from "./types.ts";
  * report as string, never null).
  */
 export interface AggregatedRunState {
-  /** Deep-merged `output.emitted` object payloads. Non-object payloads are ignored. */
+  /** Latest `output.emitted` object payload (replaces previous). Non-object payloads project to `{}`. */
   output: Record<string, unknown>;
   /** Last object `state.set` payload. `null` if never set or set to non-object. */
   state: Record<string, unknown> | null;

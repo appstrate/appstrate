@@ -26,14 +26,6 @@
     "runId": "ref_run_001",
     "data": {
       "summary": "AFPS ships a portable runtime.",
-      "partial": true
-    }
-  },
-  {
-    "type": "output.emitted",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "data": {
       "partial": false
     }
   },

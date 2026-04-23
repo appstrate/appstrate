@@ -3,13 +3,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 /**
- * Tests for buildDataSchema() in the output system tool.
+ * Tests for the output system tool.
  *
  * Since the extension reads process.env.OUTPUT_SCHEMA at import time,
  * we must set the env var BEFORE dynamically importing the module.
  * Each test uses a fresh import via cache-busting query string.
  *
- * The source lives in system-packages/tool-output-1.0.0/output.ts but
+ * The source lives in system-packages/tool-output-2.0.0/output.ts but
  * depends on @mariozechner/pi-ai (installed in runtime-pi/node_modules).
  * We import from system-packages — Bun resolves the Pi SDK via the
  * runtime-pi workspace's node_modules.
@@ -28,20 +28,18 @@ function createMockPi() {
 
 /** Absolute path to the output extension source. */
 const OUTPUT_PATH = new URL(
-  "../../scripts/system-packages/tool-output-1.0.0/output.ts",
+  "../../scripts/system-packages/tool-output-2.0.0/output.ts",
   import.meta.url,
 ).pathname;
 
 /** Helper: import the extension with a fresh module evaluation. */
 async function importExtension(envValue?: string) {
-  // Set or clear the env var before import
   if (envValue !== undefined) {
     process.env.OUTPUT_SCHEMA = envValue;
   } else {
     delete process.env.OUTPUT_SCHEMA;
   }
 
-  // Cache-bust to force re-evaluation of module-level code
   const cacheBuster = `${Date.now()}-${Math.random()}`;
   const mod = await import(`${OUTPUT_PATH}?v=${cacheBuster}`);
   const factory = mod.default;
@@ -51,7 +49,7 @@ async function importExtension(envValue?: string) {
   return pi.tools[0];
 }
 
-describe("output extension", () => {
+describe("output extension — schema exposure", () => {
   beforeEach(() => {
     delete process.env.OUTPUT_SCHEMA;
   });
@@ -60,7 +58,6 @@ describe("output extension", () => {
     const tool = await importExtension(undefined);
 
     expect(tool.name).toBe("output");
-    // The data parameter should be a generic object
     const dataSchema = tool.parameters.properties.data;
     expect(dataSchema.type).toBe("object");
     expect(dataSchema.properties).toBeUndefined();
@@ -84,7 +81,7 @@ describe("output extension", () => {
     expect(dataSchema.properties.items.type).toBe("array");
   });
 
-  it("strips required from injected schema to allow incremental calls", async () => {
+  it("preserves required fields in tool parameter schema", async () => {
     const schema = {
       type: "object",
       properties: {
@@ -97,8 +94,7 @@ describe("output extension", () => {
     const tool = await importExtension(JSON.stringify(schema));
 
     const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.required).toBeUndefined();
-    // Properties are still present
+    expect(dataSchema.required).toEqual(["name", "age"]);
     expect(dataSchema.properties.name.type).toBe("string");
     expect(dataSchema.properties.age.type).toBe("number");
   });
@@ -115,9 +111,7 @@ describe("output extension", () => {
     const schema = {
       type: "object",
       description: "Customer order summary",
-      properties: {
-        orderId: { type: "string" },
-      },
+      properties: { orderId: { type: "string" } },
     };
 
     const tool = await importExtension(JSON.stringify(schema));
@@ -129,14 +123,96 @@ describe("output extension", () => {
   it("adds default description when output schema has none", async () => {
     const schema = {
       type: "object",
-      properties: {
-        count: { type: "number" },
-      },
+      properties: { count: { type: "number" } },
     };
 
     const tool = await importExtension(JSON.stringify(schema));
 
     const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.description).toBe("JSON object to merge into the output");
+    expect(dataSchema.description).toBe("JSON object to return as the run output");
+  });
+});
+
+describe("output extension — execute validation", () => {
+  beforeEach(() => {
+    delete process.env.OUTPUT_SCHEMA;
+  });
+
+  it("rejects empty data when required fields are declared", async () => {
+    const schema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    };
+    const tool = await importExtension(JSON.stringify(schema));
+
+    const result = await tool.execute("call-1", { data: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("validation failed");
+    expect(result.content[0].text).toContain("name");
+  });
+
+  it("rejects type mismatches", async () => {
+    const schema = {
+      type: "object",
+      properties: { count: { type: "number" } },
+      required: ["count"],
+    };
+    const tool = await importExtension(JSON.stringify(schema));
+
+    const result = await tool.execute("call-1", { data: { count: "not a number" } });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("validation failed");
+  });
+
+  it("accepts valid data and emits output.emitted", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        age: { type: "number" },
+      },
+      required: ["name", "age"],
+    };
+    const tool = await importExtension(JSON.stringify(schema));
+
+    // Capture stdout to verify the emitted event
+    const writes: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout as any).write = (chunk: any) => {
+      writes.push(typeof chunk === "string" ? chunk : chunk.toString());
+      return true;
+    };
+
+    try {
+      const result = await tool.execute("call-1", { data: { name: "Ada", age: 36 } });
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toBe("Output recorded");
+      expect(result.details.data).toEqual({ name: "Ada", age: 36 });
+
+      const emitted = writes
+        .map((w) => {
+          try {
+            return JSON.parse(w);
+          } catch {
+            return null;
+          }
+        })
+        .find((e) => e?.type === "output.emitted");
+      expect(emitted).toBeTruthy();
+      expect(emitted.data).toEqual({ name: "Ada", age: 36 });
+    } finally {
+      (process.stdout as any).write = originalWrite;
+    }
+  });
+
+  it("accepts any data when OUTPUT_SCHEMA is not set", async () => {
+    const tool = await importExtension(undefined);
+
+    const result = await tool.execute("call-1", { data: {} });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe("Output recorded");
   });
 });

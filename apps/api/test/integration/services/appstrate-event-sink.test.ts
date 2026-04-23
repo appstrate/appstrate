@@ -72,12 +72,12 @@ describe("AppstrateEventSink", () => {
     expect(sink.current.state).toBeNull();
   });
 
-  it("merges object outputs JSON-merge-patch style + writes a run log", async () => {
+  it("replaces output on each emission + writes a run log per call", async () => {
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
     await sink.handle(event("output.emitted", { data: { a: 1, b: 2 } }));
     await sink.handle(event("output.emitted", { data: { b: 3, c: 4 } }));
 
-    expect(sink.current.output).toEqual({ a: 1, b: 3, c: 4 });
+    expect(sink.current.output).toEqual({ b: 3, c: 4 });
 
     const logs = await loadLogs();
     const outputLogs = logs.filter((l) => l.event === "output");

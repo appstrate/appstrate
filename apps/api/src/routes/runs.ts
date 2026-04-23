@@ -248,29 +248,66 @@ export async function executeAgentInBackground(
 
       const structuredOutput = sink.current.output;
       const hasOutput = Object.keys(structuredOutput).length > 0;
-      // Validate output against schema (if any output was produced)
-      if (hasOutput) {
-        const outputSchema = agent.manifest.output?.schema;
-        if (outputSchema) {
-          const outputValidation = validateOutput(
-            structuredOutput,
-            asJSONSchemaObject(outputSchema),
+      const outputSchema = agent.manifest.output?.schema;
+      // Validate against the declared output schema whenever one exists —
+      // including the empty-output case (a missing required object IS a failure).
+      if (outputSchema) {
+        const outputValidation = validateOutput(structuredOutput, asJSONSchemaObject(outputSchema));
+        if (!outputValidation.valid) {
+          const validationError = `Output validation failed: ${outputValidation.errors.join("; ")}`;
+          await appendRunLog(
+            scope,
+            runId,
+            "system",
+            "output_validation",
+            null,
+            { valid: false, errors: outputValidation.errors },
+            "error",
           );
-          if (!outputValidation.valid) {
-            await appendRunLog(
-              scope,
-              runId,
-              "system",
-              "output_validation",
-              null,
-              { valid: false, errors: outputValidation.errors },
-              "warn",
-            );
-            logger.warn("Output validation failed", {
-              runId,
-              errors: outputValidation.errors,
-            });
-          }
+          logger.warn("Output validation failed — marking run as failed", {
+            runId,
+            errors: outputValidation.errors,
+          });
+          const failureMetadata = await collectAfterRunMetadata({
+            orgId,
+            runId,
+            packageId: agent.id,
+            applicationId,
+            status: "failed",
+            cost: sink.current.cost,
+            duration,
+            modelSource: modelSource ?? null,
+          });
+          await updateRun(scope, runId, {
+            status: "failed",
+            error: validationError,
+            completedAt: new Date().toISOString(),
+            duration,
+            notifiedAt: new Date().toISOString(),
+            ...(failureMetadata ? { metadata: failureMetadata } : {}),
+          });
+          await appendRunLog(
+            scope,
+            runId,
+            "system",
+            "run_completed",
+            null,
+            { runId, status: "failed", error: validationError },
+            "error",
+          );
+          void emitEvent("onRunStatusChange", {
+            orgId,
+            runId,
+            packageId: agent.id,
+            applicationId,
+            status: "failed",
+            cost: sink.current.cost,
+            duration,
+            modelSource: modelSource ?? null,
+            packageEphemeral,
+            extra: { error: validationError },
+          });
+          return;
         }
       }
 

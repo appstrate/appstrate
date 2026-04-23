@@ -50,7 +50,7 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
       return;
     }
     case "output.emitted": {
-      result.output = mergeOutput(result.output, event.data);
+      result.output = event.data ?? null;
       return;
     }
     case "report.appended": {
@@ -83,15 +83,4 @@ export function reduceEvents(events: Iterable<RunEvent>, opts: ReduceOptions = {
   for (const event of events) foldEvent(result, event);
   if (opts.error) result.error = opts.error;
   return result;
-}
-
-function mergeOutput(previous: unknown, next: unknown): unknown {
-  if (!isPlainObject(previous) || !isPlainObject(next)) {
-    return next;
-  }
-  return { ...previous, ...next };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
