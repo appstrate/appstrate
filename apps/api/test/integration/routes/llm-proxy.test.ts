@@ -60,7 +60,7 @@ async function buildHarness(overrides?: {
     orgId: ctx.orgId,
     label: "Upstream",
     api: overrides?.api ?? "openai-completions",
-    baseUrl: overrides?.baseUrl ?? "https://api.openai.test",
+    baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     apiKeyEncrypted: encrypt(overrides?.upstreamKey ?? "sk-upstream-42"),
   });
   const model = await seedOrgModel({
@@ -68,7 +68,7 @@ async function buildHarness(overrides?: {
     providerKeyId: providerKey.id,
     label: "Preset",
     api: overrides?.api ?? "openai-completions",
-    baseUrl: overrides?.baseUrl ?? "https://api.openai.test",
+    baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
     cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },

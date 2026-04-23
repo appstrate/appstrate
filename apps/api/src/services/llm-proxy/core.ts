@@ -112,9 +112,16 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallRe
   const isSse = contentType.includes("text/event-stream");
 
   // Upstream errors: surface verbatim but DON'T meter them as usage —
-  // the call never produced tokens.
+  // the call never produced tokens. We read + rebuild the Response so
+  // `cloneResponseHeaders` can strip `content-length` / `content-encoding`
+  // — Bun already decompressed the body here, so forwarding the
+  // upstream's encoding header would trip the caller's decoder.
   if (!upstream.ok) {
-    return { response: stripHopByHop(upstream) };
+    const errorBody = await upstream.text();
+    const headers = cloneResponseHeaders(upstream.headers);
+    return {
+      response: new Response(errorBody, { status: upstream.status, headers }),
+    };
   }
 
   if (isSse && upstream.body) {
@@ -236,18 +243,23 @@ const HOP_BY_HOP = new Set([
   "upgrade",
 ]);
 
+// Bun's fetch auto-decompresses upstream responses, so `upstream.body`
+// holds plaintext even when the upstream advertised `content-encoding:
+// gzip`. Forwarding the original encoding header would tell the caller
+// to decompress bytes that aren't compressed → ZlibError. We also drop
+// `content-length` because it described the compressed payload; the
+// rewrapped Response recomputes it from the uncompressed body.
+const STRIPPED_CONTENT_HEADERS = new Set(["content-encoding", "content-length"]);
+
 function cloneResponseHeaders(src: Headers): Headers {
   const out = new Headers();
   src.forEach((v, k) => {
-    if (HOP_BY_HOP.has(k.toLowerCase())) return;
+    const lower = k.toLowerCase();
+    if (HOP_BY_HOP.has(lower)) return;
+    if (STRIPPED_CONTENT_HEADERS.has(lower)) return;
     out.set(k, v);
   });
   return out;
-}
-
-function stripHopByHop(res: Response): Response {
-  const headers = cloneResponseHeaders(res.headers);
-  return new Response(res.body, { status: res.status, headers });
 }
 
 async function tapSseStream(

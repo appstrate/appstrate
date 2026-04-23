@@ -234,11 +234,18 @@ async function resolveLlmConfig(
     );
   }
   const profileName = await resolveProfileNameForPreset(opts);
+  if (!resolverInputs.orgId) {
+    throw new ModelResolutionError(
+      "--model-source preset requires a pinned org id (JWT auth needs X-Org-Id on /api/llm-proxy/*)",
+      "Run `appstrate org switch`, or set APPSTRATE_ORG_ID when running headless.",
+    );
+  }
   return resolvePresetModel({
     profileName,
     modelId: opts.model,
     instance: resolverInputs.instance,
     bearerToken: resolverInputs.bearerToken,
+    orgId: resolverInputs.orgId,
   });
 }
 
@@ -295,13 +302,15 @@ async function buildHeadlessRemoteInputs(
 ): Promise<RemoteResolverInputs> {
   let instance = process.env.APPSTRATE_INSTANCE;
   let appId = process.env.APPSTRATE_APP_ID;
+  let orgId = process.env.APPSTRATE_ORG_ID;
 
-  if (!instance || !appId) {
+  if (!instance || !appId || !orgId) {
     const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
     const profile = resolved?.profile;
     if (profile) {
       instance ??= profile.instance;
       appId ??= profile.appId;
+      orgId ??= profile.orgId;
     }
   }
 
@@ -318,7 +327,7 @@ async function buildHeadlessRemoteInputs(
     );
   }
 
-  return { instance, bearerToken: apiKey, appId };
+  return { instance, bearerToken: apiKey, appId, orgId };
 }
 
 async function buildInteractiveRemoteInputs(
@@ -349,6 +358,7 @@ async function buildInteractiveRemoteInputs(
       instance: ctx.instance,
       bearerToken: ctx.accessToken,
       appId: profile.appId,
+      orgId: profile.orgId,
     };
   } catch (err) {
     if (err instanceof AuthError) {

@@ -134,6 +134,7 @@ describe("buildResolverInputs — remote", () => {
         instance: "https://app.example.com",
         bearerToken: "ask_headless_2",
         appId: "app_1",
+        orgId: "org_1",
       });
     });
 
@@ -181,6 +182,7 @@ describe("buildResolverInputs — remote", () => {
         instance: "https://app.example.com",
         bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
         appId: "app_1",
+        orgId: "org_1",
       });
     });
 

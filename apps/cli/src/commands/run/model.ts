@@ -46,6 +46,14 @@ export interface PresetResolutionInputs {
   instance: string;
   /** Bearer token to carry to `/api/llm-proxy/*`. Must have `llm-proxy:call`. */
   bearerToken: string;
+  /**
+   * Org id pinned on the profile. Forwarded as `X-Org-Id` on every
+   * upstream call so `requireOrgContext` resolves without falling back
+   * to the header-less path (JWT auth uses `deferOrgResolution`, which
+   * requires the header). API-key auth pre-resolves the org inline and
+   * ignores the header.
+   */
+  orgId: string;
 }
 
 const PROVIDER_BY_API: Record<string, string> = {
@@ -154,6 +162,7 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     cost: preset.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
+    headers: { "X-Org-Id": inputs.orgId },
   };
   return { model, apiKey: inputs.bearerToken };
 }

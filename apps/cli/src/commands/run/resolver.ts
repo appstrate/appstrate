@@ -44,6 +44,13 @@ export interface RemoteResolverInputs {
    */
   bearerToken: string;
   appId: string;
+  /**
+   * Org id pinned on the profile (interactive) or passed via
+   * `APPSTRATE_ORG_ID` (headless). Required for JWT auth on routes that
+   * `deferOrgResolution` (e.g. `/api/llm-proxy/*`). Optional for API-key
+   * auth — those pre-resolve the org inline.
+   */
+  orgId?: string;
   endUserId?: string;
 }
 

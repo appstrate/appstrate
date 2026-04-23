@@ -91,9 +91,16 @@ export function createLlmProxyRouter() {
     upstreamPath: string;
     adapter: LlmProxyAdapter;
   }> = [
+    // `upstreamPath` mirrors each SDK's own path convention so a stored
+    // `baseUrl` produces the same final URL whether pi-ai calls the
+    // upstream directly (platform runner) or via this proxy (CLI).
+    //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`
+    //     (`https://api.openai.com/v1`, `https://openrouter.ai/api/v1`).
+    //   - Anthropic SDK appends `/v1/messages` → baseUrl is the bare host
+    //     (`https://api.anthropic.com`).
     {
       urlPath: "/openai-completions/v1/chat/completions",
-      upstreamPath: "/v1/chat/completions",
+      upstreamPath: "/chat/completions",
       adapter: openaiCompletionsAdapter,
     },
     {
