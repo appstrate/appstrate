@@ -11,22 +11,35 @@
  *   2. `apps/cli/src/commands/run.ts` — the public CLI runner (out-of-
  *      container, uses a temp dir as workspace).
  *
- * Having a single helper means both code paths load tools with
- * identical semantics: same manifest parsing, same dedup rules, same
- * wrapper chain. A bug fix lands in both places simultaneously.
+ * In a published AFPS archive, `manifest.entrypoint` points at a
+ * self-contained, pre-bundled ESM artifact (AFPS §3.4). The runner
+ * does NOT resolve bare-specifier imports against an ambient
+ * `node_modules/` tree — every runtime dep other than the Pi SDK
+ * pair is inlined into the emitted file at publish time by
+ * `@appstrate/core/tool-bundler`. A package whose `entrypoint` is
+ * missing or unreadable is rejected at load with a clear error so
+ * the problem surfaces at the package boundary, not at tool-call time.
  *
  * The helper is FS-bound because Bun/Node only supports dynamic
- * `import()` on file paths. We write any tool-scoped file into the
- * workspace `.agent-tools/<id>/` subtree so multi-file tools (shared
- * helpers, fixtures, etc.) resolve correctly relative to their
- * entrypoint.
+ * `import()` on file paths. We write the entrypoint file into the
+ * workspace `.agent-tools/<id>/` subtree so the import path is stable.
  */
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
-import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { parsePackageIdentity, resolveToolEntrypoint } from "@appstrate/afps-runtime/bundle";
+
+/**
+ * The only package names Appstrate-bundled tool entrypoints keep as
+ * external imports (see `@appstrate/core/tool-bundler`). When we place
+ * the tool scratch dir inside a tree walkable to a `node_modules/`
+ * that contains these two packages, every bundled entrypoint can
+ * `import` against the runner's own copy — no per-workspace symlink
+ * required.
+ */
+const PI_SDK_EXTERNAL_PACKAGES = ["@mariozechner/pi-ai", "@mariozechner/pi-coding-agent"] as const;
 
 export interface PrepareBundleOptions {
   /**
@@ -57,9 +70,15 @@ export interface PreparedBundle {
   /** Factories ready to pass to `PiRunner({ extensionFactories })`. */
   extensionFactories: ExtensionFactory[];
   /**
-   * Remove the `.agent-tools/` scratch directory created by the
-   * helper. Safe to call multiple times. Does NOT touch `.pi/` — that
-   * subtree is considered part of the workspace contract.
+   * Absolute path of the scratch dir where tool entrypoints were
+   * materialised. Useful for tests and debug logging — callers should
+   * prefer {@link cleanup} for teardown.
+   */
+  toolsScratchDir: string;
+  /**
+   * Remove the tool scratch directory created by the helper. Safe to
+   * call multiple times. Does NOT touch `.pi/` — that subtree is
+   * considered part of the workspace contract.
    */
   cleanup: () => Promise<void>;
 }
@@ -79,7 +98,20 @@ export async function prepareBundleForPi(
 ): Promise<PreparedBundle> {
   const onError = opts.onError ?? (() => {});
   const piDir = path.join(opts.workspaceDir, ".pi");
-  const toolsScratchDir = path.join(opts.workspaceDir, ".agent-tools");
+
+  // Tool entrypoints leave two package names external — the Pi SDK
+  // pair. They must still resolve at runtime when Bun/Node dynamic-
+  // imports the entrypoint file. The resolver walks up from the file's
+  // location looking for an ancestor `node_modules/`, so we pick a
+  // scratch dir beneath the runner's own `node_modules/` when we can
+  // find one. Falls back to `<workspaceDir>/.agent-tools/` otherwise;
+  // runners that use that fallback (the Docker runtime image) must
+  // arrange for `@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`
+  // to resolve from the workspace themselves (e.g. a node_modules symlink).
+  const sdkNodeModules = await findPiSdkNodeModules();
+  const toolsScratchDir = sdkNodeModules
+    ? path.join(sdkNodeModules, ".cache", "appstrate-tools", `run-${process.pid}-${Date.now()}`)
+    : path.join(opts.workspaceDir, ".agent-tools");
 
   // ─── Step 1: materialise each dep package under its .pi/ subtree ───
   for (const [identity, pkg] of bundle.packages) {
@@ -117,12 +149,14 @@ export async function prepareBundleForPi(
       const wrapped = opts.extensionWrapper ? opts.extensionWrapper(factory, resolvedId) : factory;
       factories.push(wrapped);
     } catch (err) {
-      onError(`Failed to load tool '${toolId}'`, err);
+      const detail = err instanceof Error ? err.message : String(err);
+      onError(`Failed to load tool '${toolId}': ${detail}`, err);
     }
   }
 
   return {
     extensionFactories: factories,
+    toolsScratchDir,
     cleanup: async () => {
       await fs.rm(toolsScratchDir, { recursive: true, force: true });
     },
@@ -132,6 +166,32 @@ export async function prepareBundleForPi(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Walk up from this module's directory looking for the nearest
+ * `node_modules/` that contains every Pi SDK external. Returns that
+ * `node_modules/` path or null if no ancestor has the full set
+ * installed — in which case callers fall back to writing the tool
+ * scratch into `workspaceDir/.agent-tools/`.
+ */
+async function findPiSdkNodeModules(): Promise<string | null> {
+  let dir = import.meta.dir;
+  for (;;) {
+    const candidate = path.join(dir, "node_modules");
+    const allPresent = await Promise.all(
+      PI_SDK_EXTERNAL_PACKAGES.map((pkg) =>
+        fs
+          .stat(path.join(candidate, pkg))
+          .then(() => true)
+          .catch(() => false),
+      ),
+    ).then((r) => r.every(Boolean));
+    if (allPresent) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 
 function findPackageByName(bundle: Bundle, name: string): BundlePackage | null {
   for (const pkg of bundle.packages.values()) {
@@ -157,19 +217,25 @@ async function materialisePackage(pkg: BundlePackage, destDir: string): Promise<
 }
 
 /**
- * Load a single tool from its {@link BundlePackage}:
- *   1. Copy every file into `.agent-tools/<packageId>/` so dynamic-
- *      imported entrypoint can resolve relative deps.
- *   2. Parse `manifest.json` to find the entrypoint file and the
- *      canonical tool name for dedup.
- *   3. Copy `TOOL.md` (when present) under `.pi/tools/<packageId>/`
- *      for Pi SDK docs discovery.
- *   4. Dynamic-import the entrypoint absolute path, verify `default`
- *      is a function, return it as the ExtensionFactory.
+ * Load a single tool from its {@link BundlePackage}.
  *
- * Returns `{ factory: null }` for well-formed skips (missing manifest,
- * missing entrypoint) so the caller counts them separately from loader
- * failures (which throw).
+ * Contract:
+ *   - `manifest.entrypoint` MUST point at a file the runner can load
+ *     with no further build step. In published archives this is a
+ *     self-contained bundle (see `@appstrate/core/tool-bundler`).
+ *   - A package with a missing or unreadable entrypoint is rejected
+ *     here; the caller logs via `onError` and the run proceeds without
+ *     the tool. We do NOT fall back to any heuristic (source `.ts` at
+ *     a conventional path, etc.) — that silently depends on an ambient
+ *     `node_modules/` the runner is not supposed to know about.
+ *
+ * Steps:
+ *   1. Write the entrypoint file to `.agent-tools/<packageId>/`
+ *      (the only file the runner needs at runtime).
+ *   2. Copy `TOOL.md` (when present) under `.pi/tools/<packageId>/`
+ *      for Pi SDK docs discovery.
+ *   3. Dynamic-import the entrypoint, verify `default` is a function,
+ *      return it as the ExtensionFactory.
  */
 async function loadToolFromPackage(
   pkg: BundlePackage,
@@ -178,30 +244,21 @@ async function loadToolFromPackage(
 ): Promise<{ factory: ExtensionFactory | null; resolvedId: string }> {
   const parsed = parsePackageIdentity(pkg.identity);
   const fallbackId = parsed?.packageId ?? pkg.identity;
+  const resolvedId = (pkg.manifest as { tool?: { name?: string } }).tool?.name ?? fallbackId;
 
-  // 1. Write tool files to scratch dir
+  // Per AFPS §3.4: `manifest.entrypoint` is the single runtime contract.
+  // `resolveToolEntrypoint` throws AfpsEntrypointError on missing/unsafe
+  // path/absent file; we let it propagate to the caller which logs via
+  // `onError` and continues without this tool.
+  const { entrypoint, bytes: entrypointBytes } = resolveToolEntrypoint(pkg, fallbackId);
+
+  // 1. Write the entrypoint to scratch dir
   const toolScratchRoot = path.join(toolsScratchDir, fallbackId);
-  await fs.mkdir(toolScratchRoot, { recursive: true });
-  for (const [relative, bytes] of pkg.files) {
-    if (relative === "RECORD") continue;
-    if (!relative || relative.endsWith("/")) continue;
-    const target = path.join(toolScratchRoot, relative);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, bytes);
-  }
+  const entrypointDest = path.join(toolScratchRoot, entrypoint);
+  await fs.mkdir(path.dirname(entrypointDest), { recursive: true });
+  await fs.writeFile(entrypointDest, entrypointBytes);
 
-  // 2. Read manifest (prefer in-memory over file bytes — same content)
-  const manifest = pkg.manifest as {
-    entrypoint?: string;
-    tool?: { name?: string };
-  };
-  const entrypoint = manifest.entrypoint;
-  if (!entrypoint) {
-    return { factory: null, resolvedId: fallbackId };
-  }
-  const resolvedId = manifest.tool?.name ?? fallbackId;
-
-  // 3. Copy TOOL.md (if present) to .pi/tools/<packageId>/TOOL.md
+  // 2. Copy TOOL.md (if present) to .pi/tools/<packageId>/TOOL.md
   const toolMdBytes = pkg.files.get("TOOL.md");
   if (toolMdBytes) {
     const toolMdDir = path.join(piDir, "tools", fallbackId);
@@ -209,9 +266,8 @@ async function loadToolFromPackage(
     await fs.writeFile(path.join(toolMdDir, "TOOL.md"), toolMdBytes);
   }
 
-  // 4. Dynamic-import the entrypoint
-  const entrypointPath = path.join(toolScratchRoot, entrypoint);
-  const mod: unknown = await import(entrypointPath);
+  // 3. Dynamic-import the entrypoint
+  const mod: unknown = await import(entrypointDest);
   const factory = (mod as { default?: unknown }).default;
   if (typeof factory !== "function") {
     throw new Error(

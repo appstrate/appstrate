@@ -103,14 +103,14 @@ describe("prepareBundleForPi — skills/ and providers/ install", () => {
 });
 
 describe("prepareBundleForPi — tool loading", () => {
-  const TOOL_SOURCE = `
+  const TOOL_COMPILED = `
 export default function factory(pi) {
   pi._registeredViaThisFactory = true;
   return { name: "test-tool", version: "1.0.0" };
 }
 `;
 
-  it("dynamic-imports the tool entrypoint and returns a factory", async () => {
+  it("dynamic-imports the entrypoint and returns a factory", async () => {
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
@@ -125,9 +125,10 @@ export default function factory(pi) {
       "1.0.0",
       "tool",
       {
-        "index.ts": TOOL_SOURCE,
+        "index.ts": "// source kept for authoring only — never loaded at runtime",
+        "tool.js": TOOL_COMPILED,
       },
-      { entrypoint: "index.ts", tool: { name: "my-tool" } },
+      { entrypoint: "tool.js", tool: { name: "my-tool" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
 
@@ -140,6 +141,44 @@ export default function factory(pi) {
     );
     expect(pi._registeredViaThisFactory).toBe(true);
     expect((result as unknown as { name: string }).name).toBe("test-tool");
+  });
+
+  it("materialises only the entrypoint (not other files in the archive)", async () => {
+    const root = makeBundlePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      {
+        dependencies: { tools: { "@acme/my-tool": "^1" } },
+      },
+    );
+    const toolPkg = makeBundlePackage(
+      "@acme/my-tool",
+      "1.0.0",
+      "tool",
+      {
+        "index.ts":
+          "// archive may keep sources for attribution — must NOT land on disk at load time",
+        "tool.js": TOOL_COMPILED,
+      },
+      { entrypoint: "tool.js", tool: { name: "my-tool" } },
+    );
+    const bundle = makeTestBundle(root, [toolPkg]);
+
+    const { toolsScratchDir } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
+
+    const entrypointExists = await fs
+      .stat(path.join(toolsScratchDir, "@acme", "my-tool", "tool.js"))
+      .then(() => true)
+      .catch(() => false);
+    expect(entrypointExists).toBe(true);
+
+    const sourceExists = await fs
+      .stat(path.join(toolsScratchDir, "@acme", "my-tool", "index.ts"))
+      .then(() => true)
+      .catch(() => false);
+    expect(sourceExists).toBe(false);
   });
 
   it("writes TOOL.md under .pi/tools/<packageId>/TOOL.md", async () => {
@@ -157,10 +196,10 @@ export default function factory(pi) {
       "1.0.0",
       "tool",
       {
-        "index.ts": TOOL_SOURCE,
+        "tool.js": TOOL_COMPILED,
         "TOOL.md": "# Usage",
       },
-      { entrypoint: "index.ts", tool: { name: "my-tool" } },
+      { entrypoint: "tool.js", tool: { name: "my-tool" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
 
@@ -187,15 +226,15 @@ export default function factory(pi) {
       "@acme/alias-a",
       "1.0.0",
       "tool",
-      { "index.ts": TOOL_SOURCE },
-      { entrypoint: "index.ts", tool: { name: "canonical" } },
+      { "tool.js": TOOL_COMPILED },
+      { entrypoint: "tool.js", tool: { name: "canonical" } },
     );
     const toolB = makeBundlePackage(
       "@acme/alias-b",
       "1.0.0",
       "tool",
-      { "index.ts": TOOL_SOURCE },
-      { entrypoint: "index.ts", tool: { name: "canonical" } },
+      { "tool.js": TOOL_COMPILED },
+      { entrypoint: "tool.js", tool: { name: "canonical" } },
     );
     const bundle = makeTestBundle(root, [toolA, toolB]);
 
@@ -218,8 +257,8 @@ export default function factory(pi) {
       "@acme/my-tool",
       "1.0.0",
       "tool",
-      { "index.ts": TOOL_SOURCE },
-      { entrypoint: "index.ts", tool: { name: "my-tool" } },
+      { "tool.js": TOOL_COMPILED },
+      { entrypoint: "tool.js", tool: { name: "my-tool" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
 
@@ -234,7 +273,7 @@ export default function factory(pi) {
     expect(extensionFactories).toHaveLength(1);
   });
 
-  it("reports onError and continues when a tool entrypoint throws on import", async () => {
+  it("reports onError and continues when a tool artifact throws on import", async () => {
     const errors: string[] = [];
     const root = makeBundlePackage(
       "@acme/agent",
@@ -249,15 +288,15 @@ export default function factory(pi) {
       "@acme/bad",
       "1.0.0",
       "tool",
-      { "index.ts": `throw new Error("boom at module load");` },
-      { entrypoint: "index.ts", tool: { name: "bad" } },
+      { "tool.js": `throw new Error("boom at module load");` },
+      { entrypoint: "tool.js", tool: { name: "bad" } },
     );
     const good = makeBundlePackage(
       "@acme/good",
       "1.0.0",
       "tool",
-      { "index.ts": TOOL_SOURCE },
-      { entrypoint: "index.ts", tool: { name: "good" } },
+      { "tool.js": TOOL_COMPILED },
+      { entrypoint: "tool.js", tool: { name: "good" } },
     );
     const bundle = makeTestBundle(root, [bad, good]);
 
@@ -285,8 +324,8 @@ export default function factory(pi) {
       "@acme/oops",
       "1.0.0",
       "tool",
-      { "index.ts": `export default { not: "a function" };` },
-      { entrypoint: "index.ts", tool: { name: "oops" } },
+      { "tool.js": `export default { not: "a function" };` },
+      { entrypoint: "tool.js", tool: { name: "oops" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
 
@@ -313,66 +352,94 @@ export default function factory(pi) {
     expect(extensionFactories).toHaveLength(0);
   });
 
-  it("skips tool when manifest has no entrypoint", async () => {
+  it("rejects tool without manifest.entrypoint", async () => {
+    const errors: string[] = [];
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
       "agent",
       {},
       {
-        dependencies: { tools: { "@acme/x": "^1" } },
+        dependencies: { tools: { "@acme/legacy": "^1" } },
       },
     );
     const toolPkg = makeBundlePackage(
-      "@acme/x",
+      "@acme/legacy",
       "1.0.0",
       "tool",
-      {},
-      { tool: { name: "x" } }, // no entrypoint
+      { "tool.js": TOOL_COMPILED },
+      // no entrypoint declared at all
+      { tool: { name: "legacy" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
-    const { extensionFactories } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
+
+    const { extensionFactories } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+      onError: (msg) => errors.push(msg),
+    });
     expect(extensionFactories).toHaveLength(0);
+    expect(errors[0]).toMatch(/manifest\.entrypoint/);
   });
 
-  it("preserves multi-file tool layout (relative imports resolve)", async () => {
+  it("rejects tool whose manifest.entrypoint points at a missing file", async () => {
+    const errors: string[] = [];
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
       "agent",
       {},
       {
-        dependencies: { tools: { "@acme/multi": "^1" } },
+        dependencies: { tools: { "@acme/missing": "^1" } },
       },
     );
     const toolPkg = makeBundlePackage(
-      "@acme/multi",
+      "@acme/missing",
       "1.0.0",
       "tool",
-      {
-        "index.ts": `
-import { suffix } from "./helper.ts";
-export default function factory(pi) {
-  pi._value = "hello" + suffix;
-  return { name: "multi" };
-}
-`,
-        "helper.ts": `export const suffix = " world";`,
-      },
-      { entrypoint: "index.ts", tool: { name: "multi" } },
+      {},
+      { entrypoint: "tool.js", tool: { name: "missing" } },
     );
     const bundle = makeTestBundle(root, [toolPkg]);
 
-    const { extensionFactories } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
-    expect(extensionFactories).toHaveLength(1);
-    const pi = {} as Record<string, unknown>;
-    extensionFactories[0]!(pi as unknown as Parameters<(typeof extensionFactories)[number]>[0]);
-    expect(pi._value).toBe("hello world");
+    const { extensionFactories } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+      onError: (msg) => errors.push(msg),
+    });
+    expect(extensionFactories).toHaveLength(0);
+    expect(errors[0]).toMatch(/no such file/);
+  });
+
+  it("rejects tool with path-traversal manifest.entrypoint", async () => {
+    const errors: string[] = [];
+    const root = makeBundlePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      {
+        dependencies: { tools: { "@acme/trav": "^1" } },
+      },
+    );
+    const toolPkg = makeBundlePackage(
+      "@acme/trav",
+      "1.0.0",
+      "tool",
+      { "tool.js": TOOL_COMPILED },
+      { entrypoint: "../escape.js", tool: { name: "trav" } },
+    );
+    const bundle = makeTestBundle(root, [toolPkg]);
+
+    const { extensionFactories } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+      onError: (msg) => errors.push(msg),
+    });
+    expect(extensionFactories).toHaveLength(0);
+    expect(errors[0]).toMatch(/unsafe|traversal/i);
   });
 });
 
 describe("prepareBundleForPi — cleanup", () => {
-  it("removes .agent-tools/ but preserves .pi/", async () => {
+  it("removes the tool scratch dir but preserves .pi/", async () => {
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
@@ -390,15 +457,17 @@ describe("prepareBundleForPi — cleanup", () => {
       "@acme/t",
       "1.0.0",
       "tool",
-      { "index.ts": "export default () => ({});" },
-      { entrypoint: "index.ts", tool: { name: "t" } },
+      { "tool.js": "export default () => ({});" },
+      { entrypoint: "tool.js", tool: { name: "t" } },
     );
     const bundle = makeTestBundle(root, [skillPkg, toolPkg]);
 
-    const { cleanup } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
+    const { cleanup, toolsScratchDir } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+    });
 
     const scratchExists = await fs
-      .stat(path.join(workspace, ".agent-tools"))
+      .stat(toolsScratchDir)
       .then(() => true)
       .catch(() => false);
     expect(scratchExists).toBe(true);
@@ -406,7 +475,7 @@ describe("prepareBundleForPi — cleanup", () => {
     await cleanup();
 
     const scratchGone = await fs
-      .stat(path.join(workspace, ".agent-tools"))
+      .stat(toolsScratchDir)
       .then(() => true)
       .catch(() => false);
     expect(scratchGone).toBe(false);

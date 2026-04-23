@@ -71,6 +71,12 @@ export {
   type BundleValidationResult,
   type ValidateBundleOptions,
 } from "./validate-bundle.ts";
+export {
+  resolveToolEntrypoint,
+  AfpsEntrypointError,
+  type AfpsEntrypointErrorCode,
+  type ResolvedToolEntrypoint,
+} from "./tool-entrypoint.ts";
 
 // ─── Prompt rendering ───────────────────────────────────────────────
 export {

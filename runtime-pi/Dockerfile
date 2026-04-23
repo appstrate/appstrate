@@ -95,8 +95,15 @@ COPY appstrate/runtime-pi/extension-wrapper.ts /runtime/extension-wrapper.ts
 COPY appstrate/runtime-pi/entrypoint.ts /runtime/entrypoint.ts
 
 RUN adduser -D -s /bin/bash pi && \
-    mkdir -p /workspace && chown pi:pi /workspace && \
-    ln -sf /runtime/node_modules /workspace/node_modules
+    mkdir -p /workspace && chown pi:pi /workspace
+
+# No `/workspace/node_modules` symlink — AFPS tools ship pre-bundled
+# (`manifest.entrypoint` points at a self-contained artifact per AFPS
+# §3.4, produced by `@appstrate/core/tool-bundler`), so nothing under
+# the user workspace tree needs to resolve against npm packages.
+# The Pi SDK pair (`@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`)
+# is resolved directly from `/runtime/node_modules/` by
+# `prepareBundleForPi`, which places the tool scratch inside that tree.
 
 USER pi
 

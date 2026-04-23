@@ -5,7 +5,6 @@ import { unzipSync, zipSync, type Zippable } from "fflate";
 import {
   validateManifest,
   extractSkillMeta,
-  validateToolSource,
   type Manifest,
   type AgentManifest,
   type ToolManifest,
@@ -247,18 +246,14 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       if (!entrypoint || !files[entrypoint]) {
         throw new PackageZipError(
           "MISSING_CONTENT",
-          `Tool package must contain the source file declared in entrypoint: "${entrypoint || "(missing)"}"`,
+          `Tool package must contain the file declared in entrypoint: "${entrypoint || "(missing)"}"`,
         );
       }
-      const source = new TextDecoder().decode(files[entrypoint]!);
-      const toolValidation = validateToolSource(source);
-      if (!toolValidation.valid) {
-        throw new PackageZipError(
-          "INVALID_CONTENT",
-          `Tool source validation failed: ${toolValidation.errors.join("; ")}`,
-        );
-      }
-      content = source;
+      // Structural check only. `entrypoint` may point at either draft source
+      // or a published bundle (AFPS §3.4); source-level validation is an
+      // authoring-time concern handled by upload/import/publish pipelines
+      // via `validateToolSource` explicitly, not by the ZIP parser.
+      content = new TextDecoder().decode(files[entrypoint]!);
       break;
     }
     case "provider": {

@@ -3,12 +3,13 @@
 
 import type { Bundle, BundlePackage, Tool, ToolRef, ToolResolver } from "./types.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
+import { resolveToolEntrypoint } from "../bundle/tool-entrypoint.ts";
 
 /**
- * Shape a tool package ships inside its `index.js` (or `.mjs`/`.ts`):
- * a default export that is either a {@link Tool} object or a factory
- * producing one. Factories let tools capture runtime-scoped state
- * (counters, caches) without leaking it across runs.
+ * Shape a tool package ships inside the file pointed at by
+ * `manifest.entrypoint`: a default export that is either a {@link Tool}
+ * object or a factory producing one. Factories let tools capture
+ * runtime-scoped state (counters, caches) without leaking it across runs.
  */
 export type BundledToolModule =
   | Tool
@@ -30,11 +31,9 @@ export class BundledToolResolutionError extends Error {
 /**
  * Default {@link ToolResolver} that loads each entry in
  * `dependencies.tools[]` from the corresponding package inside the
- * {@link Bundle}. Resolution order per ref:
- *
- *   1. `index.mjs`  (ES module)
- *   2. `index.js`   (ES module)
- *   3. `index.ts`   (Bun / ts-node)
+ * {@link Bundle}. Honors the AFPS §3.4 contract: reads the file
+ * named by `manifest.entrypoint` (in a published archive, a single
+ * self-contained bundle), with no path-convention fallback.
  *
  * The file is imported via a data URL so the bundle does not need to
  * be unpacked to disk. This keeps bundle execution sealed — tools run
@@ -75,34 +74,37 @@ export class BundledToolResolver implements ToolResolver {
         `bundled tool ${ref.name} is not present in the bundle`,
       );
     }
-    const candidates = ["index.mjs", "index.js", "index.ts"];
-
-    for (const candidate of candidates) {
-      const source = pkg.files.get(candidate);
-      if (!source) continue;
-      try {
-        const tool = await this.importTool({
-          source,
-          path: `${pkg.identity}/${candidate}`,
-          bundle,
-          ref,
-          pkg,
-        });
-        validateTool(tool, ref);
-        return tool;
-      } catch (err) {
-        throw new BundledToolResolutionError(
-          ref,
-          `failed to load bundled tool ${ref.name} from ${pkg.identity}/${candidate}: ${err instanceof Error ? err.message : String(err)}`,
-          err,
-        );
-      }
+    let entrypoint: string;
+    let source: Uint8Array;
+    try {
+      // §3.4 entrypoint validation is delegated to the shared helper —
+      // every AFPS loader uses the same implementation.
+      ({ entrypoint, bytes: source } = resolveToolEntrypoint(pkg, ref.name));
+    } catch (err) {
+      throw new BundledToolResolutionError(
+        ref,
+        err instanceof Error ? err.message : String(err),
+        err,
+      );
     }
-
-    throw new BundledToolResolutionError(
-      ref,
-      `bundled tool ${ref.name} has no entrypoint in package ${pkg.identity} (looked for index.{mjs,js,ts})`,
-    );
+    try {
+      const tool = await this.importTool({
+        source,
+        path: `${pkg.identity}/${entrypoint}`,
+        bundle,
+        ref,
+        pkg,
+      });
+      validateTool(tool, ref);
+      return tool;
+    } catch (err) {
+      if (err instanceof BundledToolResolutionError) throw err;
+      throw new BundledToolResolutionError(
+        ref,
+        `failed to load bundled tool ${ref.name} from ${pkg.identity}/${entrypoint}: ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+    }
   }
 
   private async importTool(args: {

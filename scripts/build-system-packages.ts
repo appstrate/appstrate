@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { validateManifest, validateToolSource } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
@@ -63,13 +64,7 @@ async function main() {
       }
     }
 
-    if (checkOnly) {
-      console.log(`  ${dirName} [${type}] ✓`);
-      count++;
-      continue;
-    }
-
-    // Collect all files
+    // Collect all files — needed for bundling (tools) and zipping (all types)
     const files = await readdir(dirPath);
     const zipEntries: Record<string, Uint8Array> = {};
     for (const file of files) {
@@ -77,6 +72,29 @@ async function main() {
       const fileStat = await stat(filePath);
       if (!fileStat.isFile()) continue;
       zipEntries[file] = new Uint8Array(await readFile(filePath));
+    }
+
+    // Tool-specific: rebundle via the same helper used by the API
+    // publish path so system packages ship the identical §3.4 archive
+    // layout (self-contained `tool.js` + rewritten entrypoint). Run
+    // this even in --check mode so CI catches tools that won't bundle.
+    let zipBytes: Uint8Array;
+    if (type === "tool") {
+      const toolId = (manifest as Record<string, unknown>).name as string;
+      const built = await buildPublishedToolArchive({
+        files: zipEntries,
+        manifest: manifest as Record<string, unknown>,
+        toolId,
+      });
+      zipBytes = built.archive;
+    } else {
+      zipBytes = zipArtifact(zipEntries);
+    }
+
+    if (checkOnly) {
+      console.log(`  ${dirName} [${type}] ✓`);
+      count++;
+      continue;
     }
 
     // Delete old archives for this package
@@ -90,7 +108,6 @@ async function main() {
 
     // Build archive
     const zipName = `${dirName}.afps`;
-    const zipBytes = zipArtifact(zipEntries);
     const integrity = computeIntegrity(zipBytes);
 
     await writeFile(join(OUTPUT_DIR, zipName), zipBytes);
