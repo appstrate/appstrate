@@ -25,7 +25,7 @@
     },
     "credentialHeaderName": "Shortcut-Token",
     "credentialHeaderPrefix": "",
-    "authorizedUris": ["https://api.app.shortcut.com/*"]
+    "authorizedUris": ["https://api.app.shortcut.com/**"]
   },
   "setupGuide": {
     "steps": [

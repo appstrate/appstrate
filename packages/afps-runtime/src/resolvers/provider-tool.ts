@@ -14,13 +14,22 @@ import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } f
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 /**
- * Metadata the resolver extracts from the provider manifest shipped in
- * the bundle (`.agent-package/providers/{name}/provider.json`).
+ * Runtime projection of the provider manifest — a flat view over the
+ * subset of fields that `makeProviderTool` actually consumes. The
+ * canonical wire shape nests these fields under `definition.*` per AFPS
+ * spec §7.5 / §8.6 (`authorizedUris`, `allowAllUris` are transversal
+ * fields of the `definition` object); {@link readProviderMeta} projects
+ * them onto this flat shape so enforcement code does not have to carry
+ * the nesting.
  */
 export interface ProviderMeta {
-  /** Scoped package name (e.g. `@afps/gmail`). */
+  /** Scoped package name (e.g. `@appstrate/gmail`). */
   name: string;
-  /** Optional URL allowlist enforced by the tool before dispatch. */
+  /**
+   * URL allowlist enforced by the tool before dispatch. Patterns follow
+   * {@link matchesAuthorizedUriSpec} semantics (`*` = single path
+   * segment, `**` = any substring).
+   */
   authorizedUris?: string[];
   /**
    * When true, the tool does not enforce the URL allowlist — the
@@ -28,8 +37,27 @@ export interface ProviderMeta {
    * sidecar gates this server-side). Defaults to false.
    */
   allowAllUris?: boolean;
-  /** Arbitrary manifest-level extras that resolvers want to forward. */
-  [key: string]: unknown;
+  /**
+   * Header name the upstream expects the credential under — e.g.
+   * `Authorization` for Bearer tokens, `X-Api-Key` for API keys.
+   * Projected from `manifest.definition.credentialHeaderName`.
+   */
+  credentialHeaderName?: string;
+  /**
+   * Prefix prepended to the credential value (e.g. `Bearer`). Rendered
+   * as `${prefix} {{placeholder}}` when a prefix is set, otherwise the
+   * placeholder is written on its own. Projected from
+   * `manifest.definition.credentialHeaderPrefix`.
+   */
+  credentialHeaderPrefix?: string;
+  /**
+   * Name of the credential field the transport will substitute into the
+   * `{{placeholder}}` at dispatch time — typically `access_token` for
+   * OAuth providers and `api_key` for api-key providers. Projected from
+   * `manifest.definition.credentials.fieldName`; callers fall back to a
+   * default derived from `authMode` when absent.
+   */
+  credentialPlaceholder?: string;
 }
 
 export interface ProviderCallRequest {
@@ -262,17 +290,23 @@ export async function serializeFetchResponse(res: Response): Promise<ProviderCal
 }
 
 /**
- * Load a provider manifest from the bundle. Missing files surface the
- * explicit {@link ProviderMeta} fallback so resolvers don't accidentally
- * all share the same default — the sidecar/remote paths trust the
+ * Load a provider manifest from the bundle and project the fields
+ * consumed at runtime into a flat {@link ProviderMeta}.
+ *
+ * Missing packages surface the explicit fallback so resolvers don't
+ * accidentally share the same default — sidecar/remote paths trust the
  * transport to enforce the allowlist, while the local path refuses to
- * call an un-manifested provider. Shared implementation lets all three
- * resolvers fix bugs and add manifest fields in one place.
+ * call an un-manifested provider. Sharing this helper keeps manifest
+ * parsing in a single place for every resolver.
  *
  * Resolution order inside the provider's package:
  *   1. `provider.json` (AFPS 1.x convention)
- *   2. `manifest.json` (falls back to the package manifest when a
- *      dedicated provider.json is absent)
+ *   2. `manifest.json` (package manifest when no dedicated provider.json)
+ *   3. In-memory `pkg.manifest` (the bundle builder's pre-parsed copy)
+ *
+ * Per AFPS spec §7.5 / §8.6, `authorizedUris` and `allowAllUris` live
+ * under `manifest.definition` — they are read from there and exposed
+ * flat on the returned meta.
  */
 export function readProviderMeta(
   bundle: Bundle,
@@ -284,12 +318,119 @@ export function readProviderMeta(
   for (const candidate of ["provider.json", "manifest.json"] as const) {
     const bytes = pkg.files.get(candidate);
     if (!bytes) continue;
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ProviderMeta>;
-    return { name: ref.name, ...parsed };
+    return projectProviderMeta(ref.name, JSON.parse(new TextDecoder().decode(bytes)));
   }
   // Package present but no manifest file — fall back to the in-memory
   // package manifest that the bundle builder already parsed for us.
-  return { name: ref.name, ...(pkg.manifest as Partial<ProviderMeta>) };
+  return projectProviderMeta(ref.name, pkg.manifest);
+}
+
+/**
+ * Project a parsed provider manifest onto the flat {@link ProviderMeta}
+ * shape consumed by the runtime. Reads every projected field from
+ * `definition.*` (the canonical AFPS location) and ignores any
+ * top-level occurrences — the manifest wire shape is the single source
+ * of truth.
+ *
+ * The credential-injection fields (`credentialHeaderName`,
+ * `credentialHeaderPrefix`, `credentialPlaceholder`) are what let the
+ * sidecar/remote resolvers build an `Authorization: Bearer
+ * {{access_token}}`-style header at dispatch time without hard-coding
+ * transport conventions in the LLM-facing tool schema.
+ */
+function projectProviderMeta(name: string, parsed: unknown): ProviderMeta {
+  const definition =
+    parsed && typeof parsed === "object" && "definition" in parsed
+      ? ((parsed as { definition?: unknown }).definition ?? {})
+      : {};
+  const def = definition as {
+    authMode?: unknown;
+    authorizedUris?: unknown;
+    allowAllUris?: unknown;
+    credentialHeaderName?: unknown;
+    credentialHeaderPrefix?: unknown;
+    credentials?: unknown;
+  };
+  const meta: ProviderMeta = { name };
+  if (Array.isArray(def.authorizedUris)) {
+    meta.authorizedUris = def.authorizedUris.filter((u): u is string => typeof u === "string");
+  }
+  if (typeof def.allowAllUris === "boolean") {
+    meta.allowAllUris = def.allowAllUris;
+  }
+  if (typeof def.credentialHeaderName === "string" && def.credentialHeaderName.length > 0) {
+    meta.credentialHeaderName = def.credentialHeaderName;
+  }
+  if (typeof def.credentialHeaderPrefix === "string") {
+    meta.credentialHeaderPrefix = def.credentialHeaderPrefix;
+  }
+  const credentialsObj =
+    def.credentials && typeof def.credentials === "object"
+      ? (def.credentials as { fieldName?: unknown })
+      : null;
+  const explicitField =
+    credentialsObj && typeof credentialsObj.fieldName === "string"
+      ? credentialsObj.fieldName
+      : undefined;
+  const placeholder = explicitField ?? defaultCredentialPlaceholder(def.authMode);
+  if (placeholder) {
+    meta.credentialPlaceholder = placeholder;
+  }
+  return meta;
+}
+
+/**
+ * Default credential placeholder name per auth mode when the manifest
+ * does not pin one explicitly. Mirrors the conventions enforced by the
+ * platform's `buildSidecarCredentials` helper: OAuth flows expose the
+ * live bearer as `access_token`, api-key flows expose the secret as
+ * `api_key`. Modes that don't map to a single placeholder (`basic`,
+ * `custom`) return `undefined` — the LLM must populate the header
+ * itself for those.
+ */
+function defaultCredentialPlaceholder(authMode: unknown): string | undefined {
+  if (authMode === "oauth2" || authMode === "oauth1") return "access_token";
+  if (authMode === "api_key") return "api_key";
+  return undefined;
+}
+
+/**
+ * Build the credential header value that gets injected into an
+ * outgoing provider call — e.g. `Bearer {{access_token}}`. Returns
+ * `undefined` when the manifest doesn't carry enough metadata to
+ * determine what to inject (no headerName, or no placeholder); callers
+ * treat that as "skip injection, the LLM / transport handles it".
+ *
+ * Exported so resolvers that speak the sidecar substitution contract
+ * (Sidecar, RemoteAppstrate) share one implementation. Local / offline
+ * resolvers handle injection differently (they substitute locally).
+ */
+export function buildCredentialHeader(
+  meta: ProviderMeta,
+): { name: string; value: string } | undefined {
+  if (!meta.credentialHeaderName || !meta.credentialPlaceholder) return undefined;
+  const placeholder = `{{${meta.credentialPlaceholder}}}`;
+  const prefix = meta.credentialHeaderPrefix?.trim();
+  const value = prefix ? `${prefix} ${placeholder}` : placeholder;
+  return { name: meta.credentialHeaderName, value };
+}
+
+/**
+ * Merge caller-supplied headers with the credential header derived
+ * from {@link buildCredentialHeader}. Caller headers win on
+ * case-insensitive match — if the LLM explicitly set the auth header,
+ * we respect the override rather than silently clobbering it.
+ */
+export function applyCredentialHeader(
+  callerHeaders: Record<string, string> | undefined,
+  meta: ProviderMeta,
+): Record<string, string> {
+  const caller = callerHeaders ?? {};
+  const creds = buildCredentialHeader(meta);
+  if (!creds) return { ...caller };
+  const lowerCaller = new Set(Object.keys(caller).map((k) => k.toLowerCase()));
+  if (lowerCaller.has(creds.name.toLowerCase())) return { ...caller };
+  return { [creds.name]: creds.value, ...caller };
 }
 
 function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
@@ -317,14 +458,11 @@ function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
  * authors cannot accidentally inject a regex.
  */
 export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
-  const regex = new RegExp(
-    "^" +
-      pattern
-        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "§§DOUBLESTAR§§")
-        .replace(/\*/g, "[^/]*")
-        .replace(/§§DOUBLESTAR§§/g, ".*") +
-      "$",
-  );
+  const parsedPattern = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "§§DOUBLESTAR§§")
+    .replace(/\*/g, "[^/]*")
+    .replace(/§§DOUBLESTAR§§/g, ".*");
+  const regex = new RegExp("^" + parsedPattern + "$");
   return regex.test(target);
 }

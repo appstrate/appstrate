@@ -36,7 +36,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": ["https://*.zendesk.com/*"]
+    "authorizedUris": ["https://*.zendesk.com/**"]
   },
   "setupGuide": {
     "steps": [

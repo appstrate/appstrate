@@ -34,9 +34,9 @@
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
     "authorizedUris": [
-      "https://api.twilio.com/*",
-      "https://lookups.twilio.com/*",
-      "https://verify.twilio.com/*"
+      "https://api.twilio.com/**",
+      "https://lookups.twilio.com/**",
+      "https://verify.twilio.com/**"
     ]
   },
   "setupGuide": {

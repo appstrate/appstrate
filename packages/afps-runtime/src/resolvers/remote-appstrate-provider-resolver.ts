@@ -73,6 +73,14 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private buildCall(ref: ProviderRef, meta: ProviderMeta): ProviderCallFn {
     return async (req) => {
       const bodyBytes = await resolveBodyStream(req.body, { allowFromFile: true });
+      // Provider credential injection is deliberately NOT done here:
+      // the `/api/credential-proxy/proxy` endpoint strips the inbound
+      // `Authorization` header (it is consumed by api-key auth) and
+      // the current proxy core does not re-synthesise an upstream
+      // credential header from the manifest. Adding injection here
+      // would smuggle an auth header that either gets dropped or
+      // collides with the api-key bearer — see the sidecar path for
+      // the in-container counterpart where this *is* safe.
       const headers: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,

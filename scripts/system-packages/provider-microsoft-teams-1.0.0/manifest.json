@@ -27,7 +27,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://graph.microsoft.com/*"],
+    "authorizedUris": ["https://graph.microsoft.com/**"],
     "availableScopes": [
       { "value": "Team.ReadBasic.All", "label": "Read team names and descriptions" },
       { "value": "Channel.ReadBasic.All", "label": "Read channel names and descriptions" },
@@ -44,7 +44,10 @@
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Register an application in Azure AD", "url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" },
+      {
+        "label": "Register an application in Azure AD",
+        "url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+      },
       { "label": "Add Microsoft Graph delegated permissions for Teams" },
       { "label": "Create a client secret under Certificates & secrets" }
     ]

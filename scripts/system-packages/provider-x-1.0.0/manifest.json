@@ -21,7 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.x.com/*"],
+    "authorizedUris": ["https://api.x.com/**"],
     "availableScopes": [
       { "value": "tweet.read", "label": "Read tweets" },
       { "value": "tweet.write", "label": "Post & delete tweets" },

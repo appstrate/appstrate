@@ -14,9 +14,7 @@
       "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
       "tokenUrl": "https://oauth2.googleapis.com/token",
       "refreshUrl": "https://oauth2.googleapis.com/token",
-      "defaultScopes": [
-        "https://www.googleapis.com/auth/contacts.readonly"
-      ],
+      "defaultScopes": ["https://www.googleapis.com/auth/contacts.readonly"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post",
@@ -27,21 +25,39 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://people.googleapis.com/*"],
+    "authorizedUris": ["https://people.googleapis.com/**"],
     "availableScopes": [
       { "value": "https://www.googleapis.com/auth/contacts.readonly", "label": "Read contacts" },
       { "value": "https://www.googleapis.com/auth/contacts", "label": "Read and write contacts" },
-      { "value": "https://www.googleapis.com/auth/contacts.other.readonly", "label": "Read 'Other contacts' (auto-suggested)" },
-      { "value": "https://www.googleapis.com/auth/directory.readonly", "label": "Read organization directory (Google Workspace)" },
-      { "value": "https://www.googleapis.com/auth/userinfo.profile", "label": "Read user profile info" }
+      {
+        "value": "https://www.googleapis.com/auth/contacts.other.readonly",
+        "label": "Read 'Other contacts' (auto-suggested)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/directory.readonly",
+        "label": "Read organization directory (Google Workspace)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/userinfo.profile",
+        "label": "Read user profile info"
+      }
     ]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Enable the People API", "url": "https://console.cloud.google.com/apis/library/people.googleapis.com" },
-      { "label": "Configure the OAuth consent screen", "url": "https://console.cloud.google.com/apis/credentials/consent" },
-      { "label": "Create OAuth credentials", "url": "https://console.cloud.google.com/apis/credentials" }
+      {
+        "label": "Enable the People API",
+        "url": "https://console.cloud.google.com/apis/library/people.googleapis.com"
+      },
+      {
+        "label": "Configure the OAuth consent screen",
+        "url": "https://console.cloud.google.com/apis/credentials/consent"
+      },
+      {
+        "label": "Create OAuth credentials",
+        "url": "https://console.cloud.google.com/apis/credentials"
+      }
     ]
   },
   "schemaVersion": "1.0"

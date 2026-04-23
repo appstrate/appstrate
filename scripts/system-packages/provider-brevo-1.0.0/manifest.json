@@ -24,7 +24,7 @@
     },
     "credentialHeaderName": "api-key",
     "credentialHeaderPrefix": "",
-    "authorizedUris": ["https://api.brevo.com/*"]
+    "authorizedUris": ["https://api.brevo.com/**"]
   },
   "setupGuide": {
     "steps": [

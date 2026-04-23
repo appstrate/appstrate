@@ -24,7 +24,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://discord.com/api/*"],
+    "authorizedUris": ["https://discord.com/api/**"],
     "availableScopes": [
       { "value": "identify", "label": "Read user profile (id, username, avatar)" },
       { "value": "email", "label": "Read user email address" },

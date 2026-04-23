@@ -74,7 +74,7 @@ describe("renderPlatformPrompt", () => {
           id: "@appstrate/gmail",
           displayName: "Gmail",
           authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/*"],
+          authorizedUris: ["https://gmail.googleapis.com/**"],
           hasProviderDoc: true,
         },
       ],
@@ -82,7 +82,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("## Connected Providers");
     expect(out).toContain("**Gmail** (`@appstrate/gmail`)");
     expect(out).toContain("appstrate_gmail_call");
-    expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/*");
+    expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/**");
     expect(out).toContain(".pi/providers/@appstrate/gmail/PROVIDER.md");
   });
 

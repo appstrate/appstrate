@@ -33,7 +33,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": ["https://*.freshdesk.com/*"]
+    "authorizedUris": ["https://*.freshdesk.com/**"]
   },
   "setupGuide": {
     "steps": [

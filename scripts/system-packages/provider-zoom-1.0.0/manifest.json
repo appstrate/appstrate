@@ -14,18 +14,14 @@
       "authorizationUrl": "https://zoom.us/oauth/authorize",
       "tokenUrl": "https://zoom.us/oauth/token",
       "refreshUrl": "https://zoom.us/oauth/token",
-      "defaultScopes": [
-        "user:read:user",
-        "meeting:read:list_meetings",
-        "meeting:read:meeting"
-      ],
+      "defaultScopes": ["user:read:user", "meeting:read:list_meetings", "meeting:read:meeting"],
       "scopeSeparator": " ",
       "pkceEnabled": true,
       "tokenAuthMethod": "client_secret_basic"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.zoom.us/*"],
+    "authorizedUris": ["https://api.zoom.us/**"],
     "availableScopes": [
       { "value": "user:read:user", "label": "Read user profile" },
       { "value": "meeting:read:list_meetings", "label": "List meetings" },
@@ -36,7 +32,10 @@
       { "value": "recording:read:recording", "label": "Read recording details" },
       { "value": "webinar:read:list_webinars", "label": "List webinars" },
       { "value": "webinar:read:webinar", "label": "Read webinar details" },
-      { "value": "report:read:list_meeting_participants", "label": "Read meeting participants report" }
+      {
+        "value": "report:read:list_meeting_participants",
+        "label": "Read meeting participants report"
+      }
     ]
   },
   "setupGuide": {

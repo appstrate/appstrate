@@ -45,6 +45,8 @@ export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-a
 
 // Provider-resolver surface — tool factory + concrete impls.
 export {
+  applyCredentialHeader,
+  buildCredentialHeader,
   makeProviderTool,
   matchesAuthorizedUriSpec,
   providerToolName,

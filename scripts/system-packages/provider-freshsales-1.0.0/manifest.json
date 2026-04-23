@@ -29,7 +29,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Token token=",
-    "authorizedUris": ["https://*.myfreshworks.com/*", "https://*.freshsales.io/*"]
+    "authorizedUris": ["https://*.myfreshworks.com/**", "https://*.freshsales.io/**"]
   },
   "setupGuide": {
     "steps": [

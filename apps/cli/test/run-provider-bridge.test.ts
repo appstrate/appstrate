@@ -75,7 +75,10 @@ function makeBundle(providerName: `@${string}/${string}`): Bundle {
   const provider = makePackage(providerName, "1.0.0", "provider", {
     "provider.json": JSON.stringify({
       name: providerName,
-      authorizedUris: ["https://api.example.com/**"],
+      definition: {
+        authMode: "api_key",
+        authorizedUris: ["https://api.example.com/**"],
+      },
     }),
   });
   const packages = new Map<PackageIdentity, BundlePackage>();

@@ -25,18 +25,18 @@
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
     "authorizedUris": [
-      "https://*.dynamics.com/*",
-      "https://*.api.crm.dynamics.com/*",
-      "https://*.api.crm2.dynamics.com/*",
-      "https://*.api.crm3.dynamics.com/*",
-      "https://*.api.crm4.dynamics.com/*",
-      "https://*.api.crm5.dynamics.com/*",
-      "https://*.api.crm6.dynamics.com/*",
-      "https://*.api.crm7.dynamics.com/*",
-      "https://*.api.crm8.dynamics.com/*",
-      "https://*.api.crm9.dynamics.com/*",
-      "https://*.api.crm10.dynamics.com/*",
-      "https://*.api.crm11.dynamics.com/*"
+      "https://*.dynamics.com/**",
+      "https://*.api.crm.dynamics.com/**",
+      "https://*.api.crm2.dynamics.com/**",
+      "https://*.api.crm3.dynamics.com/**",
+      "https://*.api.crm4.dynamics.com/**",
+      "https://*.api.crm5.dynamics.com/**",
+      "https://*.api.crm6.dynamics.com/**",
+      "https://*.api.crm7.dynamics.com/**",
+      "https://*.api.crm8.dynamics.com/**",
+      "https://*.api.crm9.dynamics.com/**",
+      "https://*.api.crm10.dynamics.com/**",
+      "https://*.api.crm11.dynamics.com/**"
     ],
     "availableScopes": [
       {

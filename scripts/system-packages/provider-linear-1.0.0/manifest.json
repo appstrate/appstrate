@@ -24,7 +24,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.linear.app/*"],
+    "authorizedUris": ["https://api.linear.app/**"],
     "availableScopes": [
       { "value": "read", "label": "Read access to workspace data" },
       { "value": "write", "label": "Write access to workspace data" },

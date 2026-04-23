@@ -109,7 +109,12 @@ function makeBundle(providers: Record<string, string>): Bundle {
     const pkg = makePackage(name as `@${string}/${string}`, "1.0.0", "provider", {
       "provider.json": JSON.stringify({
         name,
-        authorizedUris: ["https://api.example.com/**"],
+        definition: {
+          authMode: "oauth2",
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          authorizedUris: ["https://api.example.com/**"],
+        },
       }),
     });
     packages.set(pkg.identity, pkg);

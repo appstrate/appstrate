@@ -30,7 +30,7 @@
     "credentialHeaderName": "Api-Token",
     "credentialHeaderPrefix": "",
     "allowAllUris": true,
-    "authorizedUris": ["https://*.api-us1.com/*"]
+    "authorizedUris": ["https://*.api-us1.com/**"]
   },
   "setupGuide": {
     "steps": [

@@ -23,7 +23,7 @@
       },
       "fieldName": "bot_token"
     },
-    "authorizedUris": ["https://api.telegram.org/*"]
+    "authorizedUris": ["https://api.telegram.org/**"]
   },
   "setupGuide": {
     "steps": [

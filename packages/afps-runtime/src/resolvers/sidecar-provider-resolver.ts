@@ -3,6 +3,7 @@
 
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
+  applyCredentialHeader,
   makeProviderTool,
   readProviderMeta,
   resolveBodyStream,
@@ -61,17 +62,25 @@ export class SidecarProviderResolver implements ProviderResolver {
   private buildCall(ref: ProviderRef, meta: ProviderMeta): ProviderCallFn {
     return async (req) => {
       const bodyBytes = await resolveBodyStream(req.body);
+      // The sidecar receives the real credentials from the platform and
+      // substitutes `{{placeholder}}` occurrences in forwarded headers
+      // at dispatch time. Injecting the auth header here lets the LLM
+      // call the tool with just `{method, target}` — the agent never
+      // sees the credential, and the header the upstream expects is
+      // still populated. Caller-supplied headers win on conflict so an
+      // agent that wants to set its own `Authorization` (e.g. a token
+      // passed through input) stays in control.
+      const headers: Record<string, string> = {
+        ...this.baseHeaders,
+        "X-Provider": ref.name,
+        "X-Target": req.target,
+        ...applyCredentialHeader(req.headers, meta),
+      };
       const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, {
         method: req.method,
-        headers: {
-          ...this.baseHeaders,
-          "X-Provider": ref.name,
-          "X-Target": req.target,
-          ...(req.headers ?? {}),
-        },
+        headers,
         body: bodyBytes,
       });
-      void meta;
       return serializeFetchResponse(res);
     };
   }

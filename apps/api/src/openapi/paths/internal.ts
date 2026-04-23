@@ -75,7 +75,7 @@ export const internalPaths = {
               },
               example: {
                 credentials: { access_token: "ya29.a0AfH6SM..." },
-                authorizedUris: ["https://gmail.googleapis.com/*"],
+                authorizedUris: ["https://gmail.googleapis.com/**"],
               },
             },
           },
