@@ -333,14 +333,24 @@ describe("afps run — bundle load + signature + context (Phase 2)", () => {
     expect(io.stderrText()).toContain("cannot read --trust-root");
   });
 
-  it("exits 1 when --context file cannot be read", async () => {
+  it("exits 2 when --context is not valid JSON", async () => {
     const bundle = join(dir, "a.afps");
     await writeBundleFile(bundle);
     const handler = createRunHandler(stubDeps());
     const io = captureIo();
-    const code = await handler(validArgs(bundle, ["--context", join(dir, "missing.json")]), io);
-    expect(code).toBe(1);
-    expect(io.stderrText()).toContain("cannot read --context");
+    const code = await handler(validArgs(bundle, ["--context", "{not json"]), io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("invalid --context JSON");
+  });
+
+  it("exits 2 when --context is not a JSON object", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, ["--context", "[1,2,3]"]), io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("must be a JSON object");
   });
 
   it("exits 1 when --snapshot file has invalid JSON", async () => {
@@ -355,11 +365,9 @@ describe("afps run — bundle load + signature + context (Phase 2)", () => {
     expect(io.stderrText()).toContain("cannot read --snapshot");
   });
 
-  it("accepts valid --context and --snapshot files without error", async () => {
+  it("accepts valid inline --context JSON and --snapshot file without error", async () => {
     const bundle = join(dir, "a.afps");
     await writeBundleFile(bundle);
-    const context = join(dir, "context.json");
-    await writeJsonFile(context, { runId: "r1", input: { foo: 1 } });
     const snapshot = join(dir, "snapshot.json");
     await writeJsonFile(snapshot, {
       memories: [{ content: "m", createdAt: 0 }],
@@ -368,9 +376,23 @@ describe("afps run — bundle load + signature + context (Phase 2)", () => {
     const handler = createRunHandler(stubDeps());
     const io = captureIo();
     const code = await handler(
-      validArgs(bundle, ["--context", context, "--snapshot", snapshot]),
+      validArgs(bundle, [
+        "--context",
+        JSON.stringify({ runId: "r1", input: { foo: 1 } }),
+        "--snapshot",
+        snapshot,
+      ]),
       io,
     );
+    expect(code).toBe(0);
+  });
+
+  it("accepts omitted --context (defaults to {})", async () => {
+    const bundle = join(dir, "a.afps");
+    await writeBundleFile(bundle);
+    const handler = createRunHandler(stubDeps());
+    const io = captureIo();
+    const code = await handler(validArgs(bundle, []), io);
     expect(code).toBe(0);
   });
 });
@@ -526,8 +548,6 @@ describe("afps run — orchestration (Phase 3)", () => {
   });
 
   it("passes the assembled ExecutionContext and systemPrompt to PiRunner", async () => {
-    const contextPath = join(dir, "ctx.json");
-    await writeJsonFile(contextPath, { runId: "r-7", input: { task: "brief" } });
     const snapshotPath = join(dir, "snap.json");
     await writeJsonFile(snapshotPath, { memories: [{ content: "m0", createdAt: 0 }] });
 
@@ -546,18 +566,45 @@ describe("afps run — orchestration (Phase 3)", () => {
     });
     const io = captureIo();
     const code = await handler(
-      validArgs(["--context", contextPath, "--snapshot", snapshotPath]),
+      validArgs([
+        "--context",
+        JSON.stringify({ runId: "r-7", input: { task: "brief" } }),
+        "--snapshot",
+        snapshotPath,
+      ]),
       io,
     );
     expect(code).toBe(0);
 
     const ctor = capturedCtor as {
       systemPrompt: string;
-      model: { api: string; id: string };
+      model: {
+        api: string;
+        id: string;
+        name: string;
+        provider: string;
+        baseUrl: string;
+        reasoning: boolean;
+        input: string[];
+        cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+        contextWindow: number;
+        maxTokens: number;
+      };
     } | null;
     expect(ctor).not.toBeNull();
     expect(ctor!.model.api).toBe("anthropic-messages");
     expect(ctor!.model.id).toBe("claude-haiku-4-5-20251001");
+    // All Pi SDK Model required fields must be populated — missing any
+    // of these surfaces as "No API key found for undefined" or similar
+    // runtime errors inside Pi SDK.
+    expect(ctor!.model.name).toBe("claude-haiku-4-5-20251001");
+    expect(ctor!.model.provider).toBe("anthropic");
+    expect(ctor!.model.baseUrl).toBe("");
+    expect(ctor!.model.reasoning).toBe(false);
+    expect(ctor!.model.input).toEqual(["text"]);
+    expect(ctor!.model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    expect(ctor!.model.contextWindow).toBe(128000);
+    expect(ctor!.model.maxTokens).toBe(16384);
     // renderPlatformPrompt always includes a "## System" section header.
     expect(ctor!.systemPrompt).toContain("## System");
     expect(ctor!.systemPrompt).toContain("afps run");
@@ -566,6 +613,17 @@ describe("afps run — orchestration (Phase 3)", () => {
     expect(ctx?.runId).toBe("r-7");
     expect(ctx?.input).toEqual({ task: "brief" });
     expect(ctx?.memories).toEqual([{ content: "m0", createdAt: 0 }]);
+  });
+
+  it("rejects an unknown --api with exit 2", async () => {
+    const handler = createRunHandler({
+      loadRunnerPi: async () => stubModuleFor({}),
+    });
+    const io = captureIo();
+    const argv = validArgs().map((v) => (v === "anthropic-messages" ? "bogus-api" : v));
+    const code = await handler(argv, io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("unknown --api 'bogus-api'");
   });
 
   it("passes --base-url through to PiRunner model config", async () => {

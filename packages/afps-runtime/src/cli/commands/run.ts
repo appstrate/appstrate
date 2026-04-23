@@ -114,8 +114,11 @@ Auth:
   --base-url <url>       Override LLM base URL (OpenRouter, custom gateways)
 
 Context:
-  --context <path>       JSON ExecutionContext (runId, input). Defaults to {}
-  --snapshot <path>      JSON { memories?, state?, history? } merged onto context
+  --context <json>       Inline JSON ExecutionContext (runId, input).
+                         Defaults to '{}' — pass '{"runId":"x","input":{…}}'
+                         or use --context "$(cat context.json)" for big bodies
+  --snapshot <path>      Path to JSON { memories?, state?, history? }
+                         merged onto context
 
 Output:
   --output <path>        Write final RunResult as JSON to <path>
@@ -245,12 +248,21 @@ export function createRunHandler(
     }
 
     let contextFile: ContextFile = {};
-    if (parsed.values.context) {
+    const contextRaw = parsed.values.context;
+    if (contextRaw !== undefined) {
       try {
-        contextFile = (await readJson(parsed.values.context)) as ContextFile;
+        const parsedContext = JSON.parse(contextRaw) as unknown;
+        if (
+          parsedContext === null ||
+          typeof parsedContext !== "object" ||
+          Array.isArray(parsedContext)
+        ) {
+          throw new Error("--context must be a JSON object");
+        }
+        contextFile = parsedContext as ContextFile;
       } catch (err) {
-        io.stderr(`afps run: cannot read --context: ${(err as Error).message}\n`);
-        return 1;
+        io.stderr(`afps run: invalid --context JSON: ${(err as Error).message}\n`);
+        return 2;
       }
     }
 
@@ -360,11 +372,29 @@ export function createRunHandler(
       }
       cleanupTasks.push(async () => prepared.cleanup());
 
+      const provider = deriveProviderFromApi(api);
+      if (!provider) {
+        io.stderr(
+          `afps run: unknown --api '${api}' (expected one of: ${Object.keys(PROVIDER_BY_API).join(", ")})\n`,
+        );
+        return 2;
+      }
+
+      // Pi SDK's Model type requires a full field set. Defaults below are
+      // the same as runtime-pi/entrypoint.ts — they make the Pi session
+      // boot without cost tracking (cost=0) but the LLM call itself works.
       const runner = new runnerPi.PiRunner({
         model: {
-          api,
           id: model,
-          ...(parsed.values["base-url"] ? { baseUrl: parsed.values["base-url"] } : {}),
+          name: model,
+          api,
+          provider,
+          baseUrl: parsed.values["base-url"] ?? "",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000,
+          maxTokens: 16384,
         },
         apiKey,
         systemPrompt,
@@ -424,6 +454,28 @@ export function createRunHandler(
       }
     }
   };
+}
+
+/**
+ * Mirrors `deriveProviderFromApi` in `@appstrate/runner-pi`. Duplicated
+ * here to keep afps-runtime's tsc decoupled from runner-pi's internals.
+ * Must stay in sync — runner-pi stores the API key under the derived
+ * provider, Pi SDK looks it up via `model.provider`, so any drift breaks
+ * auth.
+ */
+const PROVIDER_BY_API: Record<string, string> = {
+  "anthropic-messages": "anthropic",
+  "openai-completions": "openai",
+  "openai-responses": "openai",
+  "mistral-conversations": "mistral",
+  "google-generative-ai": "google",
+  "google-vertex": "google-vertex",
+  "azure-openai-responses": "azure-openai-responses",
+  "bedrock-converse-stream": "amazon-bedrock",
+};
+
+function deriveProviderFromApi(api: string): string | undefined {
+  return PROVIDER_BY_API[api];
 }
 
 class TimeoutAbort {

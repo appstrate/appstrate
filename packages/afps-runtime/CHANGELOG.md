@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package remains hermetically free of Pi SDK types and code. Missing
   `runner-pi` or missing `@mariozechner/pi-coding-agent` peer dep each surface
   a dedicated install hint.
-- Supports `--api-key` / `$AFPS_API_KEY`, `--base-url`, `--context`,
-  `--snapshot`, `--trust-root` (enforces signature verification),
+- Supports `--api-key` / `$AFPS_API_KEY`, `--base-url`, `--context`
+  (inline JSON object, defaults to `{}`), `--snapshot` (file path),
+  `--trust-root` (enforces signature verification),
   `--timeout`, `--thinking-level`, `--workspace` (auto-tempdir with cleanup),
   `--sink console|file|both|none`, `--sink-file`, `--output` (JSON RunResult
   dump). Exit codes: 0 success, 1 runtime, 2 usage, 3 bundle/signature,
