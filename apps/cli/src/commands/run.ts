@@ -29,7 +29,12 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfile } from "../lib/config.ts";
 import { resolveAuthContext, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
-import { resolveModel, ModelResolutionError } from "./run/model.ts";
+import {
+  resolveModel,
+  resolvePresetModel,
+  ModelResolutionError,
+  type ModelSource,
+} from "./run/model.ts";
 import { createConsoleSink } from "./run/sink.ts";
 import {
   buildResolver,
@@ -50,6 +55,7 @@ export interface RunCommandOptions {
   credsFile?: string;
   model?: string;
   modelApi?: string;
+  modelSource?: string;
   llmApiKey?: string;
   runId?: string;
   output?: string;
@@ -68,16 +74,20 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
+  const modelSource = parseModelSource(opts.modelSource);
 
   // ─── 2. Resolve the LLM (fails fast if no key) ─────────────────────
-  const { model, apiKey: llmApiKey } = resolveModel({
-    modelApi: opts.modelApi,
-    model: opts.model,
-    llmApiKey: opts.llmApiKey,
-  });
+  //   env    — user-supplied credentials, no Appstrate call
+  //   preset — preset id resolved via `/api/models`, LLM traffic routed
+  //            through `/api/llm-proxy/<api>/*` with the profile's bearer
+  //
+  // Build provider resolver inputs FIRST so preset mode can reuse the
+  // bearer token — they share the same auth surface.
+  const resolverInputs = await buildResolverInputs(mode, opts);
+
+  const { model, apiKey: llmApiKey } = await resolveLlmConfig(modelSource, opts, resolverInputs);
 
   // ─── 3. Build the ProviderResolver ─────────────────────────────────
-  const resolverInputs = await buildResolverInputs(mode, opts);
   const providerResolver = buildResolver(mode, resolverInputs);
 
   // ─── 4. Load the bundle ────────────────────────────────────────────
@@ -188,6 +198,60 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function parseModelSource(raw: string | undefined): ModelSource {
+  const value = (raw ?? process.env.APPSTRATE_MODEL_SOURCE ?? "env").toLowerCase();
+  if (value === "env" || value === "preset") return value;
+  throw new ModelResolutionError(
+    `Unknown --model-source "${raw}"`,
+    "Accepted values: env (default), preset.",
+  );
+}
+
+async function resolveLlmConfig(
+  source: ModelSource,
+  opts: RunCommandOptions,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+): ReturnType<typeof resolveModel> extends infer T ? Promise<T> : never;
+async function resolveLlmConfig(
+  source: ModelSource,
+  opts: RunCommandOptions,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+) {
+  if (source === "env") {
+    return resolveModel({
+      modelApi: opts.modelApi,
+      model: opts.model,
+      llmApiKey: opts.llmApiKey,
+    });
+  }
+  // source === "preset" — the LLM proxy is remote-only; it needs an
+  // Appstrate bearer token, which lives in the remote resolver inputs.
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) {
+    throw new ModelResolutionError(
+      "--model-source preset requires remote provider mode",
+      "Remove --providers=none/local, or log in with `appstrate login`.",
+    );
+  }
+  const profileName = await resolveProfileNameForPreset(opts);
+  return resolvePresetModel({
+    profileName,
+    modelId: opts.model,
+    instance: resolverInputs.instance,
+    bearerToken: resolverInputs.bearerToken,
+  });
+}
+
+async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<string> {
+  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  if (!resolved) {
+    throw new ModelResolutionError(
+      "--model-source preset requires a CLI profile for `GET /api/models`",
+      "Run `appstrate login` or pass --profile.",
+    );
+  }
+  return resolved.profileName;
+}
 
 async function buildResolverInputs(
   mode: ProviderMode,

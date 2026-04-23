@@ -328,6 +328,10 @@ const expectedEndpoints = [
 
   // Credential proxy (AFPS 1.3 BYOI)
   "POST /api/credential-proxy/proxy",
+
+  // LLM proxy (Remote CLI execution — Phase 3)
+  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
+  "POST /api/llm-proxy/anthropic-messages/v1/messages",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

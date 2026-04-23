@@ -156,6 +156,64 @@ export const packageMemories = pgTable(
   ],
 );
 
+/**
+ * Per-call metering of the `/api/llm-proxy/*` routes — one row per
+ * upstream LLM request the platform proxied server-side for a remote
+ * runner (CLI, GitHub Action, third-party agents).
+ *
+ * A call is attributable to exactly one principal: either an API key
+ * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`
+ * constraint enforces the XOR so accounting never double-counts.
+ *
+ * `run_id` is nullable because Phase 3 ships standalone proxy calls
+ * (`X-Run-Id` absent). Phase 4's `POST /api/runs/remote` path will
+ * propagate the header and populate the column without migration.
+ */
+export const llmProxyUsage = pgTable(
+  "llm_proxy_usage",
+  {
+    id: serial("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    runId: text("run_id").references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    // Preset id the caller asked for (what the CLI / client picked from
+    // the model catalog). Kept alongside `realModel` for audit.
+    model: text("model").notNull(),
+    // Upstream model id the proxy actually forwarded — resolved from the
+    // preset via `loadModel()`.
+    realModel: text("real_model").notNull(),
+    // Protocol family: "openai-completions", "anthropic-messages", …
+    api: text("api").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_llm_proxy_usage_org_id").on(table.orgId),
+    index("idx_llm_proxy_usage_api_key_id").on(table.apiKeyId),
+    index("idx_llm_proxy_usage_user_id").on(table.userId),
+    index("idx_llm_proxy_usage_run_id").on(table.runId),
+    index("idx_llm_proxy_usage_org_created").on(table.orgId, table.createdAt),
+    // INSERT invariant: exactly one principal. After FK cleanup (api_key /
+    // user deleted) both may become NULL — the row survives for audit /
+    // billing retention, so we don't enforce "exactly one" forever.
+    check("llm_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
+  ],
+);
+
 export const schedules = pgTable(
   "package_schedules",
   {

@@ -31,6 +31,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
+import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
 import meRouter from "./routes/me.ts";
@@ -242,6 +243,7 @@ app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/connections", createConnectionsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
+app.route("/api/llm-proxy", createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

@@ -55,6 +55,7 @@ import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
+import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
@@ -222,6 +223,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/connections", createConnectionsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
+  app.route("/api/llm-proxy", createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());

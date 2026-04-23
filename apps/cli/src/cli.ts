@@ -44,6 +44,7 @@ import {
   appCurrentCommand,
   appCreateCommand,
 } from "./commands/app.ts";
+import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
 import { exitWithError } from "./lib/ui.ts";
@@ -331,6 +332,28 @@ appGroup
     });
   });
 
+// ─── `appstrate models …` — discover model presets on the instance ────
+
+const modelsGroup = program
+  .command("models")
+  .description("Discover model presets exposed by the pinned Appstrate instance");
+
+modelsGroup
+  .command("list")
+  .description(
+    "List model presets. Use `--proxy-only` to filter to presets wired on /api/llm-proxy/*.",
+  )
+  .option("--json", "Emit machine-readable JSON")
+  .option("--proxy-only", "Only show presets that /api/llm-proxy/* can route")
+  .action(async (opts: { json?: boolean; proxyOnly?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await modelsListCommand({
+      profile: globalOpts.profile,
+      json: opts.json,
+      proxyOnly: opts.proxyOnly,
+    });
+  });
+
 program
   .command("api <target> [extra]")
   .description(
@@ -565,9 +588,16 @@ program
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
   .option("--config <json>", "Config JSON object passed to the agent")
-  .option("--model <id>", "Model ID (default: claude-sonnet-4-5)")
-  .option("--model-api <api>", "Model API (default: anthropic-messages)")
-  .option("--llm-api-key <key>", "LLM API key (default: from env — ANTHROPIC_API_KEY etc.)")
+  .option(
+    "--model-source <mode>",
+    "Where the model comes from: env (default, user LLM credentials) or preset (pinned instance routes via /api/llm-proxy/*)",
+  )
+  .option("--model <id>", "Model ID (env mode) or preset id (preset mode); defaults apply")
+  .option("--model-api <api>", "Model API (env mode only; default: anthropic-messages)")
+  .option(
+    "--llm-api-key <key>",
+    "LLM API key (env mode; default: from env — ANTHROPIC_API_KEY etc.)",
+  )
   .option("--run-id <id>", "Explicit run id (default: generated)")
   .option("--output <path>", "Write the final RunResult JSON to this path")
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
@@ -584,6 +614,7 @@ program
       config: typeof opts.config === "string" ? opts.config : undefined,
       model: typeof opts.model === "string" ? opts.model : undefined,
       modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
+      modelSource: typeof opts.modelSource === "string" ? opts.modelSource : undefined,
       llmApiKey: typeof opts.llmApiKey === "string" ? opts.llmApiKey : undefined,
       runId: typeof opts.runId === "string" ? opts.runId : undefined,
       output: typeof opts.output === "string" ? opts.output : undefined,

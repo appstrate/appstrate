@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * LLM proxy endpoints — server-side model injection for remote-backed
+ * AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
+ *
+ * Two protocol families ship today; each gets its own concrete endpoint
+ * so callers hit the upstream shape they already know (OpenAI Chat
+ * Completions, Anthropic Messages). Additional families land as new
+ * path entries — the route surface stays concrete per the spec.
+ */
+
+const baseParameters = [
+  {
+    name: "X-Run-Id",
+    in: "header",
+    required: false,
+    description:
+      "Optional run id (`run_…`) to attribute the call to. Populated by " +
+      "`appstrate run` once the platform mints a remote run record; rolls " +
+      "up into the run's cost/token totals.",
+    schema: { type: "string" },
+  },
+  {
+    name: "Idempotency-Key",
+    in: "header",
+    required: false,
+    description:
+      "Optional idempotency key; replays are served from the stored " +
+      "response for 24h (see Applications idempotency spec).",
+    schema: { type: "string", maxLength: 256 },
+  },
+] as const;
+
+const baseResponses = {
+  "200": {
+    description:
+      "Upstream response forwarded verbatim. For streaming requests " +
+      "(`stream: true`), the response is `text/event-stream`; otherwise " +
+      "`application/json`.",
+    content: {
+      "application/json": {},
+      "text/event-stream": {},
+    },
+  },
+  "400": {
+    description:
+      "Validation error — malformed body, missing/empty `model`, model " +
+      "preset not enabled for this org, or preset's protocol does not " +
+      "match this endpoint (use the corresponding " +
+      "`/api/llm-proxy/<api>/…` route instead).",
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": {
+    description:
+      "Forbidden — principal lacks `llm-proxy:call`, or cookie session " + "used (bearer only).",
+  },
+  "413": {
+    description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB).",
+  },
+  "429": { $ref: "#/components/responses/RateLimited" },
+  "502": {
+    description:
+      "Upstream provider returned a non-2xx response; body and status " +
+      "forwarded as-is. No usage recorded.",
+  },
+} as const;
+
+export const llmProxyPaths = {
+  "/api/llm-proxy/openai-completions/v1/chat/completions": {
+    post: {
+      operationId: "llmProxyOpenaiChatCompletions",
+      tags: ["LLM Proxy"],
+      summary: "OpenAI Chat Completions — with server-side model injection",
+      description:
+        "Wire-compatible with the OpenAI `/v1/chat/completions` endpoint. " +
+        "The caller supplies `body.model` as an Appstrate **model preset id** " +
+        "(e.g. `m_` or a SYSTEM_PROVIDER_KEYS preset); the platform resolves " +
+        "the preset against `org_models` + `org_system_provider_keys`, " +
+        "substitutes the real upstream model id, injects the upstream API " +
+        "key, and forwards the request. Streaming responses pass through " +
+        "unchanged; usage is tapped in parallel for accounting.\n\n" +
+        "Authentication: bearer only — API key with the `llm-proxy:call` " +
+        "scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, " +
+        "dashboard access token). Cookie sessions are rejected.",
+      security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
+      parameters: baseParameters,
+      requestBody: {
+        description:
+          "OpenAI Chat Completions payload, with `model` replaced by an " +
+          "Appstrate model preset id. All other fields (`messages`, `tools`, " +
+          "`stream`, `response_format`, …) pass through untouched.",
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["model", "messages"],
+              properties: {
+                model: {
+                  type: "string",
+                  description: "Appstrate model preset id (NOT an upstream model id).",
+                },
+                messages: { type: "array", items: { type: "object" } },
+                stream: { type: "boolean" },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      responses: baseResponses,
+    },
+  },
+  "/api/llm-proxy/anthropic-messages/v1/messages": {
+    post: {
+      operationId: "llmProxyAnthropicMessages",
+      tags: ["LLM Proxy"],
+      summary: "Anthropic Messages — with server-side model injection",
+      description:
+        "Wire-compatible with the Anthropic `/v1/messages` endpoint. The " +
+        "caller supplies `body.model` as an Appstrate **model preset id**; " +
+        "the platform resolves the preset, substitutes the real upstream " +
+        "model id, injects the `x-api-key` server-side, and forwards the " +
+        "request. `cache_control` blocks, extended-thinking, tool use — all " +
+        "pass through untouched. The `anthropic-version` and `anthropic-beta` " +
+        "request headers are forwarded to upstream; `anthropic-version` " +
+        "defaults to `2023-06-01` when the caller omits it.\n\n" +
+        "Streaming responses pass through unchanged; usage is tapped in " +
+        "parallel (merging `message_start` + `message_delta` frames) for " +
+        "accounting.\n\n" +
+        "Authentication: bearer only — API key with the `llm-proxy:call` " +
+        "scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, " +
+        "dashboard access token). Cookie sessions are rejected.",
+      security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
+      parameters: [
+        ...baseParameters,
+        {
+          name: "anthropic-version",
+          in: "header",
+          required: false,
+          description: "Forwarded verbatim to upstream. Defaults to `2023-06-01` when omitted.",
+          schema: { type: "string" },
+        },
+        {
+          name: "anthropic-beta",
+          in: "header",
+          required: false,
+          description: "Forwarded verbatim to upstream (e.g. `prompt-caching-2024-07-31`).",
+          schema: { type: "string" },
+        },
+      ],
+      requestBody: {
+        description:
+          "Anthropic Messages payload, with `model` replaced by an " +
+          "Appstrate model preset id. All other fields (`messages`, `system`, " +
+          "`tools`, `stream`, …) pass through untouched.",
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["model", "messages"],
+              properties: {
+                model: {
+                  type: "string",
+                  description: "Appstrate model preset id (NOT an upstream model id).",
+                },
+                messages: { type: "array", items: { type: "object" } },
+                system: { oneOf: [{ type: "string" }, { type: "array" }] },
+                max_tokens: { type: "integer" },
+                stream: { type: "boolean" },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      responses: baseResponses,
+    },
+  },
+} as const;
