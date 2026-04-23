@@ -26,4 +26,5 @@ export interface RunSinkContext {
   sinkExpiresAt: Date | null;
   sinkClosedAt: Date | null;
   lastEventSequence: number;
+  startedAt: Date;
 }

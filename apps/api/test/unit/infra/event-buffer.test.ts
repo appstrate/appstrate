@@ -68,7 +68,7 @@ describe("LocalEventBuffer", () => {
 
     const head = await buf.peekLowest("r1");
     expect(head?.sequence).toBe(1);
-    expect((head?.event as { message: string }).message).toBe("replacement");
+    expect((head?.event as unknown as { message: string }).message).toBe("replacement");
     await buf.shutdown();
   });
 
@@ -133,8 +133,8 @@ describe("LocalEventBuffer", () => {
 
     const h1 = await buf.peekLowest("r1");
     const h2 = await buf.peekLowest("r2");
-    expect((h1?.event as { message: string }).message).toBe("event-1");
-    expect((h2?.event as { message: string }).message).toBe("event-100");
+    expect((h1?.event as unknown as { message: string }).message).toBe("event-1");
+    expect((h2?.event as unknown as { message: string }).message).toBe("event-100");
     await buf.shutdown();
   });
 });

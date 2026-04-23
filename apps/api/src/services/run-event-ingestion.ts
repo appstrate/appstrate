@@ -112,6 +112,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       sinkExpiresAt: runs.sinkExpiresAt,
       sinkClosedAt: runs.sinkClosedAt,
       lastEventSequence: runs.lastEventSequence,
+      startedAt: runs.startedAt,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -271,6 +272,12 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
   const cost = await aggregateRunCost(run.id);
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
+  // Wall-clock duration as the authoritative value. Runners (PiRunner,
+  // MockRunner, …) only measure their internal loop and often omit
+  // `durationMs` from the finalize payload — without this fallback the
+  // `duration` column stays null on every successful run and the UI
+  // loses the value the moment `isRunning` flips to false.
+  const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
 
   // 5. afterRun hook — must run BEFORE the CAS update so metadata can be
   //    written in the same UPDATE (no second round-trip, no partial state).
@@ -281,7 +288,7 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
     applicationId: run.applicationId,
     status,
     packageEphemeral,
-    ...(result.durationMs !== undefined ? { duration: result.durationMs } : {}),
+    duration: resolvedDurationMs,
     ...(cost.total > 0 ? { cost: cost.total } : {}),
   };
   let metadata: Record<string, unknown> | null = null;
@@ -305,7 +312,7 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
       state: stateToPersist,
       error: errorMessage,
       completedAt: now,
-      duration: result.durationMs ?? null,
+      duration: resolvedDurationMs,
       cost: cost.total > 0 ? cost.total : null,
       sinkClosedAt: now,
       notifiedAt: now,

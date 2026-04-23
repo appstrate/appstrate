@@ -24,6 +24,22 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds - minutes * 60);
+  return `${minutes}m ${rest}s`;
+}
+
+function formatTimestamp(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
 export function RunInfoTab({ run }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: providersData } = useProviders();
@@ -38,7 +54,10 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   } | null;
   const metadata = run.metadata as Record<string, unknown> | null;
   const hasUsage = run.cost != null || usage != null || run.modelLabel != null;
-  const hasConfig = run.modelLabel != null || run.proxyLabel != null;
+  const runnerLabel =
+    run.runOrigin === "remote" ? t("exec.infoRunnerRemote") : t("exec.infoRunnerPlatform");
+  const startedAt = formatTimestamp(run.startedAt);
+  const completedAt = formatTimestamp(run.completedAt);
 
   return (
     <div className="space-y-4">
@@ -98,19 +117,24 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Execution — model / proxy / provider bindings actually used at run time */}
-      {hasConfig && (
-        <SectionCard title={t("exec.infoExecution")}>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {run.modelLabel != null && (
-              <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />
-            )}
-            {run.proxyLabel != null && (
-              <InfoCard label={t("exec.infoProxy")} value={run.proxyLabel} />
-            )}
-          </div>
-        </SectionCard>
-      )}
+      {/* Execution — who ran it, when, and with which wiring. Always shown:
+          runner origin + startedAt are populated for every run. */}
+      <SectionCard title={t("exec.infoExecution")}>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoCard label={t("exec.infoRunner")} value={runnerLabel} />
+          {run.duration != null && (
+            <InfoCard label={t("exec.infoDuration")} value={formatDuration(run.duration)} />
+          )}
+          {startedAt && <InfoCard label={t("exec.infoStartedAt")} value={startedAt} />}
+          {completedAt && <InfoCard label={t("exec.infoCompletedAt")} value={completedAt} />}
+          {run.modelLabel != null && (
+            <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />
+          )}
+          {run.proxyLabel != null && (
+            <InfoCard label={t("exec.infoProxy")} value={run.proxyLabel} />
+          )}
+        </div>
+      </SectionCard>
 
       {/* Usage */}
       {hasUsage ? (

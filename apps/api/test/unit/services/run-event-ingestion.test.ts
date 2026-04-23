@@ -38,6 +38,7 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     sinkExpiresAt: new Date(Date.now() + 3600_000),
     sinkClosedAt: null,
     lastEventSequence: 0,
+    startedAt: new Date(),
     ...overrides,
   };
 }

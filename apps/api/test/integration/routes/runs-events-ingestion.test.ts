@@ -184,8 +184,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
 
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
-    expect((await a.json()).outcome).toBe("persisted");
-    expect((await b.json()).outcome).toBe("replay");
+    expect(((await a.json()) as { outcome: string }).outcome).toBe("persisted");
+    expect(((await b.json()) as { outcome: string }).outcome).toBe("replay");
   });
 
   it("buffers out-of-order events and drains them when the missing sequence arrives", async () => {
@@ -200,7 +200,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     );
     const res2 = await postEvent(runId, env2);
     expect(res2.status).toBe(200);
-    expect((await res2.json()).outcome).toBe("buffered");
+    expect(((await res2.json()) as { outcome: string }).outcome).toBe("buffered");
 
     // Counter did NOT advance — still 0.
     const [mid] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
