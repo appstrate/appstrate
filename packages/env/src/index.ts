@@ -77,6 +77,32 @@ const envSchema = z
       .default("{}")
       .transform((s) => JSON.parse(s) as Record<string, unknown>),
 
+    // Unified runner protocol — governs the event-ingestion surface shared
+    // by platform containers and remote CLIs. See
+    // docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md.
+    //
+    // Default sink TTL when the caller does not request one (remote CLI) or
+    // cannot (platform container boot env). 2h is comfortably above the
+    // platform timeout ceiling.
+    REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS: z.coerce.number().int().positive().default(7200),
+    // Hard ceiling — any caller-requested TTL is clamped to this.
+    REMOTE_RUN_SINK_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+    // Per-run event-route rate limit. Parsed at route-build time, changes
+    // require a reboot. Empty object means defaults apply.
+    REMOTE_RUN_EVENT_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    // Redis dedup window for webhook-id replay detection. MUST exceed the
+    // Standard Webhooks timestamp tolerance (5 min) so a replayed event
+    // cannot slip through after its cache entry expires.
+    REMOTE_RUN_REPLAY_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),
+    // Out-of-order event buffer flush window. Events with non-contiguous
+    // sequence numbers wait up to this long for the gap to fill; terminal
+    // events (run.completed/failed/timeout/cancelled) flush immediately
+    // regardless of gaps.
+    REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
+
     // Modules (comma-separated specifiers).
     // Default loads built-in OSS modules (oidc, webhooks).
     // Append external specifiers (npm package names) to extend.

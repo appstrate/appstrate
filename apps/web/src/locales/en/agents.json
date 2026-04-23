@@ -71,6 +71,8 @@
   "runs.filterKindPackage": "Agents",
   "runs.filterKindInline": "Inline",
   "runs.inlineBadge": "Inline",
+  "runs.remoteBadge": "Remote",
+  "runs.remoteBadgeTitle": "This run executed on the caller's host (CLI, GitHub Action, or self-hosted runner) and reported events back via a signed sink.",
   "runs.detailsExpired": "Details expired",
   "exec.rerun": "Re-run",
   "exec.tabLogs": "Logs",

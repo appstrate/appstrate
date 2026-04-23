@@ -284,6 +284,10 @@ const expectedEndpoints = [
   "GET /api/runs",
   "POST /api/runs/inline",
   "POST /api/runs/inline/validate",
+  "POST /api/runs/remote",
+  "POST /api/runs/{runId}/events",
+  "POST /api/runs/{runId}/events/finalize",
+  "PATCH /api/runs/{runId}/sink/extend",
 
   // Packages
   "POST /api/packages/import",

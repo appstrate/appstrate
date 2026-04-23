@@ -44,6 +44,18 @@ import {
   type RemoteResolverInputs,
   type LocalResolverInputs,
 } from "./run/resolver.ts";
+import {
+  shouldReport,
+  startReportSession,
+  bundleIdentity,
+  ReportConfigError,
+  ReportStartError,
+  type ReportMode,
+  type ReportFallback,
+  type ReportContext,
+  type ReportSession,
+} from "./run/report.ts";
+import { CompositeSink } from "@appstrate/afps-runtime/sinks";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -61,6 +73,19 @@ export interface RunCommandOptions {
   output?: string;
   json?: boolean;
   apiKey?: string;
+  /**
+   * Stream telemetry back to the Appstrate instance via a signed sink.
+   * `auto` (default): on when a profile + app are available, off otherwise.
+   * `true`: force on, fail if no context. `false`: console-only.
+   */
+  report?: ReportMode;
+  /**
+   * What to do when the initial `POST /api/runs/remote` fails.
+   * `abort` (default) exits the command. `console` falls back silently.
+   */
+  reportFallback?: ReportFallback;
+  /** Requested sink TTL in seconds. Server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
+  sinkTtl?: number;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -87,10 +112,10 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 
   const { model, apiKey: llmApiKey } = await resolveLlmConfig(modelSource, opts, resolverInputs);
 
-  // ─── 3. Build the ProviderResolver ─────────────────────────────────
-  const providerResolver = buildResolver(mode, resolverInputs);
-
-  // ─── 4. Load the bundle ────────────────────────────────────────────
+  // ─── 3. Load the bundle ────────────────────────────────────────────
+  // Load before building the provider resolver so the reporting layer
+  // (which needs the manifest + prompt to register the run) can run
+  // before any resolver is wired.
   const bundlePath = path.resolve(opts.bundle);
   try {
     await fs.access(bundlePath);
@@ -98,6 +123,17 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     throw new Error(`Bundle not found: ${bundlePath}`);
   }
   const bundle = await readBundleFromFile(bundlePath);
+
+  // ─── 3a. Optional: register run + build reporting session ─────────
+  const reportSession = await resolveReportSession(opts, bundle, resolverInputs);
+
+  // ─── 3b. Build the ProviderResolver ────────────────────────────────
+  // Thread X-Run-Id into credential-proxy calls when reporting is on.
+  const effectiveResolverInputs =
+    resolverInputs && reportSession
+      ? appendResolverHeaders(resolverInputs, reportSession.proxyHeaders)
+      : resolverInputs;
+  const providerResolver = buildResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input + config ───────────────────────────────────────
   const input = await resolveInput(opts);
@@ -161,11 +197,15 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   process.on("SIGINT", onSigint);
 
   // ─── 9. Run ───────────────────────────────────────────────────────
-  const sink = createConsoleSink({ json: opts.json, outputPath: opts.output });
+  const consoleSink = createConsoleSink({ json: opts.json, outputPath: opts.output });
+  const sink = reportSession
+    ? new CompositeSink([consoleSink, reportSession.httpSink])
+    : consoleSink;
   if (!opts.json) {
-    process.stderr.write(
-      `→ running ${path.basename(bundlePath)} (CLI mode — no platform preamble)\n`,
-    );
+    const reportNote = reportSession
+      ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
+      : " (CLI mode — no platform preamble)";
+    process.stderr.write(`→ running ${path.basename(bundlePath)}${reportNote}\n`);
   }
   try {
     const runner = new PiRunner({
@@ -393,8 +433,84 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// --report wiring
+// ---------------------------------------------------------------------------
+
+async function resolveReportSession(
+  opts: RunCommandOptions,
+  bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+): Promise<ReportSession | null> {
+  const mode: ReportMode = opts.report ?? "auto";
+  const fallback: ReportFallback = opts.reportFallback ?? "abort";
+
+  const reportCtx =
+    resolverInputs && "bearerToken" in resolverInputs
+      ? ({
+          instance: resolverInputs.instance,
+          bearerToken: resolverInputs.bearerToken,
+          appId: resolverInputs.appId,
+          orgId: resolverInputs.orgId ?? null,
+        } satisfies ReportContext)
+      : null;
+
+  let enabled: boolean;
+  try {
+    enabled = shouldReport(mode, reportCtx);
+  } catch (err) {
+    if (err instanceof ReportConfigError) {
+      if (fallback === "console") {
+        if (!opts.json) process.stderr.write(`warn: ${err.message} — reporting disabled\n`);
+        return null;
+      }
+      throw err;
+    }
+    throw err;
+  }
+  if (!enabled || !reportCtx) return null;
+
+  const identity = bundleIdentity(bundle);
+  try {
+    return await startReportSession(
+      bundle,
+      reportCtx,
+      { mode, fallback, ttlSeconds: opts.sinkTtl },
+      {
+        os: `${process.platform} ${process.arch}`,
+        cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
+        bundle: identity,
+      },
+    );
+  } catch (err) {
+    if (err instanceof ReportStartError && fallback === "console") {
+      if (!opts.json) {
+        process.stderr.write(`warn: remote reporting failed — falling back to console-only\n`);
+        process.stderr.write(`  ${err.message}\n`);
+      }
+      return null;
+    }
+    throw err;
+  }
+}
+
+function appendResolverHeaders(
+  inputs: RemoteResolverInputs | LocalResolverInputs,
+  extra: Record<string, string>,
+): RemoteResolverInputs | LocalResolverInputs {
+  if (!("bearerToken" in inputs)) return inputs;
+  return {
+    ...inputs,
+    extraHeaders: { ...(inputs.extraHeaders ?? {}), ...extra },
+  };
+}
+
+function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInputs | null): string {
+  return inputs && "bearerToken" in inputs ? inputs.instance : "(local)";
+}
+
 // Re-export error types for the CLI's formatError pipeline.
-export { ModelResolutionError, ResolverConfigError };
+export { ModelResolutionError, ResolverConfigError, ReportConfigError, ReportStartError };
 
 /**
  * Test-only access to the resolver-input builder. Exercised by

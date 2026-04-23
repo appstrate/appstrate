@@ -71,6 +71,8 @@
   "runs.filterKindPackage": "Agents",
   "runs.filterKindInline": "Inline",
   "runs.inlineBadge": "Inline",
+  "runs.remoteBadge": "Distant",
+  "runs.remoteBadgeTitle": "Ce run a été exécuté sur l'hôte de l'appelant (CLI, GitHub Action, ou runner auto-hébergé) et a renvoyé ses événements via un sink signé.",
   "runs.detailsExpired": "Détails expirés",
   "exec.rerun": "Relancer",
   "exec.tabLogs": "Logs",

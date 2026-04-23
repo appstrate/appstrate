@@ -12,6 +12,8 @@ import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
+import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
+import { createRunsEventsRouter } from "./routes/runs-events.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
@@ -222,6 +224,13 @@ app.route("/api/me", meRouter);
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
+// Unified-runner event ingestion — HMAC-authenticated, no user principal.
+// Mounted BEFORE runsRouter so the more-specific `/runs/:runId/events` path
+// matches without falling through to `GET /runs/:id`. Path-pattern `skipAuth`
+// bypass is declared in `lib/auth-pipeline.ts` so these never pass through
+// the cookie/API-key auth layer.
+app.route("/api", createRunsEventsRouter());
+app.route("/api", createRunsRemoteRouter());
 app.route("/api", runsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());

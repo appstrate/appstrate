@@ -51,7 +51,10 @@ describe("AppstrateEventSink", () => {
   }
 
   it("aggregates memory.added events into the memories list", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("memory.added", { content: "first" }));
     await sink.handle(event("memory.added", { content: "second" }));
 
@@ -59,21 +62,30 @@ describe("AppstrateEventSink", () => {
   });
 
   it("stores state.set as-is when payload is an object", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("state.set", { state: { counter: 42 } }));
 
     expect(sink.current.state).toEqual({ counter: 42 });
   });
 
   it("projects non-object state.set payloads to null (runtime stores raw, projection drops)", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("state.set", { state: "just a string" }));
 
     expect(sink.current.state).toBeNull();
   });
 
   it("replaces output on each emission + writes a run log per call", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("output.emitted", { data: { a: 1, b: 2 } }));
     await sink.handle(event("output.emitted", { data: { b: 3, c: 4 } }));
 
@@ -87,7 +99,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("projects non-object output replacement to empty object (runtime stores raw, projection drops)", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("output.emitted", { data: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: [1, 2, 3] }));
 
@@ -95,7 +110,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("concatenates report.appended events with \\n (runtime-canonical) + writes a run log per line", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("report.appended", { content: "line one" }));
     await sink.handle(event("report.appended", { content: "line two" }));
 
@@ -108,7 +126,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("maps log.written into run_logs with the original level + message", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("log.written", { level: "info", message: "booting" }));
     await sink.handle(event("log.written", { level: "warn", message: "retry" }));
 
@@ -119,7 +140,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("maps appstrate.progress into progress run_logs with message/data/level", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(
       event("appstrate.progress", {
         message: "Tool: read_file",
@@ -137,7 +161,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("captures appstrate.error into lastAdapterError + writes system row", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(event("appstrate.error", { message: "OOM killed" }));
 
     expect(sink.current.lastAdapterError).toBe("OOM killed");
@@ -151,7 +178,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("accumulates appstrate.metric usage + cost", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.handle(
       event("appstrate.metric", {
         usage: { input_tokens: 100, output_tokens: 50 },
@@ -171,7 +201,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("exposes the RunResult from the runtime reducer on finalize", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     const events: RunEvent[] = [
       event("memory.added", { content: "m" }),
       event("output.emitted", { data: { x: 1 } }),
@@ -190,7 +223,10 @@ describe("AppstrateEventSink", () => {
   });
 
   it("is compatible with emptyRunResult as a baseline", async () => {
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
     await sink.finalize(emptyRunResult());
     expect(sink.result).toEqual(emptyRunResult());
   });

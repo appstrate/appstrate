@@ -43,6 +43,13 @@
       "when": 1776957664000,
       "tag": "0005_llm_proxy_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777766400000,
+      "tag": "0006_unified_runner_protocol",
+      "breakpoints": true
     }
   ]
 }

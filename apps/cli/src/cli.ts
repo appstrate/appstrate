@@ -601,6 +601,18 @@ program
   .option("--run-id <id>", "Explicit run id (default: generated)")
   .option("--output <path>", "Write the final RunResult JSON to this path")
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
+  .option(
+    "--report <mode>",
+    "Stream events to the Appstrate instance: auto (default — on when a profile is present), true (force on), false (off)",
+  )
+  .option(
+    "--report-fallback <mode>",
+    "Behavior when `POST /api/runs/remote` fails: abort (default) or console (console-only fallback)",
+  )
+  .option(
+    "--sink-ttl <seconds>",
+    "Requested sink lifetime in seconds (server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS)",
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -619,7 +631,31 @@ program
       runId: typeof opts.runId === "string" ? opts.runId : undefined,
       output: typeof opts.output === "string" ? opts.output : undefined,
       json: opts.json === true,
+      report: parseReportMode(opts.report),
+      reportFallback: parseReportFallback(opts.reportFallback),
+      sinkTtl: parseSinkTtl(opts.sinkTtl),
     });
   });
+
+function parseReportMode(raw: unknown): "auto" | "true" | "false" | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw === "auto" || raw === "true" || raw === "false") return raw;
+  throw new Error(`Invalid --report value "${raw}" (expected: auto | true | false)`);
+}
+
+function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw === "abort" || raw === "console") return raw;
+  throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
+}
+
+function parseSinkTtl(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid --sink-ttl "${raw}" (expected a positive integer number of seconds)`);
+  }
+  return n;
+}
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

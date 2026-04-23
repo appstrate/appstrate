@@ -67,7 +67,10 @@ describe("Parity E2E — full adapter stack", () => {
       { type: "report.appended", timestamp: Date.now(), runId, content: "work done" },
     ];
 
-    const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
 
     // Mirror the production inline loop (routes/runs.ts:executeAgentInBackground).
     async function* scripted() {

@@ -29,6 +29,19 @@ export interface RunResult {
   report: string | null;
   logs: LogEntry[];
   error?: RunError;
+  /**
+   * Terminal status hint. Optional — the reducer does not populate it (events
+   * alone cannot distinguish "success" from "cancelled by signal"). Runners
+   * that surface a specific terminal cause (timeout, cancellation) set this
+   * before calling {@link EventSink.finalize} so downstream ingestion can
+   * persist the exact `runs.status` without inferring from `error` text.
+   *
+   * When absent, consumers default to `"failed"` if `error` is set, else
+   * `"success"`.
+   */
+  status?: "success" | "failed" | "timeout" | "cancelled";
+  /** Elapsed wall-clock time in milliseconds. Runners populate this. */
+  durationMs?: number;
 }
 
 export interface Memory {

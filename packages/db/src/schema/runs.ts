@@ -84,6 +84,30 @@ export const runs = pgTable(
     // without relying on `packages.manifest.name`.
     agentScope: text("agent_scope"),
     agentName: text("agent_name"),
+    // Unified runner protocol (AFPS runtime event ingestion). Every run — platform
+    // container or remote CLI — posts events to POST /api/runs/:id/events over
+    // HMAC-signed HTTP. The runs row is the per-run credential store and the
+    // sink lifecycle tracker.
+    //
+    // `run_origin` distinguishes WHO controls the process (we do vs customer
+    // does), not which protocol is used — the protocol is the same.
+    runOrigin: text("run_origin").notNull().default("platform").$type<"platform" | "remote">(),
+    // AES-256-GCM ciphertext of the 32-byte run secret (via @appstrate/connect
+    // encryption). Returned once in the run-creation response, then lives
+    // encrypted at rest for the event-ingestion middleware to decrypt and
+    // verify HMAC signatures against.
+    sinkSecretEncrypted: text("sink_secret_encrypted"),
+    // Hard cap after which /events rejects. Also the "sink is active" signal.
+    sinkExpiresAt: timestamp("sink_expires_at"),
+    // Set on finalize (terminal event, /finalize POST, explicit revocation).
+    // Presence means the sink is closed; subsequent events reject with 410.
+    sinkClosedAt: timestamp("sink_closed_at"),
+    // Highest successfully persisted sequence number; drives the ordering
+    // buffer fast-path (CAS update on sequence = last_event_sequence + 1).
+    lastEventSequence: integer("last_event_sequence").notNull().default(0),
+    // CLI-provided execution environment metadata (os, cli version, git sha,
+    // ...). Capped at 16 KiB by the route Zod schema.
+    contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),
@@ -99,9 +123,21 @@ export const runs = pgTable(
       table.notifiedAt,
       table.readAt,
     ),
+    // Reaper scans only active sinks — cheap partial index.
+    index("idx_runs_sink_expires_at")
+      .on(table.sinkExpiresAt)
+      .where(sql`${table.sinkExpiresAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL`),
     check(
       "runs_at_most_one_actor",
       sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
+    check("runs_run_origin_valid", sql`run_origin IN ('platform', 'remote')`),
+    // Invariant: an open sink row (has an expires_at) must have a secret to
+    // verify against. Enforced for every origin so platform and remote share
+    // the same ingestion code path without any conditional branches.
+    check(
+      "runs_open_sink_has_secret",
+      sql`sink_expires_at IS NULL OR sink_secret_encrypted IS NOT NULL`,
     ),
   ],
 );
@@ -211,6 +247,60 @@ export const llmProxyUsage = pgTable(
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.
     check("llm_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
+  ],
+);
+
+/**
+ * Per-call metering of the `/api/credential-proxy/*` routes — one row per
+ * upstream provider call proxied server-side for a remote runner.
+ *
+ * Mirrors `llm_proxy_usage` so reporting queries compose uniformly:
+ *   SUM(llm_proxy_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
+ *   WHERE run_id = $1
+ * yields the full attributable spend for one run.
+ *
+ * `cost_usd` is 0 today (providers are not billed per-call); reserved for
+ * metered providers (paid APIs) without schema migration.
+ *
+ * `request_id` is the dedup key: the credential-proxy route derives one per
+ * upstream request; replays of the same request are no-ops via the UNIQUE
+ * constraint. Prevents double-counting when a CLI retries.
+ */
+export const credentialProxyUsage = pgTable(
+  "credential_proxy_usage",
+  {
+    id: serial("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    runId: text("run_id").references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    // Provider id the call hit (e.g. "gmail", "clickup"). Matches the
+    // credential-proxy route path parameter.
+    providerId: text("provider_id").notNull(),
+    // Upstream host for audit (no path/query — avoid logging secrets).
+    targetHost: text("target_host"),
+    httpStatus: integer("http_status"),
+    durationMs: integer("duration_ms"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    requestId: text("request_id").notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_credential_proxy_usage_org_id").on(table.orgId),
+    index("idx_credential_proxy_usage_run_id").on(table.runId),
+    index("idx_credential_proxy_usage_org_created").on(table.orgId, table.createdAt),
+    check("credential_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
   ],
 );
 

@@ -52,6 +52,12 @@ export interface RemoteResolverInputs {
    */
   orgId?: string;
   endUserId?: string;
+  /**
+   * Extra headers attached to every credential-proxy call (e.g.
+   * `X-Run-Id` when `--report` is active). Forwarded verbatim by
+   * {@link RemoteAppstrateProviderResolver}.
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 export interface LocalResolverInputs {
@@ -111,6 +117,7 @@ export function buildResolver(
         apiKey: remote.bearerToken,
         appId: remote.appId,
         endUserId: remote.endUserId,
+        extraHeaders: remote.extraHeaders,
       });
     }
   }

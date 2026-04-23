@@ -280,9 +280,15 @@ export function skipAuth(path: string, publicPaths: Set<string>): boolean {
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
+  // Unified-runner event ingestion: `/api/runs/:runId/events` and
+  // `/api/runs/:runId/events/finalize` authenticate via Standard Webhooks
+  // HMAC signature at the route layer — not via JWT / API key / cookie.
+  if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
   return false;
 }
+
+const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize)?$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

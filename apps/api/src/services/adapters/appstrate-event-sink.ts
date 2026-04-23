@@ -31,8 +31,8 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import type { OrgScope } from "../../lib/scope.ts";
-import { appendRunLog } from "../state/runs.ts";
+import type { AppScope } from "../../lib/scope.ts";
+import { appendRunLog, updateRun } from "../state/runs.ts";
 import type { TokenUsage } from "./types.ts";
 
 /**
@@ -59,13 +59,13 @@ export interface AggregatedRunState {
 }
 
 export interface AppstrateEventSinkOptions {
-  scope: OrgScope;
+  scope: AppScope;
   runId: string;
 }
 
 export class AppstrateEventSink implements EventSink {
   readonly runId: string;
-  private readonly scope: OrgScope;
+  private readonly scope: AppScope;
   private readonly reducer: ReducerSinkHandle = createReducerSink();
   private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
   private accumulatedCost = 0;
@@ -154,6 +154,14 @@ export class AppstrateEventSink implements EventSink {
         if (typeof event.cost === "number") {
           this.accumulatedCost += event.cost;
         }
+        // Persist the running totals to the run row atomically. The sink is
+        // instantiated per-event in the unified-runner ingestion path, so
+        // the in-memory accumulators above would reset across requests —
+        // the source of truth for usage/cost lives on the `runs` row.
+        await persistRunMetrics(this.scope, this.runId, {
+          usage: isPlainObject(event.usage) ? (event.usage as TokenUsage) : null,
+          cost: typeof event.cost === "number" ? event.cost : null,
+        });
         break;
       }
 
@@ -196,6 +204,38 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
     return value;
   }
   return null;
+}
+
+/**
+ * Atomically merge a metric event's usage + cost into the run row. Uses
+ * Postgres JSONB concatenation for usage (per-key add isn't a primitive,
+ * so the delta is whole-object merged — downstream consumers sum the keys
+ * at read time) and a scalar increment for cost.
+ *
+ * Single writer ⇒ no race. For the unified-runner architecture, the
+ * run-event-ingestion route serializes all events per-run via its
+ * ordering buffer, so concurrent updates on the same row are impossible.
+ */
+async function persistRunMetrics(
+  scope: AppScope,
+  runId: string,
+  delta: { usage: TokenUsage | null; cost: number | null },
+): Promise<void> {
+  const updates: {
+    tokenUsage?: Record<string, unknown>;
+    cost?: number;
+  } = {};
+  if (delta.usage) {
+    // Whole-object replacement is correct because HttpSink emits running
+    // totals, not deltas. Runners that emit deltas need to be fixed at
+    // the emit site.
+    updates.tokenUsage = delta.usage as unknown as Record<string, unknown>;
+  }
+  if (delta.cost !== null) {
+    updates.cost = delta.cost;
+  }
+  if (Object.keys(updates).length === 0) return;
+  await updateRun(scope, runId, updates);
 }
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {

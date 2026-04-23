@@ -26,6 +26,13 @@ export interface RemoteAppstrateProviderResolverOptions {
    * the jar warm for multi-step OAuth flows.
    */
   sessionId?: string;
+  /**
+   * Extra headers to attach to every credential-proxy call. Used by CLI
+   * runners to propagate `X-Run-Id` so the resulting
+   * `credential_proxy_usage` rows are attributable per-run for cost
+   * rollup. Header names are forwarded verbatim; values must be strings.
+   */
+  extraHeaders?: Record<string, string>;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -47,6 +54,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly appId: string;
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
+  private readonly extraHeaders: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: RemoteAppstrateProviderResolverOptions) {
@@ -58,6 +66,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
     this.appId = opts.appId;
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
+    this.extraHeaders = opts.extraHeaders ?? {};
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
@@ -88,6 +97,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
         "X-Provider": ref.name,
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
+        ...this.extraHeaders,
         ...(req.headers ?? {}),
       };
 

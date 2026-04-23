@@ -90,5 +90,13 @@ export type AppEnv = {
      * when hitting platform routes.
      */
     sessionRealm?: string;
+    /**
+     * Populated by `verifyRunSignature` on HMAC-authenticated event routes
+     * (POST /api/runs/:runId/events and /finalize). Routes read this
+     * instead of `user`/`orgId` — the principal is the run itself.
+     */
+    run?: import("./run-sink.ts").RunSinkContext;
+    /** Request-specific webhook-id header (Standard Webhooks msg id) used for replay dedup. */
+    webhookId?: string;
   };
 };

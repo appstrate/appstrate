@@ -46,6 +46,7 @@ import {
   ProxyCredentialError,
 } from "../services/credential-proxy/core.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
+import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /**
@@ -166,6 +167,12 @@ export function createCredentialProxyRouter() {
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = c.req.header("X-Substitute-Body") === "true";
+      // X-Run-Id is optional — populated by runners that want per-run
+      // attribution in `credential_proxy_usage`. The value is not validated
+      // against the principal here (matches llm-proxy behaviour); a
+      // mismatched runId is a reporting oddity, not a security boundary.
+      const runIdHeader = c.req.header("X-Run-Id");
+      const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
 
       if (!providerId) throw invalidRequest("Missing X-Provider header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -270,6 +277,8 @@ export function createCredentialProxyRouter() {
           maxResponseBytes: limits.max_response_bytes,
         });
 
+        const durationMs = Date.now() - started;
+
         logger.info("credential-proxy call", {
           requestId: c.get("requestId"),
           authMethod,
@@ -281,7 +290,26 @@ export function createCredentialProxyRouter() {
           method,
           target,
           status: result.status,
-          durationMs: Date.now() - started,
+          runId,
+          durationMs,
+        });
+
+        // Record per-call metering for reporting. `request_id` is the row
+        // UNIQUE key — replays (retries of the same proxy request) no-op.
+        // Fire-and-forget: metering failure MUST NOT fail a successful
+        // upstream call; the service logs and drops on DB error.
+        void insertCredentialProxyUsage({
+          orgId,
+          apiKeyId: apiKeyId ?? null,
+          userId: apiKeyId ? null : userId,
+          runId,
+          applicationId,
+          providerId,
+          targetHost: safeTargetHost(target),
+          httpStatus: result.status,
+          durationMs,
+          costUsd: 0,
+          requestId: c.get("requestId"),
         });
 
         const responseHeaders = new Headers();
@@ -332,11 +360,25 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-target",
   "x-session-id",
   "x-substitute-body",
+  "x-run-id",
   "x-app-id",
   "authorization",
   "appstrate-user",
   "appstrate-version",
 ]);
+
+/**
+ * Derive the audit-safe host for usage logging. Returns `null` for
+ * unparseable targets — the usage record carries a nullable `target_host`
+ * column so we never lose the attribution row on a malformed target.
+ */
+function safeTargetHost(target: string): string | null {
+  try {
+    return new URL(target).host;
+  } catch {
+    return null;
+  }
+}
 
 const HOP_BY_HOP = new Set([
   "connection",
