@@ -86,7 +86,6 @@
   "devDependencies": {
     "@types/mustache": "^4.2.6",
     "@types/semver": "^7.7.1",
-    "@appstrate/runner-pi": "workspace:*",
     "@mariozechner/pi-coding-agent": "^0.67.0",
     "@mariozechner/pi-ai": "^0.67.0"
   }
