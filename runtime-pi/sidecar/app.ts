@@ -14,6 +14,7 @@ import {
   findUnresolvedPlaceholders,
   matchesAuthorizedUri,
   isBlockedUrl,
+  applyInjectedCredentialHeader,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyConfig,
@@ -331,11 +332,21 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     /** Make an upstream request, substituting credentials into raw header templates. */
-    const doUpstreamRequest = async (credentials: Record<string, string>): Promise<FetchResult> => {
+    const doUpstreamRequest = async (activeCreds: CredentialsResponse): Promise<FetchResult> => {
       const resolvedHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(rawHeaders)) {
-        resolvedHeaders[key] = substituteVars(value, credentials);
+        resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
       }
+      // Server-side credential injection. When the provider manifest
+      // declares a `credentialHeaderName` (e.g. `Authorization` for OAuth,
+      // `X-Api-Key` for API-key providers), the sidecar writes the final
+      // header server-side from `credentials[credentialFieldName]`. The
+      // agent never touches the credential value — no placeholders on
+      // the wire, no way for the LLM to exfiltrate the token through the
+      // header name. Caller override wins on case-insensitive match so
+      // an agent can still pass a per-call token through input when
+      // exotic dual-auth flows need it.
+      applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
       // Normalize auth headers: ensure space after scheme (e.g. "Bearertoken" → "Bearer token").
       // LLMs sometimes generate "Bearer{{access_token}}" without a space, which produces
       // a malformed header that providers reject with 401.
@@ -355,7 +366,7 @@ export function createApp(deps: AppDeps): Hono {
           : storedCookies2.join("; ");
       }
 
-      const body = buildBody(credentials);
+      const body = buildBody(activeCreds.credentials);
       return fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
         method,
         headers: resolvedHeaders,
@@ -367,11 +378,14 @@ export function createApp(deps: AppDeps): Hono {
     };
 
     // 7. Make the first request to the target
-    let result = await doUpstreamRequest(creds.credentials);
+    let result = await doUpstreamRequest(creds);
     if (!result.ok) return result.errorResponse;
     let targetRes = result.response;
 
-    // 7b. Retry on 401: refresh credentials and retry once
+    // 7b. Retry on 401: refresh credentials and retry once. The refresh
+    //     endpoint returns the full CredentialsResponse (including
+    //     headerName / prefix / fieldName), so credential injection uses
+    //     the freshly rotated token without any extra plumbing.
     if (
       targetRes.status === 401 &&
       deps.refreshCredentials &&
@@ -381,7 +395,7 @@ export function createApp(deps: AppDeps): Hono {
     ) {
       try {
         const refreshed = await deps.refreshCredentials(providerId);
-        const retryResult = await doUpstreamRequest(refreshed.credentials);
+        const retryResult = await doUpstreamRequest(refreshed);
         if (retryResult.ok) {
           targetRes = retryResult.response;
         }

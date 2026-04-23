@@ -54,6 +54,7 @@ export {
   listProviderCredentialIds,
   listConfiguredProviderIds,
 } from "./credentials.ts";
+export type { ProxyCredentialsPayload } from "./credentials.ts";
 
 // Credential-proxy primitives (shared between the /api/credential-proxy/proxy
 // route and the in-container sidecar to prevent silent drift).

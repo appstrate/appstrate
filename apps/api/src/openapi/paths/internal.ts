@@ -63,19 +63,48 @@ export const internalPaths = {
       ],
       responses: {
         "200": {
-          description: "Credentials and authorized URIs",
+          description: "Credentials, authorized URIs, and transport metadata",
           content: {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["credentials", "authorizedUris", "allowAllUris", "credentialFieldName"],
                 properties: {
-                  credentials: { type: "object" },
-                  authorizedUris: { type: "array", items: { type: "string" } },
+                  credentials: {
+                    type: "object",
+                    description:
+                      "Credential fields keyed by name. Consumed server-side by the sidecar / credential-proxy when injecting the upstream auth header.",
+                    additionalProperties: { type: "string" },
+                  },
+                  authorizedUris: {
+                    type: ["array", "null"],
+                    items: { type: "string" },
+                  },
+                  allowAllUris: { type: "boolean" },
+                  credentialHeaderName: {
+                    type: "string",
+                    description:
+                      "Header name the upstream expects the credential under. When present, the sidecar / credential-proxy writes this header server-side from `credentials[credentialFieldName]`.",
+                  },
+                  credentialHeaderPrefix: {
+                    type: "string",
+                    description:
+                      "Optional prefix prepended to the credential value (e.g. `Bearer`).",
+                  },
+                  credentialFieldName: {
+                    type: "string",
+                    description:
+                      "Name of the field in `credentials` that holds the secret. Defaults to `access_token` for OAuth flows and `api_key` for API-key flows unless the manifest overrides via `definition.credentials.fieldName`.",
+                  },
                 },
               },
               example: {
                 credentials: { access_token: "ya29.a0AfH6SM..." },
                 authorizedUris: ["https://gmail.googleapis.com/**"],
+                allowAllUris: false,
+                credentialHeaderName: "Authorization",
+                credentialHeaderPrefix: "Bearer",
+                credentialFieldName: "access_token",
               },
             },
           },
@@ -115,15 +144,25 @@ export const internalPaths = {
       ],
       responses: {
         "200": {
-          description: "Refreshed credentials and authorized URIs",
+          description: "Refreshed credentials, authorized URIs, and transport metadata",
           content: {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["credentials", "authorizedUris", "allowAllUris", "credentialFieldName"],
                 properties: {
-                  credentials: { type: "object" },
-                  authorizedUris: { type: "array", items: { type: "string" } },
+                  credentials: {
+                    type: "object",
+                    additionalProperties: { type: "string" },
+                  },
+                  authorizedUris: {
+                    type: ["array", "null"],
+                    items: { type: "string" },
+                  },
                   allowAllUris: { type: "boolean" },
+                  credentialHeaderName: { type: "string" },
+                  credentialHeaderPrefix: { type: "string" },
+                  credentialFieldName: { type: "string" },
                 },
               },
             },

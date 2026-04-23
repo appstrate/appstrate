@@ -175,6 +175,32 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     headers.set(k, substituteVars(v, fields));
   }
 
+  // Server-side credential injection — mirror of the sidecar logic so
+  // Remote runners (CLI, GitHub Action, BYOI) get the same auth story
+  // as the in-container sidecar. When the provider manifest declares a
+  // `credentialHeaderName`, the route writes the final header here
+  // from `credentials[credentialFieldName]`. The caller's API-key auth
+  // has already been consumed upstream and `Authorization` is stripped
+  // by the public route's `PROXY_CONTROL_HEADERS` allowlist, so there
+  // is no credential leak and no risk of the agent overriding the
+  // pinned header. Non-Authorization custom headers (e.g. `X-Api-Key`)
+  // honour a case-insensitive caller override for exotic dual-auth
+  // flows — symmetric with the sidecar.
+  if (resolved.credentialHeaderName) {
+    const secret = fields[resolved.credentialFieldName];
+    if (secret) {
+      const lower = resolved.credentialHeaderName.toLowerCase();
+      let overridden = false;
+      headers.forEach((_v, k) => {
+        if (k.toLowerCase() === lower) overridden = true;
+      });
+      if (!overridden) {
+        const prefix = resolved.credentialHeaderPrefix?.trim();
+        headers.set(resolved.credentialHeaderName, prefix ? `${prefix} ${secret}` : secret);
+      }
+    }
+  }
+
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
   let body: string | Uint8Array | undefined;

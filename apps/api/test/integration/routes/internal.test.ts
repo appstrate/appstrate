@@ -9,6 +9,7 @@ import {
   seedRun,
   seedConnectionProfile,
   seedConnectionForApp,
+  seedPackage,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
@@ -275,6 +276,155 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    it("returns credentials + authorizedUris + transport metadata for an OAuth2 provider", async () => {
+      // Seed a full graph: OAuth2 provider package + agent listing it +
+      // profile + connection + running run. Then GET must return the
+      // extended payload the sidecar / credential-proxy consumes to
+      // inject the upstream auth header server-side.
+      const providerId = "@internalorg/gmail";
+      await seedPackage({
+        orgId: null,
+        id: providerId,
+        type: "provider",
+        source: "system",
+        draftManifest: {
+          name: providerId,
+          version: "1.0.0",
+          type: "provider",
+          definition: {
+            authMode: "oauth2",
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            authorizedUris: ["https://gmail.googleapis.com/**"],
+          },
+        },
+      });
+
+      // Agent must list the provider under dependencies.providers so
+      // the route accepts the request.
+      const agentWithProvider = await seedAgent({
+        id: "@internalorg/agent-with-gmail",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@internalorg/agent-with-gmail",
+          version: "0.1.0",
+          type: "agent",
+          dependencies: { providers: { [providerId]: "^1" } },
+        },
+      });
+
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Default",
+        isDefault: true,
+      });
+      await seedConnectionForApp(
+        profile.id,
+        providerId,
+        ctx.orgId,
+        ctx.defaultAppId,
+        { access_token: "ya29.stored-token" },
+        { expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() },
+      );
+
+      const run = await seedRun({
+        packageId: agentWithProvider.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+        providerProfileIds: { [providerId]: profile.id },
+      });
+
+      const res = await app.request(`/internal/credentials/${providerId}`, {
+        headers: { Authorization: `Bearer ${signRunToken(run.id)}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        credentials: Record<string, string>;
+        authorizedUris: string[] | null;
+        allowAllUris: boolean;
+        credentialHeaderName?: string;
+        credentialHeaderPrefix?: string;
+        credentialFieldName: string;
+      };
+      expect(body.credentials.access_token).toBe("ya29.stored-token");
+      expect(body.authorizedUris).toEqual(["https://gmail.googleapis.com/**"]);
+      expect(body.allowAllUris).toBe(false);
+      expect(body.credentialHeaderName).toBe("Authorization");
+      expect(body.credentialHeaderPrefix).toBe("Bearer");
+      expect(body.credentialFieldName).toBe("access_token");
+    });
+
+    it("omits credentialHeaderName for providers that do not declare it", async () => {
+      // A custom-auth or basic-auth provider that never sets
+      // `credentialHeaderName` — the sidecar must see `undefined` and
+      // therefore skip the injection step. `credentialFieldName` is
+      // still populated so the field stays type-stable.
+      const providerId = "@internalorg/custom-svc";
+      await seedPackage({
+        orgId: null,
+        id: providerId,
+        type: "provider",
+        source: "system",
+        draftManifest: {
+          name: providerId,
+          version: "1.0.0",
+          type: "provider",
+          definition: {
+            authMode: "basic",
+            authorizedUris: ["https://custom.example.com/**"],
+          },
+        },
+      });
+
+      const agentWithCustom = await seedAgent({
+        id: "@internalorg/agent-with-custom",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@internalorg/agent-with-custom",
+          version: "0.1.0",
+          type: "agent",
+          dependencies: { providers: { [providerId]: "^1" } },
+        },
+      });
+
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Default",
+        isDefault: true,
+      });
+      await seedConnectionForApp(profile.id, providerId, ctx.orgId, ctx.defaultAppId, {
+        username: "admin",
+        password: "s3cret",
+      });
+
+      const run = await seedRun({
+        packageId: agentWithCustom.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+        providerProfileIds: { [providerId]: profile.id },
+      });
+
+      const res = await app.request(`/internal/credentials/${providerId}`, {
+        headers: { Authorization: `Bearer ${signRunToken(run.id)}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        credentialHeaderName?: string;
+        credentialFieldName: string;
+      };
+      expect(body.credentialHeaderName).toBeUndefined();
+      // Defaults to "access_token" since authMode is basic (not api_key)
+      expect(body.credentialFieldName).toBe("access_token");
     });
   });
 

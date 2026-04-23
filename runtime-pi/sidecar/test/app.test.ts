@@ -12,6 +12,9 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
         credentials: { access_token: "test-123" },
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
       }),
     ),
     cookieJar: new Map(),
@@ -335,6 +338,7 @@ describe("ALL /proxy — validation", () => {
         credentials: { access_token: "t" },
         authorizedUris: null,
         allowAllUris: true,
+        credentialFieldName: "access_token",
       }),
     );
     const app = createApp(makeDeps({ fetchCredentials }));
@@ -354,6 +358,7 @@ describe("ALL /proxy — validation", () => {
         credentials: { access_token: "t" },
         authorizedUris: null,
         allowAllUris: false,
+        credentialFieldName: "access_token",
       }),
     );
     const app = createApp(makeDeps({ fetchCredentials }));
@@ -373,6 +378,7 @@ describe("ALL /proxy — validation", () => {
         credentials: {},
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
+        credentialFieldName: "access_token",
       }),
     );
     const app = createApp(makeDeps({ fetchCredentials }));
@@ -697,6 +703,176 @@ describe("ALL /proxy — forwarding", () => {
   });
 });
 
+// --- ALL /proxy — server-side credential injection ---
+
+/**
+ * The sidecar writes the upstream auth header itself based on the
+ * `credentialHeaderName` / `credentialHeaderPrefix` / `credentialFieldName`
+ * fields returned by the platform's `/internal/credentials` endpoint.
+ * The agent never touches the credential — no placeholders on the wire,
+ * no way for the LLM to exfiltrate the token through header-value
+ * manipulation.
+ */
+describe("ALL /proxy — server-side credential injection", () => {
+  it("injects Authorization: Bearer <token> when manifest declares OAuth2 transport", async () => {
+    let capturedHeaders: Record<string, string> | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@appstrate/gmail",
+        "X-Target": "https://api.example.com/messages",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(capturedHeaders?.Authorization).toBe("Bearer test-123");
+  });
+
+  it("injects X-Api-Key: <token> without prefix when manifest declares api_key transport", async () => {
+    let capturedHeaders: Record<string, string> | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return new Response("{}", { status: 200 });
+    });
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { api_key: "sk_live_xyz" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "X-Api-Key",
+        credentialHeaderPrefix: undefined,
+        credentialFieldName: "api_key",
+      }),
+    );
+    const app = createApp(makeDeps({ fetchFn, fetchCredentials }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@appstrate/stripe",
+        "X-Target": "https://api.example.com/charges",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(capturedHeaders?.["x-api-key"] ?? capturedHeaders?.["X-Api-Key"]).toBe("sk_live_xyz");
+    // No Authorization header was written — prefix-less API-key auth
+    // must not leak into a Bearer slot.
+    expect(capturedHeaders?.Authorization).toBeUndefined();
+  });
+
+  it("respects a caller-supplied header (case-insensitive) instead of injecting", async () => {
+    let capturedHeaders: Record<string, string> | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return new Response("{}", { status: 200 });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@appstrate/gmail",
+        "X-Target": "https://api.example.com/me",
+        // Agent passes a dual-auth / override token. The sidecar must
+        // not clobber it server-side — the override case preserves
+        // flexibility for exotic flows.
+        authorization: "Bearer caller-override",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(capturedHeaders?.authorization ?? capturedHeaders?.Authorization).toBe(
+      "Bearer caller-override",
+    );
+    expect(capturedHeaders?.Authorization ?? capturedHeaders?.authorization).not.toContain(
+      "test-123",
+    );
+  });
+
+  it("does not inject when manifest omits credentialHeaderName (basic/custom auth)", async () => {
+    let capturedHeaders: Record<string, string> | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return new Response("{}", { status: 200 });
+    });
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "unused-by-transport" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        // No credentialHeaderName → agent is expected to write its own
+        // auth (e.g. a basic-auth header already rendered in a skill).
+        credentialFieldName: "access_token",
+      }),
+    );
+    const app = createApp(makeDeps({ fetchFn, fetchCredentials }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@appstrate/custom",
+        "X-Target": "https://api.example.com/thing",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(capturedHeaders?.Authorization).toBeUndefined();
+    expect(capturedHeaders?.authorization).toBeUndefined();
+  });
+
+  it("re-injects the refreshed token on 401 retry", async () => {
+    const captured: string[] = [];
+    let callCount = 0;
+    const deps = makeDeps({
+      fetchCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "old-token" },
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        }),
+      ),
+      refreshCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "new-token" },
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        }),
+      ),
+      fetchFn: mock(async (_url: string, init?: RequestInit) => {
+        callCount++;
+        const headers = init?.headers as Record<string, string>;
+        const auth = headers?.authorization ?? headers?.Authorization ?? "";
+        captured.push(auth);
+        if (auth.includes("old-token")) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    });
+    const app = createApp(deps);
+    // Agent sends no auth header — injection is the only source.
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@appstrate/gmail",
+        "X-Target": "https://api.example.com/me",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(callCount).toBe(2);
+    expect(captured[0]).toBe("Bearer old-token");
+    expect(captured[1]).toBe("Bearer new-token");
+  });
+});
+
 // --- ALL /proxy — binary body integrity ---
 
 describe("ALL /proxy — binary body integrity", () => {
@@ -739,6 +915,9 @@ describe("ALL /proxy — binary body integrity", () => {
           credentials: { access_token: "new-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
       fetchFn: mock(async (_url: string, init?: RequestInit) => {
@@ -756,6 +935,9 @@ describe("ALL /proxy — binary body integrity", () => {
           credentials: { access_token: "old-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
     });
@@ -1216,6 +1398,9 @@ describe("proxy retry-on-401", () => {
           credentials: { access_token: "old-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
       refreshCredentials: mock(
@@ -1223,6 +1408,9 @@ describe("proxy retry-on-401", () => {
           credentials: { access_token: "new-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
       fetchFn: mock(async (_url: string, _init?: RequestInit) => {
@@ -1261,6 +1449,9 @@ describe("proxy retry-on-401", () => {
           credentials: { access_token: "still-bad" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
       fetchFn: mock(async (url: string, _init?: RequestInit) => {
@@ -1353,6 +1544,9 @@ describe("proxy retry-on-401", () => {
           credentials: { access_token: "new-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
       fetchFn: mock(async (_url: string, init?: RequestInit) => {
@@ -1375,6 +1569,9 @@ describe("proxy retry-on-401", () => {
           credentials: { access_token: "old-token" },
           authorizedUris: ["https://api.example.com/**"],
           allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
         }),
       ),
     });

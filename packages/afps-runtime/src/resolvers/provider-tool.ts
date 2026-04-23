@@ -21,6 +21,19 @@ import { resolvePackageRef } from "./bundle-adapter.ts";
  * fields of the `definition` object); {@link readProviderMeta} projects
  * them onto this flat shape so enforcement code does not have to carry
  * the nesting.
+ *
+ * Credential header metadata (name / prefix / field name) is
+ * deliberately NOT part of this type. Every shipped transport —
+ * sidecar, credential-proxy, Local — owns credential injection itself:
+ *
+ *   - Sidecar + credential-proxy: read the metadata from the platform's
+ *     internal credentials endpoint and write the header server-side.
+ *     The runtime never sees the credential field at all.
+ *   - Local: reads `injection` from the local creds file, not from the
+ *     bundle manifest.
+ *
+ * Consequence: the tool schema surfaced to the LLM is identical across
+ * auth modes and carries no hint of how the credential is transported.
  */
 export interface ProviderMeta {
   /** Scoped package name (e.g. `@appstrate/gmail`). */
@@ -37,27 +50,6 @@ export interface ProviderMeta {
    * sidecar gates this server-side). Defaults to false.
    */
   allowAllUris?: boolean;
-  /**
-   * Header name the upstream expects the credential under — e.g.
-   * `Authorization` for Bearer tokens, `X-Api-Key` for API keys.
-   * Projected from `manifest.definition.credentialHeaderName`.
-   */
-  credentialHeaderName?: string;
-  /**
-   * Prefix prepended to the credential value (e.g. `Bearer`). Rendered
-   * as `${prefix} {{placeholder}}` when a prefix is set, otherwise the
-   * placeholder is written on its own. Projected from
-   * `manifest.definition.credentialHeaderPrefix`.
-   */
-  credentialHeaderPrefix?: string;
-  /**
-   * Name of the credential field the transport will substitute into the
-   * `{{placeholder}}` at dispatch time — typically `access_token` for
-   * OAuth providers and `api_key` for api-key providers. Projected from
-   * `manifest.definition.credentials.fieldName`; callers fall back to a
-   * default derived from `authMode` when absent.
-   */
-  credentialPlaceholder?: string;
 }
 
 export interface ProviderCallRequest {
@@ -327,16 +319,15 @@ export function readProviderMeta(
 
 /**
  * Project a parsed provider manifest onto the flat {@link ProviderMeta}
- * shape consumed by the runtime. Reads every projected field from
- * `definition.*` (the canonical AFPS location) and ignores any
+ * shape consumed by the runtime. Reads from `definition.*` (the
+ * canonical AFPS location per spec §7.5 / §8.6) and ignores any
  * top-level occurrences — the manifest wire shape is the single source
  * of truth.
  *
- * The credential-injection fields (`credentialHeaderName`,
- * `credentialHeaderPrefix`, `credentialPlaceholder`) are what let the
- * sidecar/remote resolvers build an `Authorization: Bearer
- * {{access_token}}`-style header at dispatch time without hard-coding
- * transport conventions in the LLM-facing tool schema.
+ * Only `authorizedUris` and `allowAllUris` are surfaced: every shipped
+ * transport (sidecar, credential-proxy, Local) owns credential
+ * injection itself, so the runtime never reads header name / prefix /
+ * field name from the manifest.
  */
 function projectProviderMeta(name: string, parsed: unknown): ProviderMeta {
   const definition =
@@ -344,12 +335,8 @@ function projectProviderMeta(name: string, parsed: unknown): ProviderMeta {
       ? ((parsed as { definition?: unknown }).definition ?? {})
       : {};
   const def = definition as {
-    authMode?: unknown;
     authorizedUris?: unknown;
     allowAllUris?: unknown;
-    credentialHeaderName?: unknown;
-    credentialHeaderPrefix?: unknown;
-    credentials?: unknown;
   };
   const meta: ProviderMeta = { name };
   if (Array.isArray(def.authorizedUris)) {
@@ -358,79 +345,7 @@ function projectProviderMeta(name: string, parsed: unknown): ProviderMeta {
   if (typeof def.allowAllUris === "boolean") {
     meta.allowAllUris = def.allowAllUris;
   }
-  if (typeof def.credentialHeaderName === "string" && def.credentialHeaderName.length > 0) {
-    meta.credentialHeaderName = def.credentialHeaderName;
-  }
-  if (typeof def.credentialHeaderPrefix === "string") {
-    meta.credentialHeaderPrefix = def.credentialHeaderPrefix;
-  }
-  const credentialsObj =
-    def.credentials && typeof def.credentials === "object"
-      ? (def.credentials as { fieldName?: unknown })
-      : null;
-  const explicitField =
-    credentialsObj && typeof credentialsObj.fieldName === "string"
-      ? credentialsObj.fieldName
-      : undefined;
-  const placeholder = explicitField ?? defaultCredentialPlaceholder(def.authMode);
-  if (placeholder) {
-    meta.credentialPlaceholder = placeholder;
-  }
   return meta;
-}
-
-/**
- * Default credential placeholder name per auth mode when the manifest
- * does not pin one explicitly. Mirrors the conventions enforced by the
- * platform's `buildSidecarCredentials` helper: OAuth flows expose the
- * live bearer as `access_token`, api-key flows expose the secret as
- * `api_key`. Modes that don't map to a single placeholder (`basic`,
- * `custom`) return `undefined` — the LLM must populate the header
- * itself for those.
- */
-function defaultCredentialPlaceholder(authMode: unknown): string | undefined {
-  if (authMode === "oauth2" || authMode === "oauth1") return "access_token";
-  if (authMode === "api_key") return "api_key";
-  return undefined;
-}
-
-/**
- * Build the credential header value that gets injected into an
- * outgoing provider call — e.g. `Bearer {{access_token}}`. Returns
- * `undefined` when the manifest doesn't carry enough metadata to
- * determine what to inject (no headerName, or no placeholder); callers
- * treat that as "skip injection, the LLM / transport handles it".
- *
- * Exported so resolvers that speak the sidecar substitution contract
- * (Sidecar, RemoteAppstrate) share one implementation. Local / offline
- * resolvers handle injection differently (they substitute locally).
- */
-export function buildCredentialHeader(
-  meta: ProviderMeta,
-): { name: string; value: string } | undefined {
-  if (!meta.credentialHeaderName || !meta.credentialPlaceholder) return undefined;
-  const placeholder = `{{${meta.credentialPlaceholder}}}`;
-  const prefix = meta.credentialHeaderPrefix?.trim();
-  const value = prefix ? `${prefix} ${placeholder}` : placeholder;
-  return { name: meta.credentialHeaderName, value };
-}
-
-/**
- * Merge caller-supplied headers with the credential header derived
- * from {@link buildCredentialHeader}. Caller headers win on
- * case-insensitive match — if the LLM explicitly set the auth header,
- * we respect the override rather than silently clobbering it.
- */
-export function applyCredentialHeader(
-  callerHeaders: Record<string, string> | undefined,
-  meta: ProviderMeta,
-): Record<string, string> {
-  const caller = callerHeaders ?? {};
-  const creds = buildCredentialHeader(meta);
-  if (!creds) return { ...caller };
-  const lowerCaller = new Set(Object.keys(caller).map((k) => k.toLowerCase()));
-  if (lowerCaller.has(creds.name.toLowerCase())) return { ...caller };
-  return { [creds.name]: creds.value, ...caller };
 }
 
 function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {

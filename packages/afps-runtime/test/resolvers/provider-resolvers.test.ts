@@ -3,8 +3,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  applyCredentialHeader,
-  buildCredentialHeader,
   makeProviderTool,
   matchesAuthorizedUriSpec,
   readProviderMeta,
@@ -384,111 +382,13 @@ describe("matchesAuthorizedUriSpec", () => {
   });
 });
 
-describe("readProviderMeta — credential header projection", () => {
-  // These three fields drive the sidecar/auto-inject contract. The
-  // default-placeholder logic mirrors the platform's
-  // `buildSidecarCredentials` helper so the wire substitution round-trip
-  // stays consistent across both ends.
-  it("projects credentialHeaderName / Prefix / placeholder from definition.*", () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: {
-          authMode: "oauth2",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-    const meta = readProviderMeta(bundle, { name: "@appstrate/gmail", version: "^1" }, true);
-    expect(meta.credentialHeaderName).toBe("Authorization");
-    expect(meta.credentialHeaderPrefix).toBe("Bearer");
-    expect(meta.credentialPlaceholder).toBe("access_token");
-  });
-
-  it("honours an explicit definition.credentials.fieldName over the auth-mode default", () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@acme/p", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: {
-          authMode: "api_key",
-          credentialHeaderName: "X-Api-Key",
-          credentials: { fieldName: "api_token" },
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-    const meta = readProviderMeta(bundle, { name: "@acme/p", version: "^1" }, false);
-    expect(meta.credentialPlaceholder).toBe("api_token");
-  });
-
-  it("leaves the placeholder undefined for auth modes without a canonical field (basic, custom)", () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@acme/p", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: { authMode: "basic", credentialHeaderName: "Authorization" },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-    const meta = readProviderMeta(bundle, { name: "@acme/p", version: "^1" }, false);
-    expect(meta.credentialPlaceholder).toBeUndefined();
-  });
-});
-
-describe("buildCredentialHeader / applyCredentialHeader", () => {
-  it("renders `<prefix> {{placeholder}}` and skips when metadata is incomplete", () => {
-    expect(
-      buildCredentialHeader({
-        name: "@acme/p",
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialPlaceholder: "access_token",
-      }),
-    ).toEqual({ name: "Authorization", value: "Bearer {{access_token}}" });
-
-    // Prefix is optional — without it the placeholder is the full value.
-    expect(
-      buildCredentialHeader({
-        name: "@acme/p",
-        credentialHeaderName: "X-Api-Key",
-        credentialPlaceholder: "api_key",
-      }),
-    ).toEqual({ name: "X-Api-Key", value: "{{api_key}}" });
-
-    expect(
-      buildCredentialHeader({
-        name: "@acme/p",
-        credentialHeaderName: "Authorization",
-        // placeholder missing — cannot inject safely.
-      }),
-    ).toBeUndefined();
-  });
-
-  it("injects the credential header and yields to caller-supplied overrides (case-insensitive)", () => {
-    const meta: ProviderMeta = {
-      name: "@acme/p",
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
-      credentialPlaceholder: "access_token",
-    };
-    expect(applyCredentialHeader({}, meta)).toEqual({
-      Authorization: "Bearer {{access_token}}",
-    });
-    expect(applyCredentialHeader({ "User-Agent": "x" }, meta)).toEqual({
-      Authorization: "Bearer {{access_token}}",
-      "User-Agent": "x",
-    });
-    // Caller already set an Authorization (different casing) — respect it.
-    expect(applyCredentialHeader({ authorization: "Bearer custom" }, meta)).toEqual({
-      authorization: "Bearer custom",
-    });
-  });
-});
-
-describe("SidecarProviderResolver — credential header auto-injection", () => {
-  it("adds `Authorization: Bearer {{access_token}}` to the forwarded request for oauth2 providers", async () => {
+describe("SidecarProviderResolver — wire protocol is credential-free", () => {
+  // Option C (issue #250) moved credential injection server-side. The
+  // sidecar now owns the injection — the runtime forwards only
+  // routing headers (`X-Provider`, `X-Target`) plus any custom headers
+  // the LLM explicitly set. No Authorization, no placeholders, no
+  // credential field at all on the wire from agent to sidecar.
+  it("forwards only routing headers — no auth metadata leaks from the manifest", async () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
       "provider.json": JSON.stringify({
@@ -517,19 +417,25 @@ describe("SidecarProviderResolver — credential header auto-injection", () => {
       ctx,
     );
     const h = calls[0]!.headers as Record<string, string>;
-    expect(h.Authorization).toBe("Bearer {{access_token}}");
     expect(h["X-Provider"]).toBe("@appstrate/gmail");
+    expect(h["X-Target"]).toBe("https://gmail.googleapis.com/gmail/v1/users/me");
+    // The canonical Option C guarantee: the credential header never
+    // crosses the agent → sidecar boundary. The sidecar writes it
+    // server-side from the platform's internal credentials payload.
+    expect(h.Authorization).toBeUndefined();
+    expect(h.authorization).toBeUndefined();
   });
 
-  it("does not inject when the manifest omits credentialHeaderName", async () => {
-    // A provider that leaves credentialHeaderName unset (e.g. a test
-    // stub) must not get a spurious Authorization header — otherwise
-    // the sidecar would reject the forwarded request because the
-    // placeholder cannot be substituted.
+  it("passes caller-supplied headers through untouched for agent-driven overrides", async () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@acme/p", "1.0.0", "provider", {
+    const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
       "provider.json": JSON.stringify({
-        definition: { authMode: "oauth2", authorizedUris: ["https://api.acme.com/**"] },
+        definition: {
+          authMode: "oauth2",
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          authorizedUris: ["https://gmail.googleapis.com/**"],
+        },
       }),
     });
     const bundle = makeBundle(root, [providerPkg]);
@@ -541,11 +447,22 @@ describe("SidecarProviderResolver — credential header auto-injection", () => {
         return Promise.resolve(new Response("{}", { status: 200 }));
       }) as typeof fetch,
     });
-    const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], bundle);
+    const tools = await resolver.resolve([{ name: "@appstrate/gmail", version: "^1" }], bundle);
     const { ctx } = makeCtx();
-    await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/x" }, ctx);
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://gmail.googleapis.com/gmail/v1/users/me",
+        headers: { "X-Dual-Auth-Token": "agent-override" },
+      },
+      ctx,
+    );
     const h = calls[0]!.headers as Record<string, string>;
-    expect(h.Authorization).toBeUndefined();
+    // Custom headers pass through to the sidecar, which then honours
+    // them over the server-side injection for non-Authorization
+    // keys — preserves dual-auth / exotic flows without giving up the
+    // pinned-header guarantee for the 99% default.
+    expect(h["X-Dual-Auth-Token"]).toBe("agent-override");
   });
 });
 

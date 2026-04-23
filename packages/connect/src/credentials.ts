@@ -118,8 +118,46 @@ export async function getCredentials(
 }
 
 /**
+ * Payload returned by {@link resolveCredentialsForProxy} and
+ * {@link forceRefreshCredentials} to the sidecar and the
+ * `/api/credential-proxy/proxy` route. Both consumers inject the
+ * upstream auth header server-side from this payload — the agent never
+ * sees placeholders.
+ */
+export interface ProxyCredentialsPayload {
+  /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
+  credentials: Record<string, string>;
+  /** URL allowlist per AFPS §7.5 — `null` means no whitelist, SSRF safety net applies. */
+  authorizedUris: string[] | null;
+  /** When true, skip allowlist enforcement (still block private/internal ranges). */
+  allowAllUris: boolean;
+  /**
+   * Header name the upstream expects the credential under
+   * (e.g. `Authorization`, `X-Api-Key`). Absent = the sidecar does not
+   * inject any header and the agent is expected to write its own auth
+   * (basic/custom modes, or providers that pass credentials via URL /
+   * query / body). Pinned server-side so the agent cannot alter it.
+   */
+  credentialHeaderName?: string;
+  /**
+   * Prefix prepended to the credential value — typically `Bearer` for
+   * OAuth, empty for most API-key providers. When set, the rendered
+   * header is `${prefix} ${credentials[credentialFieldName]}`.
+   */
+  credentialHeaderPrefix?: string;
+  /**
+   * Name of the field in `credentials` that holds the secret to inject.
+   * Always populated (defaults `access_token` / `api_key` by auth mode)
+   * so the sidecar can treat `credentialHeaderName` presence as the
+   * single switch that controls injection.
+   */
+  credentialFieldName: string;
+}
+
+/**
  * Resolve credentials for the sidecar proxy.
- * Reads authorizedUris and field names from packages.manifest.definition.
+ * Reads authorizedUris and transport metadata from
+ * `packages.manifest.definition`.
  */
 export async function resolveCredentialsForProxy(
   db: Db,
@@ -127,11 +165,7 @@ export async function resolveCredentialsForProxy(
   providerId: string,
   orgId: string,
   providerCredentialId: string,
-): Promise<{
-  credentials: Record<string, string>;
-  authorizedUris: string[] | null;
-  allowAllUris: boolean;
-} | null> {
+): Promise<ProxyCredentialsPayload | null> {
   const result = await getCredentials(db, profileId, providerId, orgId, providerCredentialId);
   if (!result) return null;
 
@@ -141,6 +175,7 @@ export async function resolveCredentialsForProxy(
   return {
     credentials: buildSidecarCredentials(result.credentials, def, authMode),
     ...extractUriConfig(def),
+    ...extractInjection(def, authMode),
   };
 }
 
@@ -155,11 +190,7 @@ export async function forceRefreshCredentials(
   providerId: string,
   orgId: string,
   providerCredentialId: string,
-): Promise<{
-  credentials: Record<string, string>;
-  authorizedUris: string[] | null;
-  allowAllUris: boolean;
-} | null> {
+): Promise<ProxyCredentialsPayload | null> {
   const connection = await getConnection(db, profileId, providerId, orgId, providerCredentialId);
   if (!connection) return null;
 
@@ -191,6 +222,7 @@ export async function forceRefreshCredentials(
   return {
     credentials: buildSidecarCredentials(credentials, def, authMode),
     ...extractUriConfig(def),
+    ...extractInjection(def, authMode),
   };
 }
 
@@ -455,4 +487,47 @@ function extractUriConfig(def: Record<string, unknown>): {
     : null;
   const allowAllUris = (def.allowAllUris as boolean) ?? false;
   return { authorizedUris, allowAllUris };
+}
+
+/**
+ * Extract the transport-injection metadata that lets the sidecar (and the
+ * `/api/credential-proxy/proxy` route) write the upstream auth header
+ * server-side without the agent ever touching placeholders.
+ *
+ * `credentialHeaderName` / `credentialHeaderPrefix` come from the
+ * definition root (spec §7.5 — cross-cutting transport fields).
+ * `credentialFieldName` is the resolved name of the field inside the
+ * sidecar credentials map that holds the secret — `access_token` for
+ * OAuth flows, `api_key` for API-key flows, or an explicit manifest
+ * override via `definition.credentials.fieldName`.
+ *
+ * For auth modes that don't map to a single secret (basic, custom), we
+ * still return a field name (the default) so downstream code can treat
+ * the presence of `credentialHeaderName` as the single switch that
+ * controls injection.
+ */
+function extractInjection(
+  def: Record<string, unknown>,
+  authMode: AuthMode | undefined,
+): {
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  credentialFieldName: string;
+} {
+  const headerName = def.credentialHeaderName;
+  const headerPrefix = def.credentialHeaderPrefix;
+  const creds = (def.credentials as Record<string, unknown> | undefined) ?? {};
+  const explicitField = creds.fieldName;
+  const credentialFieldName =
+    typeof explicitField === "string" && explicitField.length > 0
+      ? explicitField
+      : authMode === "api_key"
+        ? "api_key"
+        : "access_token";
+  return {
+    credentialHeaderName:
+      typeof headerName === "string" && headerName.length > 0 ? headerName : undefined,
+    credentialHeaderPrefix: typeof headerPrefix === "string" ? headerPrefix : undefined,
+    credentialFieldName,
+  };
 }
