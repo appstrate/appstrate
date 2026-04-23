@@ -221,4 +221,94 @@ describe("renderPlatformPrompt", () => {
     });
     expect(out).toContain("\n---\n\nUSER_TEMPLATE_BODY");
   });
+
+  describe("Output Format section", () => {
+    const schema = {
+      type: "object",
+      required: ["random"],
+      properties: {
+        random: { type: "number", description: "A random float between 0 and 1" },
+      },
+    };
+
+    it("emits the section when outputSchema is provided", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+      });
+      expect(out).toContain("## Output Format");
+      expect(out).toContain("exactly once");
+      expect(out).toContain("do not probe");
+    });
+
+    it("omits the section when outputSchema is absent or empty", () => {
+      const without = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(without).not.toContain("## Output Format");
+      const withEmpty = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: {},
+      });
+      expect(withEmpty).not.toContain("## Output Format");
+    });
+
+    it("lists each property with type, required flag, and description", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+      });
+      expect(out).toContain("### Required shape");
+      expect(out).toContain("- **random** (number, required): A random float between 0 and 1");
+    });
+
+    it("marks optional fields as optional", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: {
+          type: "object",
+          required: ["a"],
+          properties: { a: { type: "string" }, b: { type: "number" } },
+        },
+      });
+      expect(out).toContain("- **a** (string, required)");
+      expect(out).toContain("- **b** (number, optional)");
+    });
+
+    it("includes the full JSON Schema block", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+      });
+      expect(out).toContain("### Full JSON Schema");
+      expect(out).toContain('"required": [\n    "random"\n  ]');
+      expect(out).toContain('"type": "number"');
+    });
+
+    it("renders before the template separator so the constraint precedes the task prompt", () => {
+      const out = renderPlatformPrompt({
+        template: "USER_TEMPLATE_BODY",
+        context: ctx(),
+        outputSchema: schema,
+      });
+      const outputIdx = out.indexOf("## Output Format");
+      const sepIdx = out.indexOf("\n---\n\nUSER_TEMPLATE_BODY");
+      expect(outputIdx).toBeGreaterThan(-1);
+      expect(sepIdx).toBeGreaterThan(outputIdx);
+    });
+
+    it("tolerates schemas without `properties` (list section skipped, full schema still shown)", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: { type: "string" },
+      });
+      expect(out).toContain("## Output Format");
+      expect(out).not.toContain("### Required shape");
+      expect(out).toContain("### Full JSON Schema");
+    });
+  });
 });

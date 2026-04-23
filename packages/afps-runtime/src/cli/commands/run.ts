@@ -343,6 +343,9 @@ export function createRunHandler(
       template,
       context,
       ...(schemaVersion ? { schemaVersion } : {}),
+      ...(outputSchema && typeof outputSchema === "object" && !Array.isArray(outputSchema)
+        ? { outputSchema: outputSchema as Record<string, unknown> }
+        : {}),
       platformName: "afps run",
       timeoutSeconds,
     });

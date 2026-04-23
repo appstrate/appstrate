@@ -48,6 +48,9 @@ export function buildPlatformSystemPrompt(
     providers: connected,
     ...(plan.schemas.input ? { inputSchema: plan.schemas.input } : {}),
     ...(plan.schemas.config ? { configSchema: plan.schemas.config } : {}),
+    ...(plan.schemas.output
+      ? { outputSchema: plan.schemas.output as unknown as Record<string, unknown> }
+      : {}),
     uploads: plan.files?.map((f) => ({
       name: f.name,
       path: `./documents/${sanitizeStorageKey(f.name)}`,

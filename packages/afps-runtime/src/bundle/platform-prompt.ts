@@ -103,6 +103,16 @@ export interface PlatformPromptOptions {
   inputSchema?: PlatformPromptSchema;
   /** Config schema — drives the `## Configuration` section. */
   configSchema?: PlatformPromptSchema;
+  /**
+   * Output schema — drives the `## Output Format` section. The full JSON
+   * Schema (as it appears under `manifest.output.schema`) is surfaced in
+   * plain text so the LLM sees the constraint in the prompt AND via the
+   * `output` tool definition. This belt-and-suspenders is necessary
+   * because pi-ai currently sends `strict: false` on tool schemas — the
+   * LLM treats tool `required` as a hint, not a decode constraint, so
+   * weaker models routinely call `output({})` before the correct shape.
+   */
+  outputSchema?: Record<string, unknown>;
 
   /** Uploaded documents surfaced in `## Documents`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
@@ -342,6 +352,45 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
     );
     sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
+  }
+
+  // --- Output format ---
+  // Rendered LAST so the constraint is freshly in the LLM's context when
+  // it reads the agent task prompt below. See `outputSchema` docstring
+  // for why this duplicates the tool-level schema.
+  if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
+    sections.push("## Output Format\n");
+    sections.push(
+      "You MUST call the `output` tool **exactly once** before finishing, " +
+        "with a `data` parameter that satisfies the JSON Schema below. " +
+        "Provide ALL required fields in that single call — do not probe " +
+        "with `output({})` first, and do not split the payload across " +
+        "multiple calls (each call REPLACES the previous one).\n",
+    );
+
+    const required = Array.isArray(opts.outputSchema.required)
+      ? (opts.outputSchema.required as readonly unknown[]).filter(
+          (v): v is string => typeof v === "string",
+        )
+      : [];
+    const props = opts.outputSchema.properties;
+    if (props && typeof props === "object" && !Array.isArray(props)) {
+      sections.push("### Required shape\n");
+      for (const [key, prop] of Object.entries(props as Record<string, unknown>)) {
+        const propRec = (prop as Record<string, unknown>) ?? {};
+        const type = propRec.type;
+        const req = required.includes(key) ? "required" : "optional";
+        const description =
+          typeof propRec.description === "string" ? `: ${propRec.description}` : "";
+        sections.push(`- **${key}** (${String(type ?? "unknown")}, ${req})${description}`);
+      }
+      sections.push("");
+    }
+
+    sections.push("### Full JSON Schema\n");
+    sections.push("```json");
+    sections.push(JSON.stringify(opts.outputSchema, null, 2));
+    sections.push("```\n");
   }
 
   // schemaVersion 1.1+: render rawPrompt through logic-less Mustache so

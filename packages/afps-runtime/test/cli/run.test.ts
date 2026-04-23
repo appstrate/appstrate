@@ -626,6 +626,41 @@ describe("afps run — orchestration (Phase 3)", () => {
     expect(io.stderrText()).toContain("unknown --api 'bogus-api'");
   });
 
+  it("includes the Output Format section in systemPrompt when the bundle has output.schema", async () => {
+    const schema = {
+      type: "object",
+      required: ["random"],
+      properties: { random: { type: "number" } },
+    };
+    await writeBundleFile(bundle, {
+      manifest: {
+        name: "@acme/hw",
+        version: "1.0.0",
+        type: "agent",
+        schemaVersion: "1.1",
+        displayName: "HW",
+        author: "Acme",
+        output: { schema },
+      },
+    });
+    let captured: unknown = null;
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          captureOpts: (opts) => {
+            captured = opts;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(validArgs(), io);
+    expect(code).toBe(0);
+    const systemPrompt = (captured as { systemPrompt: string }).systemPrompt;
+    expect(systemPrompt).toContain("## Output Format");
+    expect(systemPrompt).toContain("do not probe with `output({})`");
+    expect(systemPrompt).toContain("**random** (number, required)");
+  });
+
   it("exports OUTPUT_SCHEMA env var when manifest has output.schema", async () => {
     const schema = {
       type: "object",
