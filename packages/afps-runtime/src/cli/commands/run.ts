@@ -323,6 +323,22 @@ export function createRunHandler(
     const schemaVersion =
       typeof manifest.schemaVersion === "string" ? manifest.schemaVersion : undefined;
 
+    // The bundled @appstrate/output tool reads process.env.OUTPUT_SCHEMA at
+    // import time to decide whether to expose a strict schema or a generic
+    // `data: any` shape to the LLM. On the platform this env var is set by
+    // `buildRuntimePiEnv` before container spawn; here we must set it in-
+    // process before prepareBundleForPi imports the tool. The output schema
+    // lives under `manifest.output.schema` per AFPS 1.3 (it's a wrapper:
+    // `{ schema, fileConstraints?, uiHints?, propertyOrder? }`).
+    const outputSection = manifest.output;
+    const outputSchema =
+      outputSection &&
+      typeof outputSection === "object" &&
+      !Array.isArray(outputSection) &&
+      "schema" in outputSection
+        ? (outputSection as { schema: unknown }).schema
+        : undefined;
+
     const systemPrompt = renderPlatformPrompt({
       template,
       context,
@@ -341,6 +357,16 @@ export function createRunHandler(
     const cleanupTasks: Array<() => Promise<void>> = [];
     if (ownsWorkspace) {
       cleanupTasks.push(async () => rm(workspaceDir, { recursive: true, force: true }));
+    }
+    // Snapshot-then-set OUTPUT_SCHEMA so repeated CLI invocations in the
+    // same process (tests, scripts) don't leak schemas between bundles.
+    const priorOutputSchema = process.env.OUTPUT_SCHEMA;
+    cleanupTasks.push(async () => {
+      if (priorOutputSchema === undefined) delete process.env.OUTPUT_SCHEMA;
+      else process.env.OUTPUT_SCHEMA = priorOutputSchema;
+    });
+    if (outputSchema !== undefined && outputSchema !== null) {
+      process.env.OUTPUT_SCHEMA = JSON.stringify(outputSchema);
     }
 
     // Abort plumbing: timeout OR SIGINT aborts the controller, the

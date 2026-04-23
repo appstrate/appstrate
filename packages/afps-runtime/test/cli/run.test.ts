@@ -626,6 +626,88 @@ describe("afps run — orchestration (Phase 3)", () => {
     expect(io.stderrText()).toContain("unknown --api 'bogus-api'");
   });
 
+  it("exports OUTPUT_SCHEMA env var when manifest has output.schema", async () => {
+    const schema = {
+      type: "object",
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+    };
+    // Overwrite the Phase 3 default bundle with a manifest that declares
+    // output.schema — cheaper than juggling a custom path through validArgs.
+    await writeBundleFile(bundle, {
+      manifest: {
+        name: "@acme/with-output",
+        version: "1.0.0",
+        type: "agent",
+        schemaVersion: "1.1",
+        displayName: "With Output",
+        author: "Acme",
+        output: { schema },
+      },
+    });
+
+    let seenAtPrepare: string | undefined;
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          // prepareBundleForPi is the exact call site where the bundled
+          // @appstrate/output tool would read OUTPUT_SCHEMA at import
+          // time on a real run. Sampling it here mirrors production timing.
+          preparedWorkspaceCallback: () => {
+            seenAtPrepare = process.env.OUTPUT_SCHEMA;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(validArgs(), io);
+    expect(code).toBe(0);
+    expect(seenAtPrepare).toBeDefined();
+    expect(JSON.parse(seenAtPrepare!)).toEqual(schema);
+    // Post-run the var must be cleared (not leak to subsequent tests).
+    expect(process.env.OUTPUT_SCHEMA).toBeUndefined();
+  });
+
+  it("leaves OUTPUT_SCHEMA unset when manifest has no output.schema", async () => {
+    let seenAtPrepare: string | undefined = "SENTINEL";
+    const handler = createRunHandler({
+      loadRunnerPi: async () =>
+        stubModuleFor({
+          preparedWorkspaceCallback: () => {
+            seenAtPrepare = process.env.OUTPUT_SCHEMA;
+          },
+        }),
+    });
+    const io = captureIo();
+    const code = await handler(validArgs(), io);
+    expect(code).toBe(0);
+    expect(seenAtPrepare).toBeUndefined();
+  });
+
+  it("restores a pre-existing OUTPUT_SCHEMA after the run", async () => {
+    process.env.OUTPUT_SCHEMA = '{"type":"pre-existing"}';
+    try {
+      const schema = { type: "object", properties: { x: { type: "number" } } };
+      await writeBundleFile(bundle, {
+        manifest: {
+          name: "@acme/with-schema",
+          version: "1.0.0",
+          type: "agent",
+          schemaVersion: "1.1",
+          displayName: "X",
+          author: "Acme",
+          output: { schema },
+        },
+      });
+      const handler = createRunHandler({ loadRunnerPi: async () => stubModuleFor({}) });
+      const io = captureIo();
+      const code = await handler(validArgs(), io);
+      expect(code).toBe(0);
+      expect(process.env.OUTPUT_SCHEMA).toBe('{"type":"pre-existing"}');
+    } finally {
+      delete process.env.OUTPUT_SCHEMA;
+    }
+  });
+
   it("passes --base-url through to PiRunner model config", async () => {
     let captured: unknown = null;
     const handler = createRunHandler({
