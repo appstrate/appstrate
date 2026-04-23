@@ -20,6 +20,7 @@
 
 import { mkdir, rm, open as fsOpen } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import type { ContainerOrchestrator } from "./interface.ts";
 import type {
@@ -289,6 +290,14 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       }
     }
     return found ? "stopped" : "not_found";
+  }
+
+  /**
+   * In process mode agents run as host subprocesses — loopback reaches the
+   * platform directly. No Docker bridge, no host alias needed.
+   */
+  async resolvePlatformApiUrl(): Promise<string> {
+    return `http://localhost:${getEnv().PORT}`;
   }
 
   // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
+import { getOrchestrator } from "./orchestrator/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
@@ -298,10 +299,17 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // protocol. The container reads `APPSTRATE_SINK_URL` +
   // `APPSTRATE_SINK_SECRET` from its env and POSTs CloudEvents back;
   // the platform's event-ingestion pipeline is the single writer.
+  //
+  // The base URL comes from the orchestrator — `APP_URL` is a public
+  // hostname meant for OAuth redirects and CLI clients, not for
+  // container-to-platform traffic. Docker orchestrator resolves to the
+  // platform's Docker-network hostname (bridge-internal, survives
+  // container renames); process orchestrator resolves to loopback.
   const env = getEnv();
+  const sinkBaseUrl = await getOrchestrator().resolvePlatformApiUrl();
   const sinkCredentials = mintSinkCredentials({
     runId,
-    appUrl: env.APP_URL,
+    appUrl: sinkBaseUrl,
     ttlSeconds: env.REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS,
   });
 

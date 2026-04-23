@@ -39,6 +39,7 @@ import { notFound } from "../../src/lib/errors.ts";
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
 import { createRunsRouter } from "../../src/routes/runs.ts";
+import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
@@ -199,6 +200,10 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
+  // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
+  // more-specific `/runs/:runId/events` path wins — mirrors the
+  // production wiring in `apps/api/src/index.ts`.
+  app.route("/api", createRunsEventsRouter());
   app.route("/api", runsRouter);
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());

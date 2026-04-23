@@ -146,6 +146,9 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
     async stopByRunId(): Promise<StopResult> {
       return "stopped";
     },
+    async resolvePlatformApiUrl(): Promise<string> {
+      return "http://platform:3000";
+    },
   };
 
   handle.orchestrator = orchestrator;

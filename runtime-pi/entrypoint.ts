@@ -43,9 +43,10 @@ import {
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
+import { attachTeeSink } from "./tee-sink.ts";
 
 // --- 0. Sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
@@ -73,6 +74,16 @@ const sink = new HttpSink({
   finalizeUrl: SINK_FINALIZE_URL,
   runSecret: SINK_SECRET,
 });
+
+// --- 0a. Tee sink + stdout bridge ---
+// See `tee-sink.ts` for the full design rationale. In short: system
+// tools still emit canonical events via `process.stdout.write`; we
+// intercept those lines, fold them into an aggregator together with
+// PiRunner's session events, and merge the aggregate into the finalize
+// POST so `result.report` / `result.output` / `result.state` /
+// `result.memories` are complete when the platform ingests the run.
+const tee = attachTeeSink({ sink, runId: AGENT_RUN_ID });
+const teeSink = tee.sink;
 
 /**
  * Emit a best-effort `appstrate.error` event for a bootstrap failure. We
@@ -233,10 +244,11 @@ if (bundle && sidecarUrl) {
       runId: AGENT_RUN_ID,
       workspace: workspaceForProviders,
       emitProvider: (event) => {
-        // Route provider lifecycle events through the same signed sink so
-        // the platform observes each call structurally. Fire-and-forget —
-        // HttpSink's internal retry handles transient network errors.
-        void sink.handle(event);
+        // Route provider lifecycle events through the tee sink so the
+        // platform observes each call structurally AND the aggregate
+        // reducer sees every event. Fire-and-forget — HttpSink handles
+        // retries internally.
+        void teeSink.handle(event as RunEvent);
       },
     });
     extensionFactories.push(...providerFactories);
@@ -380,7 +392,7 @@ try {
     bundle: runnerBundle,
     context,
     providerResolver,
-    eventSink: sink,
+    eventSink: teeSink,
   });
   process.exit(0);
 } catch (err) {

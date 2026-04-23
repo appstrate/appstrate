@@ -30,7 +30,7 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
-import { getRedisConnection } from "../lib/redis.ts";
+import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import { AppstrateEventSink } from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
@@ -89,10 +89,8 @@ const TERMINAL_EVENT_TYPES = new Set([
   "run.cancelled",
 ]);
 
-/** Redis key prefix for webhook-id dedup (replay cache). */
+/** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
-/** Redis key prefix for per-run ordering buffer (sorted set keyed by sequence). */
-const BUFFER_KEY_PREFIX = "appstrate:remote-run:buffer:";
 
 // ---------------------------------------------------------------------------
 // DB helpers
@@ -149,15 +147,12 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
 
   // 1. Replay check — SET … EX … NX atomically rejects a duplicate webhook-id.
   const replayKey = `${REPLAY_KEY_PREFIX}${run.id}:${webhookId}`;
-  const redis = getRedisConnection();
-  const setResult = await redis.set(
-    replayKey,
-    "1",
-    "EX",
-    getEnv().REMOTE_RUN_REPLAY_WINDOW_SECONDS,
-    "NX",
-  );
-  if (setResult === null) {
+  const cache = await getCache();
+  const claimed = await cache.set(replayKey, "1", {
+    ttlSeconds: getEnv().REMOTE_RUN_REPLAY_WINDOW_SECONDS,
+    nx: true,
+  });
+  if (!claimed) {
     return { status: "replay" };
   }
 
@@ -437,49 +432,40 @@ async function persistEventAndAdvance(
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
-  const redis = getRedisConnection();
-  const key = `${BUFFER_KEY_PREFIX}${runId}`;
-  // Sorted set with sequence as score; payload as member (JSON-encoded).
-  await redis.zadd(key, sequence, JSON.stringify(event));
-  // Expiry anchored to buffer flush window + a safety margin.
-  await redis.expire(key, Math.ceil(getEnv().REMOTE_RUN_BUFFER_FLUSH_MS / 1000) + 60);
+  const buffer = await getEventBuffer();
+  const ttlSeconds = Math.ceil(getEnv().REMOTE_RUN_BUFFER_FLUSH_MS / 1000) + 60;
+  await buffer.put(runId, sequence, event, ttlSeconds);
 }
 
 async function drainBufferedEvents(
   run: RunSinkContext,
   opts: { allowGaps?: boolean } = {},
 ): Promise<void> {
-  const redis = getRedisConnection();
-  const key = `${BUFFER_KEY_PREFIX}${run.id}`;
+  const buffer = await getEventBuffer();
 
   while (true) {
-    // ZRANGE … WITHSCORES returns [member1, score1, member2, score2, ...].
-    const pair = await redis.zrange(key, 0, 0, "WITHSCORES");
-    if (pair.length === 0) return;
+    const head = await buffer.peekLowest(run.id);
+    if (!head) return;
 
-    const member = pair[0]!;
-    const score = Number(pair[1]!);
     const next = run.lastEventSequence + 1;
 
-    if (score === next) {
-      const event = JSON.parse(member) as RunEvent;
-      await persistEventAndAdvance(run, event, score);
-      await redis.zrem(key, member);
+    if (head.sequence === next) {
+      await persistEventAndAdvance(run, head.event, head.sequence);
+      await buffer.remove(run.id, head.sequence);
       continue;
     }
 
-    if (opts.allowGaps && score > next) {
+    if (opts.allowGaps && head.sequence > next) {
       // Skip the gap — persist the lowest buffered event as if it were the
       // next in line. Records a gap-filling log line so operators can spot
       // dropped events in post-mortems.
       logger.warn("remote run flushed with sequence gap", {
         runId: run.id,
         expectedSequence: next,
-        actualSequence: score,
+        actualSequence: head.sequence,
       });
-      const event = JSON.parse(member) as RunEvent;
-      await persistEventAndAdvance(run, event, score);
-      await redis.zrem(key, member);
+      await persistEventAndAdvance(run, head.event, head.sequence);
+      await buffer.remove(run.id, head.sequence);
       continue;
     }
 

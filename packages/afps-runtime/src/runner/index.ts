@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 export { type Runner, type RunOptions } from "./types.ts";
-export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
+export { reduceEvents, foldEvent, emptyRunResult, type ReduceOptions } from "./reducer.ts";
 export {
   runContainerLifecycle,
   RunTimeoutError,
