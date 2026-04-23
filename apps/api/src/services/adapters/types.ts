@@ -111,10 +111,3 @@ export interface AppstrateRunPlan {
   /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
   agentPackage?: Buffer | null;
 }
-
-export class TimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "TimeoutError";
-  }
-}

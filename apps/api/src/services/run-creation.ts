@@ -3,12 +3,15 @@
 /**
  * Unified run creation — single entry point for every runs-creating route.
  *
- * - `origin: "platform"` — the platform container will execute the agent.
- * - `origin: "remote"`   — the caller (CLI, GitHub Action, ...) will execute
- *                          the agent on their own host. We mint sink
- *                          credentials, create the `runs` row in `pending`,
- *                          and return the credentials. Status transitions
- *                          (`pending → running → terminal`) flow through
+ * - `origin: "platform"` — the platform spawns a Docker container that
+ *                          talks the exact same HMAC-signed event protocol
+ *                          as any remote runner. Delegates to
+ *                          {@link prepareAndExecuteRun} for the heavy
+ *                          container plan + fire-and-forget execution.
+ * - `origin: "remote"`   — the caller (CLI, GitHub Action, ...) is the
+ *                          runner. We mint sink credentials, create the
+ *                          `runs` row in `pending`, and return the
+ *                          credentials. Status transitions flow through
  *                          the signed-event route (§run-event-ingestion).
  *
  * Both origins share:
@@ -16,12 +19,11 @@
  *   - `beforeRun` module hook (billing/quota/feature-gate rejects)
  *   - Provider readiness (the agent needs configured credentials to run)
  *   - `onRunStatusChange` event firing (consumers stay origin-agnostic)
+ *   - HMAC-signed event ingestion at `POST /api/runs/:runId/events`
  *
  * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
  */
 
-import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -35,7 +37,7 @@ import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { getPlatformRunLimits } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
-import { getRunningRunCountForOrg } from "./state/index.ts";
+import { getRunningRunCountForOrg, createRun as createRunRow } from "./state/index.ts";
 import { callHook, hasHook, emitEvent } from "../lib/modules/module-loader.ts";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { isInlineShadowPackageId } from "./inline-run.ts";
@@ -100,9 +102,10 @@ export type CreateRunResult =
 
 /**
  * Create a run. For platform origin, delegates to {@link prepareAndExecuteRun}
- * (in-process executor, unchanged). For remote origin, runs the same preflight
- * gates, mints sink credentials, creates the `runs` row in `pending`, and
- * returns — the CLI executes on its own host and posts events back.
+ * (builds the container plan + mints sink credentials + fires the container).
+ * For remote origin, runs the same preflight gates, mints sink credentials,
+ * creates the `runs` row in `pending`, and returns — the CLI executes on its
+ * own host and posts events back.
  */
 export async function createRun(input: CreateRunInput): Promise<CreateRunResult> {
   if (input.origin === "platform") {
@@ -236,33 +239,34 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     ttlSeconds,
   });
 
-  // --- Insert run row (pending, with sink state populated) ---
+  // --- Insert run row via the state-layer helper (single source of truth
+  //     for runs inserts — covers runNumber allocation, app-scoping, and
+  //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
   const profileIdMap = Object.fromEntries(
     Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
   );
 
-  await db.insert(runs).values({
-    id: runId,
-    packageId: agent.id,
-    orgId,
-    applicationId,
-    status: "pending",
-    input: runInput ?? null,
-    dashboardUserId: actor?.type === "member" ? actor.id : null,
-    endUserId: actor?.type === "end_user" ? actor.id : null,
-    apiKeyId: apiKeyId ?? null,
-    connectionProfileId: connectionProfileId ?? null,
-    agentScope: agentDenorm.scope,
-    agentName: agentDenorm.name,
-    providerProfileIds: profileIdMap,
-    providerStatuses: providerStatusSnapshots ?? null,
-    config,
-    runOrigin: "remote",
-    sinkSecretEncrypted: encrypt(credentials.secret),
-    sinkExpiresAt: new Date(credentials.expiresAt),
-    contextSnapshot: contextSnapshot ?? null,
-  });
+  await createRunRow(
+    { orgId, applicationId },
+    {
+      id: runId,
+      packageId: agent.id,
+      actor,
+      input: runInput ?? null,
+      connectionProfileId,
+      apiKeyId,
+      providerProfileIds: profileIdMap,
+      providerStatuses: providerStatusSnapshots,
+      agentScope: agentDenorm.scope,
+      agentName: agentDenorm.name,
+      config,
+      runOrigin: "remote",
+      sinkSecretEncrypted: encrypt(credentials.secret),
+      sinkExpiresAt: new Date(credentials.expiresAt),
+      ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
+    },
+  );
 
   // --- Status-change event (consumers stay origin-agnostic) ---
   void emitEvent("onRunStatusChange", {

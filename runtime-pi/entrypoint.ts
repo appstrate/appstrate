@@ -8,19 +8,27 @@
  * container execution is guaranteed by using the same class.
  *
  * Responsibilities (runtime-pi only):
- *   1. Extract the injected agent package (if any) into the workspace.
- *   2. Initialise a git repo for the Pi coding tools.
- *   3. Install TOOL.md / skills / providers into `.pi/` for on-disk lookup.
- *   4. Collect tool extension factories (from agent package + built-ins).
- *   5. Build an {@link ExecutionContext} from env vars.
- *   6. Build a stdout JSONL {@link EventSink} — the current agent ↔ platform
- *      wire protocol.
- *   7. Instantiate {@link PiRunner} and `await runner.run(...)`.
+ *   1. Initialise a git repo + extract the injected agent package.
+ *   2. Install TOOL.md / skills / providers into `.pi/` for on-disk lookup.
+ *   3. Collect tool extension factories (from agent package + built-ins).
+ *   4. Build an {@link ExecutionContext} from env vars.
+ *   5. Build an {@link HttpSink} against the platform's signed-event API.
+ *   6. Instantiate {@link PiRunner} and `await runner.run(...)`.
  *
- * The event-to-RunEvent translation that used to live in this file is
- * now inside {@link PiRunner}. The platform side (`apps/api`) no longer
- * needs `parsePiStreamLine` — events arriving over stdout are already
- * canonical AFPS {@link RunEvent}s.
+ * Wire protocol (agent ↔ platform): HMAC-signed CloudEvents over HTTP via
+ * `@appstrate/afps-runtime/sinks.HttpSink`. Every runner — platform
+ * container, CLI, GitHub Action — speaks the exact same protocol against
+ * `/api/runs/:runId/events` and `/events/finalize`. No stdout parsing.
+ *
+ * Required env vars:
+ *   - `APPSTRATE_SINK_URL`, `APPSTRATE_SINK_FINALIZE_URL`, `APPSTRATE_SINK_SECRET`
+ *   - `AGENT_RUN_ID`, `AGENT_PROMPT`, `MODEL_API`, `MODEL_ID`
+ *
+ * Fatal failures (missing env, malformed bundle) post a single
+ * `appstrate.error` event via HttpSink *and* a terminal failed
+ * `RunResult` via finalize, then `process.exit(1)`. The platform's
+ * container-monitor also synthesises a failed finalize on non-zero
+ * exit — the CAS in `finalizeRemoteRun` guarantees idempotency.
  */
 
 import * as fs from "node:fs/promises";
@@ -33,22 +41,74 @@ import {
   buildProviderExtensionFactories,
 } from "@appstrate/runner-pi";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
-import type { EventSink } from "@appstrate/afps-runtime/interfaces";
+import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
-import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
-import { emit } from "./lib/emit.ts";
 
-// --- Helpers ---
+// --- 0. Sink bootstrap ---
+// Every runtime-pi invocation MUST come from a platform run that has
+// already minted sink credentials + inserted a pending run row. We
+// refuse to boot without them — running without a destination defeats
+// the point of the unified protocol and would produce orphaned work.
 
-function die(message: string): never {
-  emit({
-    type: "appstrate.error",
-    timestamp: Date.now(),
-    runId: process.env.AGENT_RUN_ID ?? "unknown",
-    message,
-  });
+const SINK_URL = process.env.APPSTRATE_SINK_URL;
+const SINK_FINALIZE_URL = process.env.APPSTRATE_SINK_FINALIZE_URL;
+const SINK_SECRET = process.env.APPSTRATE_SINK_SECRET;
+const AGENT_RUN_ID = process.env.AGENT_RUN_ID;
+
+if (!AGENT_RUN_ID || !SINK_URL || !SINK_FINALIZE_URL || !SINK_SECRET) {
+  // Before the sink is live, stderr is the only channel — the platform's
+  // container monitor will synthesise a `failed` finalize from the exit
+  // code so the run record still reaches a terminal state.
+  process.stderr.write(
+    "runtime-pi: missing required sink env (AGENT_RUN_ID, APPSTRATE_SINK_URL, APPSTRATE_SINK_FINALIZE_URL, APPSTRATE_SINK_SECRET)\n",
+  );
+  process.exit(1);
+}
+
+const sink = new HttpSink({
+  url: SINK_URL,
+  finalizeUrl: SINK_FINALIZE_URL,
+  runSecret: SINK_SECRET,
+});
+
+/**
+ * Emit a best-effort `appstrate.error` event for a bootstrap failure. We
+ * swallow sink errors here — the caller is about to `process.exit(1)` and
+ * the platform's container-monitor will synthesise a finalize on exit.
+ */
+async function emitError(message: string, data?: Record<string, unknown>): Promise<void> {
+  try {
+    await sink.handle({
+      type: "appstrate.error",
+      timestamp: Date.now(),
+      runId: AGENT_RUN_ID!,
+      message,
+      ...(data !== undefined ? { data } : {}),
+    });
+  } catch {
+    // The sink POST failed — let the container exit with non-zero code.
+    // Finalize synthesis on the server will record the failure.
+  }
+}
+
+/**
+ * Fatal bootstrap failure. Emits one `appstrate.error`, attempts to
+ * finalize the run as `failed`, and exits. `finalize` is best-effort —
+ * server-side synthesis covers the case where even finalize POST fails.
+ */
+async function die(message: string): Promise<never> {
+  await emitError(message);
+  try {
+    const failureResult = emptyRunResult();
+    failureResult.error = { message };
+    failureResult.status = "failed";
+    await sink.finalize(failureResult);
+  } catch {
+    // fall through
+  }
   process.exit(1);
 }
 
@@ -95,12 +155,9 @@ async function loadExtensionsFromDir(dir: string, label: string) {
         const mod = await import(path.join(dir, entry));
         const factory = mod.default;
         if (typeof factory !== "function") {
-          emit({
-            type: "appstrate.error",
-            timestamp: Date.now(),
-            runId: process.env.AGENT_RUN_ID ?? "unknown",
-            message: `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
-          });
+          await emitError(
+            `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
+          );
           return;
         }
         extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
@@ -110,12 +167,7 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
   for (const result of results) {
     if (result.status === "rejected") {
-      emit({
-        type: "appstrate.error",
-        timestamp: Date.now(),
-        runId: process.env.AGENT_RUN_ID ?? "unknown",
-        message: `Failed to load extension (${label}): ${result.reason}`,
-      });
+      await emitError(`Failed to load extension (${label}): ${result.reason}`);
     }
   }
 }
@@ -138,14 +190,9 @@ if (bundle) {
       workspaceDir: WORKSPACE,
       extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id),
       onError: (message, err) => {
-        emit({
-          type: "appstrate.error",
-          timestamp: Date.now(),
-          runId: process.env.AGENT_RUN_ID ?? "unknown",
-          message: err
-            ? `${message}: ${err instanceof Error ? err.message : String(err)}`
-            : message,
-        });
+        void emitError(
+          err ? `${message}: ${err instanceof Error ? err.message : String(err)}` : message,
+        );
       },
     });
     extensionFactories.push(...prepared.extensionFactories);
@@ -155,12 +202,9 @@ if (bundle) {
     void prepared.cleanup().catch(() => {});
     void fs.unlink(packagePath).catch(() => {});
   } catch (err) {
-    emit({
-      type: "appstrate.error",
-      timestamp: Date.now(),
-      runId: process.env.AGENT_RUN_ID ?? "unknown",
-      message: `Failed to prepare agent package: ${err instanceof Error ? err.message : String(err)}`,
-    });
+    await emitError(
+      `Failed to prepare agent package: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -175,7 +219,6 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 const sidecarUrl = process.env.SIDECAR_URL;
 let providerResolver: ProviderResolver = { resolve: async () => [] };
-const runIdEarly = process.env.AGENT_RUN_ID ?? "local_run";
 const workspaceForProviders = WORKSPACE;
 
 if (bundle && sidecarUrl) {
@@ -187,33 +230,31 @@ if (bundle && sidecarUrl) {
     const providerFactories = await buildProviderExtensionFactories({
       bundle,
       providerResolver,
-      runId: runIdEarly,
+      runId: AGENT_RUN_ID,
       workspace: workspaceForProviders,
       emitProvider: (event) => {
-        // Route provider lifecycle events into the stdout JSONL stream
-        // so the platform observes each call structurally.
-        emit(event as Record<string, unknown>);
+        // Route provider lifecycle events through the same signed sink so
+        // the platform observes each call structurally. Fire-and-forget —
+        // HttpSink's internal retry handles transient network errors.
+        void sink.handle(event);
       },
     });
     extensionFactories.push(...providerFactories);
   } catch (err) {
-    emit({
-      type: "appstrate.error",
-      timestamp: Date.now(),
-      runId: runIdEarly,
-      message: `Failed to wire provider tools: ${err instanceof Error ? err.message : String(err)}`,
-    });
+    await emitError(
+      `Failed to wire provider tools: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
 // --- 3. Model + system prompt from env ---
 
 const api = process.env.MODEL_API;
-if (!api) die("MODEL_API environment variable is required");
+if (!api) await die("MODEL_API environment variable is required");
 const modelId = process.env.MODEL_ID;
-if (!modelId) die("MODEL_ID environment variable is required");
+if (!modelId) await die("MODEL_ID environment variable is required");
 const systemPrompt = process.env.AGENT_PROMPT;
-if (!systemPrompt) die("AGENT_PROMPT environment variable is required");
+if (!systemPrompt) await die("AGENT_PROMPT environment variable is required");
 
 const model: Model<Api> = {
   id: modelId,
@@ -244,11 +285,9 @@ const PROVIDER_BY_API: Record<string, string> = {
   "bedrock-converse-stream": "amazon-bedrock",
 };
 model.provider = PROVIDER_BY_API[api] ?? "";
-if (!model.provider) die(`Unknown MODEL_API: "${api}"`);
+if (!model.provider) await die(`Unknown MODEL_API: "${api}"`);
 
 // --- 4. Build ExecutionContext from env ---
-
-const runId = process.env.AGENT_RUN_ID ?? "local_run";
 
 let parsedInput: Record<string, unknown> = {};
 if (process.env.AGENT_INPUT) {
@@ -261,26 +300,13 @@ if (process.env.AGENT_INPUT) {
 }
 
 const context: ExecutionContext = {
-  runId,
+  runId: AGENT_RUN_ID,
   input: parsedInput,
   memories: [],
   config: {},
 };
 
-// --- 5. Stdout JSONL sink ---
-
-const stdoutSink: EventSink = {
-  async handle(event: RunEvent): Promise<void> {
-    emit(event as unknown as Record<string, unknown>);
-  },
-  async finalize(_result: RunResult): Promise<void> {
-    // The platform reads stdout events and runs its own reducer; no
-    // extra wire message needed. Kept as a no-op hook for parity with
-    // out-of-container runners that may emit a terminal summary.
-  },
-};
-
-// --- 6. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
+// --- 5. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
 // PiRunner needs a Bundle; when no agent-package.afps was present, the
 // platform pre-installed files directly so we hand it a minimal stub
 // whose content is never re-consumed.
@@ -330,8 +356,15 @@ function buildInContainerBundle(prompt: string): Bundle {
 
 const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 
-// --- 7. Run via PiRunner ---
+// --- 6. Run via PiRunner ---
+//
+// PiRunner calls `sink.finalize(result)` on both happy path and its own
+// internal error path. Any error escaping it here is a bootstrap-level
+// failure (before the runner reached its own try/catch) — we catch it,
+// emit an error + finalize, then exit non-zero so the container monitor
+// also records the crash.
 
+const startTime = Date.now();
 try {
   const runner = new PiRunner({
     model,
@@ -347,15 +380,20 @@ try {
     bundle: runnerBundle,
     context,
     providerResolver,
-    eventSink: stdoutSink,
+    eventSink: sink,
   });
   process.exit(0);
 } catch (err) {
-  emit({
-    type: "appstrate.error",
-    timestamp: Date.now(),
-    runId,
-    message: err instanceof Error ? err.message : String(err),
-  });
+  const message = err instanceof Error ? err.message : String(err);
+  await emitError(message);
+  try {
+    const failureResult = emptyRunResult();
+    failureResult.error = { message, stack: err instanceof Error ? err.stack : undefined };
+    failureResult.status = "failed";
+    failureResult.durationMs = Date.now() - startTime;
+    await sink.finalize(failureResult);
+  } catch {
+    // swallow — container exit code + server-side synthesis cover us
+  }
   process.exit(1);
 }

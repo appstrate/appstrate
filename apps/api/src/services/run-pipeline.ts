@@ -18,6 +18,9 @@ import { validateAgentReadiness } from "./agent-readiness.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getPlatformRunLimits } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
+import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
+import { encrypt } from "@appstrate/connect";
+import { getEnv } from "@appstrate/env";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
@@ -290,7 +293,19 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
   );
 
-  // --- Step 5: Create run record ---
+  // --- Step 5: Mint sink credentials ---
+  // Every run — platform and remote — uses the same signed-event
+  // protocol. The container reads `APPSTRATE_SINK_URL` +
+  // `APPSTRATE_SINK_SECRET` from its env and POSTs CloudEvents back;
+  // the platform's event-ingestion pipeline is the single writer.
+  const env = getEnv();
+  const sinkCredentials = mintSinkCredentials({
+    runId,
+    appUrl: env.APP_URL,
+    ttlSeconds: env.REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS,
+  });
+
+  // --- Step 6: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
   await createRun(
     { orgId, applicationId },
@@ -312,21 +327,25 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
       config,
+      runOrigin: "platform",
+      sinkSecretEncrypted: encrypt(sinkCredentials.secret),
+      sinkExpiresAt: new Date(sinkCredentials.expiresAt),
     },
   );
 
-  // --- Step 6: Fire-and-forget execution ---
-  executeAgentInBackground(
+  // --- Step 7: Fire-and-forget execution ---
+  executeAgentInBackground({
     runId,
     orgId,
+    applicationId,
     agent,
     context,
     plan,
-    applicationId,
     agentPackage,
-    uploadedFiles,
+    inputFiles: uploadedFiles,
     modelSource,
-  ).catch((err) => {
+    sinkCredentials,
+  }).catch((err) => {
     logger.error("Unhandled error in background run", {
       runId,
       error: err instanceof Error ? err.message : String(err),

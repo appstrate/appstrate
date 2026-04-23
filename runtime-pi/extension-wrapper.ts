@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { emit as defaultEmit } from "./lib/emit.ts";
 
 type EmitFn = (obj: Record<string, unknown>) => void;
+
+/**
+ * Default breadcrumb sink for runtime tool-execution errors. The tool's
+ * error content is returned to the LLM via the MCP `content` channel,
+ * which is the authoritative surface. Tests inject their own spy to
+ * observe breadcrumbs; production defaults to a no-op because the
+ * unified protocol does not parse ad-hoc side channels.
+ */
+const defaultEmit: EmitFn = () => {};
 
 /**
  * Wrap an extension factory to catch errors thrown by tool execute functions.

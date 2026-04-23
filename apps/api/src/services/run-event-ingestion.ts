@@ -33,12 +33,17 @@ import { logger } from "../lib/logger.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { getEnv } from "@appstrate/env";
 import { AppstrateEventSink } from "./adapters/appstrate-event-sink.ts";
-import { updateRun } from "./state/runs.ts";
+import { updateRun, appendRunLog } from "./state/runs.ts";
+import { addPackageMemories } from "./state/package-memories.ts";
+import { getPackage } from "./agent-service.ts";
+import { validateOutput } from "./schema.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { aggregateRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
+import type { TokenUsage } from "./adapters/types.ts";
 
 // Re-export the pure helpers so callers that already import from this
 // service don't have to change.
@@ -185,45 +190,131 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
 }
 
 /**
- * Terminal closure.
+ * Terminal closure — the single convergence point for every run, regardless of
+ * origin (platform container, remote CLI, GitHub Action, ...). All post-run
+ * logic lives here:
  *
- * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize requests
- * (retries from an HttpSink that didn't see our 200) end up applying once.
+ *   1. Drain buffered events (accepting gaps — last chance).
+ *   2. Load the package manifest (for output-schema validation).
+ *   3. Derive the authoritative terminal status:
+ *        a. Explicit `result.status` from the runner wins.
+ *        b. `result.error` → failed.
+ *        c. If status is still "success": validate output against manifest
+ *           schema (if declared) — failure overrides to "failed".
+ *        d. If status is still "success": apply the "zero tokens" heuristic
+ *           (no LLM roundtrip ever happened) — overrides to "failed".
+ *   4. Build the result payload (`{ output, report }`) mirroring the legacy
+ *      platform shape; consumers of `runs.result` get the same structure
+ *      whether the run executed in-process or came from a remote runner.
+ *   5. Fire the `afterRun` hook to collect module-provided metadata (billing,
+ *      usage quotas, ...).
+ *   6. CAS-update the run row (status, result, state, cost, metadata,
+ *      sink_closed_at). Idempotent: zero rows affected = already finalized.
+ *   7. Persist memories + terminal log rows.
+ *   8. Emit `onRunStatusChange` (modules react asynchronously).
  *
- * Order:
- *   1. Flush buffered events (accepting gaps — we will never see them now).
- *   2. CAS-update the run row with status + result + cost.
- *   3. Fire `afterRun` hook and `onRunStatusChange` event.
+ * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
+ * from HttpSink end up applying once.
  */
 export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<void> {
   const { run, result } = input;
+  const scope = { orgId: run.orgId, applicationId: run.applicationId };
 
-  // 1. Drain buffer (no gap filtering — this is the last chance).
+  // 1. Flush any buffered events before we close the sink.
   await drainBufferedEvents(run, { allowGaps: true });
 
-  // 2. CAS close. Zero rows affected → already finalized, return 200.
+  // 2. Load manifest for output-schema validation. `includeEphemeral: true`
+  //    keeps inline-run shadow packages addressable here.
+  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+
+  // 3. Derive final status + error message.
+  let status = mapTerminalStatus(result);
+  let errorMessage: string | null = result.error?.message ?? null;
+
+  if (status === "success" && agent?.manifest.output?.schema) {
+    const outputRecord = isPlainRecord(result.output) ? result.output : {};
+    const validation = validateOutput(
+      outputRecord,
+      asJSONSchemaObject(agent.manifest.output.schema),
+    );
+    if (!validation.valid) {
+      status = "failed";
+      errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
+      await appendRunLog(
+        scope,
+        run.id,
+        "system",
+        "output_validation",
+        null,
+        { valid: false, errors: validation.errors },
+        "error",
+      );
+    }
+  }
+
+  if (status === "success") {
+    const zeroTokens = await runHadZeroTokens(run.id);
+    if (zeroTokens) {
+      status = "failed";
+      errorMessage = llmUnreachableMessage(run);
+    }
+  }
+
+  // 4. Build the persisted result payload — matches the legacy platform shape
+  //    so existing consumers of `runs.result.output` / `runs.result.report`
+  //    keep working.
+  const resultPayload: Record<string, unknown> = {};
+  if (result.output !== null && result.output !== undefined) {
+    resultPayload.output = result.output;
+  }
+  if (typeof result.report === "string" && result.report.length > 0) {
+    resultPayload.report = result.report;
+  }
+  const resultToPersist =
+    Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
+
   const cost = await aggregateRunCost(run.id);
   const now = new Date();
-  const status = mapTerminalStatus(result);
+  const packageEphemeral = isInlineShadowPackageId(run.packageId);
 
-  // Usage is accumulated in-place by AppstrateEventSink's metric handler as
-  // `appstrate.metric` events arrived — no need to re-write it here. Cost is
-  // the aggregated proxy-attributable spend (llm + credential) which may
-  // include rows whose run_id matches but whose insertion races the final
-  // event; re-computed here as the authoritative close-out value.
+  // 5. afterRun hook — must run BEFORE the CAS update so metadata can be
+  //    written in the same UPDATE (no second round-trip, no partial state).
+  const hookParams: RunStatusChangeParams = {
+    orgId: run.orgId,
+    runId: run.id,
+    packageId: run.packageId,
+    applicationId: run.applicationId,
+    status,
+    packageEphemeral,
+    ...(result.durationMs !== undefined ? { duration: result.durationMs } : {}),
+    ...(cost.total > 0 ? { cost: cost.total } : {}),
+  };
+  let metadata: Record<string, unknown> | null = null;
+  try {
+    metadata = (await callHook("afterRun", hookParams)) ?? null;
+  } catch (err) {
+    logger.error("afterRun hook failed on remote run finalize", {
+      runId: run.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 6. CAS close.
+  const stateToPersist = isPlainRecord(result.state) ? result.state : null;
+
   const rowsAffected = await db
     .update(runs)
     .set({
       status,
-      // output is runtime's unknown|null; Drizzle jsonb accepts unknown but
-      // the column type is Record<string, unknown> — the cast is intentional
-      // and matches how existing code persists arbitrary output shapes.
-      result: (result.output ?? null) as Record<string, unknown> | null,
-      error: result.error ? result.error.message : null,
+      result: resultToPersist,
+      state: stateToPersist,
+      error: errorMessage,
       completedAt: now,
       duration: result.durationMs ?? null,
-      cost: cost.total,
+      cost: cost.total > 0 ? cost.total : null,
       sinkClosedAt: now,
+      notifiedAt: now,
+      ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
     .returning({ id: runs.id });
@@ -233,26 +324,68 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
     return;
   }
 
-  // 3. Hooks.
-  const packageEphemeral = isInlineShadowPackageId(run.packageId);
-  const hookParams: RunStatusChangeParams = {
-    orgId: run.orgId,
-    runId: run.id,
-    packageId: run.packageId,
-    applicationId: run.applicationId,
-    status,
-    packageEphemeral,
-  };
-
-  try {
-    await callHook("afterRun", hookParams);
-  } catch (err) {
-    logger.error("afterRun hook failed on remote run finalize", {
-      runId: run.id,
-      err: err instanceof Error ? err.message : String(err),
-    });
+  // 7. Memories + terminal log rows.
+  if (result.memories?.length) {
+    await addPackageMemories(
+      run.packageId,
+      run.orgId,
+      run.applicationId,
+      result.memories.map((m) => m.content),
+      run.id,
+    );
   }
-  void emitEvent("onRunStatusChange", hookParams);
+  if (status === "success" && resultToPersist) {
+    await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+  }
+  await appendRunLog(
+    scope,
+    run.id,
+    "system",
+    "run_completed",
+    null,
+    { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
+    status === "success" ? "info" : "error",
+  );
+
+  // 8. Status-change broadcast with the enriched params (including
+  //    validation-failure errors and any afterRun metadata).
+  const broadcastParams: RunStatusChangeParams = {
+    ...hookParams,
+    ...(errorMessage ? { extra: { error: errorMessage } } : {}),
+    ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
+  };
+  void emitEvent("onRunStatusChange", broadcastParams);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Query the runs row for its current `tokenUsage` aggregate and return `true`
+ * when no LLM tokens were ever counted. Used as a post-run liveness signal —
+ * a run that exited "successfully" without consuming tokens never reached an
+ * LLM and is treated as a failure.
+ */
+async function runHadZeroTokens(runId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ tokenUsage: runs.tokenUsage })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  if (!row?.tokenUsage) return true;
+  const usage = row.tokenUsage as Partial<TokenUsage>;
+  return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
+}
+
+function llmUnreachableMessage(run: RunSinkContext): string {
+  // Runs that carry a `proxyLabel` resolved a proxy at preflight — when they
+  // subsequently fail to reach the LLM, the proxy is the first suspect. Keep
+  // the two wordings separate so operators can spot which failure mode applies.
+  // `run.proxyLabel` isn't in the sink context; we'd need a query. Scoping the
+  // message to a single generic reason keeps finalize transport-agnostic.
+  void run;
+  return "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible";
 }
 
 // ---------------------------------------------------------------------------

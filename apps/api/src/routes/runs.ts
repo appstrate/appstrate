@@ -13,17 +13,15 @@ import {
   deletePackageRuns,
   listPackageRuns,
   listRunLogs,
-  addPackageMemories,
 } from "../services/state/index.ts";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
-import { TimeoutError } from "../services/adapters/index.ts";
 import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.ts";
-import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
-import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
-import { createPiContainerExecutor } from "../services/adapters/pi.ts";
-import { reduceEvents } from "@appstrate/afps-runtime/runner";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { runPlatformContainer } from "../services/adapters/pi.ts";
+import type { PlatformContainerResult } from "../services/adapters/pi.ts";
+import type { ContainerOrchestrator } from "../services/orchestrator/index.ts";
+import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getVersionDetail } from "../services/package-versions.ts";
-import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
@@ -33,8 +31,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
-import type { RunStatusChangeParams } from "@appstrate/core/module";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -45,45 +42,70 @@ import {
   type InlineRunBody,
 } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-
-async function collectAfterRunMetadata(
-  params: RunStatusChangeParams,
-): Promise<Record<string, unknown> | null> {
-  try {
-    return (await callHook("afterRun", params)) ?? null;
-  } catch (err) {
-    logger.error("afterRun hook failed — run record will be missing metadata", {
-      err: err instanceof Error ? err.message : String(err),
-      orgId: params.orgId,
-      runId: params.runId,
-    });
-    return null;
-  }
-}
+import { finalizeRemoteRun, getRunSinkContext } from "../services/run-event-ingestion.ts";
+import type { SinkCredentials } from "../lib/mint-sink-credentials.ts";
 
 // --- Background run (decoupled from client) ---
 
+export interface ExecuteAgentInBackgroundInput {
+  runId: string;
+  orgId: string;
+  applicationId: string;
+  agent: LoadedPackage;
+  context: ExecutionContext;
+  plan: AppstrateRunPlan;
+  agentPackage?: Buffer | null;
+  inputFiles?: UploadedFile[];
+  modelSource?: string | null;
+  /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
+  sinkCredentials: SinkCredentials;
+  /**
+   * Injectable orchestrator — production leaves this unset and the
+   * global singleton drives Docker. Tests inject a fake orchestrator to
+   * exercise the lifecycle without a real container runtime.
+   */
+  orchestrator?: ContainerOrchestrator;
+}
+
+/**
+ * Drive a platform-origin container through its lifecycle. This function is
+ * pure orchestration — no DB writes beyond the initial `running` flip + the
+ * terminal synthesis when the container doesn't finalise itself.
+ *
+ * All event + state persistence happens inside the container (via
+ * {@link HttpSink}) or inside {@link finalizeRemoteRun} (the convergence
+ * point). The only state this function owns is the in-process abort
+ * controller used to propagate user-triggered cancellation to the
+ * Docker workload.
+ */
 export async function executeAgentInBackground(
-  runId: string,
-  orgId: string,
-  agent: LoadedPackage,
-  context: ExecutionContext,
-  plan: AppstrateRunPlan,
-  applicationId: string,
-  agentPackage?: Buffer | null,
-  inputFiles?: UploadedFile[],
-  modelSource?: string | null,
-) {
+  input: ExecuteAgentInBackgroundInput,
+): Promise<void> {
+  const {
+    runId,
+    orgId,
+    applicationId,
+    agent,
+    context,
+    plan,
+    agentPackage,
+    inputFiles,
+    modelSource,
+    sinkCredentials,
+  } = input;
+
   const scope = { orgId, applicationId };
   const startTime = Date.now();
   const controller = trackRun(runId);
   const { signal } = controller;
-  // Derived once — cheap string test used to decorate every lifecycle event.
   const packageEphemeral = isInlineShadowPackageId(agent.id);
-  const sink = new AppstrateEventSink({ scope, runId });
 
   try {
-    // Update status to running
+    // Status flip — pending → running — is the ONE lifecycle transition
+    // the platform still owns (the container can't authoritatively
+    // announce itself running because it doesn't know when the server
+    // actually accepted its first event). Everything terminal flows
+    // through finalizeRemoteRun.
     await updateRun(scope, runId, { status: "running" });
     void emitEvent("onRunStatusChange", {
       orgId,
@@ -92,6 +114,7 @@ export async function executeAgentInBackground(
       applicationId,
       status: "started",
       packageEphemeral,
+      ...(modelSource ? { modelSource } : {}),
     });
 
     const runPlan: AppstrateRunPlan = {
@@ -99,333 +122,116 @@ export async function executeAgentInBackground(
       agentPackage: agentPackage ?? undefined,
       inputFiles,
     };
-    const executor = createPiContainerExecutor();
-    const events: RunEvent[] = [];
 
+    let lifecycle: PlatformContainerResult;
     try {
-      try {
-        for await (const ev of executor(runId, context, runPlan, signal)) {
-          events.push(ev);
-          await sink.handle(ev);
-        }
-        await sink.finalize(reduceEvents(events));
-      } catch (err) {
-        // Signal aborts + timeouts bubble to the outer catch for dedicated
-        // handling. Any other failure is surfaced as an `appstrate.error`
-        // event so the success path can reconcile it via `lastAdapterError`.
-        if (signal.aborted || err instanceof TimeoutError) throw err;
-        const message = err instanceof Error ? err.message : String(err);
-        const errorEvent: RunEvent = {
-          type: "appstrate.error",
-          timestamp: Date.now(),
-          runId,
-          message,
-        };
-        events.push(errorEvent);
-        await sink.handle(errorEvent);
-        await sink.finalize(
-          reduceEvents(events, {
-            error: { message, stack: err instanceof Error ? err.stack : undefined },
-          }),
-        );
-      }
+      lifecycle = await runPlatformContainer({
+        runId,
+        context,
+        plan: runPlan,
+        sinkCredentials,
+        signal,
+        ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
+      });
     } catch (err) {
-      if (signal.aborted) {
-        // Cancelled by user — cancel route already wrote DB status
-        return;
-      }
-      if (err instanceof TimeoutError) {
-        const duration = Date.now() - startTime;
-        const totalTokens = sink.current.usage.input_tokens + sink.current.usage.output_tokens;
-        const metadata = await collectAfterRunMetadata({
-          orgId,
-          runId,
-          packageId: agent.id,
-          applicationId,
-          status: "timeout",
-          cost: sink.current.cost,
-          duration,
-          modelSource: modelSource ?? null,
-        });
-        await updateRun(scope, runId, {
-          status: "timeout",
-          error: `Run timed out after ${plan.timeout}s`,
-          completedAt: new Date().toISOString(),
-          duration,
-          notifiedAt: new Date().toISOString(),
-          ...(totalTokens > 0
-            ? {
-                tokenUsage: { ...sink.current.usage } as Record<string, unknown>,
-              }
-            : {}),
-          ...(metadata ? { metadata } : {}),
-        });
-        await appendRunLog(
-          scope,
-          runId,
-          "system",
-          "run_completed",
-          null,
-          {
-            runId,
-            status: "timeout",
-          },
-          "error",
-        );
-        void emitEvent("onRunStatusChange", {
-          orgId,
-          runId,
-          packageId: agent.id,
-          applicationId,
-          status: "timeout",
-          cost: sink.current.cost,
-          duration,
-          modelSource: modelSource ?? null,
-          packageEphemeral,
-        });
-        return;
-      }
-      throw err;
+      // Orchestrator-level failure (Docker unreachable, image missing, ...)
+      // before the container even exited. Cancel case is handled below in
+      // the `finally` — we only synthesise a terminal failure here for
+      // genuine infrastructure errors.
+      if (signal.aborted) return;
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("runPlatformContainer threw — synthesising failed terminal", {
+        runId,
+        error: message,
+      });
+      await synthesiseFinalize(runId, {
+        status: "failed",
+        error: { message, stack: err instanceof Error ? err.stack : undefined },
+        durationMs: Date.now() - startTime,
+      });
+      return;
     }
 
-    // Determine outcome: fail only on adapter error or zero tokens (LLM unreachable).
-    // An agent without the output tool succeeds even without structured output.
-    const totalTokens = sink.current.usage.input_tokens + sink.current.usage.output_tokens;
-    const error =
-      sink.current.lastAdapterError ??
-      (totalTokens === 0
-        ? plan.proxyUrl
-          ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
-          : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
-        : null);
-
-    if (signal.aborted) return;
-
-    const duration = Date.now() - startTime;
-
-    if (error) {
-      const metadata = await collectAfterRunMetadata({
-        orgId,
-        runId,
-        packageId: agent.id,
-        applicationId,
-        status: "failed",
-        cost: sink.current.cost,
-        duration,
-        modelSource: modelSource ?? null,
-      });
-      await updateRun(scope, runId, {
-        status: "failed",
-        error,
-        completedAt: new Date().toISOString(),
-        duration,
-        notifiedAt: new Date().toISOString(),
-        ...(metadata ? { metadata } : {}),
-      });
-      await appendRunLog(
-        scope,
-        runId,
-        "system",
-        "run_completed",
-        null,
-        { runId, status: "failed", error },
-        "error",
-      );
-      void emitEvent("onRunStatusChange", {
-        orgId,
-        runId,
-        packageId: agent.id,
-        applicationId,
-        status: "failed",
-        cost: sink.current.cost,
-        duration,
-        modelSource: modelSource ?? null,
-        packageEphemeral,
-        extra: { error },
-      });
-    } else {
-      // --- Success path (with or without structured output) ---
-
-      const structuredOutput = sink.current.output;
-      const hasOutput = Object.keys(structuredOutput).length > 0;
-      const outputSchema = agent.manifest.output?.schema;
-      // Validate against the declared output schema whenever one exists —
-      // including the empty-output case (a missing required object IS a failure).
-      if (outputSchema) {
-        const outputValidation = validateOutput(structuredOutput, asJSONSchemaObject(outputSchema));
-        if (!outputValidation.valid) {
-          const validationError = `Output validation failed: ${outputValidation.errors.join("; ")}`;
-          await appendRunLog(
-            scope,
-            runId,
-            "system",
-            "output_validation",
-            null,
-            { valid: false, errors: outputValidation.errors },
-            "error",
-          );
-          logger.warn("Output validation failed — marking run as failed", {
-            runId,
-            errors: outputValidation.errors,
-          });
-          const failureMetadata = await collectAfterRunMetadata({
-            orgId,
-            runId,
-            packageId: agent.id,
-            applicationId,
-            status: "failed",
-            cost: sink.current.cost,
-            duration,
-            modelSource: modelSource ?? null,
-          });
-          await updateRun(scope, runId, {
-            status: "failed",
-            error: validationError,
-            completedAt: new Date().toISOString(),
-            duration,
-            notifiedAt: new Date().toISOString(),
-            ...(failureMetadata ? { metadata: failureMetadata } : {}),
-          });
-          await appendRunLog(
-            scope,
-            runId,
-            "system",
-            "run_completed",
-            null,
-            { runId, status: "failed", error: validationError },
-            "error",
-          );
-          void emitEvent("onRunStatusChange", {
-            orgId,
-            runId,
-            packageId: agent.id,
-            applicationId,
-            status: "failed",
-            cost: sink.current.cost,
-            duration,
-            modelSource: modelSource ?? null,
-            packageEphemeral,
-            extra: { error: validationError },
-          });
-          return;
-        }
-      }
-
-      const reportContent = sink.current.report;
-      const hasReport = reportContent.length > 0;
-      const result: Record<string, unknown> = {
-        ...(hasOutput ? { output: structuredOutput } : {}),
-        ...(hasReport ? { report: reportContent } : {}),
-      };
-
-      const memories = sink.current.memories;
-      if (memories.length > 0) {
-        await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
-      }
-
-      const metadata = await collectAfterRunMetadata({
-        orgId,
-        runId,
-        packageId: agent.id,
-        applicationId,
-        status: "success",
-        cost: sink.current.cost,
-        duration,
-        modelSource: modelSource ?? null,
-      });
-
-      const state = sink.current.state;
-      await updateRun(scope, runId, {
-        status: "success",
-        result,
-        ...(state ? { state } : {}),
-        completedAt: new Date().toISOString(),
-        duration,
-        notifiedAt: new Date().toISOString(),
-        ...(totalTokens > 0
-          ? { tokenUsage: { ...sink.current.usage } as Record<string, unknown> }
-          : {}),
-        cost: sink.current.cost > 0 ? sink.current.cost : null,
-        ...(metadata ? { metadata } : {}),
-      });
-
-      if (hasOutput) {
-        await appendRunLog(scope, runId, "result", "result", null, result, "info");
-      }
-      await appendRunLog(
-        scope,
-        runId,
-        "system",
-        "run_completed",
-        null,
-        { runId, status: "success" },
-        "info",
-      );
-      void emitEvent("onRunStatusChange", {
-        orgId,
-        runId,
-        packageId: agent.id,
-        applicationId,
-        status: "success",
-        cost: sink.current.cost,
-        duration,
-        modelSource: modelSource ?? null,
-        packageEphemeral,
-        extra: { result },
-      });
+    // Container exited normally. If it finalised itself over HTTP, our
+    // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
+    // we fill in the terminal state the platform observed.
+    if (lifecycle.cancelled) {
+      // Cancel route already wrote status + closed the sink — nothing to do.
+      return;
     }
+
+    if (lifecycle.timedOut) {
+      await synthesiseFinalize(runId, {
+        status: "timeout",
+        error: { message: `Run timed out after ${plan.timeout}s` },
+        durationMs: Date.now() - startTime,
+      });
+      return;
+    }
+
+    if (lifecycle.exitCode !== 0) {
+      await synthesiseFinalize(runId, {
+        status: "failed",
+        error: {
+          message: `Agent container exited with code ${lifecycle.exitCode}`,
+        },
+        durationMs: Date.now() - startTime,
+      });
+      return;
+    }
+
+    // Exit code 0 — the container ran to completion and should have
+    // called finalize itself. Defensively synthesise success so a
+    // container that forgot to finalise still reaches a terminal state;
+    // the CAS makes this a no-op when the container did call finalize.
+    await synthesiseFinalize(runId, {
+      status: "success",
+      durationMs: Date.now() - startTime,
+    });
   } catch (err) {
-    // If aborted (cancelled), the cancel route already wrote DB status
     if (signal.aborted) return;
-
-    const duration = Date.now() - startTime;
-    const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    const metadata = await collectAfterRunMetadata({
-      orgId,
-      runId,
-      packageId: agent.id,
-      applicationId,
+    const message = err instanceof Error ? err.message : "Unknown error";
+    logger.error("Unhandled error in executeAgentInBackground", { runId, error: message });
+    await synthesiseFinalize(runId, {
       status: "failed",
-      cost: sink.current.cost,
-      duration,
-      modelSource: modelSource ?? null,
-    });
-    await updateRun(scope, runId, {
-      status: "failed",
-      error: errorMessage,
-      completedAt: new Date().toISOString(),
-      duration,
-      notifiedAt: new Date().toISOString(),
-      ...(metadata ? { metadata } : {}),
-    });
-    await appendRunLog(
-      scope,
-      runId,
-      "system",
-      "run_completed",
-      null,
-      {
-        runId,
-        status: "failed",
-        error: errorMessage,
-      },
-      "error",
-    );
-    void emitEvent("onRunStatusChange", {
-      orgId,
-      runId,
-      packageId: agent.id,
-      applicationId,
-      status: "failed",
-      cost: sink.current.cost,
-      duration,
-      modelSource: modelSource ?? null,
-      packageEphemeral,
-      extra: { error: errorMessage },
+      error: { message, stack: err instanceof Error ? err.stack : undefined },
+      durationMs: Date.now() - startTime,
     });
   } finally {
     untrackRun(runId);
   }
+}
+
+/**
+ * Re-enter `finalizeRemoteRun` with a terminal result synthesised by the
+ * platform. Idempotent by design: the CAS on `sink_closed_at IS NULL`
+ * inside `finalizeRemoteRun` makes this a no-op if the container already
+ * posted its own finalize.
+ */
+async function synthesiseFinalize(
+  runId: string,
+  terminal: {
+    status: "success" | "failed" | "timeout" | "cancelled";
+    error?: { message: string; stack?: string };
+    durationMs?: number;
+  },
+): Promise<void> {
+  const run = await getRunSinkContext(runId);
+  if (!run) {
+    logger.error("synthesiseFinalize: run sink context missing", { runId });
+    return;
+  }
+
+  const result: RunResult = emptyRunResult();
+  result.status = terminal.status;
+  if (terminal.error) result.error = terminal.error;
+  if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
+
+  await finalizeRemoteRun({
+    run,
+    result,
+    webhookId: `synthesized-${runId}`,
+  });
 }
 
 // --- Router ---
@@ -633,13 +439,16 @@ export function createRunsRouter() {
       throw conflict("not_cancellable", "This run cannot be cancelled");
     }
 
-    // Update DB
+    // Update DB + close the signed-event sink atomically — any in-flight
+    // event POST from the container will now reject with 410 gone, and
+    // `finalizeRemoteRun`'s CAS makes server-side synthesis a no-op.
     const now = new Date().toISOString();
     await updateRun(scope, runId, {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,
       notifiedAt: now,
+      sinkClosedAt: now,
     });
 
     // Log the cancellation
