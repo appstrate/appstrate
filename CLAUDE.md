@@ -148,7 +148,8 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |            │  - ExtraHosts → host.docker.internal        │
      |            ├─────────────────────────────────────────────┤
      |            │  Agent Container (Pi Coding Agent, Bun)     │
-     |            │  - AGENT_PROMPT, LLM_*, SIDECAR_URL          │
+     |            │  - AGENT_PROMPT, LLM_*                      │
+     |            │  - SIDECAR_URL deleted after bootstrap      │
      |            │  - NO RUN_TOKEN, NO PLATFORM_API_URL        │
      |            │  - NO ExtraHosts (cannot reach host)        │
      |            │  - Files injected before start (parallel)   │
@@ -271,13 +272,16 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 
 - **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `runToken`, `platformApiUrl`, `proxyUrl`), then connects it to the run network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
-- **Agent-facing surface**: each connected provider declared in the bundle manifest is registered as a typed `<provider>_call` tool (slug + `_call`, e.g. `@appstrate/gmail` → `appstrate_gmail_call`). The tool is produced by `SidecarProviderResolver` (from `@appstrate/afps-runtime/resolvers`) via `buildProviderExtensionFactories` (from `@appstrate/runner-pi`) and wired into the Pi SDK at boot by `runtime-pi/entrypoint.ts`. The LLM calls the tool with `{ method, target, headers?, body?, responseMode? }`; the tool enforces `authorizedUris` client-side then proxies through `$SIDECAR_URL/proxy` with the expected `X-Provider`/`X-Target` headers. Agents MUST use this tool for authenticated provider calls — the legacy `curl $SIDECAR_URL/proxy …` bash pattern is deprecated (the env var remains injected for backwards compatibility but the prompt no longer documents it).
+- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool — the agent LLM never sees the sidecar URL.
+  - `dependencies.providers[]` → `<provider>_call` tool (slug + `_call`, e.g. `@appstrate/gmail` → `appstrate_gmail_call`) produced by `SidecarProviderResolver` via `buildProviderExtensionFactories` (wired in runtime-pi/entrypoint.ts Phase C). The LLM supplies `{ method, target, headers?, body?, responseMode? }`; the tool enforces `authorizedUris` client-side and proxies through `/proxy` with `X-Provider`/`X-Target` headers.
+  - Run history → `run_history` tool produced by `makeRunHistoryTool` + `createSidecarRunHistoryCall` via `buildRunHistoryExtensionFactory` (runtime-pi/entrypoint.ts Phase D). The LLM supplies `{ limit?, fields? }`; the tool dispatches to the sidecar's `/run-history` endpoint.
+  - **Zero-knowledge enforcement**: after Phase C + D complete, `runtime-pi/entrypoint.ts` runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence (Phase 2e). The legacy `curl $SIDECAR_URL/…` bash pattern is fully retired — no prompt path documents it anymore.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
-- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Run History API) + appends raw `prompt.md`. No Handlebars.
+- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Memory) + appends raw `prompt.md`. No Handlebars. Run history is NOT rendered as a prompt section — it is exposed via the `run_history` tool whose description self-documents the capability.
 - **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-run, AJV validates the merged result. On mismatch, a warning is logged but the run still succeeds.
-- **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via `$SIDECAR_URL/run-history`.
+- **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via the runtime-wired `run_history` tool (agents never see the sidecar URL).
 
 ## Testing
 
