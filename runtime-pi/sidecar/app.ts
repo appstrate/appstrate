@@ -188,7 +188,6 @@ export function createApp(deps: AppDeps): Hono {
       headers: forwardedHeaders,
       body,
       signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-      // @ts-expect-error - Bun supports duplex for streaming request bodies
       duplex: body instanceof ReadableStream ? "half" : undefined,
     });
     if (!result.ok) return result.errorResponse;
@@ -198,7 +197,10 @@ export function createApp(deps: AppDeps): Hono {
     const ct = result.response.headers.get("content-type");
     if (ct) responseHeaders["Content-Type"] = ct;
 
-    return c.body(result.response.body, result.response.status, responseHeaders);
+    return new Response(result.response.body, {
+      status: result.response.status,
+      headers: responseHeaders,
+    });
   });
 
   // Transparent credential-injecting proxy
@@ -309,7 +311,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     /** Build the request body with credential substitution applied. */
-    const buildBody = (credentials: Record<string, string>): BodyInit | undefined => {
+    const buildBody = (credentials: Record<string, string>): ArrayBuffer | string | undefined => {
       if (!rawBodyBytes) return undefined;
       if (substituteBody && rawBodyText) {
         const substituted = substituteVars(rawBodyText, credentials);
@@ -364,7 +366,6 @@ export function createApp(deps: AppDeps): Hono {
         headers: resolvedHeaders,
         body,
         signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        // @ts-expect-error - Bun supports proxy option natively
         proxy: resolvedProxy || undefined,
       });
     };
@@ -452,7 +453,7 @@ export function createApp(deps: AppDeps): Hono {
       }).catch(() => {});
     }
 
-    return c.body(body, targetRes.status, responseHeaders);
+    return new Response(body, { status: targetRes.status, headers: responseHeaders });
   });
 
   return app;

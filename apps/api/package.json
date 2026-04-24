@@ -41,6 +41,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.0",
     "@types/bun": "latest",
     "@types/ioredis": "^5.0.0",
     "@types/nodemailer": "^8.0.0",

@@ -58,24 +58,24 @@ function composeE2E(platformApp: ReturnType<typeof getTestApp>, runToken: string
     // Route every outbound sidecar → platform call to the in-process
     // platform app. Strip the PLATFORM_ORIGIN prefix so Hono matches
     // the path against its route table.
-    fetchFn: (async (url: RequestInfo | URL, init?: RequestInit) => {
+    fetchFn: (async (url: string | URL | Request, init?: RequestInit) => {
       const full = typeof url === "string" ? url : url.toString();
-      if (!full.startsWith(PLATFORM_ORIGIN)) {
+      const parsed = new URL(full);
+      if (parsed.origin !== PLATFORM_ORIGIN) {
         throw new Error(`unexpected outbound URL from sidecar: ${full}`);
       }
-      const pathAndQuery = full.slice(PLATFORM_ORIGIN.length);
-      return platformApp.request(pathAndQuery, init);
+      return platformApp.request(`${parsed.pathname}${parsed.search}`, init);
     }) as unknown as typeof fetch,
   });
 
   // Route every client → sidecar call to the in-process sidecar app.
-  const clientFetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+  const clientFetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const full = typeof url === "string" ? url : url.toString();
-    if (!full.startsWith(SIDECAR_ORIGIN)) {
+    const parsed = new URL(full);
+    if (parsed.origin !== SIDECAR_ORIGIN) {
       throw new Error(`unexpected outbound URL from client: ${full}`);
     }
-    const pathAndQuery = full.slice(SIDECAR_ORIGIN.length);
-    return sidecarApp.request(pathAndQuery, init);
+    return sidecarApp.request(`${parsed.pathname}${parsed.search}`, init);
   }) as unknown as typeof fetch;
 
   return { clientFetch };
