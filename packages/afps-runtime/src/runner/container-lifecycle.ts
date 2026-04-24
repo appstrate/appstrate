@@ -11,7 +11,7 @@
  * on cancellation.
  */
 
-import type { RunEvent } from "@afps/types";
+import type { RunEvent } from "@afps-spec/types";
 
 export class RunTimeoutError extends Error {
   constructor(message: string) {

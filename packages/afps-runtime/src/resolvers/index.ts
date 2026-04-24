@@ -33,7 +33,7 @@ export type {
 
 // RunEvent lives in src/types/ — re-exported here for convenience so
 // resolver authors can import all the types they need from one place.
-export type { RunEvent } from "@afps/types";
+export type { RunEvent } from "@afps-spec/types";
 
 export {
   BundledToolResolver,

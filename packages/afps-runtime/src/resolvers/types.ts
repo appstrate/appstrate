@@ -5,7 +5,7 @@
  * Runtime-internal TypeScript interfaces for `@appstrate/afps-runtime`.
  *
  * Spec-level contracts (Tool protocol, RunEvent envelope, manifest refs)
- * are re-exported from `@afps/types` — the vendor-neutral projection of
+ * are re-exported from `@afps-spec/types` — the vendor-neutral projection of
  * the AFPS spec. Everything declared here describes how THIS runtime
  * wires itself up internally (resolver dispatch, sink composition,
  * aggregated run state) and is intentionally not part of the spec.
@@ -24,9 +24,9 @@ export type {
   ToolContext,
   ToolResult,
   RunEvent,
-} from "@afps/types";
+} from "@afps-spec/types";
 
-import type { ToolRef, ProviderRef, SkillRef, Tool, RunEvent } from "@afps/types";
+import type { ToolRef, ProviderRef, SkillRef, Tool, RunEvent } from "@afps-spec/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers — the spec {@link Bundle} is the

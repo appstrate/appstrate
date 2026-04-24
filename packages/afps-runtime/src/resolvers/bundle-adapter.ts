@@ -12,7 +12,7 @@
  */
 
 import type { Bundle, BundlePackage } from "../bundle/types.ts";
-import type { DependencyRef } from "@afps/types";
+import type { DependencyRef } from "@afps-spec/types";
 
 /**
  * Find the package in the bundle whose manifest name matches the ref.

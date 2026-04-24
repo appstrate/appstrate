@@ -3,7 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { RunEvent } from "@afps/types";
+import type { RunEvent } from "@afps-spec/types";
 import type { RunResult } from "../types/run-result.ts";
 import { buildCloudEventEnvelope } from "../events/cloudevents.ts";
 import { sign } from "../events/signing.ts";

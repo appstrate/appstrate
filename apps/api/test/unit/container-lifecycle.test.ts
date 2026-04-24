@@ -1,26 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 Appstrate
 
 import { describe, it, expect, mock } from "bun:test";
-import {
-  runContainerLifecycle,
-  RunTimeoutError,
-  type WorkloadOrchestrator,
-} from "../../src/runner/container-lifecycle.ts";
-import type { RunEvent } from "@afps-spec/types";
+import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
+import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";
+import { runContainerLifecycle } from "../../src/services/adapters/container-lifecycle.ts";
+import type { RunMessage } from "../../src/services/adapters/types.ts";
 
-interface TestHandle {
-  id: string;
-  runId: string;
-  role: string;
-}
-
-const RUN_ID = "exec-1";
-
-function createMockOrchestrator(
-  overrides?: Partial<WorkloadOrchestrator<TestHandle>>,
-): WorkloadOrchestrator<TestHandle> {
+function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
   return {
+    initialize: mock(() => Promise.resolve()),
+    shutdown: mock(() => Promise.resolve()),
+    cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
+    ensureImages: mock(() => Promise.resolve()),
+    createIsolationBoundary: mock(() =>
+      Promise.resolve({ id: "boundary-1", name: "test-boundary" }),
+    ),
+    removeIsolationBoundary: mock(() => Promise.resolve()),
+    createSidecar: mock(() =>
+      Promise.resolve({ id: "sidecar-1", runId: "exec-1", role: "sidecar" }),
+    ),
+    createWorkload: mock(() => Promise.resolve({ id: "agent-1", runId: "exec-1", role: "agent" })),
     startWorkload: mock(() => Promise.resolve()),
     stopWorkload: mock(() => Promise.resolve()),
     removeWorkload: mock(() => Promise.resolve()),
@@ -28,68 +27,64 @@ function createMockOrchestrator(
     streamLogs: mock(async function* () {
       yield '{"type": "text_delta", "text": "hello"}';
     }),
+    stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,
   };
 }
 
-function createHandle(overrides?: Partial<TestHandle>): TestHandle {
+function createHandle(overrides?: Partial<WorkloadHandle>): WorkloadHandle {
   return {
     id: "container-1",
-    runId: RUN_ID,
+    runId: "exec-1",
     role: "agent",
     ...overrides,
   };
 }
 
-function progressEvent(message: string): RunEvent {
-  return {
-    type: "appstrate.progress",
-    timestamp: Date.now(),
-    runId: RUN_ID,
-    message,
-  };
-}
-
-async function collectEvents(gen: AsyncGenerator<RunEvent>): Promise<RunEvent[]> {
-  const events: RunEvent[] = [];
-  for await (const ev of gen) {
-    events.push(ev);
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
+  for await (const msg of gen) {
+    messages.push(msg);
   }
-  return events;
+  return messages;
 }
 
 describe("runContainerLifecycle", () => {
-  it("yields initial appstrate.progress event with container info", async () => {
+  it("yields initial progress message with container info", async () => {
     const orchestrator = createMockOrchestrator();
     const handle = createHandle();
 
-    const events = await collectEvents(
+    const messages = await collectMessages(
       runContainerLifecycle({
         orchestrator,
         handle,
         adapterName: "pi",
-        runId: RUN_ID,
+        runId: "exec-1",
         timeout: 30,
-        processLogs: async function* () {},
+        processLogs: async function* (logs) {
+          for await (const line of logs) {
+            yield { type: "progress" as const, message: line };
+          }
+        },
       }),
     );
 
-    expect(events[0]!.type).toBe("appstrate.progress");
-    expect(String(events[0]!.message ?? "")).toContain("container started");
-    expect((events[0]!.data as Record<string, unknown>).adapter).toBe("pi");
-    expect((events[0]!.data as Record<string, unknown>).runId).toBe(RUN_ID);
+    expect(messages[0]!.type).toBe("progress");
+    expect(messages[0]!.message).toContain("container started");
+    expect(messages[0]!.data?.adapter).toBe("pi");
+    expect(messages[0]!.data?.runId).toBe("exec-1");
   });
 
   it("calls startWorkload on the orchestrator", async () => {
     const orchestrator = createMockOrchestrator();
     const handle = createHandle();
 
-    await collectEvents(
+    await collectMessages(
       runContainerLifecycle({
         orchestrator,
         handle,
         adapterName: "pi",
-        runId: RUN_ID,
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {},
       }),
@@ -107,24 +102,25 @@ describe("runContainerLifecycle", () => {
     });
     const handle = createHandle();
 
-    const events = await collectEvents(
+    const messages = await collectMessages(
       runContainerLifecycle({
         orchestrator,
         handle,
         adapterName: "pi",
-        runId: RUN_ID,
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* (logs) {
           for await (const line of logs) {
-            yield progressEvent(line);
+            yield { type: "progress" as const, message: line };
           }
         },
       }),
     );
 
-    expect(events).toHaveLength(3);
-    expect(events[1]!.message).toBe("line-1");
-    expect(events[2]!.message).toBe("line-2");
+    // First is "container started", then the log lines
+    expect(messages).toHaveLength(3);
+    expect(messages[1]!.message).toBe("line-1");
+    expect(messages[2]!.message).toBe("line-2");
   });
 
   it("waits for exit and succeeds with exit code 0", async () => {
@@ -133,12 +129,13 @@ describe("runContainerLifecycle", () => {
     });
     const handle = createHandle();
 
-    await collectEvents(
+    // Should not throw
+    await collectMessages(
       runContainerLifecycle({
         orchestrator,
         handle,
         adapterName: "pi",
-        runId: RUN_ID,
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {},
       }),
@@ -154,12 +151,12 @@ describe("runContainerLifecycle", () => {
     const handle = createHandle();
 
     try {
-      await collectEvents(
+      await collectMessages(
         runContainerLifecycle({
           orchestrator,
           handle,
           adapterName: "pi",
-          runId: RUN_ID,
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {},
         }),
@@ -171,31 +168,27 @@ describe("runContainerLifecycle", () => {
     }
   });
 
-  it("does NOT throw on non-zero exit code when output was received", async () => {
+  it("does NOT throw on non-zero exit code when result was received", async () => {
     const orchestrator = createMockOrchestrator({
       waitForExit: mock(() => Promise.resolve(1)),
     });
     const handle = createHandle();
 
-    const events = await collectEvents(
+    // Should not throw because an output was yielded
+    const messages = await collectMessages(
       runContainerLifecycle({
         orchestrator,
         handle,
         adapterName: "pi",
-        runId: RUN_ID,
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {
-          yield {
-            type: "output.emitted",
-            timestamp: Date.now(),
-            runId: RUN_ID,
-            data: { done: true },
-          };
+          yield { type: "output" as const, data: { done: true } };
         },
       }),
     );
 
-    expect(events.some((e) => e.type === "output.emitted")).toBe(true);
+    expect(messages.some((m) => m.type === "output")).toBe(true);
   });
 
   it("always removes workload in finally block", async () => {
@@ -205,12 +198,12 @@ describe("runContainerLifecycle", () => {
     const handle = createHandle();
 
     try {
-      await collectEvents(
+      await collectMessages(
         runContainerLifecycle({
           orchestrator,
           handle,
           adapterName: "pi",
-          runId: RUN_ID,
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {},
         }),
@@ -233,17 +226,17 @@ describe("runContainerLifecycle", () => {
     const handle = createHandle();
 
     try {
-      await collectEvents(
+      await collectMessages(
         runContainerLifecycle({
           orchestrator,
           handle,
           adapterName: "pi",
-          runId: RUN_ID,
+          runId: "exec-1",
           timeout: 30,
           signal: controller.signal,
           processLogs: async function* (logs) {
             for await (const line of logs) {
-              yield progressEvent(line);
+              yield { type: "progress" as const, message: line };
             }
           },
         }),
@@ -254,27 +247,22 @@ describe("runContainerLifecycle", () => {
     }
   });
 
-  it("uses last appstrate.error message for non-zero exit code", async () => {
+  it("uses last error message for non-zero exit code", async () => {
     const orchestrator = createMockOrchestrator({
       waitForExit: mock(() => Promise.resolve(1)),
     });
     const handle = createHandle();
 
     try {
-      await collectEvents(
+      await collectMessages(
         runContainerLifecycle({
           orchestrator,
           handle,
           adapterName: "pi",
-          runId: RUN_ID,
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {
-            yield {
-              type: "appstrate.error",
-              timestamp: Date.now(),
-              runId: RUN_ID,
-              message: "OOM killed",
-            };
+            yield { type: "error" as const, message: "OOM killed" };
           },
         }),
       );
@@ -282,38 +270,5 @@ describe("runContainerLifecycle", () => {
     } catch (err) {
       expect((err as Error).message).toBe("OOM killed");
     }
-  });
-
-  it("throws RunTimeoutError when the timeout fires before exit", async () => {
-    const orchestrator = createMockOrchestrator({
-      streamLogs: async function* () {
-        // Stream completes without yielding, so waitForExit runs next.
-      },
-      waitForExit: mock(
-        () =>
-          new Promise<number>((resolve) => {
-            setTimeout(() => resolve(0), 50);
-          }),
-      ),
-    });
-    const handle = createHandle();
-
-    let caught: unknown;
-    try {
-      await collectEvents(
-        runContainerLifecycle({
-          orchestrator,
-          handle,
-          adapterName: "pi",
-          runId: RUN_ID,
-          timeout: 0.001,
-          processLogs: async function* () {},
-        }),
-      );
-    } catch (err) {
-      caught = err;
-    }
-
-    expect(caught).toBeInstanceOf(RunTimeoutError);
   });
 });

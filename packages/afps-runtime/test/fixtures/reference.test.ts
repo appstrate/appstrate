@@ -34,7 +34,7 @@ import {
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
 import { reduceEvents } from "../../src/runner/reducer.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { RunEvent } from "@afps/types";
+import type { RunEvent } from "@afps-spec/types";
 import type {
   ExecutionContext,
   HistoryEntry,

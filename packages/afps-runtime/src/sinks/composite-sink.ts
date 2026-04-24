@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { RunEvent } from "@afps/types";
+import type { RunEvent } from "@afps-spec/types";
 import type { RunResult } from "../types/run-result.ts";
 
 /**
