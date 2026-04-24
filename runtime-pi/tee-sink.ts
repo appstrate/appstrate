@@ -85,6 +85,12 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
     ...(runnerResult.status !== undefined ? { status: runnerResult.status } : {}),
     ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
     ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),
+    // Token usage + cost are sourced exclusively from the runner — the
+    // tee aggregator only sees canonical AFPS events (memory/state/
+    // output/report/log), not `appstrate.metric`. Forwarding them here
+    // is what makes finalize self-contained on the platform side.
+    ...(runnerResult.usage !== undefined ? { usage: runnerResult.usage } : {}),
+    ...(runnerResult.cost !== undefined ? { cost: runnerResult.cost } : {}),
   };
 }
 

@@ -63,6 +63,9 @@ class ScriptedEventRunner extends PiRunner {
     for (const event of this.scripted) {
       await internalSink.emit(event);
     }
+    // Conformance runner emits raw scripted events — no Pi SDK session,
+    // no bridge to install, so no usage accumulator and no onBridgeReady
+    // callback to fire.
   }
 }
 

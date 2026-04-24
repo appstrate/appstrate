@@ -367,6 +367,202 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.result).toBeNull();
   });
 
+  // ---------------------------------------------------------------------
+  // Authoritative usage in the finalize body — closes the race window
+  // where the side-channel `appstrate.metric` POST landed AFTER the
+  // finalize POST, leading `runHadZeroTokens` to read a stale (zero)
+  // `runs.tokenUsage` and flip a healthy run to "failed: could not
+  // reach the LLM API". The runner now ships `usage` in the finalize
+  // body and the platform reads it preferentially.
+  // ---------------------------------------------------------------------
+  it("uses result.usage as the authoritative zero-tokens signal (success path)", async () => {
+    // DB column starts empty — proves the body, not the column, drives
+    // the heuristic. A pre-fix run would have flipped to failed here.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 1234, output_tokens: 56 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    // Finalize also persists usage from the body so the column reflects
+    // truth even when the metric event was dropped (process exit, network).
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 1234, output_tokens: 56 });
+  });
+
+  it("flips to failed with LLM-unreachable when result.usage reports zero tokens", async () => {
+    // Seed the column with a non-zero count to prove the body wins —
+    // an authoritative `usage: {0, 0}` from the runner overrides any
+    // late-arriving metric events that previously updated the column.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 999, output_tokens: 999 },
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/could not reach the LLM API/);
+    // Body wins on persistence too — the column ends at zero.
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+  });
+
+  it("falls back to runs.tokenUsage when result.usage is absent (legacy runners)", async () => {
+    // Runners that don't yet ship `usage` in the finalize body (older
+    // CLI, third-party AFPS runners) must keep working — finalize falls
+    // back to the side-channel-populated DB column.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 50, output_tokens: 25 },
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      // no `usage` field
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    // No `usage` in body → finalize MUST NOT overwrite the column.
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 50, output_tokens: 25 });
+  });
+
+  it("falls back to DB and flips to failed when neither body nor column has tokens", async () => {
+    // The pre-fix failure mode at the legacy layer — preserved so
+    // legitimate "agent never reached the LLM" cases still produce the
+    // diagnostic instead of silently succeeding.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      // no `usage` field
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/could not reach the LLM API/);
+  });
+
+  // ---------------------------------------------------------------------
+  // Authoritative cost in the finalize body — closes the second race
+  // window. The runtime emits `appstrate.metric` as fire-and-forget
+  // POST and `process.exit(0)` immediately after finalize returns; if
+  // the metric POST is aborted mid-flight we used to lose the runner-
+  // source `llm_usage` ledger row entirely. Now finalize synthesises
+  // the row from `result.cost` whenever the runner ledger is empty.
+  // ---------------------------------------------------------------------
+  it("synthesises a runner ledger row from result.cost when metric never landed", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // No metric events posted — simulate `process.exit(0)` aborting the
+    // fire-and-forget POST. Finalize MUST still attribute the cost.
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 200, output_tokens: 100 },
+      cost: 0.0042,
+    });
+    expect(res.status).toBe(200);
+
+    // Synthetic row uses sequence=0 (real metric events start at 1).
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.sequence).toBe(0);
+    expect(ledger[0]!.costUsd).toBeCloseTo(0.0042, 5);
+    expect(ledger[0]!.inputTokens).toBe(200);
+    expect(ledger[0]!.outputTokens).toBe(100);
+
+    // runs.cost reflects the synthesised row.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.cost).toBeCloseTo(0.0042, 5);
+  });
+
+  it("does NOT duplicate the runner ledger row when a metric event already landed", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // Metric arrives first — the platform persists a runner-source row
+    // at the metric's envelope sequence (1+).
+    const ev = buildEnvelope(
+      runId,
+      "appstrate.metric",
+      {
+        usage: { input_tokens: 200, output_tokens: 100 },
+        cost: 0.0042,
+        timestamp: Date.now(),
+      },
+      1,
+    );
+    expect((await postEvent(runId, ev)).status).toBe(200);
+
+    // Finalize ships the same `cost` in the body. It MUST detect the
+    // existing runner row and skip its own synthesis — otherwise we'd
+    // double-bill the run.
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 200, output_tokens: 100 },
+      cost: 0.0042,
+    });
+    expect(res.status).toBe(200);
+
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.sequence).toBe(1); // the metric event's sequence, not the synth sentinel
+    expect(ledger[0]!.costUsd).toBeCloseTo(0.0042, 5);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.cost).toBeCloseTo(0.0042, 5);
+  });
+
+  it("does not synthesise when result.cost is zero — empty ledger stays empty", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 100, output_tokens: 50 },
+    });
+
+    // A run that bridge-emitted `cost: 0` (e.g. cached LLM call, no
+    // billable tokens) MUST NOT pollute the ledger with a $0 row.
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+      cost: 0,
+    });
+    expect(res.status).toBe(200);
+
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(0);
+  });
+
   // Cost-ledger end-to-end regression: before the llm_usage unification,
   // runs.cost was overwritten with null at finalize for platform runs
   // because aggregateRunCost only summed the proxy tables. Now finalize

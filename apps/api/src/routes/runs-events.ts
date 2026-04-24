@@ -25,6 +25,7 @@ import { invalidRequest } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { tokenUsageSchema } from "../services/adapters/types.ts";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
@@ -83,6 +84,17 @@ const RunResultSchema = z
       .optional(),
     status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),
     durationMs: z.number().int().nonnegative().optional(),
+    // Authoritative token usage. When present, finalize uses this as the
+    // source of truth for both the zero-tokens heuristic and the
+    // `runs.tokenUsage` column write — independent of whether the
+    // `appstrate.metric` event POST has landed yet.
+    usage: tokenUsageSchema.optional(),
+    // Authoritative LLM cost in USD for the runner-source contribution.
+    // When present, finalize synthesises a runner-source `llm_usage`
+    // ledger row from this value if no metric event has landed yet, so
+    // `runs.cost` is correct even when `process.exit()` aborts the
+    // metric POST.
+    cost: z.number().nonnegative().optional(),
   })
   .passthrough();
 
@@ -162,6 +174,8 @@ export function createRunsEventsRouter() {
       ...(d.error ? { error: d.error } : {}),
       ...(d.status ? { status: d.status } : {}),
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
+      ...(d.usage !== undefined ? { usage: d.usage } : {}),
+      ...(d.cost !== undefined ? { cost: d.cost } : {}),
     };
 
     await finalizeRun({ run, result, webhookId });

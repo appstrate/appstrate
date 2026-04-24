@@ -32,7 +32,12 @@ import { notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { AppstrateEventSink } from "./adapters/appstrate-event-sink.ts";
+import {
+  AppstrateEventSink,
+  appendRunnerLedgerRow,
+  sumRunnerCost,
+  SYNTHESISED_RUNNER_LEDGER_SEQUENCE,
+} from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import { addPackageMemories } from "./state/package-memories.ts";
 import { getPackage } from "./agent-service.ts";
@@ -244,7 +249,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   }
 
   if (status === "success") {
-    const zeroTokens = await runHadZeroTokens(run.id);
+    const zeroTokens = await runHadZeroTokens(run.id, result);
     if (zeroTokens) {
       status = "failed";
       errorMessage = llmUnreachableMessage(run);
@@ -263,6 +268,24 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   }
   const resultToPersist =
     Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
+
+  // 4b. Synthesise the runner-source ledger row from `result.cost` when
+  //     the `appstrate.metric` event never landed (e.g. process exited
+  //     before the fire-and-forget POST resolved). Idempotent: if the
+  //     metric did land first, the runner ledger sum is already non-zero
+  //     and we skip — its real row already accounts for the cost. The
+  //     synthetic row uses `SYNTHESISED_RUNNER_LEDGER_SEQUENCE` (= 0) so
+  //     it cannot collide with real metric sequences (≥ 1).
+  if (typeof result.cost === "number" && result.cost > 0) {
+    const existing = await sumRunnerCost(run.id);
+    if (existing === 0) {
+      await appendRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
+        sequence: SYNTHESISED_RUNNER_LEDGER_SEQUENCE,
+        cost: result.cost,
+        usage: result.usage ?? null,
+      });
+    }
+  }
 
   const cost = await computeRunCost(run.id);
   const now = new Date();
@@ -314,6 +337,13 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       cost: cost.total > 0 ? cost.total : null,
       sinkClosedAt: now,
       notifiedAt: now,
+      // When the runner ships authoritative usage in the finalize body
+      // we persist it here so `runs.tokenUsage` reflects reality even if
+      // the side-channel `appstrate.metric` event was dropped (network
+      // hiccup, container exit before the POST drained, …). The metric
+      // handler still runs the same UPDATE on its own path; whichever
+      // arrives second is a no-op overwrite of the same value.
+      ...(result.usage ? { tokenUsage: result.usage as unknown as Record<string, unknown> } : {}),
       ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
@@ -374,12 +404,28 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Query the runs row for its current `tokenUsage` aggregate and return `true`
- * when no LLM tokens were ever counted. Used as a post-run liveness signal —
- * a run that exited "successfully" without consuming tokens never reached an
- * LLM and is treated as a failure.
+ * Decide whether the run produced any LLM tokens. Used as a post-run
+ * liveness signal — a run that exited "successfully" without consuming
+ * tokens never reached an LLM and is treated as a failure.
+ *
+ * Resolution order:
+ *
+ *   1. `result.usage` from the finalize POST body — authoritative when
+ *      present. Self-contained: no dependency on the side-channel
+ *      `appstrate.metric` event having been ingested first, so the
+ *      previous race window (metric POST and finalize POST in flight
+ *      simultaneously → finalize reads stale `runs.tokenUsage` = 0 →
+ *      false "could not reach the LLM API" failure) is closed.
+ *
+ *   2. Fallback: the `runs.tokenUsage` JSONB column written by the
+ *      `appstrate.metric` event handler. Kept for runners (legacy CLI
+ *      paths, third-party AFPS runners) that do not set `result.usage`
+ *      and rely on the metric event being ingested before finalize.
  */
-async function runHadZeroTokens(runId: string): Promise<boolean> {
+async function runHadZeroTokens(runId: string, result: RunResult): Promise<boolean> {
+  if (result.usage) {
+    return (result.usage.input_tokens ?? 0) === 0 && (result.usage.output_tokens ?? 0) === 0;
+  }
   const [row] = await db
     .select({ tokenUsage: runs.tokenUsage })
     .from(runs)

@@ -258,6 +258,15 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
 }
 
 /**
+ * Synthetic sequence reserved for the finalize-time ledger write — real
+ * `appstrate.metric` events use sequence ≥ 1 (HttpSink's counter starts
+ * at 1), so the unique key (run_id, source, sequence) cannot collide.
+ * Co-owned by `run-event-ingestion.ts` which falls back to this writer
+ * when the metric POST is aborted by `process.exit()`.
+ */
+export const SYNTHESISED_RUNNER_LEDGER_SEQUENCE = 0;
+
+/**
  * Append one runner-source row to the `llm_usage` ledger.
  *
  * Runners emit running totals, not deltas. The per-event delta is derived
@@ -272,7 +281,7 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  * Errors are logged; correctness is self-healing because the next
  * metric event carries the full running total.
  */
-async function appendRunnerLedgerRow(
+export async function appendRunnerLedgerRow(
   scope: AppScope,
   runId: string,
   row: {
@@ -312,7 +321,7 @@ async function appendRunnerLedgerRow(
 }
 
 /** SUM of runner-source cost_usd persisted so far for this run. */
-async function sumRunnerCost(runId: string): Promise<number> {
+export async function sumRunnerCost(runId: string): Promise<number> {
   try {
     const [row] = await db
       .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })

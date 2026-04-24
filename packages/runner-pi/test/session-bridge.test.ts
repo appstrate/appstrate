@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { installSessionBridge } from "../src/pi-runner.ts";
+import { installSessionBridge, type InternalSink } from "../src/pi-runner.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 
 const RUN_ID = "run_bridge_test";
@@ -281,5 +281,166 @@ describe("installSessionBridge — wire envelope guarantees", () => {
       expect(typeof ev.timestamp).toBe("number");
       expect(ev.timestamp).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("installSessionBridge — getCost()", () => {
+  // The bridge's cost accumulator is the authoritative cost source
+  // threaded into RunResult.cost at finalize. The platform synthesises
+  // a runner-source `llm_usage` ledger row from this value when the
+  // metric event POST never landed, so cost accounting is independent
+  // of the side-channel's timing.
+  it("returns 0 before any messages have arrived", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    expect(bridge.getCost()).toBe(0);
+  });
+
+  it("accumulates cost across each message_end", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 10, output: 20, cost: { total: 0.001 } },
+      content: [{ type: "text", text: "a" }],
+    });
+    session.emit({ type: "message_end" });
+    expect(bridge.getCost()).toBeCloseTo(0.001, 5);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 5, output: 15, cost: { total: 0.002 } },
+      content: [{ type: "text", text: "b" }],
+    });
+    session.emit({ type: "message_end" });
+    expect(bridge.getCost()).toBeCloseTo(0.003, 5);
+  });
+
+  it("matches the cost carried on the appstrate.metric event", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 100, output: 200, cost: { total: 0.005 } },
+      content: [{ type: "text", text: "x" }],
+    });
+    session.emit({ type: "message_end" });
+    session.emit({ type: "agent_end" });
+
+    const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
+      cost: number;
+    };
+    expect(metric.cost).toBeCloseTo(bridge.getCost(), 5);
+  });
+});
+
+describe("installSessionBridge — getUsage()", () => {
+  // The bridge's accumulator is the authoritative usage source threaded
+  // into RunResult.usage at finalize. The platform reads it directly
+  // from the finalize body, removing the dependency on the metric event
+  // POST having been ingested first.
+  it("returns zeroed usage before any messages have arrived", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    expect(bridge.getUsage()).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    });
+  });
+
+  it("reflects accumulated usage after each message_end", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 10, output: 20, cacheRead: 1, cacheWrite: 2 },
+      content: [{ type: "text", text: "a" }],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(bridge.getUsage()).toEqual({
+      input_tokens: 10,
+      output_tokens: 20,
+      cache_creation_input_tokens: 2,
+      cache_read_input_tokens: 1,
+    });
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 5, output: 15, cacheRead: 3, cacheWrite: 4 },
+      content: [{ type: "text", text: "b" }],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(bridge.getUsage()).toEqual({
+      input_tokens: 15,
+      output_tokens: 35,
+      cache_creation_input_tokens: 6,
+      cache_read_input_tokens: 4,
+    });
+  });
+
+  it("matches the usage carried on the appstrate.metric event", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 100, output: 200, cacheRead: 5, cacheWrite: 10 },
+      content: [{ type: "text", text: "x" }],
+    });
+    session.emit({ type: "message_end" });
+    session.emit({ type: "agent_end" });
+
+    const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
+      usage: {
+        input_tokens: number;
+        output_tokens: number;
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
+      };
+    };
+    expect(metric.usage).toEqual(bridge.getUsage());
+  });
+});
+
+describe("installSessionBridge — fire-and-forget rejection handling", () => {
+  // The bridge calls `sink.emit(event).catch(() => {})` from the
+  // synchronous Pi SDK callback. A rejected emit MUST NOT bubble out as
+  // an unhandled promise rejection — the SDK callback returns void and
+  // has nowhere to receive an error.
+  it("does not throw or reject when sink.emit rejects", async () => {
+    const failingSink: InternalSink = {
+      emit: async () => {
+        throw new Error("network failure");
+      },
+    };
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, failingSink, RUN_ID);
+
+    // The synchronous emit MUST return cleanly even when the sink throws
+    // asynchronously. Yield a microtask so the rejected promise's
+    // `.catch(() => {})` runs before the test asserts no unhandled
+    // rejections were raised.
+    expect(() => session.emit({ type: "agent_end" })).not.toThrow();
+    await Promise.resolve();
+
+    // Accumulators still work after a failing emit — failure is purely
+    // local to the emit and doesn't corrupt bridge state.
+    expect(bridge.getUsage().input_tokens).toBe(0);
+    expect(bridge.getCost()).toBe(0);
   });
 });

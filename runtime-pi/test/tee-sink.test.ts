@@ -131,6 +131,55 @@ describe("mergeTerminalResult", () => {
     expect("error" in merged).toBe(false);
     expect("durationMs" in merged).toBe(false);
   });
+
+  it("forwards runner.usage onto the merged result", () => {
+    // The tee aggregator only sees canonical AFPS events, never
+    // `appstrate.metric` — so usage MUST come from the runner side.
+    // This is the path that lets the platform's finalize endpoint read
+    // an authoritative token count without waiting on the metric event.
+    const aggregate = emptyRunResult();
+    const runner: RunResult = {
+      ...emptyRunResult(),
+      status: "success",
+      usage: {
+        input_tokens: 123,
+        output_tokens: 45,
+        cache_creation_input_tokens: 6,
+        cache_read_input_tokens: 7,
+      },
+    };
+    const merged = mergeTerminalResult(aggregate, runner);
+    expect(merged.usage).toEqual({
+      input_tokens: 123,
+      output_tokens: 45,
+      cache_creation_input_tokens: 6,
+      cache_read_input_tokens: 7,
+    });
+  });
+
+  it("omits usage when runner did not provide it", () => {
+    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
+    expect("usage" in merged).toBe(false);
+  });
+
+  it("forwards runner.cost onto the merged result", () => {
+    // Same rationale as `usage`: cost must come from the runner side
+    // so finalize can synthesise the runner-source ledger row without
+    // waiting on the metric event POST.
+    const aggregate = emptyRunResult();
+    const runner: RunResult = {
+      ...emptyRunResult(),
+      status: "success",
+      cost: 0.0123,
+    };
+    const merged = mergeTerminalResult(aggregate, runner);
+    expect(merged.cost).toBeCloseTo(0.0123, 5);
+  });
+
+  it("omits cost when runner did not provide it", () => {
+    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
+    expect("cost" in merged).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ import {
   type RunOptions,
   type Runner,
   type RunResult,
+  type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
 
 /**
@@ -146,8 +147,33 @@ export class PiRunner implements Runner {
     // (for the reducer) and forwarded to the caller's sink.
     const internalSink: InternalSink = { emit };
 
+    // The bridge handle is captured via callback (not return value) so
+    // it survives a mid-session throw — the catch branch still needs
+    // `bridge.getUsage()` / `bridge.getCost()` to ship the partial
+    // counters with the failure finalize, and a thrown executeSession
+    // can never deliver a return value. A holder object dodges TS's
+    // strict-flow narrowing of a `let` set across an async closure.
+    const bridgeRef: { current: SessionBridgeHandle | null } = { current: null };
+    const captureBridge = (handle: SessionBridgeHandle): void => {
+      bridgeRef.current = handle;
+    };
+
+    const attachAccumulators = (result: RunResult): void => {
+      // Authoritative usage + cost travel with the finalize POST so the
+      // platform does not depend on the side-channel `appstrate.metric`
+      // having been ingested first. The metric event is now purely a
+      // live-UI signal whose POST may be aborted by `process.exit(0)`
+      // after `run()` returns — finalize body covers persistence and
+      // cost accounting on its own.
+      const bridge = bridgeRef.current;
+      if (bridge) {
+        result.usage = bridge.getUsage();
+        result.cost = bridge.getCost();
+      }
+    };
+
     try {
-      await this.executeSession(context, internalSink, signal);
+      await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
       if (signal?.aborted) {
         // Cancellation: propagate without finalizing — the caller's
@@ -164,11 +190,13 @@ export class PiRunner implements Runner {
       const result = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
+      attachAccumulators(result);
       await eventSink.finalize(result);
       return;
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    attachAccumulators(result);
     await eventSink.finalize(result);
   }
 
@@ -176,6 +204,7 @@ export class PiRunner implements Runner {
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
+    onBridgeReady?: (handle: SessionBridgeHandle) => void,
   ): Promise<void> {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
@@ -219,7 +248,10 @@ export class PiRunner implements Runner {
       }),
     });
 
-    installSessionBridge(session, internalSink, context.runId);
+    const bridge = installSessionBridge(session, internalSink, context.runId);
+    // Hand the bridge to `run()` immediately so a throw from
+    // `session.prompt()` further down does not lose the accumulator.
+    onBridgeReady?.(bridge);
 
     // Cancellation: Pi SDK does not expose a native abort. We race the
     // prompt against the signal and let the caller's abort bubble up.
@@ -244,6 +276,22 @@ export class PiRunner implements Runner {
 
 export interface InternalSink {
   emit(event: RunEvent): Promise<void>;
+}
+
+/**
+ * Returned by {@link installSessionBridge}. The Pi SDK's `subscribe`
+ * callback is synchronous and the bridge fires `sink.emit(...)` as
+ * fire-and-forget — the handle exposes the running accumulators so the
+ * caller can attach them to the terminal {@link RunResult}. These are
+ * the authoritative copies the platform reads at finalize, decoupling
+ * correctness from whether the side-channel `appstrate.metric` POST has
+ * landed yet.
+ */
+export interface SessionBridgeHandle {
+  /** Snapshot of token usage accumulated across the session so far. */
+  getUsage(): TokenUsage;
+  /** Snapshot of total LLM cost in USD accumulated across the session so far. */
+  getCost(): number;
 }
 
 /**
@@ -307,9 +355,17 @@ export function installSessionBridge(
   session: BridgeableSession,
   sink: InternalSink,
   runId: string,
-): void {
+): SessionBridgeHandle {
   // Token usage accumulator across all assistant turns.
   const totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+
+  // Fire-and-forget emit. Rejections are swallowed so a transient sink
+  // failure never propagates as an unhandled rejection out of the
+  // synchronous Pi SDK callback. Authoritative data still reaches the
+  // platform via `getUsage` / `getCost` on the finalize body.
+  const fire = (event: RunEvent): void => {
+    sink.emit(event).catch(() => {});
+  };
 
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
@@ -332,7 +388,7 @@ export function installSessionBridge(
 
         // SDK error (e.g. LLM API unreachable, auth failures)
         if (last.stopReason === "error" && last.errorMessage) {
-          void sink.emit({
+          fire({
             type: "appstrate.error",
             timestamp: Date.now(),
             runId,
@@ -348,7 +404,7 @@ export function installSessionBridge(
             .map((c) => c.text || "")
             .join("\n");
           if (text) {
-            void sink.emit({
+            fire({
               type: "appstrate.progress",
               timestamp: Date.now(),
               runId,
@@ -361,7 +417,7 @@ export function installSessionBridge(
 
       case "tool_execution_start": {
         const e = event as PiToolExecutionStartEvent;
-        void sink.emit({
+        fire({
           type: "appstrate.progress",
           timestamp: Date.now(),
           runId,
@@ -372,7 +428,7 @@ export function installSessionBridge(
       }
 
       case "agent_end": {
-        void sink.emit({
+        fire({
           type: "appstrate.metric",
           timestamp: Date.now(),
           runId,
@@ -391,4 +447,18 @@ export function installSessionBridge(
         break;
     }
   });
+
+  return {
+    getUsage(): TokenUsage {
+      return {
+        input_tokens: totalUsage.input,
+        output_tokens: totalUsage.output,
+        cache_creation_input_tokens: totalUsage.cacheWrite,
+        cache_read_input_tokens: totalUsage.cacheRead,
+      };
+    },
+    getCost(): number {
+      return totalUsage.cost;
+    },
+  };
 }

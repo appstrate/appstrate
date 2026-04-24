@@ -42,6 +42,35 @@ export interface RunResult {
   status?: "success" | "failed" | "timeout" | "cancelled";
   /** Elapsed wall-clock time in milliseconds. Runners populate this. */
   durationMs?: number;
+  /**
+   * Authoritative token usage for the run. When present, downstream
+   * consumers MUST treat this as the source of truth — the field exists
+   * so finalize is self-contained and does not race with the side-channel
+   * `appstrate.metric` event whose POST may not have landed yet. Runners
+   * that produce no LLM traffic (CLI replay, tests) leave this absent.
+   */
+  usage?: TokenUsage;
+  /**
+   * Authoritative LLM cost in USD for the runner-source contribution
+   * (i.e. the cost the runner itself observed for its own LLM calls).
+   * Travels with the finalize POST so cost accounting does not depend on
+   * the `appstrate.metric` event having been ingested before finalize.
+   * Combines with proxy + credential-proxy ledgers downstream — does NOT
+   * include those, only the runner's view.
+   */
+  cost?: number;
+}
+
+/**
+ * Snake-case token-usage shape carried on {@link RunResult.usage} and the
+ * `appstrate.metric` event. Mirrors the platform's `runs.tokenUsage` JSONB
+ * column shape so finalize can persist it directly without re-mapping.
+ */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 export interface Memory {

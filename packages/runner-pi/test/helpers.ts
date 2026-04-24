@@ -189,10 +189,11 @@ export class ScriptedPiRunner extends PiRunner {
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
+    onBridgeReady?: (handle: import("../src/pi-runner.ts").SessionBridgeHandle) => void,
   ): Promise<void> {
     const session = createFakeSession();
     const { installSessionBridge } = await import("../src/pi-runner.ts");
-    installSessionBridge(session, internalSink, context.runId);
+    onBridgeReady?.(installSessionBridge(session, internalSink, context.runId));
     await this.script(session, context, signal);
   }
 }
