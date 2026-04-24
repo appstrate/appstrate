@@ -261,11 +261,17 @@ export interface BridgeableSession {
  * canonical AFPS {@link RunEvent} emitted on the internal sink.
  *
  * Mapping:
- *   - `message_update` (text_delta)            → `appstrate.progress`
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
+ *
+ * The bridge deliberately does NOT forward `message_update` / `text_delta`
+ * streaming chunks. A 1000-token assistant reply would otherwise produce
+ * ~1000 signed HTTP POSTs + `run_logs` rows + frontend aggregation work,
+ * all describing content that's already delivered whole at `message_end`.
+ * Runs here are autonomous (fire-and-forget) so token-level live feedback
+ * is speculative UX; the message-level granularity suffices.
  *
  * Structured canonical events (memory.added, state.set, output.emitted,
  * report.appended, log.written) are produced by tool extensions that
@@ -290,10 +296,6 @@ interface PiAssistantMessage {
   errorMessage?: string;
   content?: Array<PiTextContent | { type: string }>;
 }
-interface PiMessageUpdateEvent {
-  type: "message_update";
-  assistantMessageEvent?: { type: string; delta?: string };
-}
 interface PiToolExecutionStartEvent {
   type: "tool_execution_start";
   toolName?: string;
@@ -312,19 +314,6 @@ export function installSessionBridge(
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
     switch (event.type) {
-      case "message_update": {
-        const msgEvent = (event as PiMessageUpdateEvent).assistantMessageEvent;
-        if (msgEvent?.type === "text_delta" && msgEvent.delta) {
-          void sink.emit({
-            type: "appstrate.progress",
-            timestamp: Date.now(),
-            runId,
-            message: String(msgEvent.delta),
-          });
-        }
-        break;
-      }
-
       case "message_end": {
         const entries = session.state.messages;
         if (!entries.length) break;

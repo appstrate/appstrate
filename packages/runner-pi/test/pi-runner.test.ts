@@ -23,10 +23,7 @@ describe("PiRunner.run — event forwarding", () => {
   it("forwards bridge-emitted events to the caller's EventSink before finalize", async () => {
     const sink = createCaptureSink();
     const runner = new ScriptedPiRunner(async (session) => {
-      session.emit({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: "hi" },
-      });
+      session.emit({ type: "tool_execution_start", toolName: "read_file" });
       session.emit({ type: "agent_end" });
     });
 
@@ -79,14 +76,8 @@ describe("PiRunner.run — event forwarding", () => {
     };
 
     const runner = new ScriptedPiRunner(async (session) => {
-      session.emit({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: "one" },
-      });
-      session.emit({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: "two" },
-      });
+      session.emit({ type: "tool_execution_start", toolName: "one" });
+      session.emit({ type: "tool_execution_start", toolName: "two" });
     });
 
     await runner.run({

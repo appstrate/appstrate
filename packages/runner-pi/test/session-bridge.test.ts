@@ -17,55 +17,26 @@ import { createFakeSession, createInternalCapture } from "./helpers.ts";
 const RUN_ID = "run_bridge_test";
 
 describe("installSessionBridge — message_update / text_delta", () => {
-  it("translates an assistantMessageEvent text_delta into appstrate.progress", () => {
+  it("does NOT forward text_delta streaming chunks (message_end carries the full text)", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     installSessionBridge(session, sink, RUN_ID);
 
+    // Burst of deltas — historically these each turned into an
+    // `appstrate.progress`. We stopped forwarding them to avoid
+    // 1000× signed POSTs / run_logs inserts per long assistant reply;
+    // the `message_end` mapping still surfaces the assembled text.
     session.emit({
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: "Hello " },
     });
-
-    expect(sink.events).toHaveLength(1);
-    expect(sink.events[0]).toMatchObject({
-      type: "appstrate.progress",
-      runId: RUN_ID,
-      message: "Hello ",
-    });
-  });
-
-  it("emits one progress per text_delta", () => {
-    const sink = createInternalCapture();
-    const session = createFakeSession();
-    installSessionBridge(session, sink, RUN_ID);
-
     session.emit({
       type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta: "a" },
+      assistantMessageEvent: { type: "text_delta", delta: "world" },
     });
-    session.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta: "b" },
-    });
-
-    expect(sink.events).toHaveLength(2);
-    expect((sink.events[0] as unknown as { message: string }).message).toBe("a");
-    expect((sink.events[1] as unknown as { message: string }).message).toBe("b");
-  });
-
-  it("ignores message_update events with no delta", () => {
-    const sink = createInternalCapture();
-    const session = createFakeSession();
-    installSessionBridge(session, sink, RUN_ID);
-
     session.emit({
       type: "message_update",
       assistantMessageEvent: { type: "text_delta" }, // delta: undefined
-    });
-    session.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "other" },
     });
 
     expect(sink.events).toHaveLength(0);
@@ -288,13 +259,10 @@ describe("installSessionBridge — wire envelope guarantees", () => {
     const session = createFakeSession();
     installSessionBridge(session, sink, RUN_ID);
 
-    session.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta: "hi" },
-    });
     session.emit({ type: "tool_execution_start", toolName: "t" });
     session.emit({ type: "agent_end" });
 
+    expect(sink.events.length).toBeGreaterThan(0);
     for (const ev of sink.events) {
       expect(ev.runId).toBe(RUN_ID);
     }
@@ -305,12 +273,10 @@ describe("installSessionBridge — wire envelope guarantees", () => {
     const session = createFakeSession();
     installSessionBridge(session, sink, RUN_ID);
 
-    session.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta: "hi" },
-    });
+    session.emit({ type: "tool_execution_start", toolName: "t" });
     session.emit({ type: "agent_end" });
 
+    expect(sink.events.length).toBeGreaterThan(0);
     for (const ev of sink.events) {
       expect(typeof ev.timestamp).toBe("number");
       expect(ev.timestamp).toBeGreaterThan(0);
