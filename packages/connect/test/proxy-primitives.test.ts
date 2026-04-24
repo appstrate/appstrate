@@ -14,6 +14,11 @@ import {
   matchesAuthorizedUriSpec,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
+  buildInjectedCredentialHeader,
+  applyInjectedCredentialHeader,
+  applyInjectedCredentialHeaderToHeaders,
+  normalizeAuthScheme,
+  normalizeAuthSchemeOnHeaders,
 } from "../src/proxy-primitives.ts";
 
 describe("substituteVars", () => {
@@ -177,5 +182,143 @@ describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
   it("preserves original casing of kept headers", () => {
     const out = filterHeaders({ Authorization: "Bearer abc" });
     expect(out).toEqual({ Authorization: "Bearer abc" });
+  });
+});
+
+describe("buildInjectedCredentialHeader", () => {
+  it("builds `Bearer <token>` when prefix is set", () => {
+    const out = buildInjectedCredentialHeader({
+      credentials: { access_token: "abc" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    });
+    expect(out).toEqual({ name: "Authorization", value: "Bearer abc" });
+  });
+
+  it("omits the space when no prefix", () => {
+    const out = buildInjectedCredentialHeader({
+      credentials: { api_key: "secret" },
+      credentialHeaderName: "X-Api-Key",
+      credentialFieldName: "api_key",
+    });
+    expect(out).toEqual({ name: "X-Api-Key", value: "secret" });
+  });
+
+  it("returns undefined when header name is absent (no injection)", () => {
+    expect(
+      buildInjectedCredentialHeader({
+        credentials: { access_token: "abc" },
+        credentialFieldName: "access_token",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when the referenced field is empty", () => {
+    expect(
+      buildInjectedCredentialHeader({
+        credentials: { access_token: "" },
+        credentialHeaderName: "Authorization",
+        credentialFieldName: "access_token",
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("applyInjectedCredentialHeader (record)", () => {
+  it("adds the header when absent", () => {
+    const headers: Record<string, string> = {};
+    applyInjectedCredentialHeader(headers, {
+      credentials: { access_token: "abc" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    });
+    expect(headers).toEqual({ Authorization: "Bearer abc" });
+  });
+
+  it("respects a case-insensitive caller override", () => {
+    const headers: Record<string, string> = { authorization: "Bearer caller" };
+    applyInjectedCredentialHeader(headers, {
+      credentials: { access_token: "server" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    });
+    expect(headers).toEqual({ authorization: "Bearer caller" });
+  });
+});
+
+describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
+  it("adds the header when absent", () => {
+    const headers = new Headers();
+    applyInjectedCredentialHeaderToHeaders(headers, {
+      credentials: { access_token: "abc" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    });
+    expect(headers.get("authorization")).toBe("Bearer abc");
+  });
+
+  it("respects a case-insensitive caller override", () => {
+    const headers = new Headers({ Authorization: "Bearer caller" });
+    applyInjectedCredentialHeaderToHeaders(headers, {
+      credentials: { access_token: "server" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    });
+    expect(headers.get("authorization")).toBe("Bearer caller");
+  });
+});
+
+describe("normalizeAuthScheme", () => {
+  it("adds a space after Bearer when missing", () => {
+    const headers = { Authorization: "Bearertoken" };
+    normalizeAuthScheme(headers);
+    expect(headers).toEqual({ Authorization: "Bearer token" });
+  });
+
+  it("handles Basic and Token schemes", () => {
+    const h1 = { Authorization: "Basicdeadbeef" };
+    normalizeAuthScheme(h1);
+    expect(h1).toEqual({ Authorization: "Basic deadbeef" });
+
+    const h2 = { Authorization: "Tokenabc" };
+    normalizeAuthScheme(h2);
+    expect(h2).toEqual({ Authorization: "Token abc" });
+  });
+
+  it("leaves well-formed schemes untouched", () => {
+    const headers = { Authorization: "Bearer abc" };
+    normalizeAuthScheme(headers);
+    expect(headers).toEqual({ Authorization: "Bearer abc" });
+  });
+
+  it("normalises Proxy-Authorization too", () => {
+    const headers = { "Proxy-Authorization": "Basicabc" };
+    normalizeAuthScheme(headers);
+    expect(headers).toEqual({ "Proxy-Authorization": "Basic abc" });
+  });
+
+  it("leaves non-auth headers untouched", () => {
+    const headers = { "X-Custom": "Bearertoken" };
+    normalizeAuthScheme(headers);
+    expect(headers).toEqual({ "X-Custom": "Bearertoken" });
+  });
+});
+
+describe("normalizeAuthSchemeOnHeaders (Headers instance)", () => {
+  it("adds a space after Bearer on a Headers instance", () => {
+    const headers = new Headers({ Authorization: "Bearertoken" });
+    normalizeAuthSchemeOnHeaders(headers);
+    expect(headers.get("authorization")).toBe("Bearer token");
+  });
+
+  it("leaves well-formed schemes untouched", () => {
+    const headers = new Headers({ Authorization: "Bearer abc" });
+    normalizeAuthSchemeOnHeaders(headers);
+    expect(headers.get("authorization")).toBe("Bearer abc");
   });
 });

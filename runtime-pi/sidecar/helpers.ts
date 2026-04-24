@@ -47,45 +47,6 @@ export interface CredentialsResponse {
   credentialFieldName: string;
 }
 
-/**
- * Build the final header-name / header-value pair to inject server-side
- * from the platform-supplied credentials payload. Returns `undefined`
- * when the provider does not declare a `credentialHeaderName` (no
- * injection intended) or when the referenced credential field is empty.
- *
- * Exported so the `/proxy` handler and any future retry / refresh loop
- * share one implementation.
- */
-export function buildInjectedCredentialHeader(
-  creds: CredentialsResponse,
-): { name: string; value: string } | undefined {
-  if (!creds.credentialHeaderName) return undefined;
-  const token = creds.credentials[creds.credentialFieldName];
-  if (!token) return undefined;
-  const prefix = creds.credentialHeaderPrefix?.trim();
-  const value = prefix ? `${prefix} ${token}` : token;
-  return { name: creds.credentialHeaderName, value };
-}
-
-/**
- * Apply {@link buildInjectedCredentialHeader} onto an existing header
- * map in-place. Caller headers win on case-insensitive match — if the
- * agent explicitly set the credential header (e.g. passing a per-call
- * token via input), we respect the override rather than clobbering it.
- */
-export function applyInjectedCredentialHeader(
-  headers: Record<string, string>,
-  creds: CredentialsResponse,
-): void {
-  const injected = buildInjectedCredentialHeader(creds);
-  if (!injected) return;
-  const lower = injected.name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === lower) return; // caller override wins
-  }
-  headers[injected.name] = injected.value;
-}
-
 // Import from the dedicated subpath so the compiled sidecar binary does
 // NOT pull `@appstrate/connect`'s credentials module (which transitively
 // depends on @appstrate/db — unwanted in a credential-isolating proxy).
@@ -94,6 +55,9 @@ export {
   findUnresolvedPlaceholders,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
+  buildInjectedCredentialHeader,
+  applyInjectedCredentialHeader,
+  normalizeAuthScheme,
 } from "@appstrate/connect/proxy-primitives";
 
 import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";

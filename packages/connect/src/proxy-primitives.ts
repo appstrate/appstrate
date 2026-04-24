@@ -41,6 +41,105 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
+ * Narrow structural shape consumed by {@link buildInjectedCredentialHeader}
+ * and {@link applyInjectedCredentialHeader}. Matches both
+ * `@appstrate/connect`'s `ProxyCredentialsPayload` (platform, DB-backed)
+ * and the sidecar's `CredentialsResponse` (HTTP-backed). Narrowing keeps
+ * the helpers agnostic of how credentials were sourced so drift between
+ * the two entrypoints is impossible.
+ */
+export interface InjectableCredentials {
+  credentials: Record<string, string>;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  credentialFieldName: string;
+}
+
+/**
+ * Build the final header-name / header-value pair the proxy injects
+ * server-side from the platform-supplied credentials. Returns `undefined`
+ * when the provider declares no `credentialHeaderName` (no injection
+ * intended) or the referenced credential field is empty. The LLM never
+ * touches the credential value — it only sees placeholder templates.
+ */
+export function buildInjectedCredentialHeader(
+  creds: InjectableCredentials,
+): { name: string; value: string } | undefined {
+  if (!creds.credentialHeaderName) return undefined;
+  const token = creds.credentials[creds.credentialFieldName];
+  if (!token) return undefined;
+  const prefix = creds.credentialHeaderPrefix?.trim();
+  const value = prefix ? `${prefix} ${token}` : token;
+  return { name: creds.credentialHeaderName, value };
+}
+
+/**
+ * Apply {@link buildInjectedCredentialHeader} onto an existing header
+ * map in-place. Caller headers win on case-insensitive match — if the
+ * agent explicitly set the credential header (e.g. passing a per-call
+ * token via input), we respect the override rather than clobbering it.
+ */
+export function applyInjectedCredentialHeader(
+  headers: Record<string, string>,
+  creds: InjectableCredentials,
+): void {
+  const injected = buildInjectedCredentialHeader(creds);
+  if (!injected) return;
+  const lower = injected.name.toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === lower) return; // caller override wins
+  }
+  headers[injected.name] = injected.value;
+}
+
+/**
+ * Same as {@link applyInjectedCredentialHeader} but for a `Headers`
+ * instance. Platform path uses `Headers` (streaming-friendly), sidecar
+ * uses a plain record — both converge on the same injection semantics.
+ */
+export function applyInjectedCredentialHeaderToHeaders(
+  headers: Headers,
+  creds: InjectableCredentials,
+): void {
+  const injected = buildInjectedCredentialHeader(creds);
+  if (!injected) return;
+  const lower = injected.name.toLowerCase();
+  let overridden = false;
+  headers.forEach((_v, k) => {
+    if (k.toLowerCase() === lower) overridden = true;
+  });
+  if (overridden) return;
+  headers.set(injected.name, injected.value);
+}
+
+/**
+ * Normalise malformed `Authorization` / `Proxy-Authorization` schemes in
+ * place: `Bearertoken` → `Bearer token`. LLMs sometimes concatenate the
+ * scheme and the placeholder without a space (`Bearer{{access_token}}`)
+ * which substitution expands to `Bearertoken…` — upstreams reject that
+ * with 401. Applied in both entrypoints so the fix is always on.
+ */
+export function normalizeAuthScheme(headers: Record<string, string>): void {
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase();
+    if (lower !== "authorization" && lower !== "proxy-authorization") continue;
+    headers[key] = headers[key]!.replace(/^(Bearer|Basic|Token)(?=[^\s])/i, "$1 ");
+  }
+}
+
+/**
+ * Same as {@link normalizeAuthScheme} for a `Headers` instance.
+ */
+export function normalizeAuthSchemeOnHeaders(headers: Headers): void {
+  headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (lower !== "authorization" && lower !== "proxy-authorization") return;
+    const fixed = value.replace(/^(Bearer|Basic|Token)(?=[^\s])/i, "$1 ");
+    if (fixed !== value) headers.set(key, fixed);
+  });
+}
+
+/**
  * RFC 7230 §6.1 hop-by-hop headers — MUST NOT be forwarded by a proxy.
  * Used by both credential-proxy entrypoints to scrub forwarded headers
  * before they travel upstream or back downstream.

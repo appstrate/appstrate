@@ -15,6 +15,7 @@ import {
   matchesAuthorizedUri,
   isBlockedUrl,
   applyInjectedCredentialHeader,
+  normalizeAuthScheme,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyConfig,
@@ -347,16 +348,7 @@ export function createApp(deps: AppDeps): Hono {
       // an agent can still pass a per-call token through input when
       // exotic dual-auth flows need it.
       applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-      // Normalize auth headers: ensure space after scheme (e.g. "Bearertoken" → "Bearer token").
-      // LLMs sometimes generate "Bearer{{access_token}}" without a space, which produces
-      // a malformed header that providers reject with 401.
-      const authKey = Object.keys(resolvedHeaders).find((k) => k.toLowerCase() === "authorization");
-      if (authKey) {
-        resolvedHeaders[authKey] = resolvedHeaders[authKey]!.replace(
-          /^(Bearer|Basic|Token)(?=[^\s])/i,
-          "$1 ",
-        );
-      }
+      normalizeAuthScheme(resolvedHeaders);
       // Re-inject cookies (not credential-dependent)
       const storedCookies2 = cookieJar.get(providerId);
       if (storedCookies2 && storedCookies2.length) {

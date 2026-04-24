@@ -35,6 +35,7 @@ import type { Context } from "hono";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles } from "@appstrate/db/schema";
+import { filterHeaders } from "@appstrate/connect/proxy-primitives";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -44,23 +45,32 @@ import {
   proxyCall,
   ProxyAuthorizationError,
   ProxyCredentialError,
+  ProxySubstitutionError,
 } from "../services/credential-proxy/core.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /**
- * Resolve the connection profile holding the credentials for a given
- * (applicationId, optional endUser) pair:
- *   - with end-user: the end-user's default profile (exactly one by
- *     schema check constraint).
- *   - application-only: the application's default profile. Applications
- *     may have no default profile in fresh installs — in that case the
- *     caller surfaces a 404 rather than silently falling back.
+ * Resolve the connection profile holding the credentials:
+ *   - end-user in context: the end-user's default profile.
+ *   - authenticated user (dashboard / CLI JWT) with no app-default:
+ *     the user's own default profile. Mirrors how the platform dashboard
+ *     resolves providers — the user's personal connection chain is used
+ *     when no app-level profile has been provisioned.
+ *   - else: the application's default profile (API-key callers).
+ *
+ * Applications on fresh installs often have no app-default profile —
+ * they rely on `app-profile-bindings` to user profiles instead. Without
+ * the user-profile fallback a `oauth2-instance`/`oauth2-dashboard`
+ * caller would hit a 404 on every provider call despite having their
+ * own connected account; that mismatch would make the CLI remote-run
+ * flow unusable unless every admin hand-crafts an app-default profile.
  */
 async function resolveProfileId(args: {
   applicationId: string;
   endUserId?: string;
+  userId?: string;
 }): Promise<string | null> {
   if (args.endUserId) {
     const rows = await db
@@ -75,7 +85,7 @@ async function resolveProfileId(args: {
       .limit(1);
     return rows[0]?.id ?? null;
   }
-  const rows = await db
+  const appRows = await db
     .select({ id: connectionProfiles.id })
     .from(connectionProfiles)
     .where(
@@ -88,7 +98,24 @@ async function resolveProfileId(args: {
     )
     .orderBy(sql`created_at asc`)
     .limit(1);
-  return rows[0]?.id ?? null;
+  if (appRows[0]) return appRows[0].id;
+
+  if (args.userId) {
+    const userRows = await db
+      .select({ id: connectionProfiles.id })
+      .from(connectionProfiles)
+      .where(
+        and(
+          eq(connectionProfiles.userId, args.userId),
+          eq(connectionProfiles.isDefault, true),
+          isNull(connectionProfiles.applicationId),
+          isNull(connectionProfiles.endUserId),
+        ),
+      )
+      .limit(1);
+    if (userRows[0]) return userRows[0].id;
+  }
+  return null;
 }
 
 /**
@@ -147,7 +174,11 @@ export function createCredentialProxyRouter() {
 
   router.use("/*", requireAppContext());
 
-  router.post(
+  // Accept any HTTP method — the proxy preserves `req.method` on the
+  // upstream fetch, mirroring the in-container sidecar's `app.all("/proxy")`
+  // contract. A POST-only route silently 404s GET/PUT/DELETE tool calls,
+  // which the agent paraphrases as "the Gmail API is not available".
+  router.all(
     "/proxy",
     rateLimit(limits.rate_per_min),
     requirePermission("credential-proxy", "call"),
@@ -213,12 +244,20 @@ export function createCredentialProxyRouter() {
       const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
-      // Resolve the profile that owns the credentials: end-user profile
-      // when an `Appstrate-User` header was supplied, the application's
-      // default profile otherwise.
+      // Resolve the profile that owns the credentials:
+      //   - end-user profile when `Appstrate-User` was supplied
+      //   - app-default profile, else
+      //   - authenticated user's personal profile (dashboard / CLI JWT flows
+      //     only — API keys operate on apps, not users).
+      const userFallback =
+        authMethod === "oauth2-dashboard" || authMethod === "oauth2-instance" ? userId : undefined;
       let profileId: string | null;
       try {
-        profileId = await resolveProfileId({ applicationId, endUserId: endUser?.id });
+        profileId = await resolveProfileId({
+          applicationId,
+          endUserId: endUser?.id,
+          ...(userFallback ? { userId: userFallback } : {}),
+        });
       } catch (err) {
         logger.error("credential-proxy: profile resolution failed", {
           applicationId,
@@ -246,15 +285,12 @@ export function createCredentialProxyRouter() {
         }
       }
 
-      // Forward upstream headers (stripped of the proxy's control ones
-      // and hop-by-hop values).
-      const fwdHeaders: Record<string, string> = {};
-      for (const [name, value] of Object.entries(c.req.header())) {
-        const lower = name.toLowerCase();
-        if (PROXY_CONTROL_HEADERS.has(lower)) continue;
-        if (HOP_BY_HOP.has(lower)) continue;
-        fwdHeaders[name] = value;
-      }
+      // Forward upstream headers — strip (a) the proxy's control headers,
+      // (b) `host` and `content-length` (caller's inbound Host would poison
+      // the upstream TLS SNI; fetch recomputes Content-Length), and
+      // (c) RFC 7230 hop-by-hop headers. Reuses the same `filterHeaders`
+      // helper as the in-container sidecar for a single source of truth.
+      const fwdHeaders = filterHeaders(c.req.header(), PROXY_CONTROL_HEADERS);
 
       const jar = await getCookieJarStore();
 
@@ -316,6 +352,13 @@ export function createCredentialProxyRouter() {
         result.headers.forEach((value, key) => {
           const lower = key.toLowerCase();
           if (HOP_BY_HOP.has(lower)) return;
+          // Bun's upstream `fetch` auto-decodes `content-encoding`, so
+          // `result.body` is already plain bytes. Forwarding the original
+          // gzip header would make the caller's fetch double-decompress
+          // and surface as an opaque connection error on the agent side.
+          // `content-length` is dropped for the same reason — the body
+          // length changed after decompression.
+          if (lower === "content-encoding" || lower === "content-length") return;
           responseHeaders.set(key, value);
         });
         if (result.truncated) responseHeaders.set("X-Truncated", "true");
@@ -338,6 +381,9 @@ export function createCredentialProxyRouter() {
         }
         if (err instanceof ProxyCredentialError) {
           throw notFound(err.message);
+        }
+        if (err instanceof ProxySubstitutionError) {
+          throw invalidRequest(err.message);
         }
         logger.error("credential-proxy: unexpected failure", {
           authMethod,
@@ -365,6 +411,12 @@ const PROXY_CONTROL_HEADERS = new Set([
   "authorization",
   "appstrate-user",
   "appstrate-version",
+  // Strip the caller's `accept-encoding` so Bun's upstream fetch picks
+  // its own default and auto-decodes transparently — otherwise the
+  // caller's list (e.g. `gzip, br, zstd`) can leak through to Gmail,
+  // which returns an encoded body that the public route can't safely
+  // forward (re-encoding would require rebuffering the whole stream).
+  "accept-encoding",
 ]);
 
 /**

@@ -64,4 +64,10 @@ export {
   matchesAuthorizedUriSpec,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
+  buildInjectedCredentialHeader,
+  applyInjectedCredentialHeader,
+  applyInjectedCredentialHeaderToHeaders,
+  normalizeAuthScheme,
+  normalizeAuthSchemeOnHeaders,
 } from "./proxy-primitives.ts";
+export type { InjectableCredentials } from "./proxy-primitives.ts";

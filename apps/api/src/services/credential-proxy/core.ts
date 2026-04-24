@@ -25,8 +25,20 @@ import {
   resolveCredentialsForProxy,
   getProviderCredentialId,
   substituteVars,
+  findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
+  applyInjectedCredentialHeaderToHeaders,
+  normalizeAuthSchemeOnHeaders,
 } from "@appstrate/connect";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
+
+/**
+ * Hard cap on the time we wait for the upstream provider. Mirrors the
+ * sidecar's `OUTBOUND_TIMEOUT_MS` so CLI-driven calls and in-container
+ * calls fail at the same boundary — no accidental hang on a slow
+ * upstream.
+ */
+const OUTBOUND_TIMEOUT_MS = 30_000;
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -123,6 +135,19 @@ export class ProxyCredentialError extends Error {
   }
 }
 
+/**
+ * Thrown when a caller-supplied template references a credential field
+ * that does not exist in the resolved payload. Mapped to 400 by the
+ * route handler — a misconfigured agent, not an infrastructure error.
+ */
+export class ProxySubstitutionError extends Error {
+  readonly code = "UNRESOLVED_PLACEHOLDER";
+  constructor(message: string) {
+    super(message);
+    this.name = "ProxySubstitutionError";
+  }
+}
+
 // `substituteVars` and `matchesAuthorizedUriSpec` are imported from
 // `@appstrate/connect` to keep the credential-proxy server path and the
 // in-container sidecar in lockstep. Any fix to placeholder substitution
@@ -156,57 +181,68 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     throw new ProxyCredentialError(`No credentials for provider '${input.providerId}'`);
   }
 
-  // authorizedUris gate (AFPS spec: `*` = one segment, `**` = any substring)
-  if (!resolved.allowAllUris) {
-    const allowlist = resolved.authorizedUris ?? [];
-    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, input.target));
-    if (!ok) {
-      throw new ProxyAuthorizationError(
-        `Target ${input.target} is not in the authorizedUris allowlist for ${input.providerId}`,
-      );
-    }
-  }
-
-  // Substitute placeholders in target + headers
+  // Substitute placeholders in target (fail-closed on unresolved refs —
+  // mirror of the sidecar; stops the proxy from leaking `{{foo}}` to the
+  // upstream when a template references a non-existent field).
   const fields = resolved.credentials;
   const target = substituteVars(input.target, fields);
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(input.headers ?? {})) {
-    headers.set(k, substituteVars(v, fields));
+  const unresolvedInTarget = findUnresolvedPlaceholders(target);
+  if (unresolvedInTarget.length > 0) {
+    throw new ProxySubstitutionError(
+      `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
+    );
   }
 
-  // Server-side credential injection — mirror of the sidecar logic so
-  // Remote runners (CLI, GitHub Action, BYOI) get the same auth story
-  // as the in-container sidecar. When the provider manifest declares a
-  // `credentialHeaderName`, the route writes the final header here
-  // from `credentials[credentialFieldName]`. The caller's API-key auth
-  // has already been consumed upstream and `Authorization` is stripped
-  // by the public route's `PROXY_CONTROL_HEADERS` allowlist, so there
-  // is no credential leak and no risk of the agent overriding the
-  // pinned header. Non-Authorization custom headers (e.g. `X-Api-Key`)
-  // honour a case-insensitive caller override for exotic dual-auth
-  // flows — symmetric with the sidecar.
-  if (resolved.credentialHeaderName) {
-    const secret = fields[resolved.credentialFieldName];
-    if (secret) {
-      const lower = resolved.credentialHeaderName.toLowerCase();
-      let overridden = false;
-      headers.forEach((_v, k) => {
-        if (k.toLowerCase() === lower) overridden = true;
-      });
-      if (!overridden) {
-        const prefix = resolved.credentialHeaderPrefix?.trim();
-        headers.set(resolved.credentialHeaderName, prefix ? `${prefix} ${secret}` : secret);
-      }
+  // authorizedUris gate (AFPS spec: `*` = one segment, `**` = any substring).
+  // When `allowAllUris` is set we still block private/internal network
+  // targets — mirror of the sidecar's SSRF safety net so the public
+  // route can't be turned into an SSRF primitive by flipping a single
+  // flag on a provider manifest.
+  if (!resolved.allowAllUris) {
+    const allowlist = resolved.authorizedUris ?? [];
+    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, target));
+    if (!ok) {
+      throw new ProxyAuthorizationError(
+        `Target ${target} is not in the authorizedUris allowlist for ${input.providerId}`,
+      );
     }
+    if (allowlist.length === 0 && isBlockedUrl(target)) {
+      throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
+    }
+  } else if (isBlockedUrl(target)) {
+    throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
   }
+
+  // Resolve caller headers, then let the shared injector add the pinned
+  // credential header server-side (mirror of the sidecar — single source
+  // of truth in `@appstrate/connect/proxy-primitives`).
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(input.headers ?? {})) {
+    const substituted = substituteVars(v, fields);
+    const unresolved = findUnresolvedPlaceholders(substituted);
+    if (unresolved.length > 0) {
+      throw new ProxySubstitutionError(
+        `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
+      );
+    }
+    headers.set(k, substituted);
+  }
+  applyInjectedCredentialHeaderToHeaders(headers, resolved);
+  normalizeAuthSchemeOnHeaders(headers);
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
   let body: string | Uint8Array | undefined;
   if (input.body !== undefined && input.body !== null) {
     if (typeof input.body === "string" && input.substituteBody) {
-      body = substituteVars(input.body, fields);
+      const substituted = substituteVars(input.body, fields);
+      const unresolved = findUnresolvedPlaceholders(substituted);
+      if (unresolved.length > 0) {
+        throw new ProxySubstitutionError(
+          `Unresolved placeholders in body: {{${unresolved.join(",")}}}`,
+        );
+      }
+      body = substituted;
     } else {
       body = input.body;
     }
@@ -223,7 +259,12 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     }
   }
 
-  const res = await fetchImpl(target, { method: input.method, headers, body });
+  const res = await fetchImpl(target, {
+    method: input.method,
+    headers,
+    body,
+    signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+  });
 
   if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();
