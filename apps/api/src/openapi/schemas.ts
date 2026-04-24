@@ -367,7 +367,18 @@ export const schemas = {
       result: { type: "object" },
       state: { type: "object" },
       error: { type: "string" },
-      tokenUsage: { type: "object" },
+      tokenUsage: {
+        type: ["object", "null"],
+        description:
+          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
+        properties: {
+          input_tokens: { type: "integer", minimum: 0 },
+          output_tokens: { type: "integer", minimum: 0 },
+          cache_creation_input_tokens: { type: "integer", minimum: 0 },
+          cache_read_input_tokens: { type: "integer", minimum: 0 },
+        },
+        additionalProperties: false,
+      },
       startedAt: { type: "string", format: "date-time" },
       completedAt: { type: "string", format: "date-time" },
       duration: { type: "integer", description: "Duration in milliseconds" },

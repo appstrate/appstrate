@@ -259,6 +259,42 @@ describe("AppstrateEventSink", () => {
     expect(runRow?.cost).toBeNull();
   });
 
+  it("concurrent metric inserts for the same run produce SUM == final running total", async () => {
+    // Multi-turn agents emit several appstrate.metric events whose `cost`
+    // is the running total to date. The sink derives a per-row delta as
+    // `(running_total − prior_SUM)`. Without the per-run advisory lock,
+    // concurrent reads of `prior_SUM` would all observe the same stale
+    // value and the deltas would over-count. This test fires the inserts
+    // in parallel and asserts that SUM(ledger) equals the highest
+    // observed running total — invariant of the delta-from-running-total
+    // protocol, regardless of arrival interleaving.
+    const totals = [0.001, 0.003, 0.006, 0.01, 0.015];
+    await Promise.all(
+      totals.map((cost, idx) => {
+        const sink = new AppstrateEventSink({
+          scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+          runId,
+          persistOnly: true,
+          sequence: idx + 1,
+        });
+        return sink.handle(
+          event("appstrate.metric", {
+            usage: { input_tokens: (idx + 1) * 100, output_tokens: (idx + 1) * 50 },
+            cost,
+          }),
+        );
+      }),
+    );
+
+    const rows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    const sum = rows.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
+    expect(rows).toHaveLength(totals.length);
+    expect(sum).toBeCloseTo(Math.max(...totals), 5);
+  });
+
   it("envelope replay is idempotent on the ledger (unique (run_id, sequence))", async () => {
     const build = () =>
       new AppstrateEventSink({

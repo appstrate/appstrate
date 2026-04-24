@@ -1,25 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-call metering for `/api/credential-proxy/*` + run-cost aggregator.
+ * Per-call audit log for `/api/credential-proxy/*` + run-cost aggregator.
  *
- * Reporting queries compose against two ledger tables:
+ * Two distinct concerns share this module:
  *
- *   SUM(llm_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
- *   WHERE run_id = $1
+ *   1. {@link insertCredentialProxyUsage} — append one audit row to
+ *      `credential_proxy_usage` per upstream provider call. Today every
+ *      row carries `cost_usd = 0` because no provider is metered; the
+ *      table is an audit / observability ledger (provider, target host,
+ *      HTTP status, duration), not a billing ledger.
  *
- * yields the full attributable spend for one run — regardless of whether
- * the LLM traffic transited `/api/llm-proxy` (source='proxy') or was
- * reported by an in-run runner via `appstrate.metric` (source='runner').
- *
- * The `requestId` column is the dedup key: the proxy route derives one per
- * upstream request; replays (CLI retries) are no-ops via the UNIQUE
- * constraint on `credential_proxy_usage.request_id`.
+ *   2. {@link computeRunCost} — single read path for the canonical
+ *      `runs.cost` value. Reads only `llm_usage` (proxy + runner rows).
+ *      `credential_proxy_usage.cost_usd` is intentionally NOT summed:
+ *      it is always 0, and including a constant-zero SUM in the run
+ *      finalize hot path is dead work. When the first metered provider
+ *      ships, route its rows through `llm_usage` with a new `source`
+ *      enum value (e.g. `credential_proxy`) — that keeps the single
+ *      ledger invariant and avoids resurrecting a redundant SUM here.
  */
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, credentialProxyUsage } from "@appstrate/db/schema";
+// `credentialProxyUsage` is still used by `insertCredentialProxyUsage`
+// below; not by `computeRunCost` (see header comment).
 import { logger } from "../lib/logger.ts";
 
 export interface InsertCredentialProxyUsageInput {
@@ -74,18 +80,17 @@ export async function insertCredentialProxyUsage(
 
 export interface RunCostBreakdown {
   llmUsd: number;
-  credentialUsd: number;
   total: number;
 }
 
 /**
- * Compute the total attributable spend for a run across every ledger
- * surface (llm_usage: proxy + runner rows, credential_proxy_usage).
- * Called by `finalizeRun` to cache the canonical `runs.cost` value at
- * terminal time. This is the SINGLE read path for aggregate run cost —
- * no caller should SUM the ledgers directly.
+ * Compute the total attributable spend for a run from the unified
+ * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
+ * cache the canonical `runs.cost` value at terminal time. This is the
+ * SINGLE read path for aggregate run cost — no caller should SUM the
+ * ledger directly.
  *
- * Two scalar SUMs over indexed `run_id` columns — cheap even on long runs.
+ * One scalar SUM over the `(run_id)` index — cheap even on long runs.
  */
 export async function computeRunCost(runId: string): Promise<RunCostBreakdown> {
   const [llm] = await db
@@ -95,18 +100,9 @@ export async function computeRunCost(runId: string): Promise<RunCostBreakdown> {
     .from(llmUsage)
     .where(eq(llmUsage.runId, runId));
 
-  const [credential] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${credentialProxyUsage.costUsd}), 0)`,
-    })
-    .from(credentialProxyUsage)
-    .where(eq(credentialProxyUsage.runId, runId));
-
   const llmUsd = Number(llm?.total ?? 0);
-  const credentialUsd = Number(credential?.total ?? 0);
   return {
     llmUsd,
-    credentialUsd,
-    total: llmUsd + credentialUsd,
+    total: llmUsd,
   };
 }

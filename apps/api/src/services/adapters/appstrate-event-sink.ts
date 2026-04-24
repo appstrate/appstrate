@@ -274,6 +274,13 @@ export const SYNTHESISED_RUNNER_LEDGER_SEQUENCE = 0;
  * stays equal to the final running total regardless of how many metric
  * events a run produces (one today; multi-turn agents tomorrow).
  *
+ * Concurrency: the read-then-insert is wrapped in a transaction with a
+ * per-run `pg_advisory_xact_lock(hashtext(run_id))` so two concurrent
+ * metric events for the same run cannot both read the same prior SUM and
+ * over-count the delta. The lock is keyed on the run id alone; concurrent
+ * writes for OTHER runs are unaffected. Lock is released automatically
+ * when the transaction commits or rolls back.
+ *
  * Dedup on `(run_id, sequence)` makes envelope replay a no-op — the
  * ingestion route guarantees the sequence is monotonic per run.
  *
@@ -294,23 +301,35 @@ export async function appendRunnerLedgerRow(
   // or audit.
   if (row.cost === null && !row.usage) return;
 
-  const delta = Math.max(0, (row.cost ?? 0) - (await sumRunnerCost(runId)));
-
   try {
-    await db
-      .insert(llmUsage)
-      .values({
-        source: "runner",
-        orgId: scope.orgId,
-        runId,
-        sequence: row.sequence,
-        inputTokens: row.usage?.input_tokens ?? 0,
-        outputTokens: row.usage?.output_tokens ?? 0,
-        cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
-        cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
-        costUsd: delta,
-      })
-      .onConflictDoNothing();
+    await db.transaction(async (tx) => {
+      // Per-run advisory lock — serialises concurrent metric inserts for
+      // THIS run, leaves all other runs unaffected. Auto-released on
+      // commit / rollback.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${runId}))`);
+
+      const [prior] = await tx
+        .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })
+        .from(llmUsage)
+        .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+      const existing = Number(prior?.total ?? 0);
+      const delta = Math.max(0, (row.cost ?? 0) - existing);
+
+      await tx
+        .insert(llmUsage)
+        .values({
+          source: "runner",
+          orgId: scope.orgId,
+          runId,
+          sequence: row.sequence,
+          inputTokens: row.usage?.input_tokens ?? 0,
+          outputTokens: row.usage?.output_tokens ?? 0,
+          cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
+          cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
+          costUsd: delta,
+        })
+        .onConflictDoNothing();
+    });
   } catch (err) {
     logger.error("Failed to append runner ledger row", {
       runId,
@@ -320,7 +339,12 @@ export async function appendRunnerLedgerRow(
   }
 }
 
-/** SUM of runner-source cost_usd persisted so far for this run. */
+/**
+ * SUM of runner-source cost_usd persisted so far for this run.
+ * Read-only — safe to call without a lock for post-finalize snapshots.
+ * Do NOT use to compute deltas in concurrent writers; use the
+ * transactional read inside {@link appendRunnerLedgerRow} instead.
+ */
 export async function sumRunnerCost(runId: string): Promise<number> {
   try {
     const [row] = await db

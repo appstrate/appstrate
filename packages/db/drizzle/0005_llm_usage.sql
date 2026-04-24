@@ -9,9 +9,13 @@
 --                         `(run_id, sequence)` via the AFPS sink protocol's
 --                         monotonic event sequence.
 --
--- `runs.cost` is the cached SUM of this table + `credential_proxy_usage`
--- for the run. It is written exactly once by `finalizeRun` and must never
--- be mutated from anywhere else.
+-- `runs.cost` is the cached SUM of this table for the run. It is written
+-- exactly once by `finalizeRun` and must never be mutated from anywhere
+-- else. (`credential_proxy_usage` is an audit log — see its header
+-- comment in the schema. Today every row carries cost_usd = 0 and is
+-- intentionally not summed into `runs.cost`. When the first metered
+-- credential provider ships, route its rows through this table with a
+-- new `source` enum value rather than resurrecting a cross-table SUM.)
 
 DO $$ BEGIN
   CREATE TYPE "llm_usage_source" AS ENUM ('proxy', 'runner');

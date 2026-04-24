@@ -47,12 +47,18 @@ export const runs = pgTable(
     result: jsonb("result"),
     state: jsonb("state"),
     error: text("error"),
+    // Snake-case keys: matches the wire format produced by every runner
+    // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
+    // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
+    // `apps/api/src/services/adapters/types.ts`, and the frontend reader
+    // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
+    // migration and a coordinated wire-schema bump — the JSONB payloads
+    // already in production use snake_case.
     tokenUsage: jsonb("token_usage").$type<{
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheReadInputTokens?: number;
-      cacheCreationInputTokens?: number;
-      totalTokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
     }>(),
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
@@ -217,9 +223,10 @@ export const packageMemories = pgTable(
  *                events carry the run's monotonic `sequence`; dedup on
  *                `(run_id, source, sequence)`.
  *
- * `runs.cost` is the cached SUM of this table + `credential_proxy_usage`
- * for that run, written once at `finalizeRun`. Never write to `runs.cost`
- * from anywhere else — this table is the source of truth.
+ * `runs.cost` is the cached SUM of this table for that run, written once
+ * at `finalizeRun`. Never write to `runs.cost` from anywhere else — this
+ * table is the single source of truth for run cost. (`credential_proxy_usage`
+ * is an audit log, not a cost ledger — see its header comment.)
  *
  * A call is attributable to exactly one principal: either an API key
  * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`
@@ -297,16 +304,16 @@ export const llmUsage = pgTable(
 );
 
 /**
- * Per-call metering of the `/api/credential-proxy/*` routes — one row per
- * upstream provider call proxied server-side for a remote runner.
+ * Per-call audit log of the `/api/credential-proxy/*` routes — one row per
+ * upstream provider call proxied server-side for a remote runner. Records
+ * provider id, target host, HTTP status, and duration for observability /
+ * abuse-detection / per-org telemetry.
  *
- * Mirrors `llm_usage` so reporting queries compose uniformly:
- *   SUM(llm_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
- *   WHERE run_id = $1
- * yields the full attributable spend for one run.
- *
- * `cost_usd` is 0 today (providers are not billed per-call); reserved for
- * metered providers (paid APIs) without schema migration.
+ * `cost_usd` is 0 today and excluded from `computeRunCost` — see
+ * `apps/api/src/services/credential-proxy-usage.ts` header. When a metered
+ * credential provider ships, route its cost rows through `llm_usage` with a
+ * new `source` enum value rather than resurrecting a SUM here, so the
+ * single-ledger invariant for `runs.cost` is preserved.
  *
  * `request_id` is the dedup key: the credential-proxy route derives one per
  * upstream request; replays of the same request are no-ops via the UNIQUE
