@@ -23,6 +23,11 @@ export {
 } from "./provider-bridge.ts";
 
 export {
+  buildRunHistoryExtensionFactory,
+  type BuildRunHistoryExtensionFactoryOptions,
+} from "./run-history-bridge.ts";
+
+export {
   buildRuntimePiEnv,
   type RuntimePiEnvOptions,
   type RuntimePiModelConfig,
