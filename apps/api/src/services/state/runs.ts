@@ -215,7 +215,6 @@ export async function updateRun(
     duration?: number;
     tokenUsage?: Record<string, unknown>;
     notifiedAt?: string;
-    cost?: number | null;
     metadata?: Record<string, unknown>;
     /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
     sinkClosedAt?: string;
@@ -231,7 +230,6 @@ export async function updateRun(
   if (updates.state !== undefined) set.state = updates.state;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
-  if (updates.cost !== undefined) set.cost = updates.cost;
   if (updates.metadata !== undefined) set.metadata = updates.metadata;
   if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 

@@ -56,7 +56,7 @@ export interface ReportSession {
   httpSink: HttpSink;
   /**
    * Headers to attach to every outbound LLM / credential proxy call —
-   * populates `llm_proxy_usage.run_id` + `credential_proxy_usage.run_id`
+   * populates `llm_usage.run_id` + `credential_proxy_usage.run_id`
    * so per-run cost rollup works at `/events/finalize` time.
    */
   proxyHeaders: Record<string, string>;

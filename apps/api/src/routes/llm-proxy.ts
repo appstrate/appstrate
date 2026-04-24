@@ -19,8 +19,8 @@
  *     OIDC-issued JWTs (interactive CLI `oauth2-instance`, dashboard
  *     `oauth2-dashboard`). Cookie sessions refused.
  *   - Per-call rate limit keyed on principal (`auth` category).
- *   - Per-call accounting in `llm_proxy_usage` — input/output/cache
- *     tokens + derived cost_usd. Upstream errors don't mint usage rows.
+ *   - Per-call accounting in `llm_usage` (source='proxy') — input/output/
+ *     cache tokens + derived cost_usd. Upstream errors don't mint usage rows.
  *   - Body size capped via `LLM_PROXY_LIMITS.max_request_bytes`
  *     (default 10 MiB).
  *

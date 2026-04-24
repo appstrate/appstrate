@@ -10,11 +10,12 @@ import {
   serial,
   uuid,
   index,
+  uniqueIndex,
   doublePrecision,
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { runStatusEnum } from "./enums.ts";
+import { runStatusEnum, llmUsageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations } from "./organizations.ts";
@@ -204,22 +205,31 @@ export const packageMemories = pgTable(
 );
 
 /**
- * Per-call metering of the `/api/llm-proxy/*` routes — one row per
- * upstream LLM request the platform proxied server-side for a remote
- * runner (CLI, GitHub Action, third-party agents).
+ * Unified LLM cost ledger — one row per attributable upstream LLM call,
+ * regardless of how it reached the provider. The `source` discriminator
+ * separates two emitters:
+ *
+ *   - `proxy`  : `/api/llm-proxy/*` routes (remote/CLI runners). The
+ *                route mints a `request_id` per upstream call — replays
+ *                dedup on `request_id`.
+ *   - `runner` : `appstrate.metric` events POSTed by an in-run sink (Pi
+ *                platform container, in-process PiRunner, …). These
+ *                events carry the run's monotonic `sequence`; dedup on
+ *                `(run_id, source, sequence)`.
+ *
+ * `runs.cost` is the cached SUM of this table + `credential_proxy_usage`
+ * for that run, written once at `finalizeRun`. Never write to `runs.cost`
+ * from anywhere else — this table is the source of truth.
  *
  * A call is attributable to exactly one principal: either an API key
  * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`
  * constraint enforces the XOR so accounting never double-counts.
- *
- * `run_id` is nullable because Phase 3 ships standalone proxy calls
- * (`X-Run-Id` absent). Phase 4's `POST /api/runs/remote` path will
- * propagate the header and populate the column without migration.
  */
-export const llmProxyUsage = pgTable(
-  "llm_proxy_usage",
+export const llmUsage = pgTable(
+  "llm_usage",
   {
     id: serial("id").primaryKey(),
+    source: llmUsageSourceEnum("source").notNull(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -233,31 +243,56 @@ export const llmProxyUsage = pgTable(
       onDelete: "set null",
     }),
     // Preset id the caller asked for (what the CLI / client picked from
-    // the model catalog). Kept alongside `realModel` for audit.
-    model: text("model").notNull(),
+    // the model catalog). Kept alongside `realModel` for audit. Required
+    // for proxy rows, optional for runner rows (the runner may not know
+    // the preset id; `runs.model_label` is the canonical display name).
+    model: text("model"),
     // Upstream model id the proxy actually forwarded — resolved from the
-    // preset via `loadModel()`.
-    realModel: text("real_model").notNull(),
+    // preset via `loadModel()`. Optional on runner rows.
+    realModel: text("real_model"),
     // Protocol family: "openai-completions", "anthropic-messages", …
-    api: text("api").notNull(),
+    // Optional on runner rows.
+    api: text("api"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),
     cacheWriteTokens: integer("cache_write_tokens"),
     costUsd: doublePrecision("cost_usd").notNull().default(0),
     durationMs: integer("duration_ms"),
+    // Proxy dedup key — one per upstream call minted by the proxy route.
+    // `null` on runner-source rows (they dedup on sequence instead).
+    requestId: text("request_id"),
+    // Runner dedup key — monotonic per-run event sequence from the AFPS
+    // sink protocol. `null` on proxy-source rows.
+    sequence: integer("sequence"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("idx_llm_proxy_usage_org_id").on(table.orgId),
-    index("idx_llm_proxy_usage_api_key_id").on(table.apiKeyId),
-    index("idx_llm_proxy_usage_user_id").on(table.userId),
-    index("idx_llm_proxy_usage_run_id").on(table.runId),
-    index("idx_llm_proxy_usage_org_created").on(table.orgId, table.createdAt),
+    index("idx_llm_usage_org_id").on(table.orgId),
+    index("idx_llm_usage_api_key_id").on(table.apiKeyId),
+    index("idx_llm_usage_user_id").on(table.userId),
+    index("idx_llm_usage_run_id").on(table.runId),
+    index("idx_llm_usage_org_created").on(table.orgId, table.createdAt),
+    // Proxy-source dedup: request_id is unique across all proxy rows.
+    // Runner-source rows leave request_id NULL and dedup via sequence.
+    uniqueIndex("uq_llm_usage_proxy_request_id")
+      .on(table.requestId)
+      .where(sql`source = 'proxy' AND request_id IS NOT NULL`),
+    // Runner-source dedup: (run_id, sequence) is unique for runner rows.
+    // Proxy-source rows leave sequence NULL.
+    uniqueIndex("uq_llm_usage_runner_run_sequence")
+      .on(table.runId, table.sequence)
+      .where(sql`source = 'runner' AND run_id IS NOT NULL AND sequence IS NOT NULL`),
     // INSERT invariant: exactly one principal. After FK cleanup (api_key /
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.
-    check("llm_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
+    check("llm_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
+    // Source-consistency invariants.
+    check("llm_usage_proxy_has_request_id", sql`source <> 'proxy' OR request_id IS NOT NULL`),
+    check(
+      "llm_usage_runner_has_sequence",
+      sql`source <> 'runner' OR (run_id IS NOT NULL AND sequence IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -265,8 +300,8 @@ export const llmProxyUsage = pgTable(
  * Per-call metering of the `/api/credential-proxy/*` routes — one row per
  * upstream provider call proxied server-side for a remote runner.
  *
- * Mirrors `llm_proxy_usage` so reporting queries compose uniformly:
- *   SUM(llm_proxy_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
+ * Mirrors `llm_usage` so reporting queries compose uniformly:
+ *   SUM(llm_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
  *   WHERE run_id = $1
  * yields the full attributable spend for one run.
  *

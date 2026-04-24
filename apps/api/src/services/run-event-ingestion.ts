@@ -41,7 +41,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
-import { aggregateRunCost } from "./credential-proxy-usage.ts";
+import { computeRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import type { TokenUsage } from "./adapters/types.ts";
 
@@ -264,7 +264,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   const resultToPersist =
     Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
 
-  const cost = await aggregateRunCost(run.id);
+  const cost = await computeRunCost(run.id);
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
   // Wall-clock duration as the authoritative value. Runners (PiRunner,
@@ -430,6 +430,9 @@ async function persistEventAndAdvance(
     // Ingestion never reads `sink.current` / `sink.result` — the reducer
     // would be built and thrown away for every event. Skip it.
     persistOnly: true,
+    // Carry the envelope sequence so runner-source ledger rows can dedup
+    // on `(run_id, sequence)` under envelope replay.
+    sequence,
   });
   await sink.handle(event);
 

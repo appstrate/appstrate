@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-call metering for `/api/credential-proxy/*`. Mirrors `llm_proxy_usage`
- * shape so reporting queries compose:
+ * Per-call metering for `/api/credential-proxy/*` + run-cost aggregator.
  *
- *   SUM(llm_proxy_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
+ * Reporting queries compose against two ledger tables:
+ *
+ *   SUM(llm_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
  *   WHERE run_id = $1
  *
- * yields the full attributable spend for one run.
+ * yields the full attributable spend for one run — regardless of whether
+ * the LLM traffic transited `/api/llm-proxy` (source='proxy') or was
+ * reported by an in-run runner via `appstrate.metric` (source='runner').
  *
  * The `requestId` column is the dedup key: the proxy route derives one per
  * upstream request; replays (CLI retries) are no-ops via the UNIQUE
  * constraint on `credential_proxy_usage.request_id`.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmProxyUsage, credentialProxyUsage } from "@appstrate/db/schema";
+import { llmUsage, credentialProxyUsage } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 
 export interface InsertCredentialProxyUsageInput {
@@ -76,19 +79,21 @@ export interface RunCostBreakdown {
 }
 
 /**
- * Compute the total attributable spend for a run across both proxy surfaces.
- * Called by `finalizeRun` to set the canonical `runs.cost` value at
- * terminal time.
+ * Compute the total attributable spend for a run across every ledger
+ * surface (llm_usage: proxy + runner rows, credential_proxy_usage).
+ * Called by `finalizeRun` to cache the canonical `runs.cost` value at
+ * terminal time. This is the SINGLE read path for aggregate run cost —
+ * no caller should SUM the ledgers directly.
  *
- * Single-query with two scalar SUMs — cheap on the indexed `run_id` columns.
+ * Two scalar SUMs over indexed `run_id` columns — cheap even on long runs.
  */
-export async function aggregateRunCost(runId: string): Promise<RunCostBreakdown> {
+export async function computeRunCost(runId: string): Promise<RunCostBreakdown> {
   const [llm] = await db
     .select({
-      total: sql<string>`COALESCE(SUM(${llmProxyUsage.costUsd}), 0)`,
+      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
-    .from(llmProxyUsage)
-    .where(eq(llmProxyUsage.runId, runId));
+    .from(llmUsage)
+    .where(eq(llmUsage.runId, runId));
 
   const [credential] = await db
     .select({
@@ -105,10 +110,3 @@ export async function aggregateRunCost(runId: string): Promise<RunCostBreakdown>
     total: llmUsd + credentialUsd,
   };
 }
-
-/**
- * The `and` import is used by downstream callers that filter on both
- * run_id and org_id for tenancy-safe views. Keep the re-export so callers
- * don't have to duplicate the drizzle-orm import just for `and`.
- */
-export { and };

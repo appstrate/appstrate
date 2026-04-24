@@ -15,7 +15,7 @@ import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-eve
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents, emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
-import { runLogs } from "@appstrate/db/schema";
+import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 describe("AppstrateEventSink", () => {
@@ -177,7 +177,7 @@ describe("AppstrateEventSink", () => {
     expect(systemLogs[0]!.level).toBe("error");
   });
 
-  it("accumulates appstrate.metric usage + cost", async () => {
+  it("accumulates appstrate.metric usage + cost (in-memory, long-lived sink)", async () => {
     const sink = new AppstrateEventSink({
       scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       runId,
@@ -198,6 +198,88 @@ describe("AppstrateEventSink", () => {
     expect(sink.current.usage.input_tokens).toBe(300);
     expect(sink.current.usage.output_tokens).toBe(125);
     expect(sink.current.cost).toBeCloseTo(0.003, 5);
+
+    // Long-lived sinks (parity tests, in-process runners) do not write
+    // to the ledger — sequence is undefined, so the runner row is skipped.
+    const ledgerRows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledgerRows).toHaveLength(0);
+  });
+
+  it("appstrate.metric → ledger row (runner source) + tokenUsage snapshot in persistOnly mode", async () => {
+    // Runners emit running totals. Two events with totals 0.001 → 0.003
+    // must produce two ledger rows whose SUM equals the final total.
+    const sink1 = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+      persistOnly: true,
+      sequence: 1,
+    });
+    await sink1.handle(
+      event("appstrate.metric", {
+        usage: { input_tokens: 100, output_tokens: 50 },
+        cost: 0.001,
+      }),
+    );
+
+    const sink2 = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+      persistOnly: true,
+      sequence: 2,
+    });
+    await sink2.handle(
+      event("appstrate.metric", {
+        usage: { input_tokens: 300, output_tokens: 125 },
+        cost: 0.003,
+      }),
+    );
+
+    const ledgerRows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")))
+      .orderBy(asc(llmUsage.sequence));
+    expect(ledgerRows).toHaveLength(2);
+    expect(ledgerRows[0]!.costUsd).toBeCloseTo(0.001, 5);
+    expect(ledgerRows[1]!.costUsd).toBeCloseTo(0.002, 5);
+    const sum = ledgerRows.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
+    expect(sum).toBeCloseTo(0.003, 5);
+
+    // runs.tokenUsage is a running-total snapshot (whole-object replace).
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(runRow?.tokenUsage).toMatchObject({
+      input_tokens: 300,
+      output_tokens: 125,
+    });
+
+    // runs.cost MUST NOT be touched by the sink — only finalizeRun writes it.
+    expect(runRow?.cost).toBeNull();
+  });
+
+  it("envelope replay is idempotent on the ledger (unique (run_id, sequence))", async () => {
+    const build = () =>
+      new AppstrateEventSink({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        runId,
+        persistOnly: true,
+        sequence: 7,
+      });
+    const payload = event("appstrate.metric", {
+      usage: { input_tokens: 10, output_tokens: 5 },
+      cost: 0.0005,
+    });
+
+    await build().handle(payload);
+    await build().handle(payload);
+
+    const rows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(rows).toHaveLength(1);
   });
 
   it("exposes the RunResult from the runtime reducer on finalize", async () => {

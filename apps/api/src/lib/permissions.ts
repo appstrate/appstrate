@@ -295,8 +295,8 @@ const API_KEY_ALLOWED_SCOPES_CORE: ReadonlySet<Permission> = new Set<Permission>
   "credential-proxy:call",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
-  // per-call in `llm_proxy_usage`. NOT granted by default; callers must
-  // explicitly add it when minting the key.
+  // per-call in `llm_usage` (source='proxy'). NOT granted by default;
+  // callers must explicitly add it when minting the key.
   "llm-proxy:call",
 ]);
 

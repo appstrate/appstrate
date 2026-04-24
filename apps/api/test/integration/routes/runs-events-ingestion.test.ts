@@ -30,7 +30,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
+import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
@@ -364,6 +365,62 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("cancelled");
     expect(row?.result).toBeNull();
+  });
+
+  // Cost-ledger end-to-end regression: before the llm_usage unification,
+  // runs.cost was overwritten with null at finalize for platform runs
+  // because aggregateRunCost only summed the proxy tables. Now finalize
+  // reads the unified ledger, which includes runner-source rows written
+  // by the sink on each `appstrate.metric` event.
+  it("accumulates runner-source cost into runs.cost at finalize", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // Emit two running-total metric events: 0.001 → 0.003. The ledger
+    // derives deltas (0.001, then 0.002) so the SUM matches the running
+    // total regardless of how many events flow.
+    const ev1 = buildEnvelope(
+      runId,
+      "appstrate.metric",
+      {
+        usage: { input_tokens: 100, output_tokens: 50 },
+        cost: 0.001,
+        timestamp: Date.now(),
+      },
+      1,
+    );
+    const ev2 = buildEnvelope(
+      runId,
+      "appstrate.metric",
+      {
+        usage: { input_tokens: 300, output_tokens: 125 },
+        cost: 0.003,
+        timestamp: Date.now(),
+      },
+      2,
+    );
+    expect((await postEvent(runId, ev1)).status).toBe(200);
+    expect((await postEvent(runId, ev2)).status).toBe(200);
+
+    // Two runner-source ledger rows, SUM = final running total.
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(2);
+    const ledgerSum = ledger.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
+    expect(ledgerSum).toBeCloseTo(0.003, 5);
+
+    // Finalize caches the aggregate into runs.cost.
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.cost).toBeCloseTo(0.003, 5);
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 300, output_tokens: 125 });
   });
 });
 

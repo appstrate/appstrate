@@ -12,14 +12,14 @@
  *      upstream base URL with adapter-specific headers.
  *   4. Stream the response through to the caller verbatim; tap the
  *      bytes in parallel (via `tee()`) to parse usage for accounting.
- *   5. Insert one `llm_proxy_usage` row with cost = Σ(tokens × cost/1e6).
+ *   5. Insert one `llm_usage` row (source="proxy") with cost = Σ(tokens × cost/1e6).
  *
  * Zero retries, zero body rewrites beyond `model`. Anthropic prompt
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
 import { db } from "@appstrate/db/client";
-import { llmProxyUsage } from "@appstrate/db/schema";
+import { llmUsage } from "@appstrate/db/schema";
 import { loadModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
@@ -37,7 +37,7 @@ const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 export interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
-  /** Forwarded to `llm_proxy_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
+  /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /** Request URL path *after* the route prefix, e.g. `/v1/chat/completions`. */
   upstreamPath: string;
@@ -304,7 +304,8 @@ interface RecordUsageInputs {
 async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
   if (!inputs.usage) return;
   try {
-    await db.insert(llmProxyUsage).values({
+    await db.insert(llmUsage).values({
+      source: "proxy",
       orgId: inputs.principal.orgId,
       apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
       userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
@@ -318,6 +319,11 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
       cacheWriteTokens: inputs.usage.cacheWriteTokens ?? null,
       costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost),
       durationMs: inputs.durationMs,
+      // Fresh UUID per upstream call — satisfies the partial-unique index
+      // on (source='proxy', request_id). CLI-level retries land as new
+      // rows (same behaviour as pre-ledger; idempotency belongs to the
+      // Idempotency-Key middleware, not the ledger).
+      requestId: crypto.randomUUID(),
     });
   } catch (err) {
     // Metering failures MUST NOT break a successful LLM call — the

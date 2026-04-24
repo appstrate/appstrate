@@ -16,7 +16,7 @@
  *   3. Protocol mismatch (preset.api != route.api) → 400.
  *
  *   4. Non-streaming JSON: usage is parsed server-side and persisted into
- *      `llm_proxy_usage` with cost_usd derived from the preset's cost.
+ *      `llm_usage` (source='proxy') with cost_usd derived from the preset's cost.
  *      Failures in the upstream bubble as-is; no usage row is minted.
  *
  *   5. Streaming SSE: the response passes through verbatim to the caller,
@@ -32,7 +32,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import { llmProxyUsage } from "@appstrate/db/schema";
+import { llmUsage } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -165,7 +165,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
 
     // Metering row — allow the async insert to flush.
     await new Promise((r) => setTimeout(r, 50));
-    const [row] = await db.select().from(llmProxyUsage).where(eq(llmProxyUsage.orgId, h.ctx.orgId));
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(row).toBeDefined();
     expect(row!.model).toBe(h.presetId);
     expect(row!.realModel).toBe("gpt-4o-2024-08-06");
@@ -243,7 +243,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(res.status).toBe(429);
 
     await new Promise((r) => setTimeout(r, 50));
-    const rows = await db.select().from(llmProxyUsage).where(eq(llmProxyUsage.orgId, h.ctx.orgId));
+    const rows = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(rows).toHaveLength(0);
   });
 
@@ -350,7 +350,7 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
     // drains. The promise chain is started at `tee()` time but only
     // resolves once the caller consumed the stream, so we wait a beat.
     await new Promise((r) => setTimeout(r, 100));
-    const [row] = await db.select().from(llmProxyUsage).where(eq(llmProxyUsage.orgId, h.ctx.orgId));
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(row).toBeDefined();
     expect(row!.inputTokens).toBe(150);
     expect(row!.outputTokens).toBe(77);

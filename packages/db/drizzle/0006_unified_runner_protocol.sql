@@ -37,8 +37,8 @@ CREATE INDEX IF NOT EXISTS "idx_runs_sink_expires_at"
 --> statement-breakpoint
 
 -- Per-call metering of the /api/credential-proxy/* routes. Mirrors
--- llm_proxy_usage so reporting queries compose:
---   SUM(llm_proxy_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
+-- llm_usage so reporting queries compose:
+--   SUM(llm_usage.cost_usd) + SUM(credential_proxy_usage.cost_usd)
 --   WHERE run_id = $1
 -- yields the full attributable spend for one run.
 --
