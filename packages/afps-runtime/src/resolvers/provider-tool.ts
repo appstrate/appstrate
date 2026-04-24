@@ -246,19 +246,32 @@ export function providerToolName(providerId: string): string {
 export async function resolveBodyStream(
   body: string | Uint8Array | null | { fromFile: string } | undefined,
   opts: { allowFromFile?: boolean; transformString?: (input: string) => string } = {},
-): Promise<string | Uint8Array | undefined> {
+): Promise<string | Uint8Array<ArrayBuffer> | undefined> {
   if (body === undefined || body === null) return undefined;
   if (typeof body === "string") {
     return opts.transformString ? opts.transformString(body) : body;
   }
-  if (body instanceof Uint8Array) return body;
+  if (body instanceof Uint8Array) return toArrayBufferUint8(body);
   if (!opts.allowFromFile) {
     throw new Error(
       `resolveBodyStream: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use a resolver with allowFromFile`,
     );
   }
   const fs = await import("node:fs/promises");
-  return new Uint8Array(await fs.readFile(body.fromFile));
+  return toArrayBufferUint8(await fs.readFile(body.fromFile));
+}
+
+function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (
+    source.buffer instanceof ArrayBuffer &&
+    source.byteOffset === 0 &&
+    source.byteLength === source.buffer.byteLength
+  ) {
+    return source as Uint8Array<ArrayBuffer>;
+  }
+  const copy = new Uint8Array(source.byteLength);
+  copy.set(source);
+  return copy;
 }
 
 /**
