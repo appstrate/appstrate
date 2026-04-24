@@ -589,6 +589,10 @@ program
   .option("--input-file <path>", "Read input JSON from file")
   .option("--config <json>", "Config JSON object passed to the agent")
   .option(
+    "--snapshot <path>",
+    "JSON file { memories?, history?, state? } seeded onto the ExecutionContext before the run",
+  )
+  .option(
     "--model-source <mode>",
     "Where the model comes from: env (default, user LLM credentials) or preset (pinned instance routes via /api/llm-proxy/*)",
   )
@@ -624,6 +628,7 @@ program
       input: typeof opts.input === "string" ? opts.input : undefined,
       inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
       config: typeof opts.config === "string" ? opts.config : undefined,
+      snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
       model: typeof opts.model === "string" ? opts.model : undefined,
       modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
       modelSource: typeof opts.modelSource === "string" ? opts.modelSource : undefined,

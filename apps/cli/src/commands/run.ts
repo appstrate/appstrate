@@ -62,6 +62,7 @@ import {
   type ReportSession,
 } from "./run/report.ts";
 import { CompositeSink } from "@appstrate/afps-runtime/sinks";
+import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -69,6 +70,7 @@ export interface RunCommandOptions {
   input?: string;
   inputFile?: string;
   config?: string;
+  snapshot?: string;
   providers?: string;
   credsFile?: string;
   model?: string;
@@ -151,14 +153,20 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // bundled `@appstrate/output` tool reads `process.env.OUTPUT_SCHEMA`
   // at import time and must see the schema to expose it as constrained
   // decoding to the LLM. Matches the platform container's wiring via
-  // `buildRuntimePiEnv` and the `afps run` CLI's in-process shim.
+  // `buildRuntimePiEnv`.
+  //
+  // `--snapshot` seeds `memories` / `history` / `state` onto the
+  // context so dev-loop replays (previously served by `afps run`) keep
+  // working — agent authors can re-use the same fixture files.
   const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  const context: ExecutionContext = {
+  const baseContext: ExecutionContext = {
     runId,
     input,
     memories: [],
     config,
   };
+  const snapshot = opts.snapshot ? await loadSnapshotFile(path.resolve(opts.snapshot)) : {};
+  const context = mergeSnapshotIntoContext(baseContext, snapshot);
   const promptInputs = buildPlatformPromptInputs(bundle, context, {
     platformName: "Appstrate CLI",
   });
@@ -577,7 +585,13 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
 }
 
 // Re-export error types for the CLI's formatError pipeline.
-export { ModelResolutionError, ResolverConfigError, ReportConfigError, ReportStartError };
+export {
+  ModelResolutionError,
+  ResolverConfigError,
+  ReportConfigError,
+  ReportStartError,
+  SnapshotError,
+};
 
 /**
  * Test-only access to the resolver-input builder. Exercised by
