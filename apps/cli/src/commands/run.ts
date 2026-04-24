@@ -105,6 +105,11 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 }
 
 async function runCommandInner(opts: RunCommandOptions): Promise<void> {
+  // Captured at command entry so the "runtime ready in {N}ms" signal
+  // reflects the user-perceived warm-up cost (profile resolution, model
+  // download, bundle prep, sink setup) — not just PiRunner construction.
+  const commandStartedAt = Date.now();
+
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
   const modelSource = parseModelSource(opts.modelSource);
@@ -255,6 +260,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,
+      bootDurationMs: Date.now() - commandStartedAt,
     }).catch((err) => {
       // Do not fail the run because the heartbeat failed — the sink's
       // own retry loop has already done what it could. A warning to

@@ -28,7 +28,7 @@ describe("emitRuntimeReady", () => {
     await emitRuntimeReady(
       sink,
       "run_abc",
-      { bundleLoaded: true, extensions: 4 },
+      { bundleLoaded: true, extensions: 4, bootDurationMs: 1234 },
       () => 1_700_000_000_000,
     );
 
@@ -38,14 +38,30 @@ describe("emitRuntimeReady", () => {
     expect(evt.runId).toBe("run_abc");
     expect(evt.timestamp).toBe(1_700_000_000_000);
     const raw = evt as unknown as Record<string, unknown>;
-    expect(raw.message).toBe("runtime ready");
+    expect(raw.message).toBe("runtime ready in 1234ms");
     expect(raw.level).toBe("info");
     expect(raw.data).toEqual({ bundleLoaded: true, extensions: 4 });
   });
 
+  it("rounds fractional boot durations so the message stays integer-millisecond", async () => {
+    const { sink, events } = collectingSink();
+    await emitRuntimeReady(sink, "run_y", {
+      bundleLoaded: true,
+      extensions: 0,
+      bootDurationMs: 12.7,
+    });
+
+    const raw = events[0]! as unknown as Record<string, unknown>;
+    expect(raw.message).toBe("runtime ready in 13ms");
+  });
+
   it("is NOT a run.started event — the webhook + openapi contracts stay untouched", async () => {
     const { sink, events } = collectingSink();
-    await emitRuntimeReady(sink, "run_x", { bundleLoaded: false, extensions: 0 });
+    await emitRuntimeReady(sink, "run_x", {
+      bundleLoaded: false,
+      extensions: 0,
+      bootDurationMs: 0,
+    });
 
     // `run.started` is a reserved public event type (Standard Webhooks
     // catalogue, openapi spec, onRunStatusChange consumers). Using
@@ -63,7 +79,11 @@ describe("emitRuntimeReady", () => {
       async finalize() {},
     };
     await expect(
-      emitRuntimeReady(failingSink, "run_x", { bundleLoaded: false, extensions: 0 }),
+      emitRuntimeReady(failingSink, "run_x", {
+        bundleLoaded: false,
+        extensions: 0,
+        bootDurationMs: 0,
+      }),
     ).rejects.toThrow(/retryable 500/);
   });
 });

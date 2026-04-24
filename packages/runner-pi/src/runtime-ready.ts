@@ -32,6 +32,8 @@ export interface RuntimeReadyPayload {
   bundleLoaded: boolean;
   /** Count of extension factories (bundle tools + runtime-shipped extensions + provider tools). */
   extensions: number;
+  /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
+  bootDurationMs: number;
 }
 
 /**
@@ -50,7 +52,7 @@ export async function emitRuntimeReady(
     type: "appstrate.progress",
     timestamp: now(),
     runId,
-    message: "runtime ready",
+    message: `runtime ready in ${Math.round(payload.bootDurationMs)}ms`,
     data: { bundleLoaded: payload.bundleLoaded, extensions: payload.extensions },
     level: "info",
   });

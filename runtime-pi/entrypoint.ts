@@ -51,6 +51,11 @@ import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
 
+// Captured as early as possible so the "runtime ready in {N}ms" signal
+// reflects the full bootloader cost (bundle extract, providers wiring,
+// dynamic tool imports) — not just the post-init slice.
+const BOOT_STARTED_AT = Date.now();
+
 // --- 0. Sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
@@ -421,6 +426,7 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 await emitRuntimeReady(teeSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
   extensions: extensionFactories.length,
+  bootDurationMs: Date.now() - BOOT_STARTED_AT,
 });
 
 // --- 6a. Liveness keep-alive ---
