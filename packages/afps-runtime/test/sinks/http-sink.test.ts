@@ -118,11 +118,14 @@ describe("HttpSink", () => {
     expect(cloudEvent.type).toBe("memory.added");
     expect(cloudEvent.source).toBe("/afps/runs/run_http_test");
     expect(cloudEvent.id).toBe("id_0001");
-    expect(cloudEvent.sequence).toBe(0);
+    // First emitted event is sequence=1. The platform's ingestion endpoint
+    // accepts only `sequence === run.lastEventSequence + 1` and the column
+    // defaults to 0 — any off-by-one here drops the first event silently.
+    expect(cloudEvent.sequence).toBe(1);
     expect(cloudEvent.data).toEqual({ content: "sent via http sink" });
   });
 
-  it("increments the sequence extension monotonically across events", async () => {
+  it("increments the sequence extension monotonically across events starting at 1", async () => {
     const sink = new HttpSink({
       url: server.url,
       runSecret: RUN_SECRET,
@@ -135,9 +138,9 @@ describe("HttpSink", () => {
     await sink.handle({ ...SAMPLE_EVENT, content: "third" });
 
     expect(server.received).toHaveLength(3);
-    expect(JSON.parse(server.received[0]!.body).sequence).toBe(0);
-    expect(JSON.parse(server.received[1]!.body).sequence).toBe(1);
-    expect(JSON.parse(server.received[2]!.body).sequence).toBe(2);
+    expect(JSON.parse(server.received[0]!.body).sequence).toBe(1);
+    expect(JSON.parse(server.received[1]!.body).sequence).toBe(2);
+    expect(JSON.parse(server.received[2]!.body).sequence).toBe(3);
   });
 
   it("forwards third-party event types verbatim as the CloudEvent type", async () => {

@@ -61,14 +61,14 @@ async function seedRunWithSink(
     status?: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
     sinkClosedAt?: Date | null;
     /**
-     * Pre-seed non-zero token usage so `finalizeRemoteRun`'s zero-tokens
+     * Pre-seed non-zero token usage so `finalizeRun`'s zero-tokens
      * heuristic does not flip `success` → `failed`. Set `null` to leave
      * the row without usage (exercises the heuristic on purpose).
      */
     tokenUsage?: Record<string, number> | null;
   } = {},
 ): Promise<string> {
-  const runId = `exec_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(runs).values({
     id: runId,
     packageId,
@@ -219,6 +219,51 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(after?.lastEventSequence).toBe(2);
   });
+
+  // Regression for the HttpSink off-by-one: the first event emitted by
+  // HttpSink carries sequence=1 (not 0). With `last_event_sequence`
+  // defaulting to 0, `sequence === last + 1` must accept 1 on the
+  // fast-path — a bug here drops the first event as replay and the user
+  // loses the boot-phase logs.
+  it("persists the first event (sequence=1) on the fast-path", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent", { status: "pending" });
+
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "first log", timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { outcome: string; sequence?: number };
+    expect(body.outcome).toBe("persisted");
+    expect(body.sequence).toBe(1);
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.length).toBeGreaterThan(0);
+  });
+
+  // The server-side `run.started` consumer is the handoff that flips
+  // `pending → running` for remote runs. Runners never emit it in practice,
+  // so the status flip has to be driven by the first event — regardless of
+  // its type — or remote runs stay stuck at `pending` until finalize.
+  it("flips status pending → running on the first ingested event", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent", { status: "pending" });
+
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "first", timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("running");
+  });
 });
 
 describe("POST /api/runs/:runId/events/finalize — complete result persistence", () => {
@@ -277,6 +322,33 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // First write wins.
     expect(persisted?.output?.v).toBe(1);
     expect(row?.duration).toBe(10);
+  });
+
+  // Regression for the CAS-ordering bug: side effects (log appends,
+  // memory inserts, output_validation log) used to fire *before* the CAS
+  // update, so a concurrent synthesiseFinalize racing with a
+  // container-posted finalize duplicated log rows. Asserting that the
+  // loser's second call produces exactly zero extra rows protects the
+  // invariant after the re-ordering.
+  it("CAS-guards all side effects — only the winning finalize writes log rows", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const body = { status: "success", output: { v: 1 }, report: "ok", durationMs: 10 };
+
+    const [a, b] = await Promise.all([postFinalize(runId, body), postFinalize(runId, body)]);
+
+    // At least one caller observes success; the loser may see 200 (CAS
+    // no-op after passing the assertSinkOpen middleware gate) or 410
+    // (gate rejected it because the winner already closed the sink).
+    // Both outcomes are correct — what matters is the exactly-once
+    // invariant on side effects below.
+    expect([a.status, b.status]).toContain(200);
+
+    // Only one `run_completed` log row — duplicate would indicate side
+    // effects fired outside the CAS-protected region.
+    const completedLogs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const runCompleted = completedLogs.filter((l) => l.event === "run_completed");
+    expect(runCompleted.length).toBe(1);
   });
 
   it("finalize after cancel is a no-op (sink already closed by the cancel route)", async () => {

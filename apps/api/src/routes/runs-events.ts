@@ -21,7 +21,7 @@ import { z } from "zod";
 import { invalidRequest } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
-import { ingestRunEvent, finalizeRemoteRun } from "../services/run-event-ingestion.ts";
+import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
@@ -161,7 +161,7 @@ export function createRunsEventsRouter() {
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
     };
 
-    await finalizeRemoteRun({ run, result, webhookId });
+    await finalizeRun({ run, result, webhookId });
 
     return c.json({ ok: true });
   });

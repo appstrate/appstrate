@@ -27,3 +27,5 @@ export {
   type RuntimePiEnvOptions,
   type RuntimePiModelConfig,
 } from "./container-env.ts";
+
+export { emitRuntimeReady, type RuntimeReadyPayload } from "./runtime-ready.ts";

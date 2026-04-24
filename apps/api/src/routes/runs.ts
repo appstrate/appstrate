@@ -42,7 +42,7 @@ import {
   type InlineRunBody,
 } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-import { finalizeRemoteRun, getRunSinkContext } from "../services/run-event-ingestion.ts";
+import { finalizeRun, getRunSinkContext } from "../services/run-event-ingestion.ts";
 import type { SinkCredentials } from "../lib/mint-sink-credentials.ts";
 
 // --- Background run (decoupled from client) ---
@@ -73,7 +73,7 @@ export interface ExecuteAgentInBackgroundInput {
  * terminal synthesis when the container doesn't finalise itself.
  *
  * All event + state persistence happens inside the container (via
- * {@link HttpSink}) or inside {@link finalizeRemoteRun} (the convergence
+ * {@link HttpSink}) or inside {@link finalizeRun} (the convergence
  * point). The only state this function owns is the in-process abort
  * controller used to propagate user-triggered cancellation to the
  * Docker workload.
@@ -105,7 +105,7 @@ export async function executeAgentInBackground(
     // the platform still owns (the container can't authoritatively
     // announce itself running because it doesn't know when the server
     // actually accepted its first event). Everything terminal flows
-    // through finalizeRemoteRun.
+    // through finalizeRun.
     await updateRun(scope, runId, { status: "running" });
     void emitEvent("onRunStatusChange", {
       orgId,
@@ -203,9 +203,9 @@ export async function executeAgentInBackground(
 }
 
 /**
- * Re-enter `finalizeRemoteRun` with a terminal result synthesised by the
+ * Re-enter `finalizeRun` with a terminal result synthesised by the
  * platform. Idempotent by design: the CAS on `sink_closed_at IS NULL`
- * inside `finalizeRemoteRun` makes this a no-op if the container already
+ * inside `finalizeRun` makes this a no-op if the container already
  * posted its own finalize.
  */
 async function synthesiseFinalize(
@@ -227,7 +227,7 @@ async function synthesiseFinalize(
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
-  await finalizeRemoteRun({
+  await finalizeRun({
     run,
     result,
     webhookId: `synthesized-${runId}`,
@@ -306,7 +306,10 @@ export function createRunsRouter() {
         proxyId: proxyIdOverride,
       } = inputResult;
 
-      const runId = `exec_${crypto.randomUUID()}`;
+      // Single canonical prefix — `run_` — shared with inline + remote
+      // origins. The legacy `exec_` prefix was a platform-only relic from
+      // before the unified runner protocol.
+      const runId = `run_${crypto.randomUUID()}`;
 
       // Build file metadata for prompt context (no URLs — files injected directly into container)
       const fileRefs = uploadedFiles?.map((f) => ({
@@ -441,7 +444,7 @@ export function createRunsRouter() {
 
     // Update DB + close the signed-event sink atomically — any in-flight
     // event POST from the container will now reject with 410 gone, and
-    // `finalizeRemoteRun`'s CAS makes server-side synthesis a no-op.
+    // `finalizeRun`'s CAS makes server-side synthesis a no-op.
     const now = new Date().toISOString();
     await updateRun(scope, runId, {
       status: "cancelled",

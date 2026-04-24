@@ -32,15 +32,11 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference, UploadedFile } from "./adapters/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
 import type { RunPipelineResult } from "./run-pipeline.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { getPlatformRunLimits } from "./run-limits.ts";
-import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
-import { getRunningRunCountForOrg, createRun as createRunRow } from "./state/index.ts";
-import { callHook, hasHook, emitEvent } from "../lib/modules/module-loader.ts";
-import type { RunProviderSnapshot } from "@appstrate/shared-types";
+import { createRun as createRunRow } from "./state/index.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
+import { runPreflightGates } from "./run-preflight-gates.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -144,46 +140,20 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     orgId,
     applicationId,
     actor,
-    agent,
     providerProfiles,
     input: runInput,
     config,
     apiKeyId,
     connectionProfileId,
     contextSnapshot,
+    overrideVersionLabel,
   } = input;
 
-  // --- Platform run limits (same gates as platform path) ---
-  const platformLimits = getPlatformRunLimits();
-
-  const rateCheck = await checkOrgRunRateLimit(orgId, platformLimits.per_org_global_rate_per_min);
-  if (!rateCheck.ok) {
-    return {
-      ok: false,
-      error: {
-        code: "org_run_rate_limited",
-        message: `Organization rate limit reached (${platformLimits.per_org_global_rate_per_min}/min). Retry in ${rateCheck.retryAfterSeconds}s.`,
-        status: 429,
-      },
-    };
-  }
-
-  const runningCount = await getRunningRunCountForOrg({ orgId });
-  if (runningCount >= platformLimits.max_concurrent_per_org) {
-    return {
-      ok: false,
-      error: {
-        code: "org_run_concurrency_exceeded",
-        message: `Organization concurrent run limit reached (${platformLimits.max_concurrent_per_org}). Wait for in-flight runs to complete.`,
-        status: 429,
-      },
-    };
-  }
-
-  // --- Provider readiness ---
+  // --- Provider readiness — runs first so remote callers get a readable
+  //     400 before we spend any rate-limit / concurrency budget on them.
   try {
     await validateAgentReadiness({
-      agent,
+      agent: input.agent,
       providerProfiles,
       orgId,
       config,
@@ -200,32 +170,17 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     };
   }
 
-  // --- Provider-status snapshot (for the runs row; mirrors platform path) ---
-  let providerStatusSnapshots: RunProviderSnapshot[] | undefined;
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-  if (manifestProviders.length > 0) {
-    const statuses = await resolveProviderStatuses(
-      { orgId, applicationId },
-      manifestProviders,
-      providerProfiles,
-    );
-    providerStatusSnapshots = statuses.map((s) => ({
-      id: s.id,
-      status: s.status,
-      source: s.source,
-      profileName: s.profileName,
-      profileOwnerName: s.profileOwnerName,
-      ...(s.scopesSufficient != null ? { scopesSufficient: s.scopesSufficient } : {}),
-    }));
-  }
-
-  // --- beforeRun module hook (billing/quota/feature gates) ---
-  if (hasHook("beforeRun")) {
-    const rejection = await callHook("beforeRun", { orgId, packageId: agent.id, runningCount });
-    if (rejection) {
-      return { ok: false, error: rejection };
-    }
-  }
+  // --- Shared preflight: rate, concurrency, timeout cap, beforeRun hook,
+  //     provider status snapshot. Single source of truth across platform /
+  //     remote / scheduled origins.
+  const gates = await runPreflightGates({
+    orgId,
+    applicationId,
+    agent: input.agent,
+    providerProfiles,
+  });
+  if (!gates.ok) return { ok: false, error: gates.error };
+  const { agent, providerStatusSnapshots } = gates;
 
   // --- Mint sink credentials ---
   const env = getEnv();
@@ -264,6 +219,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
+      ...(overrideVersionLabel ? { versionLabel: overrideVersionLabel } : {}),
       ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
     },
   );

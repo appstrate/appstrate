@@ -11,7 +11,7 @@
  *   - {@link ingestRunEvent}      — single signed CloudEvent → replay check
  *                                   → ordering buffer → AppstrateEventSink.handle
  *                                   → sequence counter advance
- *   - {@link finalizeRemoteRun}   — terminal RunResult → flush buffer → close
+ *   - {@link finalizeRun}   — terminal RunResult → flush buffer → close
  *                                   sink → afterRun / onRunStatusChange hooks
  *
  * Invariant: `appendRunLog()` and status-lifecycle updates have **exactly one**
@@ -71,7 +71,7 @@ export interface IngestRunEventInput {
   webhookId: string;
 }
 
-export interface FinalizeRemoteRunInput {
+export interface FinalizeRunInput {
   run: RunSinkContext;
   result: RunResult;
   webhookId: string;
@@ -212,7 +212,7 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
  * from HttpSink end up applying once.
  */
-export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<void> {
+export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   const { run, result } = input;
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
 
@@ -223,9 +223,12 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
   //    keeps inline-run shadow packages addressable here.
   const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
 
-  // 3. Derive final status + error message.
+  // 3. Derive final status + error message. Pure computation — no DB writes
+  //    before the CAS so concurrent synthesis + container-posted finalize
+  //    don't duplicate log rows or memories.
   let status = mapTerminalStatus(result);
   let errorMessage: string | null = result.error?.message ?? null;
+  let outputValidationErrors: string[] | null = null;
 
   if (status === "success" && agent?.manifest.output?.schema) {
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
@@ -236,15 +239,7 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
     if (!validation.valid) {
       status = "failed";
       errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
-      await appendRunLog(
-        scope,
-        run.id,
-        "system",
-        "output_validation",
-        null,
-        { valid: false, errors: validation.errors },
-        "error",
-      );
+      outputValidationErrors = validation.errors;
     }
   }
 
@@ -279,8 +274,9 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
   // loses the value the moment `isRunning` flips to false.
   const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
 
-  // 5. afterRun hook — must run BEFORE the CAS update so metadata can be
-  //    written in the same UPDATE (no second round-trip, no partial state).
+  // 5. afterRun hook — the hook SHOULD be idempotent (callers may retry on
+  //    transient failures) so it runs before the CAS. Any metadata it
+  //    returns is included atomically in the same UPDATE.
   const hookParams: RunStatusChangeParams = {
     orgId: run.orgId,
     runId: run.id,
@@ -301,7 +297,9 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
     });
   }
 
-  // 6. CAS close.
+  // 6. CAS close — single gate for all subsequent side effects. Concurrent
+  //    finalize retries (platform synthesis vs container POST) hit the same
+  //    row; the CAS lets exactly one proceed.
   const stateToPersist = isPlainRecord(result.state) ? result.state : null;
 
   const rowsAffected = await db
@@ -322,11 +320,23 @@ export async function finalizeRemoteRun(input: FinalizeRemoteRunInput): Promise<
     .returning({ id: runs.id });
 
   if (rowsAffected.length === 0) {
-    logger.debug("finalizeRemoteRun idempotent — sink already closed", { runId: run.id });
+    logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
     return;
   }
 
-  // 7. Memories + terminal log rows.
+  // 7. Side effects — only the CAS winner reaches here, so memories and
+  //    log rows are written exactly once.
+  if (outputValidationErrors) {
+    await appendRunLog(
+      scope,
+      run.id,
+      "system",
+      "output_validation",
+      null,
+      { valid: false, errors: outputValidationErrors },
+      "error",
+    );
+  }
   if (result.memories?.length) {
     await addPackageMemories(
       run.packageId,
@@ -417,13 +427,19 @@ async function persistEventAndAdvance(
   const sink = new AppstrateEventSink({
     scope: { orgId: run.orgId, applicationId: run.applicationId },
     runId: run.id,
+    // Ingestion never reads `sink.current` / `sink.result` — the reducer
+    // would be built and thrown away for every event. Skip it.
+    persistOnly: true,
   });
   await sink.handle(event);
 
-  // Status transitions are route-layer; the data-plane never mutates run
-  // status. `run.started` flips pending → running so the dashboard shows
-  // the run is live; terminal status is set exclusively by finalizeRemoteRun.
-  if (event.type === "run.started") {
+  // The very first event a runner posts is the "run is live" signal. No
+  // runner currently emits `run.started` (see AppstrateEventSink handlers
+  // and HttpSink — neither produces it), so keying the flip on event type
+  // would leave remote runs stuck at `pending` until finalize. Instead we
+  // flip on the first ingested sequence, whatever its type. Terminal
+  // status remains the exclusive responsibility of finalizeRun.
+  if (run.lastEventSequence === 0) {
     await updateRun({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
       status: "running",
     });

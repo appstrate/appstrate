@@ -7,17 +7,13 @@
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { callHook, hasHook } from "../lib/modules/module-loader.ts";
-import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
+import { createRun } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { getPlatformRunLimits } from "./run-limits.ts";
-import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -25,7 +21,7 @@ import { getOrchestrator } from "./orchestrator/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
-import type { RunProviderSnapshot } from "@appstrate/shared-types";
+import { runPreflightGates } from "./run-preflight-gates.ts";
 
 /**
  * Extract the denormalized @scope and display-name snapshot for a loaded
@@ -170,51 +166,18 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     uploadedFiles,
     apiKeyId,
   } = params;
-  // `agent` is mutable — we may downgrade its timeout to the platform cap.
-  let agent = params.agent;
-
-  // --- Step 0: Platform run limits (applies to EVERY run path) ---
-  // Rate + concurrency checked BEFORE context build to fail fast; timeout
-  // ceiling applied before buildRunContext so the agentPackage buffer the
-  // container receives carries the capped value.
-  const platformLimits = getPlatformRunLimits();
-
-  // 0a. Per-org global rate limit.
-  const rateCheck = await checkOrgRunRateLimit(orgId, platformLimits.per_org_global_rate_per_min);
-  if (!rateCheck.ok) {
-    return {
-      ok: false,
-      error: {
-        code: "org_run_rate_limited",
-        message: `Organization rate limit reached (${platformLimits.per_org_global_rate_per_min}/min). Retry in ${rateCheck.retryAfterSeconds}s.`,
-        status: 429,
-      },
-    };
-  }
-
-  // 0b. Max concurrent runs per org.
-  const runningCount = await getRunningRunCountForOrg({ orgId });
-  if (runningCount >= platformLimits.max_concurrent_per_org) {
-    return {
-      ok: false,
-      error: {
-        code: "org_run_concurrency_exceeded",
-        message: `Organization concurrent run limit reached (${platformLimits.max_concurrent_per_org}). Wait for in-flight runs to complete.`,
-        status: 429,
-      },
-    };
-  }
-
-  // 0c. Timeout ceiling — cap the manifest timeout before it reaches the
-  //     background executor or the packaged container. Immutable local
-  //     override — the stored packages row keeps its original manifest.
-  const declaredTimeout = typeof agent.manifest.timeout === "number" ? agent.manifest.timeout : 300;
-  if (declaredTimeout > platformLimits.timeout_ceiling_seconds) {
-    agent = {
-      ...agent,
-      manifest: { ...agent.manifest, timeout: platformLimits.timeout_ceiling_seconds },
-    };
-  }
+  // --- Step 0: Shared preflight gates (rate, concurrency, timeout cap,
+  //     beforeRun hook, provider status snapshot). Shared with the remote
+  //     origin in run-creation.ts so drift across the two paths is
+  //     impossible — one change surface.
+  const gates = await runPreflightGates({
+    orgId,
+    applicationId: params.applicationId,
+    agent: params.agent,
+    providerProfiles,
+  });
+  if (!gates.ok) return { ok: false, error: gates.error };
+  const { agent, providerStatusSnapshots } = gates;
 
   // --- Step 1: Build run context ---
   let context;
@@ -259,37 +222,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     };
   }
 
-  // --- Step 2: Snapshot provider statuses ---
-  let providerStatusSnapshots: RunProviderSnapshot[] | undefined;
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-  if (manifestProviders.length > 0) {
-    const statuses = await resolveProviderStatuses(
-      { orgId, applicationId },
-      manifestProviders,
-      providerProfiles,
-    );
-    providerStatusSnapshots = statuses.map((s) => ({
-      id: s.id,
-      status: s.status,
-      source: s.source,
-      profileName: s.profileName,
-      profileOwnerName: s.profileOwnerName,
-      ...(s.scopesSufficient != null ? { scopesSufficient: s.scopesSufficient } : {}),
-    }));
-  }
-
-  // --- Step 3: Pre-run module hook (quota, billing, feature gates, ...) ---
-  if (hasHook("beforeRun")) {
-    const rejection = await callHook("beforeRun", { orgId, packageId: agent.id, runningCount });
-    if (rejection) {
-      return {
-        ok: false,
-        error: { code: rejection.code, message: rejection.message, status: rejection.status },
-      };
-    }
-  }
-
-  // --- Step 4: Extract profile ID map ---
+  // --- Step 2: Extract profile ID map ---
   const profileIdMap = Object.fromEntries(
     Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
   );

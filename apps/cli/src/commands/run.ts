@@ -22,6 +22,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildProviderExtensionFactories,
+  emitRuntimeReady,
 } from "@appstrate/runner-pi";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
@@ -217,6 +218,29 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       extensionFactories: [...prepared.extensionFactories, ...providerFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
+
+    // Emit the "runtime ready" heartbeat through the same sink that
+    // receives every downstream event — ConsoleSink renders it for the
+    // user, and when a reporting session is active HttpSink forwards
+    // it to the platform, flipping the remote run from pending to
+    // running on the first ingested sequence. Identical signal shape
+    // to the one runtime-pi emits inside the Docker container.
+    const emittedRunId = reportSession?.runId ?? runId;
+    const extensionsCount = prepared.extensionFactories.length + providerFactories.length;
+    await emitRuntimeReady(sink, emittedRunId, {
+      bundleLoaded: true,
+      extensions: extensionsCount,
+    }).catch((err) => {
+      // Do not fail the run because the heartbeat failed — the sink's
+      // own retry loop has already done what it could. A warning to
+      // stderr keeps the failure visible without masking it.
+      if (!opts.json) {
+        process.stderr.write(
+          `warn: runtime ready event failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    });
+
     await runner.run({
       bundle,
       context,

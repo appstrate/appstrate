@@ -77,7 +77,7 @@ export interface RunCostBreakdown {
 
 /**
  * Compute the total attributable spend for a run across both proxy surfaces.
- * Called by `finalizeRemoteRun` to set the canonical `runs.cost` value at
+ * Called by `finalizeRun` to set the canonical `runs.cost` value at
  * terminal time.
  *
  * Single-query with two scalar SUMs — cheap on the indexed `run_id` columns.

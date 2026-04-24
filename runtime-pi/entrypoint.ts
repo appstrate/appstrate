@@ -39,6 +39,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildProviderExtensionFactories,
+  emitRuntimeReady,
 } from "@appstrate/runner-pi";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
@@ -368,7 +369,20 @@ function buildInContainerBundle(prompt: string): Bundle {
 
 const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 
-// --- 6. Run via PiRunner ---
+// --- 6. Signal runtime readiness ---
+//
+// Emitted *after* the bundle is loaded + providers wired, but *before*
+// the PiRunner loop starts. This is the honest "ready to talk to the
+// LLM" signal — Docker create + pull + workspace init + dynamic tool
+// imports are all done. It also gives the dashboard a first log line
+// immediately on cold starts (Docker pull can take seconds) instead of
+// a silent gap between `pending` and the first tool call.
+await emitRuntimeReady(teeSink, AGENT_RUN_ID, {
+  bundleLoaded: bundle !== null,
+  extensions: extensionFactories.length,
+});
+
+// --- 7. Run via PiRunner ---
 //
 // PiRunner calls `sink.finalize(result)` on both happy path and its own
 // internal error path. Any error escaping it here is a bootstrap-level

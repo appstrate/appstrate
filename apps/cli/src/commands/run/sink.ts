@@ -65,7 +65,12 @@ function createHumanSink(opts: SinkOptions): EventSink {
           if (data?.tool) {
             process.stdout.write(cyan(`→ tool: ${data.tool}\n`));
           } else if (msg) {
-            process.stdout.write(msg.endsWith("\n") ? msg : msg + "\n");
+            // Prepend `→` for visual consistency with the rest of the
+            // CLI output ("→ running ...", "→ tool: ..."). Messages
+            // that already carry a leading glyph (e.g. emitted by a
+            // third-party tool) are left untouched.
+            const glyphed = /^[→✓✗⚠]/.test(msg) ? msg : `→ ${msg}`;
+            process.stdout.write(glyphed.endsWith("\n") ? glyphed : glyphed + "\n");
           }
           return;
         }

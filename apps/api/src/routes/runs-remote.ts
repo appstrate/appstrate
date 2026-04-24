@@ -33,6 +33,9 @@ import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
+import { resolveRemoteAgentIdentity } from "../services/remote-run-identity.ts";
+import { getPackage } from "../services/agent-service.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -128,19 +131,47 @@ export function createRunsRemoteRouter() {
         },
       });
 
-      const createdBy = actor?.type === "member" ? actor.id : null;
-      const shadowId = await insertShadowPackage({
+      // Attempt to resolve the posted bundle against the org's package
+      // registry. Matches land the run on the real `@scope/name@version`
+      // (no shadow, no "Inline" UI badge, version label populated); any
+      // mismatch — manifest divergence, unpublished version, cross-org —
+      // falls back cleanly to the shadow path below.
+      const resolved = await resolveRemoteAgentIdentity({
         orgId,
-        createdBy,
         manifest: preflight.manifest,
         prompt: preflight.prompt,
       });
-      const shadowAgent = buildShadowLoadedPackage(
-        shadowId,
-        preflight.manifest,
-        preflight.prompt,
-        preflight.resolvedDeps,
-      );
+
+      let agentForRun: LoadedPackage;
+      let overrideVersionLabel: string | undefined;
+
+      if (resolved) {
+        const real = await getPackage(resolved.packageId, orgId);
+        if (real) {
+          agentForRun = real;
+          overrideVersionLabel = resolved.versionLabel;
+        } else {
+          agentForRun = await createShadowAgent();
+        }
+      } else {
+        agentForRun = await createShadowAgent();
+      }
+
+      async function createShadowAgent(): Promise<LoadedPackage> {
+        const createdBy = actor?.type === "member" ? actor.id : null;
+        const shadowId = await insertShadowPackage({
+          orgId,
+          createdBy,
+          manifest: preflight.manifest,
+          prompt: preflight.prompt,
+        });
+        return buildShadowLoadedPackage(
+          shadowId,
+          preflight.manifest,
+          preflight.prompt,
+          preflight.resolvedDeps,
+        );
+      }
 
       const runId = `run_${crypto.randomUUID()}`;
       const result = await createRun({
@@ -149,7 +180,8 @@ export function createRunsRemoteRouter() {
         orgId,
         applicationId,
         actor,
-        agent: shadowAgent,
+        agent: agentForRun,
+        ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
         providerProfiles: preflight.providerProfiles,
         input: preflight.effectiveInput,
         config: preflight.effectiveConfig,

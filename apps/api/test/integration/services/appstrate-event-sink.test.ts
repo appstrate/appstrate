@@ -230,4 +230,28 @@ describe("AppstrateEventSink", () => {
     await sink.finalize(emptyRunResult());
     expect(sink.result).toEqual(emptyRunResult());
   });
+
+  // The ingestion route re-instantiates the sink per event and never
+  // reads the snapshot — `persistOnly` skips the runtime reducer so the
+  // hot path is allocation-free beyond the required write-through. We
+  // assert both that the snapshot is refused (accidental reads would
+  // silently return empty data) AND that fan-out still writes logs.
+  it("persistOnly mode skips the reducer — fan-out still writes, snapshot throws", async () => {
+    const sink = new AppstrateEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+      persistOnly: true,
+    });
+
+    await sink.handle(event("output.emitted", { data: { x: 1 } }));
+
+    expect(() => sink.current).toThrow(/persistOnly/);
+
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "output")))
+      .orderBy(asc(runLogs.createdAt));
+    expect(logs.length).toBeGreaterThan(0);
+  });
 });

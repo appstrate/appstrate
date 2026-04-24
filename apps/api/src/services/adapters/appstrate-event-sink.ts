@@ -61,12 +61,20 @@ export interface AggregatedRunState {
 export interface AppstrateEventSinkOptions {
   scope: AppScope;
   runId: string;
+  /**
+   * When `true`, skips the in-memory AFPS reducer entirely. The ingestion
+   * route re-instantiates the sink per event and never reads `current` /
+   * `result`, so the reducer is dead work on the hot path. Long-lived
+   * callers (parity tests, in-process runners) leave this unset to keep
+   * reading the canonical snapshot.
+   */
+  persistOnly?: boolean;
 }
 
 export class AppstrateEventSink implements EventSink {
   readonly runId: string;
   private readonly scope: AppScope;
-  private readonly reducer: ReducerSinkHandle = createReducerSink();
+  private readonly reducer: ReducerSinkHandle | null;
   private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
   private accumulatedCost = 0;
   private lastAdapterError: string | null = null;
@@ -75,11 +83,13 @@ export class AppstrateEventSink implements EventSink {
   constructor(opts: AppstrateEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
+    this.reducer = opts.persistOnly ? null : createReducerSink();
   }
 
   async handle(event: RunEvent): Promise<void> {
-    // Delegate canonical events to the runtime reducer.
-    await this.reducer.sink.handle(event);
+    // Delegate canonical events to the runtime reducer (skipped in
+    // persist-only mode — ingestion fan-out doesn't need the snapshot).
+    if (this.reducer) await this.reducer.sink.handle(event);
 
     // Platform write-through + metrics accumulation.
     switch (event.type) {
@@ -172,15 +182,21 @@ export class AppstrateEventSink implements EventSink {
   }
 
   async finalize(result: RunResult): Promise<void> {
-    await this.reducer.sink.finalize(result);
+    if (this.reducer) await this.reducer.sink.finalize(result);
     this.finalResult = result;
   }
 
   /**
    * Platform-facing projection of the runtime snapshot + platform accumulators.
    * Safe to read at any point during or after a run.
+   *
+   * Throws when the sink was created with `persistOnly: true` — that
+   * mode is reserved for fan-out-only consumers that never read back.
    */
   get current(): Readonly<AggregatedRunState> {
+    if (!this.reducer) {
+      throw new Error("AppstrateEventSink.current is unavailable in persistOnly mode");
+    }
     const snapshot = this.reducer.snapshot();
     return {
       output: isPlainObject(snapshot.output) ? snapshot.output : {},

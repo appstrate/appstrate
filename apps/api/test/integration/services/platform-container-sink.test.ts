@@ -12,7 +12,7 @@
  *      the agent container env — the wire protocol's entry point.
  *
  *   2. `executeAgentInBackground` synthesises a terminal
- *      {@link finalizeRemoteRun} call (status + sink_closed_at) when
+ *      {@link finalizeRun} call (status + sink_closed_at) when
  *      the container exits without calling finalize itself, covering
  *      crashes, timeouts, and defensive success-on-exit-0.
  *
@@ -43,7 +43,7 @@ import {
   executeAgentInBackground,
   type ExecuteAgentInBackgroundInput,
 } from "../../../src/routes/runs.ts";
-import { finalizeRemoteRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
+import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/adapters/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -201,7 +201,7 @@ async function seedRunWithSink(input: {
   secret: string;
   expiresAt: Date;
 }): Promise<string> {
-  const runId = `exec_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(runs).values({
     id: runId,
     packageId: input.packageId,
@@ -394,10 +394,10 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     const firstClosedAt = first!.sinkClosedAt;
 
     // Simulate the container posting a late finalize — the CAS on
-    // `sink_closed_at IS NULL` inside finalizeRemoteRun must short-circuit.
+    // `sink_closed_at IS NULL` inside finalizeRun must short-circuit.
     const sinkRun = await getRunSinkContext(runId);
     expect(sinkRun).not.toBeNull();
-    await finalizeRemoteRun({
+    await finalizeRun({
       run: sinkRun!,
       result: {
         memories: [],

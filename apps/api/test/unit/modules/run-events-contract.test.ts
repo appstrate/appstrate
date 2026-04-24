@@ -11,7 +11,7 @@
  *   - `routes/runs.ts` emits "started" (when the platform spawns the
  *     container) + "cancelled" (cancel route).
  *   - `services/run-event-ingestion.ts` emits every *terminal* status
- *     (success / failed / timeout) because `finalizeRemoteRun` is the
+ *     (success / failed / timeout) because `finalizeRun` is the
  *     single convergence point for both platform and remote runners.
  *
  * We scan the union of those two files — losing the emission for a

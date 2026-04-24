@@ -14,10 +14,10 @@
  * container lifecycle management.
  *
  * On graceful completion the container itself calls `sink.finalize(result)`
- * and the server's `finalizeRemoteRun()` closes the sink idempotently. If
+ * and the server's `finalizeRun()` closes the sink idempotently. If
  * the container crashes or times out without calling finalize, the caller
  * synthesises a terminal result from {@link PlatformContainerResult} and
- * re-enters `finalizeRemoteRun()` — the CAS on `sink_closed_at IS NULL`
+ * re-enters `finalizeRun()` — the CAS on `sink_closed_at IS NULL`
  * guarantees exactly-once closure even when container-side and
  * server-side finalize race.
  */
@@ -64,7 +64,7 @@ export interface RunPlatformContainerInput {
  * Start the Pi agent + sidecar for a platform-origin run, wait until the
  * agent container exits, and report the lifecycle outcome. The returned
  * {@link PlatformContainerResult} is consumed by the caller to synthesise
- * a terminal {@link finalizeRemoteRun} call when the container didn't
+ * a terminal {@link finalizeRun} call when the container didn't
  * finalise itself.
  *
  * Never throws on container-side failures — the lifecycle outcome is
