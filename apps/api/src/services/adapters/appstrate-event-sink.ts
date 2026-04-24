@@ -191,17 +191,22 @@ export class AppstrateEventSink implements EventSink {
 
         // Persistence — always, regardless of mode. Token usage is a
         // running-total snapshot on the run row; cost is appended to the
-        // `llm_usage` ledger so finalize can aggregate it.
+        // `llm_usage` ledger so finalize can aggregate it. Ledger writes
+        // only happen in the ingestion path (persistOnly sink carries a
+        // sequence); long-lived sinks keep the in-memory accumulators
+        // above and nothing else.
         if (usage) {
           await updateRun(this.scope, this.runId, {
             tokenUsage: usage as unknown as Record<string, unknown>,
           });
         }
-        await appendRunnerLedgerRow(this.scope, this.runId, {
-          sequence: this.sequence,
-          cost,
-          usage,
-        });
+        if (this.sequence !== undefined) {
+          await appendRunnerLedgerRow(this.scope, this.runId, {
+            sequence: this.sequence,
+            cost,
+            usage,
+          });
+        }
         break;
       }
 
@@ -271,16 +276,13 @@ async function appendRunnerLedgerRow(
   scope: AppScope,
   runId: string,
   row: {
-    sequence: number | undefined;
+    sequence: number;
     cost: number | null;
     usage: TokenUsage | null;
   },
 ): Promise<void> {
-  // Ledger writes only from the ingestion path (persistOnly sink). Long-
-  // lived sinks don't carry a sequence and skip persistence.
-  if (row.sequence === undefined) return;
-
-  // Skip degenerate events with neither usage nor cost.
+  // Skip degenerate events with neither usage nor cost — nothing to bill
+  // or audit.
   if (row.cost === null && !row.usage) return;
 
   const delta = Math.max(0, (row.cost ?? 0) - (await sumRunnerCost(runId)));
