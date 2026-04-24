@@ -123,6 +123,10 @@ export async function startReportSession(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${ctx.bearerToken}`,
+    // `/api/runs/*` is app-scoped; dashboard-user JWTs don't pin an app,
+    // so the middleware requires `X-App-Id` explicitly. Missing this
+    // rejects every remote run with `application_context_required`.
+    "X-App-Id": ctx.appId,
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 

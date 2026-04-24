@@ -116,6 +116,7 @@ export function buildResolver(
         instance: remote.instance,
         apiKey: remote.bearerToken,
         appId: remote.appId,
+        ...(remote.orgId ? { orgId: remote.orgId } : {}),
         endUserId: remote.endUserId,
         extraHeaders: remote.extraHeaders,
       });

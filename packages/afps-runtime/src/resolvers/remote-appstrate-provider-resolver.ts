@@ -18,6 +18,13 @@ export interface RemoteAppstrateProviderResolverOptions {
   apiKey: string;
   /** Application id (app_...) the API key is scoped to. */
   appId: string;
+  /**
+   * Org id (org_...) the caller operates under. Required when the bearer
+   * is a dashboard-user JWT (interactive CLI): the `/api/credential-proxy`
+   * org-context middleware derives `orgId` from the header in that mode.
+   * Optional for API-key auth — keys pre-resolve the org inline.
+   */
+  orgId?: string;
   /** End-user to impersonate (eu_...). Optional. */
   endUserId?: string;
   /**
@@ -52,6 +59,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly instance: string;
   private readonly apiKey: string;
   private readonly appId: string;
+  private readonly orgId: string | undefined;
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
   private readonly extraHeaders: Record<string, string>;
@@ -64,6 +72,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
     this.instance = opts.instance.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
     this.appId = opts.appId;
+    this.orgId = opts.orgId;
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
     this.extraHeaders = opts.extraHeaders ?? {};
@@ -93,6 +102,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,
+        ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
         "X-Provider": ref.name,
         "X-Target": req.target,
