@@ -211,6 +211,24 @@ async function waitForWorkload(
 ): Promise<PlatformContainerResult> {
   await orch.startWorkload(agent);
 
+  // Ring-buffer the agent's stdout+stderr so a non-zero exit can be
+  // diagnosed. The sink protocol normally carries structured events, but
+  // early-boot failures (missing module, malformed env) happen before the
+  // sink is wired — those only land on the container's log stream.
+  const logBuffer: string[] = [];
+  const MAX_LOG_LINES = 200;
+  const logAbort = new AbortController();
+  const logStream = (async () => {
+    try {
+      for await (const line of orch.streamLogs(agent, logAbort.signal)) {
+        logBuffer.push(line);
+        if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
+      }
+    } catch {
+      // Log streaming is best-effort — swallow errors.
+    }
+  })();
+
   let timedOut = false;
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
@@ -229,6 +247,14 @@ async function waitForWorkload(
 
   try {
     const exitCode = await orch.waitForExit(agent);
+    if (exitCode !== 0 && !timedOut && !signal?.aborted) {
+      logAbort.abort();
+      await logStream;
+      logger.error("Agent container exited non-zero", {
+        exitCode,
+        logs: logBuffer.slice(-50).join("\n"),
+      });
+    }
     return {
       exitCode,
       timedOut,
@@ -237,6 +263,7 @@ async function waitForWorkload(
   } finally {
     clearTimeout(timeoutHandle);
     if (signal) signal.removeEventListener("abort", onAbort);
+    logAbort.abort();
   }
 }
 
