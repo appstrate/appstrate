@@ -115,16 +115,14 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.providers?.[0]?.hasProviderDoc).toBe(true);
   });
 
-  it("applies scalar overrides verbatim (platformName, timeoutSeconds, runHistoryApi)", () => {
+  it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent", timeout: 120 }, { "prompt.md": "T" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx(), {
       platformName: "Custom",
       timeoutSeconds: 300,
-      runHistoryApi: true,
     });
     expect(inputs.platformName).toBe("Custom");
     expect(inputs.timeoutSeconds).toBe(300);
-    expect(inputs.runHistoryApi).toBe(true);
   });
 
   it("merges provider overrides by id (override fields win, bundle fields fill gaps)", () => {

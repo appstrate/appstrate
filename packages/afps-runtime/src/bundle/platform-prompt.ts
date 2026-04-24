@@ -117,13 +117,6 @@ export interface PlatformPromptOptions {
   /** Uploaded documents surfaced in `## Documents`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
 
-  /**
-   * When true, emit the `## Run History` section referencing the
-   * sidecar's `/run-history` endpoint via `$SIDECAR_URL`. Platforms
-   * without a sidecar should leave this unset.
-   */
-  runHistoryApi?: boolean;
-
   /** Optional pre-built PromptView; skip if you want to let the helper build one. */
   promptView?: PromptView;
 }
@@ -334,24 +327,6 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
         "Use `set_state` for structured data needed for the next run.\n",
     );
-  }
-
-  // --- Run History API ---
-  if (opts.runHistoryApi) {
-    sections.push("## Run History\n");
-    sections.push(
-      "You can access data from previous runs beyond just the latest state. " +
-        "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",
-    );
-    sections.push("```bash");
-    sections.push('curl -s "$SIDECAR_URL/run-history?limit=10&fields=state"');
-    sections.push("```\n");
-    sections.push("Query parameters:");
-    sections.push("- `limit` (1-50, default 10): Number of past runs to return");
-    sections.push(
-      "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
-    );
-    sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
   }
 
   // --- Output format ---

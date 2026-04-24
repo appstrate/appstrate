@@ -4,13 +4,12 @@
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
  * every section (System / Environment / Tools / Skills / Providers /
- * Input / Documents / Config / State / Memory / Run History / Output
- * Format) happens in the runtime from the parsed Bundle; this function
- * only adds the overrides that are platform-specific:
+ * Input / Documents / Config / State / Memory / Output Format) happens
+ * in the runtime from the parsed Bundle; this function only adds the
+ * overrides that are platform-specific:
  *
  *   - `platformName`: `"Appstrate"`
  *   - `uploads`: DB-stored files with platform-sanitised paths
- *   - `runHistoryApi: true`: sidecar-backed live history endpoint
  *   - `providers`: filtered to those with wired credentials
  *     (`plan.tokens[p.id]`) and enriched with authorized URIs via
  *     `@appstrate/connect`. Replaces the bundle-derived provider list
@@ -19,7 +18,12 @@
  *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Divergence between platform
- * and CLI is now strictly the four overrides above.
+ * and CLI is now strictly the three overrides above.
+ *
+ * Run history is NOT rendered in the prompt: the runtime wires a
+ * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
+ * description self-documents the capability — the agent never sees the
+ * sidecar URL.
  */
 
 import type { AppstrateRunPlan } from "./types.ts";
@@ -61,7 +65,6 @@ export function buildPlatformSystemPrompt(
     providers: connectedProviders,
     providersReplace: true,
     ...(uploads ? { uploads } : {}),
-    runHistoryApi: Boolean(plan.runApi),
   });
 
   return renderPlatformPrompt(inputs);

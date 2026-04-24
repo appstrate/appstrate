@@ -186,13 +186,30 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("`add_memory` tool");
   });
 
-  it("emits the Run History section only when runHistoryApi is true", () => {
-    const off = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(off).not.toContain("## Run History");
+  it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
+    // Before the run_history tool migration, a `## Run History` section
+    // with a `curl $SIDECAR_URL/run-history` snippet was emitted when
+    // `runHistoryApi: true` was passed in. That surface is gone: the
+    // prompt must never mention $SIDECAR_URL, regardless of the options
+    // bag. Run history is wired via the `run_history` tool whose
+    // description is surfaced through `availableTools` instead.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("## Run History");
+    expect(out).not.toContain("$SIDECAR_URL");
+  });
 
-    const on = renderPlatformPrompt({ template: "T", context: ctx(), runHistoryApi: true });
-    expect(on).toContain("## Run History");
-    expect(on).toContain("$SIDECAR_URL/run-history");
+  it("surfaces run_history in the Tools section when present in availableTools", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      availableTools: [
+        { id: "run_history", name: "run_history", description: "Fetch prior run metadata." },
+      ],
+    });
+    expect(out).toContain("### Tools");
+    expect(out).toContain("run_history");
+    expect(out).toContain("Fetch prior run metadata.");
+    expect(out).not.toContain("$SIDECAR_URL");
   });
 
   it("appends raw template verbatim for pre-1.1 schemaVersion", () => {

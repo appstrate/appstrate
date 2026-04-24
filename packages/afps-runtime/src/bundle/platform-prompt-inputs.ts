@@ -15,7 +15,6 @@
  *
  *   - `platformName`: display name in `## System`
  *   - `uploads`: only the platform can enumerate these (DB-backed)
- *   - `runHistoryApi`: only enable when a sidecar / proxy is wired
  *   - `providers`: pre-enriched list — merged over the bundle-derived
  *     providers by `id`, letting the platform add `authorizedUris`
  *     resolved via `@appstrate/connect` without re-deriving everything

@@ -120,8 +120,6 @@ function canonicalize(prompt: string): string {
       .replace(/running on the [^\n]* platform\./g, "running on the <PLATFORM> platform.")
       // strip the `## Documents` section (platform-only, DB-backed)
       .replace(/## Documents\n[\s\S]*?(?=\n## |\n---|$)/g, "")
-      // strip the `## Run History` section (sidecar-only)
-      .replace(/## Run History\n[\s\S]*?(?=\n## |\n---|$)/g, "")
       // strip the `## Connected Providers` section (may be filtered on
       // the platform by credential availability; CLI paths list all)
       .replace(/## Connected Providers\n[\s\S]*?(?=\n## |\n---|$)/g, "")
@@ -137,11 +135,13 @@ describe("cross-path prompt parity", () => {
   const platformPrompt = renderPlatformPrompt(
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
-      // Platform-specific: DB-backed uploads and sidecar run-history
+      // Platform-specific: DB-backed uploads. Run history used to be
+      // rendered as a `## Run History` section here; it is now surfaced
+      // via the runtime-wired `run_history` tool instead so the prompt
+      // never mentions the sidecar URL.
       uploads: [
         { name: "brief.pdf", path: "./documents/brief.pdf", size: 12345, type: "application/pdf" },
       ],
-      runHistoryApi: true,
       // Platform-specific: filtered provider list (e.g. only those with
       // credentials wired). Replaces the bundle-derived list.
       providers: [
@@ -199,9 +199,9 @@ describe("cross-path prompt parity", () => {
   });
 
   it("platform prompt matches CLI prompts modulo the documented divergences", () => {
-    // Platform: includes Documents, Run History, filtered Connected
-    // Providers. Canonicalize strips these platform-only sections so
-    // the residue must match the CLI render byte-for-byte.
+    // Platform: includes Documents and filtered Connected Providers.
+    // Canonicalize strips these platform-only sections so the residue
+    // must match the CLI render byte-for-byte.
     expect(canonicalize(platformPrompt)).toEqual(canonicalize(externalRunPrompt));
   });
 
@@ -221,10 +221,10 @@ describe("cross-path prompt parity", () => {
     expect(appstrateRunPrompt).not.toContain("## Documents");
   });
 
-  it("only the platform path emits the Run History section", () => {
-    expect(platformPrompt).toContain("## Run History");
-    expect(platformPrompt).toContain("$SIDECAR_URL/run-history");
-    expect(externalRunPrompt).not.toContain("## Run History");
-    expect(appstrateRunPrompt).not.toContain("## Run History");
+  it("no prompt path mentions the sidecar URL (zero-knowledge invariant)", () => {
+    for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
+      expect(prompt).not.toContain("$SIDECAR_URL");
+      expect(prompt).not.toContain("## Run History");
+    }
   });
 });

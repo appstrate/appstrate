@@ -412,22 +412,29 @@ describe("buildEnrichedPrompt — memories", () => {
   });
 });
 
-// ─── Run history API ────────────────────────────────────────
+// ─── Run history (zero-knowledge invariant) ────────────────
 
-describe("buildEnrichedPrompt — run history", () => {
-  it("includes run history API when runApi provided", () => {
+describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt", () => {
+  // Historical runs used to be documented in a `## Run History` section
+  // whose curl snippet exposed `$SIDECAR_URL`. That surface was migrated
+  // to a typed `run_history` tool wired by the runtime (runtime-pi
+  // Phase D); the prompt MUST NEVER mention the sidecar, regardless of
+  // whether `runApi` credentials are present.
+
+  it("does not render a Run History section when runApi is present", () => {
     const ctx = baseContext({
       runApi: { url: "http://platform:3000", token: "exec_token_123" },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Run History");
-    expect(prompt).toContain("$SIDECAR_URL/run-history");
+    expect(prompt).not.toContain("## Run History");
+    expect(prompt).not.toContain("$SIDECAR_URL");
   });
 
-  it("omits run history when no runApi", () => {
+  it("does not render a Run History section when runApi is absent", () => {
     const ctx = baseContext({ runApi: undefined });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
+    expect(prompt).not.toContain("$SIDECAR_URL");
   });
 });
 
