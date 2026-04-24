@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
  * we must set the env var BEFORE dynamically importing the module.
  * Each test uses a fresh import via cache-busting query string.
  *
- * The source lives in system-packages/tool-output-2.0.0/output.ts but
+ * The source lives in system-packages/tool-output-2.0.0/tool.ts but
  * depends on @mariozechner/pi-ai (installed in runtime-pi/node_modules).
  * We import from system-packages — Bun resolves the Pi SDK via the
  * runtime-pi workspace's node_modules.
@@ -28,7 +28,7 @@ function createMockPi() {
 
 /** Absolute path to the output extension source. */
 const OUTPUT_PATH = new URL(
-  "../../scripts/system-packages/tool-output-2.0.0/output.ts",
+  "../../scripts/system-packages/tool-output-2.0.0/tool.ts",
   import.meta.url,
 ).pathname;
 
