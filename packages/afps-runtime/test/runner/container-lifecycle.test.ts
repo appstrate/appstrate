@@ -7,7 +7,7 @@ import {
   RunTimeoutError,
   type WorkloadOrchestrator,
 } from "../../src/runner/container-lifecycle.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 
 interface TestHandle {
   id: string;

@@ -28,7 +28,7 @@ import { renderPrompt } from "../bundle/prompt-renderer.ts";
 import { reduceEvents } from "../runner/reducer.ts";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../types/run-result.ts";
 import type { ConformanceAdapter, RenderSnapshot, RunScriptedOutput } from "./adapter.ts";
 

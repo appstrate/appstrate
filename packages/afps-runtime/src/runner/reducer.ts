@@ -15,7 +15,7 @@
  * and the incremental `createReducerSink` consume it.
  */
 
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunError, RunResult } from "../types/run-result.ts";
 
 export interface ReduceOptions {

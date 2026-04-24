@@ -8,7 +8,7 @@ import { ConsoleSink } from "../../sinks/console-sink.ts";
 import { FileSink } from "../../sinks/file-sink.ts";
 import { CompositeSink } from "../../sinks/composite-sink.ts";
 import { reduceEvents } from "../../runner/reducer.ts";
-import type { RunEvent } from "../../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { EventSink } from "../../interfaces/event-sink.ts";
 import type { CliIO } from "../index.ts";
 

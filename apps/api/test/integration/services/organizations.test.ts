@@ -12,10 +12,12 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
-  slugify,
   getOrgSettings,
 } from "../../../src/services/organizations.ts";
+import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
+
+const slugify = (v: string) => toSlug(v, 50);
 
 describe("organizations service", () => {
   let userId: string;

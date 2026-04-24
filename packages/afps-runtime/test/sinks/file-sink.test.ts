@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSink } from "../../src/sinks/file-sink.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 
 function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
   return { type, timestamp: 0, runId: "r", ...extra };

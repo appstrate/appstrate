@@ -16,12 +16,12 @@ import {
   removeMember,
   updateMemberRole,
   findUserByEmail,
-  slugify,
   isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
   orgSettingsSchema,
 } from "../services/organizations.ts";
+import { toSlug } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import {
   createInvitation,
@@ -108,7 +108,7 @@ router.post("/", async (c) => {
   const body = await c.req.json();
   const data = parseBody(createOrgSchema, body);
 
-  const slug = data.slug?.trim() || slugify(data.name);
+  const slug = data.slug?.trim() || toSlug(data.name, 50);
   if (!slug) {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }

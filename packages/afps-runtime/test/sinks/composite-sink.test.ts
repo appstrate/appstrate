@@ -4,7 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import { CompositeSink } from "../../src/sinks/composite-sink.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../../src/types/run-result.ts";
 
 class RecordingSink implements EventSink {

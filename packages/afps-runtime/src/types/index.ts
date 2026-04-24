@@ -3,5 +3,5 @@
 
 export * from "./execution-context.ts";
 export * from "./manifest.ts";
-export * from "./run-event.ts";
+export type { RunEvent } from "@afps/types";
 export * from "./run-result.ts";

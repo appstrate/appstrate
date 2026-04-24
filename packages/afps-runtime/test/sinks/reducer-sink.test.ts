@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { createReducerSink } from "../../src/sinks/reducer-sink.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import { emptyRunResult, reduceEvents } from "../../src/runner/reducer.ts";
 
 const RUN_ID = "run_test";

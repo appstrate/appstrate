@@ -117,42 +117,11 @@ export async function getCredentials(
   return { credentials, connection, definition: def };
 }
 
-/**
- * Payload returned by {@link resolveCredentialsForProxy} and
- * {@link forceRefreshCredentials} to the sidecar and the
- * `/api/credential-proxy/proxy` route. Both consumers inject the
- * upstream auth header server-side from this payload — the agent never
- * sees placeholders.
- */
-export interface ProxyCredentialsPayload {
-  /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
-  credentials: Record<string, string>;
-  /** URL allowlist per AFPS §7.5 — `null` means no whitelist, SSRF safety net applies. */
-  authorizedUris: string[] | null;
-  /** When true, skip allowlist enforcement (still block private/internal ranges). */
-  allowAllUris: boolean;
-  /**
-   * Header name the upstream expects the credential under
-   * (e.g. `Authorization`, `X-Api-Key`). Absent = the sidecar does not
-   * inject any header and the agent is expected to write its own auth
-   * (basic/custom modes, or providers that pass credentials via URL /
-   * query / body). Pinned server-side so the agent cannot alter it.
-   */
-  credentialHeaderName?: string;
-  /**
-   * Prefix prepended to the credential value — typically `Bearer` for
-   * OAuth, empty for most API-key providers. When set, the rendered
-   * header is `${prefix} ${credentials[credentialFieldName]}`.
-   */
-  credentialHeaderPrefix?: string;
-  /**
-   * Name of the field in `credentials` that holds the secret to inject.
-   * Always populated (defaults `access_token` / `api_key` by auth mode)
-   * so the sidecar can treat `credentialHeaderName` presence as the
-   * single switch that controls injection.
-   */
-  credentialFieldName: string;
-}
+// `ProxyCredentialsPayload` is declared in `./proxy-primitives.ts` so
+// both the DB-backed platform path and the HTTP-backed sidecar (which
+// cannot import @appstrate/db) share a single type definition.
+export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
+import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 /**
  * Resolve credentials for the sidecar proxy.

@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { ConsoleSink, type ConsoleWritable } from "../../src/sinks/console-sink.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 
 class BufferWritable implements ConsoleWritable {
   readonly chunks: string[] = [];

@@ -41,19 +41,57 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
- * Narrow structural shape consumed by {@link buildInjectedCredentialHeader}
- * and {@link applyInjectedCredentialHeader}. Matches both
- * `@appstrate/connect`'s `ProxyCredentialsPayload` (platform, DB-backed)
- * and the sidecar's `CredentialsResponse` (HTTP-backed). Narrowing keeps
- * the helpers agnostic of how credentials were sourced so drift between
- * the two entrypoints is impossible.
+ * Payload returned by `resolveCredentialsForProxy` /
+ * `forceRefreshCredentials` (platform, DB-backed) and by the sidecar's
+ * `/internal/providers/credentials` HTTP fetch (container, HTTP-backed).
+ * Single type definition — both entrypoints import it from here, so the
+ * wire format cannot drift between platform and sidecar.
+ *
+ * Lives in `proxy-primitives.ts` rather than `credentials.ts` so the
+ * sidecar (which must not pull @appstrate/db) can consume it via the
+ * `@appstrate/connect/proxy-primitives` subpath.
  */
-export interface InjectableCredentials {
+export interface ProxyCredentialsPayload {
+  /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
   credentials: Record<string, string>;
+  /** URL allowlist per AFPS §7.5 — `null` means no whitelist, SSRF safety net applies. */
+  authorizedUris: string[] | null;
+  /** When true, skip allowlist enforcement (still block private/internal ranges). */
+  allowAllUris: boolean;
+  /**
+   * Header name the upstream expects the credential under
+   * (e.g. `Authorization`, `X-Api-Key`). Absent = the proxy does not
+   * inject any header and the agent is expected to write its own auth
+   * (basic/custom modes, or providers that pass credentials via URL /
+   * query / body). Pinned server-side so the agent cannot alter it.
+   */
   credentialHeaderName?: string;
+  /**
+   * Prefix prepended to the credential value — typically `Bearer` for
+   * OAuth, empty for most API-key providers. When set, the rendered
+   * header is `${prefix} ${credentials[credentialFieldName]}`.
+   */
   credentialHeaderPrefix?: string;
+  /**
+   * Name of the field in `credentials` that holds the secret to inject.
+   * Always populated (defaults `access_token` / `api_key` by auth mode)
+   * so both entrypoints can treat `credentialHeaderName` presence as the
+   * single switch that controls injection.
+   */
   credentialFieldName: string;
 }
+
+/**
+ * Narrow subset the header-injection helpers actually read. Every
+ * `ProxyCredentialsPayload` satisfies this shape trivially — the alias
+ * exists so ad-hoc callers (tests, fixture builders) can construct the
+ * four fields the injector needs without also filling in `authorizedUris`
+ * / `allowAllUris` boilerplate.
+ */
+type InjectableCredentials = Pick<
+  ProxyCredentialsPayload,
+  "credentials" | "credentialHeaderName" | "credentialHeaderPrefix" | "credentialFieldName"
+>;
 
 /**
  * Build the final header-name / header-value pair the proxy injects

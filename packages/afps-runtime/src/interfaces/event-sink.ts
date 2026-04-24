@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../types/run-result.ts";
 
 /**

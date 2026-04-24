@@ -70,4 +70,6 @@ export {
   normalizeAuthScheme,
   normalizeAuthSchemeOnHeaders,
 } from "./proxy-primitives.ts";
-export type { InjectableCredentials } from "./proxy-primitives.ts";
+// `ProxyCredentialsPayload` is re-exported from `./credentials.ts` above —
+// it physically lives in `proxy-primitives.ts` so the sidecar can consume
+// it without pulling @appstrate/db. Single type, shared by both paths.

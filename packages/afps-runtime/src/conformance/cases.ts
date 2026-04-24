@@ -17,7 +17,7 @@ import {
   type TrustRoot,
 } from "../bundle/signing.ts";
 import type { Bundle } from "../bundle/types.ts";
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { ConformanceAdapter } from "./adapter.ts";
 
 function rootManifestOf(bundle: Bundle): Record<string, unknown> {

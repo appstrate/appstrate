@@ -4,7 +4,7 @@
 import { appendFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../types/run-result.ts";
 
 export interface FileSinkOptions {

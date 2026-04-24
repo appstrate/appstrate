@@ -13,7 +13,7 @@
  * Specification: see AFPS spec §8 and CloudEvents 1.0.
  */
 
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 
 export interface CloudEventEnvelope {
   specversion: "1.0";

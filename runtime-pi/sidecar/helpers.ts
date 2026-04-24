@@ -22,30 +22,12 @@ export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
 
 export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
-export interface CredentialsResponse {
-  credentials: Record<string, string>;
-  authorizedUris: string[] | null;
-  allowAllUris: boolean;
-  /**
-   * Header name the upstream expects the credential under
-   * (e.g. `Authorization`, `X-Api-Key`). When present, the sidecar
-   * writes the final header server-side from
-   * `credentials[credentialFieldName]` — the LLM never touches the
-   * credential value. Absent = no header injection (basic/custom auth
-   * modes, or providers that pass credentials via URL / query / body).
-   */
-  credentialHeaderName?: string;
-  /**
-   * Optional prefix prepended to the credential value (e.g. `Bearer`).
-   * Rendered as `${prefix} ${credentials[credentialFieldName]}`.
-   */
-  credentialHeaderPrefix?: string;
-  /**
-   * Name of the field in `credentials` holding the secret to inject.
-   * Always populated by the platform (defaults by auth mode).
-   */
-  credentialFieldName: string;
-}
+// The credentials payload the sidecar receives over HTTP is
+// wire-identical to what the platform's `/api/credential-proxy/proxy`
+// route resolves from the DB — both are `ProxyCredentialsPayload`. The
+// local alias preserves the sidecar's historical vocabulary (this is
+// the HTTP response body from `/internal/providers/credentials`).
+export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/connect/proxy-primitives";
 
 // Import from the dedicated subpath so the compiled sidecar binary does
 // NOT pull `@appstrate/connect`'s credentials module (which transitively

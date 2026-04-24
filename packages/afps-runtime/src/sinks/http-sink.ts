@@ -3,7 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { EventSink } from "../interfaces/event-sink.ts";
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../types/run-result.ts";
 import { buildCloudEventEnvelope } from "../events/cloudevents.ts";
 import { sign } from "../events/signing.ts";
@@ -69,7 +69,11 @@ export class HttpSink implements EventSink {
   private readonly initialBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly fetchImpl: typeof fetch;
-  private sequence = 0;
+  // Sequence numbers start at 1. The ingestion endpoint accepts an event
+  // only when `envelope.sequence === run.lastEventSequence + 1`, and
+  // `lastEventSequence` defaults to 0 on run creation — so the first
+  // emitted event must be 1 or it is dropped as a replay.
+  private sequence = 1;
 
   constructor(opts: HttpSinkOptions) {
     this.url = opts.url;

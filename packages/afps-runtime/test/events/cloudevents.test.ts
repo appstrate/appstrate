@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildCloudEventEnvelope } from "../../src/events/cloudevents.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 
 function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
   return { type, timestamp: 1714000000000, runId: "run_abc", ...extra };

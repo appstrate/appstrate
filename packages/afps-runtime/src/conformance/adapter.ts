@@ -18,7 +18,7 @@
 import type { Bundle } from "../bundle/types.ts";
 import type { TrustRoot, VerifySignatureResult } from "../bundle/signing.ts";
 import type { ExecutionContext, HistoryEntry, MemorySnapshot } from "../types/execution-context.ts";
-import type { RunEvent } from "../types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { RunResult } from "../types/run-result.ts";
 
 /**

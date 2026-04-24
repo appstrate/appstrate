@@ -14,7 +14,7 @@ import {
 import { runCli } from "../../src/cli/index.ts";
 import { captureIo, writeBundleFile, writeJsonFile } from "./helpers.ts";
 import { generateKeyPair } from "../../src/bundle/signing.ts";
-import type { RunEvent } from "../../src/types/run-event.ts";
+import type { RunEvent } from "@afps/types";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
 
