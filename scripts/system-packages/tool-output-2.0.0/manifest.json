@@ -6,7 +6,7 @@
   "displayName": "Output",
   "description": "Return data as the run result.",
   "schemaVersion": "1.0",
-  "entrypoint": "output.ts",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "output",
     "description": "MANDATORY — call exactly once with the complete output object. Calling again replaces the previous output. Validated against the agent's output schema if defined.",

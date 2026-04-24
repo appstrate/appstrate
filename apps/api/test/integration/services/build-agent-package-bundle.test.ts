@@ -64,6 +64,12 @@ describe("buildAgentPackage — multi-package bundle output", () => {
       version: "2.1.0",
       type: "tool",
       description: "Calc tool",
+      entrypoint: "tool.ts",
+      tool: {
+        name: "calc",
+        description: "Calculator",
+        inputSchema: { type: "object", properties: {} },
+      },
     };
     const providerManifest = {
       name: "@bundlehost/svc-provider",
@@ -92,7 +98,9 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     await uploadPackageFiles("tools", ORG_ID, "@bundlehost/calc-tool", {
       "manifest.json": enc(JSON.stringify(toolManifest, null, 2)),
       "TOOL.md": enc("Calculator tool documentation"),
-      "index.ts": enc("export default () => ({ name: 'calc' });"),
+      "tool.ts": enc(
+        "export default () => ({ name: 'calc', description: 'calc', execute: async () => ({ content: [{ type: 'text', text: '42' }] }) });",
+      ),
     });
 
     await seedPackage({
@@ -162,7 +170,13 @@ describe("buildAgentPackage — multi-package bundle output", () => {
 
     const toolPkg = bundle.packages.get("@bundlehost/calc-tool@2.1.0")!;
     expect(dec(toolPkg.files.get("TOOL.md"))).toBe("Calculator tool documentation");
-    expect(dec(toolPkg.files.get("index.ts"))).toContain("export default");
+    // Tool source was bundled on-the-fly into `tool.js`; the raw `tool.ts`
+    // source must not leak into the runtime bundle.
+    expect(toolPkg.files.has("tool.ts")).toBe(false);
+    expect(toolPkg.files.has("tool.js")).toBe(true);
+    expect(dec(toolPkg.files.get("tool.js"))).toContain("export");
+    const toolManifestBytes = toolPkg.files.get("manifest.json");
+    expect(dec(toolManifestBytes)).toContain('"entrypoint": "tool.js"');
 
     const providerPkg = bundle.packages.get("@bundlehost/svc-provider@0.5.0")!;
     expect(dec(providerPkg.files.get("PROVIDER.md"))).toBe("Provider doc");

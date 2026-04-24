@@ -97,17 +97,16 @@ async function main() {
       continue;
     }
 
-    // Delete old archives for this package
-    const baseName = dirName.replace(/-\d+\.\d+\.\d+$/, "");
-    for (const f of existingAfps) {
-      if (f.endsWith(".afps") && f.startsWith(`${baseName}-`)) {
-        await unlink(join(OUTPUT_DIR, f));
-        console.log(`  Deleted old: ${f}`);
-      }
+    // Delete the existing archive for this exact version, if any. Other
+    // versions of the same package live in sibling source dirs and must
+    // be preserved.
+    const zipName = `${dirName}.afps`;
+    if (existingAfps.includes(zipName)) {
+      await unlink(join(OUTPUT_DIR, zipName));
+      console.log(`  Deleted old: ${zipName}`);
     }
 
     // Build archive
-    const zipName = `${dirName}.afps`;
     const integrity = computeIntegrity(zipBytes);
 
     await writeFile(join(OUTPUT_DIR, zipName), zipBytes);

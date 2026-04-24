@@ -6,7 +6,7 @@
   "displayName": "Report",
   "description": "Generate a markdown report as part of the run result.",
   "schemaVersion": "1.0",
-  "entrypoint": "report.ts",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "report",
     "description": "MANDATORY — call at least once. Appends markdown content to the run report.",

@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
+import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
@@ -37,7 +38,7 @@ import {
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
 import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
-import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
+import { SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
@@ -249,7 +250,9 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  Builds the ZIP from normalizedFiles + manifest.json, then uploads. */
+ *  For tools, the source is bundled into a self-contained `tool.js` via
+ *  {@link buildPublishedToolArchive} so the published archive complies
+ *  with AFPS §3.4. Other types are zipped as-is. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -265,16 +268,29 @@ async function createVersionSafe(params: {
     return;
   }
   try {
-    const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
-    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
-    const zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    let zipBuffer: Buffer;
+    let manifestToStore = params.manifest;
+
+    if (params.manifest.type === "tool") {
+      const built = await buildPublishedToolArchive({
+        files: params.normalizedFiles,
+        manifest: params.manifest,
+        toolId: params.packageId,
+      });
+      zipBuffer = Buffer.from(built.archive);
+      manifestToStore = built.manifest;
+    } else {
+      const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
+      zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    }
 
     await createVersionAndUpload({
       packageId: params.packageId,
       version,
       createdBy: params.userId,
       zipBuffer,
-      manifest: params.manifest,
+      manifest: manifestToStore,
     });
   } catch (error) {
     logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
@@ -338,7 +354,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     responseKey: "tool",
     validateSource: validateToolSource,
     storageFileName: () => "TOOL.md",
-    sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    sourceFileName: () => "tool.ts",
     jsonBodyCreate: true,
   },
   agent: {

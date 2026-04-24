@@ -6,7 +6,7 @@
   "displayName": "Log",
   "description": "Send progress messages to the user in real time.",
   "schemaVersion": "1.0",
-  "entrypoint": "log.ts",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "log",
     "description": "Send a progress message to the user. Write naturally — the user reads these in real time.",
@@ -15,11 +15,7 @@
       "properties": {
         "level": {
           "type": "string",
-          "enum": [
-            "info",
-            "warn",
-            "error"
-          ],
+          "enum": ["info", "warn", "error"],
           "description": "info: progress and milestones, warn: non-blocking issues, error: failures"
         },
         "message": {
@@ -27,10 +23,7 @@
           "description": "Message for the user"
         }
       },
-      "required": [
-        "level",
-        "message"
-      ]
+      "required": ["level", "message"]
     }
   }
 }

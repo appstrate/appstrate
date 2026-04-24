@@ -19,7 +19,8 @@ export type BundleErrorCode =
   | "VERSION_UNSUPPORTED"
   | "LIMITS_EXCEEDED"
   | "MANIFEST_SCHEMA"
-  | "DEPENDENCY_UNRESOLVED";
+  | "DEPENDENCY_UNRESOLVED"
+  | "TOOL_BUNDLE_FAILED";
 
 /**
  * Domain error for the bundle runtime. Carries a stable `code` plus
