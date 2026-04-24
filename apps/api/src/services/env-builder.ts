@@ -100,7 +100,7 @@ export async function buildRunContext(params: {
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
-  const { toolDocs } = agentPackageResult;
+  const { bundle, toolDocs } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
   const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
@@ -160,6 +160,7 @@ export async function buildRunContext(params: {
   };
 
   const plan: AppstrateRunPlan = {
+    bundle,
     rawPrompt: agent.prompt,
     schemaVersion: (agent.manifest.schemaVersion as string | undefined) ?? "1.0",
     schemas: extractManifestSchemas(agent.manifest),

@@ -10,6 +10,7 @@ import {
   formatPackageIdentity,
   parsePackageIdentity,
   writeBundleToBuffer,
+  type Bundle,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { DraftPackageCatalog } from "./adapters/draft-package-catalog.ts";
@@ -103,6 +104,12 @@ export async function uploadPackageZip(
 
 interface AgentPackageResult {
   zip: Buffer;
+  /**
+   * Parsed in-memory bundle — shared with `prompt-builder.ts` so the
+   * platform system prompt derives tools / skills / providers /
+   * schemas from the SAME source the runner-pi container will load.
+   */
+  bundle: Bundle;
   toolDocs: Array<{ id: string; content: string }>;
 }
 
@@ -164,7 +171,7 @@ export async function buildAgentPackage(
     toolDocs.push({ id: parsed.packageId, content: decoder.decode(md) });
   }
 
-  return { zip: Buffer.from(zipBuffer), toolDocs };
+  return { zip: Buffer.from(zipBuffer), bundle, toolDocs };
 }
 
 /** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */

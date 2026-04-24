@@ -32,6 +32,7 @@ import type { Bundle } from "../../bundle/types.ts";
 import { verifyBundleWithPolicy } from "../../bundle/signature-policy.ts";
 import type { TrustRoot } from "../../bundle/signing.ts";
 import { renderPlatformPrompt } from "../../bundle/platform-prompt.ts";
+import { buildPlatformPromptInputs } from "../../bundle/platform-prompt-inputs.ts";
 import type { ExecutionContext } from "../../types/execution-context.ts";
 import type { EventSink } from "../../interfaces/event-sink.ts";
 import { createReducerSink } from "../../sinks/reducer-sink.ts";
@@ -314,41 +315,16 @@ export function createRunHandler(
     }
     const eventSink: EventSink = sinks.length === 1 ? sinks[0]! : new CompositeSink(sinks);
 
-    // Extract the raw prompt.md template from the bundle's root package
-    // so the platform prompt can wrap it with the standard preamble.
-    const rootPkg = bundle.packages.get(bundle.root);
-    const promptBytes = rootPkg?.files.get("prompt.md");
-    const template = promptBytes ? new TextDecoder().decode(promptBytes) : "";
-    const manifest = (rootPkg?.manifest ?? {}) as Record<string, unknown>;
-    const schemaVersion =
-      typeof manifest.schemaVersion === "string" ? manifest.schemaVersion : undefined;
-
-    // The bundled @appstrate/output tool reads process.env.OUTPUT_SCHEMA at
-    // import time to decide whether to expose a strict schema or a generic
-    // `data: any` shape to the LLM. On the platform this env var is set by
-    // `buildRuntimePiEnv` before container spawn; here we must set it in-
-    // process before prepareBundleForPi imports the tool. The output schema
-    // lives under `manifest.output.schema` per AFPS 1.3 (it's a wrapper:
-    // `{ schema, fileConstraints?, uiHints?, propertyOrder? }`).
-    const outputSection = manifest.output;
-    const outputSchema =
-      outputSection &&
-      typeof outputSection === "object" &&
-      !Array.isArray(outputSection) &&
-      "schema" in outputSection
-        ? (outputSection as { schema: unknown }).schema
-        : undefined;
-
-    const systemPrompt = renderPlatformPrompt({
-      template,
-      context,
-      ...(schemaVersion ? { schemaVersion } : {}),
-      ...(outputSchema && typeof outputSchema === "object" && !Array.isArray(outputSchema)
-        ? { outputSchema: outputSchema as Record<string, unknown> }
-        : {}),
+    // Derive every prompt section (template, schemas, tools, skills,
+    // providers, toolDocs, timeout) from the bundle itself via the
+    // shared helper. Overrides are strictly the fields a standalone
+    // CLI run cannot derive from the bundle alone.
+    const promptInputs = buildPlatformPromptInputs(bundle, context, {
       platformName: "afps run",
       timeoutSeconds,
     });
+    const systemPrompt = renderPlatformPrompt(promptInputs);
+    const outputSchema = promptInputs.outputSchema;
 
     // Workspace: user-provided dirs are respected and NEVER cleaned up
     // (debug ergonomics). Tempdirs created here are auto-removed in

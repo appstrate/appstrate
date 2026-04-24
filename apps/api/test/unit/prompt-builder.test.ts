@@ -9,6 +9,64 @@ import type {
   ToolMeta,
 } from "../../src/services/adapters/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
+
+function makeTestBundle(opts: {
+  rawPrompt?: string;
+  schemaVersion?: string;
+  schemas?: AppstrateRunPlan["schemas"];
+  timeout?: number;
+  tools?: ToolMeta[];
+  skills?: ToolMeta[];
+  toolDocs?: Array<{ id: string; content: string }>;
+}): Bundle {
+  const rootManifest: Record<string, unknown> = {
+    name: "@test/agent",
+    version: "1.0.0",
+    type: "agent",
+    ...(opts.schemaVersion ? { schemaVersion: opts.schemaVersion } : {}),
+    ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
+    ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
+    ...(opts.schemas?.config ? { config: { schema: opts.schemas.config } } : {}),
+    ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
+  };
+  const rootFiles = new Map<string, Uint8Array>();
+  rootFiles.set("manifest.json", new TextEncoder().encode(JSON.stringify(rootManifest)));
+  rootFiles.set("prompt.md", new TextEncoder().encode(opts.rawPrompt ?? ""));
+  const rootIdentity: PackageIdentity = "@test/agent@1.0.0";
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(rootIdentity, {
+    identity: rootIdentity,
+    manifest: rootManifest,
+    files: rootFiles,
+    integrity: "sha256-stub",
+  });
+
+  const docsById = new Map((opts.toolDocs ?? []).map((d) => [d.id, d.content]));
+  for (const t of opts.tools ?? []) {
+    const identity = `${t.id}@1.0.0` as PackageIdentity;
+    const manifest = { name: t.name, type: "tool", description: t.description };
+    const files = new Map<string, Uint8Array>();
+    files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+    const doc = docsById.get(t.id);
+    if (doc) files.set("TOOL.md", new TextEncoder().encode(doc));
+    packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
+  }
+  for (const s of opts.skills ?? []) {
+    const identity = `${s.id}@1.0.0` as PackageIdentity;
+    const manifest = { name: s.name, type: "skill", description: s.description };
+    const files = new Map<string, Uint8Array>();
+    files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+    packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
+  }
+
+  return {
+    bundleFormatVersion: "1.0",
+    root: rootIdentity,
+    packages,
+    integrity: "sha256-stub",
+  };
+}
 
 /**
  * Test-local shape that mirrors the legacy `PromptContext` — tests keep
@@ -51,7 +109,17 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
     config: ctx.config,
   };
+  const bundle = makeTestBundle({
+    rawPrompt: ctx.rawPrompt,
+    ...(ctx.schemaVersion !== undefined ? { schemaVersion: ctx.schemaVersion } : {}),
+    schemas: ctx.schemas,
+    ...(ctx.timeout !== undefined ? { timeout: ctx.timeout } : {}),
+    ...(ctx.availableTools ? { tools: ctx.availableTools } : {}),
+    ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
+    ...(ctx.toolDocs ? { toolDocs: ctx.toolDocs } : {}),
+  });
   const plan: AppstrateRunPlan = {
+    bundle,
     rawPrompt: ctx.rawPrompt,
     schemaVersion: ctx.schemaVersion,
     schemas: ctx.schemas,

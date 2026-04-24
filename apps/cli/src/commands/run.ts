@@ -26,8 +26,11 @@ import {
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
-import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
-import { renderPrompt } from "@appstrate/afps-runtime";
+import {
+  readBundleFromFile,
+  buildPlatformPromptInputs,
+  renderPlatformPrompt,
+} from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfile } from "../lib/config.ts";
 import { resolveAuthContext, AuthError } from "../lib/api.ts";
@@ -142,7 +145,35 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   const input = await resolveInput(opts);
   const config = opts.config ? safeParseJson(opts.config, "--config") : {};
 
-  // ─── 6. Temp workspace + extension prep ────────────────────────────
+  // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
+  // Derive the full platform prompt (tools / skills / providers /
+  // schemas / output) from the bundle BEFORE prepareBundleForPi — the
+  // bundled `@appstrate/output` tool reads `process.env.OUTPUT_SCHEMA`
+  // at import time and must see the schema to expose it as constrained
+  // decoding to the LLM. Matches the platform container's wiring via
+  // `buildRuntimePiEnv` and the `afps run` CLI's in-process shim.
+  const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const context: ExecutionContext = {
+    runId,
+    input,
+    memories: [],
+    config,
+  };
+  const promptInputs = buildPlatformPromptInputs(bundle, context, {
+    platformName: "Appstrate CLI",
+  });
+  const systemPrompt = renderPlatformPrompt(promptInputs);
+
+  const priorOutputSchema = process.env.OUTPUT_SCHEMA;
+  if (promptInputs.outputSchema !== undefined) {
+    process.env.OUTPUT_SCHEMA = JSON.stringify(promptInputs.outputSchema);
+  }
+  const restoreOutputSchema = (): void => {
+    if (priorOutputSchema === undefined) delete process.env.OUTPUT_SCHEMA;
+    else process.env.OUTPUT_SCHEMA = priorOutputSchema;
+  };
+
+  // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
   const prepared = await prepareBundleForPi(bundle, {
     workspaceDir,
@@ -154,9 +185,6 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       }
     },
   });
-
-  // ─── 7. ExecutionContext + system prompt (AFPS canonical render) ──
-  const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
   // ─── 7a. Provider tools — bridge AFPS ProviderResolver → Pi factories ──
   // PiRunner takes pre-built Pi extension factories; AFPS provider tools
@@ -177,19 +205,6 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   if (!opts.json && providerFactories.length > 0) {
     process.stderr.write(`→ wired ${providerFactories.length} provider tool(s)\n`);
   }
-  const context: ExecutionContext = {
-    runId,
-    input,
-    memories: [],
-    config,
-  };
-  const rootPkg = bundle.packages.get(bundle.root);
-  const promptBytes = rootPkg?.files.get("prompt.md");
-  const promptTemplate = promptBytes ? new TextDecoder().decode(promptBytes) : "";
-  const systemPrompt = await renderPrompt({
-    template: promptTemplate,
-    context,
-  });
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   const controller = new AbortController();
@@ -207,7 +222,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   if (!opts.json) {
     const reportNote = reportSession
       ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
-      : " (CLI mode — no platform preamble)";
+      : "";
     process.stderr.write(`→ running ${path.basename(bundlePath)}${reportNote}\n`);
   }
   try {
@@ -277,6 +292,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
+    restoreOutputSchema();
     await prepared.cleanup().catch(() => {});
     await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
   }

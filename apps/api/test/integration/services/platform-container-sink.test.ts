@@ -159,8 +159,25 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
 // Fixtures
 // ---------------------------------------------------------------------------
 
+function buildTestBundle(): AppstrateRunPlan["bundle"] {
+  const manifest = { name: "@test/agent", version: "1.0.0", type: "agent" };
+  const files = new Map<string, Uint8Array>();
+  files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+  files.set("prompt.md", new TextEncoder().encode("Do the thing."));
+  const identity = "@test/agent@1.0.0" as AppstrateRunPlan["bundle"]["root"];
+  const packages: AppstrateRunPlan["bundle"]["packages"] = new Map();
+  packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
+  return {
+    bundleFormatVersion: "1.0",
+    root: identity,
+    packages,
+    integrity: "sha256-stub",
+  };
+}
+
 function buildRunPlan(): AppstrateRunPlan {
   return {
+    bundle: buildTestBundle(),
     rawPrompt: "Do the thing.",
     schemas: {},
     llmConfig: {

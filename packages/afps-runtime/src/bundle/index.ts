@@ -94,6 +94,10 @@ export {
   type PlatformPromptTool,
   type PlatformPromptSchema,
 } from "./platform-prompt.ts";
+export {
+  buildPlatformPromptInputs,
+  type BuildPlatformPromptInputsOverrides,
+} from "./platform-prompt-inputs.ts";
 
 // ─── Signature policy ───────────────────────────────────────────────
 export {
