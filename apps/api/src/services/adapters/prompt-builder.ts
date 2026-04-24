@@ -30,27 +30,27 @@ import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
 import type { PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
-import { getDefaultAuthorizedUris, type ProviderDefinition } from "@appstrate/connect";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
 export function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
 ): string {
+  // Project ProviderSummary → PlatformPromptProvider explicitly: drop the
+  // platform-internal credential bag (credentialSchema / credentialFieldName /
+  // credentialHeaderName / credentialHeaderPrefix / categories) so it never
+  // reaches the prompt-rendering pipeline.
   const connectedProviders: PlatformPromptProvider[] = plan.providers
     .filter((p) => plan.tokens[p.id])
-    .map((p) => {
-      const uris = getDefaultAuthorizedUris(p as ProviderDefinition);
-      return {
-        id: p.id,
-        displayName: p.displayName,
-        authMode: p.authMode,
-        ...(uris ? { authorizedUris: uris } : {}),
-        allowAllUris: p.allowAllUris ?? false,
-        ...(p.docsUrl !== undefined ? { docsUrl: p.docsUrl } : {}),
-        ...(p.hasProviderDoc !== undefined ? { hasProviderDoc: p.hasProviderDoc } : {}),
-      };
-    });
+    .map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      authMode: p.authMode,
+      ...(p.authorizedUris?.length ? { authorizedUris: p.authorizedUris } : {}),
+      allowAllUris: p.allowAllUris ?? false,
+      ...(p.docsUrl !== undefined ? { docsUrl: p.docsUrl } : {}),
+      ...(p.hasProviderDoc !== undefined ? { hasProviderDoc: p.hasProviderDoc } : {}),
+    }));
 
   const uploads = plan.files?.map((f) => ({
     name: f.name,

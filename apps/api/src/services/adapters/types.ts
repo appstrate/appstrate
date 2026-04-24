@@ -5,7 +5,7 @@ import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 
 export type { ModelCost };
 export { modelCostSchema };
@@ -32,21 +32,18 @@ export type { ToolMeta };
 
 /**
  * Provider definition projected for prompt enrichment + sidecar wiring.
- * Mirrors the fields a running agent (or the prompt builder) needs to
- * know about a connected provider — NOT the full ProviderDefinition.
+ * Extends the runtime's {@link PlatformPromptProvider} (id / displayName /
+ * authMode / authorizedUris / allowAllUris / docsUrl / hasProviderDoc /
+ * toolName) with platform-internal credential metadata consumed by the
+ * sidecar but never surfaced to the LLM prompt.
  */
-export interface ProviderSummary {
-  id: string;
+export interface ProviderSummary extends PlatformPromptProvider {
   displayName: string;
   authMode: string;
   credentialSchema?: Record<string, unknown>;
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
-  authorizedUris?: string[];
-  allowAllUris?: boolean;
-  docsUrl?: string;
-  hasProviderDoc?: boolean;
   categories?: string[];
 }
 
@@ -82,8 +79,6 @@ export interface AppstrateRunPlan {
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  /** AFPS schemaVersion for template render path selection. */
-  schemaVersion?: string;
   /** Input / config / output JSON Schemas extracted from the manifest. */
   schemas: {
     input?: JSONSchemaObject;
