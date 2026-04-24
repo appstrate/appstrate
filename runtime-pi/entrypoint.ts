@@ -39,6 +39,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildProviderExtensionFactories,
+  buildRunHistoryExtensionFactory,
   emitRuntimeReady,
   startSinkHeartbeat,
 } from "@appstrate/runner-pi";
@@ -223,12 +224,16 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
-// --- 2c. Phase C: wire provider tools via the sidecar resolver ---
-// Each `dependencies.providers[]` entry in the bundle manifest is turned
-// into a typed `<provider>_call` tool (e.g. `appstrate_gmail_call`) that
-// proxies through the sidecar. This replaces the legacy `curl
-// $SIDECAR_URL/proxy` pattern with a structured, observable tool call
-// while keeping the sidecar HTTP contract unchanged.
+// --- 2c. Phase C: wire sidecar-backed tools (providers + run_history) ---
+// Everything that needs to talk to the sidecar is wired here. The agent
+// LLM never sees the sidecar URL — each capability is surfaced as a
+// typed, observable Pi tool:
+//   - `dependencies.providers[]` → `<provider>_call` (e.g.
+//     `appstrate_gmail_call`) via SidecarProviderResolver.
+//   - run history → `run_history` via buildRunHistoryExtensionFactory.
+// Replaces every legacy `curl $SIDECAR_URL/*` pattern documented in older
+// prompts. The sidecar HTTP contract (`/proxy`, `/run-history`) is
+// unchanged — this is a client-surface migration only.
 
 const sidecarUrl = process.env.SIDECAR_URL;
 let providerResolver: ProviderResolver = { resolve: async () => [] };
@@ -260,6 +265,41 @@ if (bundle && sidecarUrl) {
     );
   }
 }
+
+// --- 2d. Phase D: wire run_history tool via the sidecar resolver ---
+// Unlike provider tools, `run_history` does NOT depend on the bundle
+// manifest — it is an intrinsic platform capability available to every
+// agent the moment a sidecar is wired. Declaring it alongside provider
+// tools keeps the sidecar-knowledge blast radius localised to this
+// block of the bootstrap.
+
+if (sidecarUrl) {
+  try {
+    extensionFactories.push(
+      buildRunHistoryExtensionFactory({
+        sidecarUrl,
+        runId: AGENT_RUN_ID,
+        workspace: WORKSPACE,
+        emit: (event) => {
+          void teeSink.handle(event as RunEvent);
+        },
+      }),
+    );
+  } catch (err) {
+    await emitError(
+      `Failed to wire run_history tool: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+// --- 2e. Zero-knowledge enforcement ---
+// The sidecar URL is a runtime implementation detail. Now that every
+// capability that needs it has been wired through typed tools, remove
+// the env var so the Pi bash extension cannot leak it via `echo
+// $SIDECAR_URL` or similar — the contract ("agent never sees the
+// sidecar") is enforced, not documented. Safe: no downstream consumer
+// in this process reads SIDECAR_URL past this point.
+delete process.env.SIDECAR_URL;
 
 // --- 3. Model + system prompt from env ---
 
