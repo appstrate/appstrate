@@ -121,7 +121,6 @@ function splitLegacy(ctx: PromptContext): {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: ctx.rawPrompt,
-    schemaVersion: ctx.schemaVersion,
     schemas: ctx.schemas,
     llmConfig: ctx.llmConfig,
     ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),

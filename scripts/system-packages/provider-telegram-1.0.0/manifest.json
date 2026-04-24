@@ -32,5 +32,5 @@
       { "label": "Copy the bot token provided by BotFather" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

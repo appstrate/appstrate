@@ -53,5 +53,5 @@
       { "label": "Copy Client ID and Client Secret" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

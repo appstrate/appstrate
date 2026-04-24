@@ -5,7 +5,7 @@
   "type": "tool",
   "displayName": "Report",
   "description": "Generate a markdown report as part of the run result.",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "entrypoint": "tool.ts",
   "tool": {
     "name": "report",

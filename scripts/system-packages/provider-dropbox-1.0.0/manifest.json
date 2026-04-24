@@ -45,5 +45,5 @@
       { "label": "Copy your App Key (Client ID) and App Secret (Client Secret)" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

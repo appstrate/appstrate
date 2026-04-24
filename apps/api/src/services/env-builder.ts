@@ -162,7 +162,6 @@ export async function buildRunContext(params: {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
-    schemaVersion: (agent.manifest.schemaVersion as string | undefined) ?? "1.0",
     schemas: extractManifestSchemas(agent.manifest),
     llmConfig,
     runApi: { url: runApiUrl, token: signRunToken(runId) },

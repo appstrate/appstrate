@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.ts";
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.0",
+  schemaVersion: "1.1",
   displayName: "Hello World",
   author: "Appstrate",
   description: "Un agent de démonstration pour découvrir les capacités de la plateforme Appstrate.",

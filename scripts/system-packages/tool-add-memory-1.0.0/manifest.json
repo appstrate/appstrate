@@ -5,7 +5,7 @@
   "type": "tool",
   "displayName": "Add Memory",
   "description": "Save a discovery or learning as a long-term memory.",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "entrypoint": "tool.ts",
   "tool": {
     "name": "add_memory",
