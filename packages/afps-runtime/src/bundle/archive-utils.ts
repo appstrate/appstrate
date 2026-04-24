@@ -2,9 +2,9 @@
 // Copyright 2026 Appstrate
 
 /**
- * Shared ZIP entry sanitization used by both the legacy AFPS loader and
- * the new `.afps-bundle` reader. Centralizes the path-safety rules so we
- * don't re-implement them.
+ * Shared ZIP entry sanitization for the `.afps-bundle` and single-package
+ * `.afps` readers. Centralizes the path-safety rules so we don't
+ * re-implement them.
  */
 
 import { BundleError } from "./errors.ts";

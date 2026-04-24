@@ -10,9 +10,6 @@
  *   - `type = "agent"` for the root when `agentOnlyRoot` is on
  *   - Prompt template syntax check on the root's `prompt.md` if present
  *   - Cycle + divergent-version detection (non-fatal warnings)
- *
- * See `validator.ts` for the single-package (`LoadedBundle`) equivalent
- * kept for backward compat during the migration.
  */
 
 import {

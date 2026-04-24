@@ -165,11 +165,9 @@ export const logTool: Tool = {
 // ─────────────────────────────────────────────
 
 /**
- * The full set of legacy-compatible platform tools keyed by tool name.
- * A runner can spread this into `toolOverrides` when running a pre-1.3
- * bundle that implicitly depended on the hardcoded tools, while a 1.3
- * bundle declaring its dependencies explicitly gets the same behaviour
- * via the bundled tool packages.
+ * The five platform tools keyed by tool name, suitable for
+ * `RunOptions.toolOverrides`. Spread directly into the overrides map
+ * when a runner needs to inject all five at once.
  */
 export const PLATFORM_TOOLS = {
   add_memory: memoryTool,
@@ -178,8 +176,3 @@ export const PLATFORM_TOOLS = {
   report: reportTool,
   log: logTool,
 } as const satisfies Record<string, Tool>;
-
-/** Return a Record<toolName, Tool> suitable for `RunOptions.toolOverrides`. */
-export function platformToolOverrides(): Record<string, Tool> {
-  return { ...PLATFORM_TOOLS };
-}

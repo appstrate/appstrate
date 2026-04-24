@@ -28,7 +28,6 @@ export type {
   ToolResolver,
   ProviderResolver,
   SkillResolver,
-  SpecRunResult,
 } from "./types.ts";
 
 // RunEvent lives in src/types/ — re-exported here for convenience so
@@ -95,5 +94,4 @@ export {
   reportTool,
   logTool,
   PLATFORM_TOOLS,
-  platformToolOverrides,
 } from "./platform-tools.ts";

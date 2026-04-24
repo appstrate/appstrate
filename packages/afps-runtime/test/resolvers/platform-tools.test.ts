@@ -9,7 +9,6 @@ import {
   reportTool,
   logTool,
   PLATFORM_TOOLS,
-  platformToolOverrides,
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
@@ -78,9 +77,8 @@ describe("platform tools — open envelope emission", () => {
     expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(
       ["add_memory", "log", "output", "report", "set_state"].sort(),
     );
-    const overrides = platformToolOverrides();
-    expect(overrides.add_memory).toBe(memoryTool);
-    expect(overrides.log).toBe(logTool);
+    expect(PLATFORM_TOOLS.add_memory).toBe(memoryTool);
+    expect(PLATFORM_TOOLS.log).toBe(logTool);
   });
 });
 

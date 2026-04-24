@@ -11,7 +11,6 @@
  * aggregated run state) and is intentionally not part of the spec.
  */
 
-import type { RunResult as LegacyRunResult } from "../types/run-result.ts";
 import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 export type {
@@ -26,7 +25,7 @@ export type {
   RunEvent,
 } from "@afps-spec/types";
 
-import type { ToolRef, ProviderRef, SkillRef, Tool, RunEvent } from "@afps-spec/types";
+import type { ToolRef, ProviderRef, SkillRef, Tool } from "@afps-spec/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers — the spec {@link Bundle} is the
@@ -62,34 +61,3 @@ export interface ProviderResolver {
 export interface SkillResolver {
   resolve(refs: SkillRef[], bundle: Bundle): Promise<ResolvedSkill[]>;
 }
-
-// ─────────────────────────────────────────────
-// EventSink (runtime-internal)
-// ─────────────────────────────────────────────
-
-export interface EventSink {
-  handle(event: RunEvent): Promise<void>;
-  finalize?(): Promise<SpecRunResult>;
-}
-
-// ─────────────────────────────────────────────
-// Accumulated end-of-run state (runtime-internal, superset of legacy)
-// ─────────────────────────────────────────────
-
-/**
- * Spec-shaped run result. Extends the legacy {@link LegacyRunResult} so
- * existing reducers remain compatible — fields the spec adds are
- * optional, and the legacy fields (memories/logs/error) live on
- * {@link LegacyRunResult} unchanged.
- */
-export interface SpecRunResult {
-  status: "success" | "failed" | "timeout" | "cancelled";
-  output?: unknown;
-  report?: string;
-  state?: unknown;
-  metadata?: Record<string, unknown>;
-}
-
-// Re-export the legacy shape under its canonical name for callers that
-// need both.
-export type { LegacyRunResult };
