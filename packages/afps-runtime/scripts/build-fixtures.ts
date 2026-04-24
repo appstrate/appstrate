@@ -11,8 +11,9 @@
  * - `bundle-unsigned.afps` — same bundle without signature.sig
  * - `key.json`       — Ed25519 key pair that signed bundle.afps
  * - `trust-root.json`— trust root containing the signing key
- * - `events.json`    — scripted events driving `afps test`
- * - `context.json`   — ExecutionContext used by `afps test`
+ * - `events.json`    — scripted events for library-level replay
+ *                      (reduceEvents + EventSink.handle)
+ * - `context.json`   — ExecutionContext passed to `renderPrompt`
  * - `snapshot.json`  — SnapshotContextProvider input for `afps render`
  *
  * Third-party conformance runners consume these files verbatim to

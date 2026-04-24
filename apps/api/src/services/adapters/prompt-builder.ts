@@ -18,8 +18,8 @@
  *     reach the LLM prompt.
  *
  * Every other field flows straight from the bundle — the same code
- * path used by `afps run` and `appstrate run` CLI. Divergence between
- * platform and CLI is now strictly the four overrides above.
+ * path used by the `appstrate run` CLI. Divergence between platform
+ * and CLI is now strictly the four overrides above.
  */
 
 import type { AppstrateRunPlan } from "./types.ts";

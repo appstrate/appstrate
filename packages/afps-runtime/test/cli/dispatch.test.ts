@@ -30,6 +30,29 @@ describe("runCli — dispatch", () => {
     expect(io.stderrText()).toContain("unknown command");
   });
 
+  it("rejects the removed 'run' subcommand (live LLM execution lives in apps/cli)", async () => {
+    const io = captureIo();
+    const code = await runCli(["run", "any.afps"], io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("unknown command 'run'");
+  });
+
+  it("rejects the removed 'test' subcommand (scripted replay via library API now)", async () => {
+    const io = captureIo();
+    const code = await runCli(["test", "any.afps"], io);
+    expect(code).toBe(2);
+    expect(io.stderrText()).toContain("unknown command 'test'");
+  });
+
+  it("help text advertises neither 'run' nor 'test' and points at appstrate run", async () => {
+    const io = captureIo();
+    await runCli([], io);
+    const help = io.stdoutText();
+    expect(help).not.toMatch(/^\s*run\s+</m);
+    expect(help).not.toMatch(/^\s*test\s+</m);
+    expect(help).toContain("appstrate run");
+  });
+
   it("converts thrown subcommand errors into a single-line stderr diagnostic + exit 1", async () => {
     const io = captureIo();
     // inspect on a non-existent path triggers ENOENT from readFile.

@@ -14,8 +14,8 @@ locally.
   ships its own sink (`AppstrateEventSink`) and resolvers against the
   runtime's open surface.
 - **Reproducible.** A run can be recorded (file sink → `.jsonl`) and
-  replayed via `afps test --events <file>` with identical structural
-  behaviour.
+  replayed via the library API (`reduceEvents` + `EventSink.handle`)
+  for deterministic regression fixtures.
 - **Apache-2.0.** Toolbox, not a platform — build whatever you want on top.
 
 ## Install
@@ -37,10 +37,14 @@ afps <command> [options]
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  test <bundle>       Replay a scripted RunEvent[] through the sink + reducer
-  run <bundle>        Execute a bundle against a real LLM (Pi Coding Agent SDK)
   conformance         Run the AFPS conformance suite (L1–L4)
 ```
+
+The `afps` binary is bundle tooling: it operates on `.afps` / `.afps-bundle`
+archives and never talks to a running platform. Live LLM execution — with
+credential injection, event telemetry, and auth against an Appstrate
+instance — is handled by the [`appstrate run`](../../apps/cli) command,
+which bundles this runtime as a workspace dependency.
 
 Each command exposes `--help` with per-option documentation.
 
@@ -64,11 +68,25 @@ afps verify my-agent.afps --trust-root trust.json
 # 5. Inspect
 afps inspect my-agent.afps --json | jq
 
-# 6. Replay a recorded run
-afps test my-agent.afps --events events.json --output result.json
-
-# 7. Contract-test your implementation
+# 6. Contract-test your implementation
 afps conformance --json | jq '.summary'
+```
+
+### Replay a recorded run (library API)
+
+The scripted replay that used to live behind `afps test` is a thin
+wrapper around two library calls — use them directly from a `.ts`
+file when you need fixture-based regression:
+
+```ts
+import { readFile } from "node:fs/promises";
+import { reduceEvents, ConsoleSink, type RunEvent } from "@appstrate/afps-runtime";
+
+const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
+const sink = new ConsoleSink();
+for (const ev of events) await sink.handle(ev);
+const result = reduceEvents(events);
+await sink.finalize(result);
 ```
 
 ## Library

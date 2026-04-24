@@ -7,31 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — CLI verbs
+### Removed — `afps run` and `afps test` subcommands (BREAKING)
 
-- **`afps run --events <path>` renamed to `afps test --events <path>`.** The
-  scripted replay validates the sink + reducer contract — a conformance test,
-  not an agent execution. The `test` verb reflects that.
+- **`afps run <bundle>` is gone.** Live LLM execution now lives
+  exclusively in the `appstrate` CLI (`apps/cli`), which bundles this
+  runtime as a workspace dependency and drives the same `PiRunner`
+  code path — plus profile / credential-proxy / HMAC sink wiring the
+  runtime CLI never had.
+  Migration: `appstrate run <bundle> --providers=none --report=false
+--model-source=env --model-api=<api> --model=<id> --llm-api-key=<key>
+--snapshot <path> --input <json>` matches the previous `afps run`
+  surface without requiring an Appstrate instance.
+- **`afps test <bundle> --events <path>` is gone.** Scripted-replay of
+  user events through `EventSink.handle` + `reduceEvents` is a
+  10-line library call; the CLI wrapper added no behaviour. A ready
+  snippet ships in the README and in
+  `examples/briefing-agent/README.md`.
+- The `afps` binary is now strictly bundle tooling: `keygen` / `sign`
+  / `verify` / `inspect` / `render` / `conformance`. Removes the only
+  command that dynamically imported `@appstrate/runner-pi` and shrinks
+  the CLI surface by two commands.
 
-### Added — `afps run` live execution
+### Changed — earlier in this branch
 
-- **`afps run <bundle> --api <api> --model <id>`** executes a bundle against a
-  real LLM via `@appstrate/runner-pi` (Pi Coding Agent SDK), in-process, with
-  no Docker and no sidecar. Provider-authenticated tools are NOT supported —
-  the Appstrate platform is the right place for those.
-- `@appstrate/runner-pi` is dynamic-imported so the base `afps-runtime`
-  package remains hermetically free of Pi SDK types and code. Missing
-  `runner-pi` or missing `@mariozechner/pi-coding-agent` peer dep each surface
-  a dedicated install hint.
-- Supports `--api-key` / `$AFPS_API_KEY`, `--base-url`, `--context`
-  (inline JSON object, defaults to `{}`), `--snapshot` (file path),
-  `--trust-root` (enforces signature verification),
-  `--timeout`, `--thinking-level`, `--workspace` (auto-tempdir with cleanup),
-  `--sink console|file|both|none`, `--sink-file`, `--output` (JSON RunResult
-  dump). Exit codes: 0 success, 1 runtime, 2 usage, 3 bundle/signature,
-  4 timeout, 130 SIGINT. API key is redacted from every surfaced error.
-- Exported helpers: `createRunHandler(deps)` for DI-based testing and
-  `assembleExecutionContext(contextFile, snapshot)` for direct unit tests.
+- **`afps run --events <path>` had already been renamed to
+  `afps test --events <path>`.** Both verbs are now removed; the
+  rename entry is kept for historical reference.
 
 ### Added — Bundle format v1
 

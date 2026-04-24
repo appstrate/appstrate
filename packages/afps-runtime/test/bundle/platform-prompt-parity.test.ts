@@ -2,15 +2,15 @@
 // Copyright 2026 Appstrate
 
 /**
- * Cross-path parity: the platform container, `afps run`, and
- * `appstrate run` all converge on `renderPlatformPrompt(
- *   buildPlatformPromptInputs(bundle, context, overrides)
- * )`. For the SAME bundle + context, the resulting prompt must match
- * across paths modulo a short, well-defined set of platform-specific
- * fields.
+ * Cross-path parity: the platform container, `appstrate run`, and any
+ * external runner that re-uses `buildPlatformPromptInputs` all
+ * converge on `renderPlatformPrompt(buildPlatformPromptInputs(bundle,
+ * context, overrides))`. For the SAME bundle + context, the resulting
+ * prompt must match across paths modulo a short, well-defined set of
+ * platform-specific fields.
  *
  * Platform-specific divergences (by design):
- *   - `platformName`: "Appstrate" / "Appstrate CLI" / "afps run"
+ *   - `platformName`: "Appstrate" / "Appstrate CLI" / caller-defined
  *   - `## Documents` section: only the platform has DB-backed uploads
  *   - `## Run History`: only enabled when a sidecar/proxy is wired
  *   - `## Connected Providers`: platform may filter by credential
@@ -157,8 +157,8 @@ describe("cross-path prompt parity", () => {
     }),
   );
 
-  const afpsRunPrompt = renderPlatformPrompt(
-    buildPlatformPromptInputs(bundle, context, { platformName: "afps run" }),
+  const externalRunPrompt = renderPlatformPrompt(
+    buildPlatformPromptInputs(bundle, context, { platformName: "External Runner" }),
   );
 
   const appstrateRunPrompt = renderPlatformPrompt(
@@ -166,7 +166,7 @@ describe("cross-path prompt parity", () => {
   );
 
   it("all three paths render every bundle-derived section", () => {
-    for (const prompt of [platformPrompt, afpsRunPrompt, appstrateRunPrompt]) {
+    for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
       expect(prompt).toContain("## System");
       expect(prompt).toContain("### Environment");
       expect(prompt).toContain("### Tools");
@@ -188,26 +188,26 @@ describe("cross-path prompt parity", () => {
     // All three prompts surface the full output schema in the tail
     // `## Output Format` section — the belt-and-suspenders against
     // weaker models that ignore tool-level required fields.
-    for (const prompt of [platformPrompt, afpsRunPrompt, appstrateRunPrompt]) {
+    for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
       expect(prompt).toContain('"answer"');
       expect(prompt).toContain('"required"');
     }
   });
 
-  it("afps run and appstrate run produce IDENTICAL prompts modulo platformName", () => {
-    expect(canonicalize(afpsRunPrompt)).toEqual(canonicalize(appstrateRunPrompt));
+  it("external and appstrate CLI paths produce IDENTICAL prompts modulo platformName", () => {
+    expect(canonicalize(externalRunPrompt)).toEqual(canonicalize(appstrateRunPrompt));
   });
 
   it("platform prompt matches CLI prompts modulo the documented divergences", () => {
     // Platform: includes Documents, Run History, filtered Connected
     // Providers. Canonicalize strips these platform-only sections so
     // the residue must match the CLI render byte-for-byte.
-    expect(canonicalize(platformPrompt)).toEqual(canonicalize(afpsRunPrompt));
+    expect(canonicalize(platformPrompt)).toEqual(canonicalize(externalRunPrompt));
   });
 
   it("only the CLI paths list providers from the bundle as-is", () => {
-    expect(afpsRunPrompt).toContain("## Connected Providers");
-    expect(afpsRunPrompt).toContain("**Gmail**");
+    expect(externalRunPrompt).toContain("## Connected Providers");
+    expect(externalRunPrompt).toContain("**Gmail**");
     expect(appstrateRunPrompt).toContain("## Connected Providers");
     expect(appstrateRunPrompt).toContain("**Gmail**");
     // Platform path also has it, just potentially filtered
@@ -217,14 +217,14 @@ describe("cross-path prompt parity", () => {
   it("only the platform path emits the Documents section", () => {
     expect(platformPrompt).toContain("## Documents");
     expect(platformPrompt).toContain("**brief.pdf**");
-    expect(afpsRunPrompt).not.toContain("## Documents");
+    expect(externalRunPrompt).not.toContain("## Documents");
     expect(appstrateRunPrompt).not.toContain("## Documents");
   });
 
   it("only the platform path emits the Run History section", () => {
     expect(platformPrompt).toContain("## Run History");
     expect(platformPrompt).toContain("$SIDECAR_URL/run-history");
-    expect(afpsRunPrompt).not.toContain("## Run History");
+    expect(externalRunPrompt).not.toContain("## Run History");
     expect(appstrateRunPrompt).not.toContain("## Run History");
   });
 });

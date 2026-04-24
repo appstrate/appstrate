@@ -22,9 +22,8 @@
  *   - any other field to override the bundle-derived value verbatim
  *
  * This helper NEVER imports anything outside `@appstrate/afps-runtime`.
- * Keeping it agnostic is what lets `afps run`, `appstrate run`, and the
- * platform container runner produce byte-identical prompts from the
- * same inputs.
+ * Keeping it agnostic is what lets `appstrate run` and the platform
+ * container runner produce byte-identical prompts from the same inputs.
  */
 
 import type { Bundle, BundlePackage } from "./types.ts";

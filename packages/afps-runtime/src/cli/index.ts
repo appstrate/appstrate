@@ -4,11 +4,12 @@
 /**
  * `afps` command-line entry point.
  *
- * The CLI exposes the runtime primitives (load, validate, sign, verify,
- * render, test, run) as portable subcommands so any machine with Bun can
- * exercise the same code paths Appstrate uses internally. Live execution
- * (`afps run`) dynamic-imports `@appstrate/runner-pi`; every other command
- * runs with zero extra dependencies.
+ * The CLI is bundle tooling: sign / verify / keygen / inspect / render
+ * operate on `.afps` / `.afps-bundle` archives without contacting any
+ * platform, and `conformance` exercises the spec's L1–L4 harness. For
+ * live LLM execution (`appstrate run`, which bundles this runtime as
+ * a workspace dep), see `apps/cli/` — that binary handles auth,
+ * credential-proxy routing, and platform telemetry.
  *
  * All commands receive a {@link CliIO} for stdout/stderr so tests can
  * capture output without touching the real process streams.
@@ -36,9 +37,11 @@ Commands:
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  test <bundle>       Replay scripted events through the sink+reducer
-  run <bundle>        Execute a bundle against a real LLM (Pi SDK)
   conformance         Run the AFPS conformance suite (L1–L4)
+
+Live LLM execution is handled by 'appstrate run' — see apps/cli.
+Scripted event-replay fixtures are runnable via the library API
+(reduceEvents + sink.handle) — see the package README.
 
 Run 'afps <command> --help' for per-command options.
 `;
@@ -65,8 +68,6 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     verify: async () => (await import("./commands/verify.ts")).run(rest, io),
     inspect: async () => (await import("./commands/inspect.ts")).run(rest, io),
     render: async () => (await import("./commands/render.ts")).run(rest, io),
-    test: async () => (await import("./commands/test.ts")).run(rest, io),
-    run: async () => (await import("./commands/run.ts")).run(rest, io),
     conformance: async () => (await import("./commands/conformance.ts")).run(rest, io),
   };
 
