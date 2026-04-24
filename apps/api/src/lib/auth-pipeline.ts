@@ -288,7 +288,7 @@ export function skipAuth(path: string, publicPaths: Set<string>): boolean {
   return false;
 }
 
-const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize)?$/;
+const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize|\/heartbeat)?$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

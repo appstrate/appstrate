@@ -103,6 +103,22 @@ const envSchema = z
     // regardless of gaps.
     REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
 
+    // Runner liveness — the stall watchdog and the runner-side keep-alive
+    // form a single unified detection path across every runner topology
+    // (platform container, remote CLI, GitHub Action, …). See
+    // apps/api/src/services/run-watchdog.ts.
+    //
+    // Runner emits an implicit heartbeat on every event POST plus an
+    // explicit /sink/extend on idle; the watchdog sweeps any open-sink
+    // row whose last heartbeat slipped past STALL_THRESHOLD.
+    //
+    // Ratio rule-of-thumb: stall_threshold ≥ 3 × heartbeat_interval
+    // (industry consensus: Temporal, Sidekiq, BullMQ, AWS Builders'
+    // Library) so a single dropped ping never trips the watchdog.
+    RUN_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+    RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(120),
+    RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+
     // Modules (comma-separated specifiers).
     // Default loads built-in OSS modules (oidc, webhooks).
     // Append external specifiers (npm package names) to extend.

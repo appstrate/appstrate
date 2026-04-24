@@ -445,10 +445,16 @@ async function persistEventAndAdvance(
     });
   }
 
-  // Advance the sequence counter (CAS — no-op if another flush beat us).
+  // Advance the sequence counter AND bump the liveness marker in a single
+  // UPDATE. Every authenticated event is an implicit heartbeat — the
+  // watchdog uses `last_heartbeat_at` as the single source of truth for
+  // stall detection, regardless of runner topology. The CAS on the
+  // previous sequence keeps the advance no-op if a parallel flush beat us,
+  // but the heartbeat bump is still safe: a concurrent event POST is,
+  // by definition, proof-of-life.
   await db
     .update(runs)
-    .set({ lastEventSequence: sequence })
+    .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
     .where(and(eq(runs.id, run.id), eq(runs.lastEventSequence, sequence - 1)));
   // Keep the in-memory context fresh for the rest of the request.
   run.lastEventSequence = sequence;

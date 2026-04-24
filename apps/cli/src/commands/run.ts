@@ -23,6 +23,8 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
   emitRuntimeReady,
+  startSinkHeartbeat,
+  type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
@@ -241,13 +243,38 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       }
     });
 
-    await runner.run({
-      bundle,
-      context,
-      providerResolver,
-      eventSink: sink,
-      signal: controller.signal,
-    });
+    // Start the sink liveness heartbeat when reporting to a platform.
+    // Shared helper with runtime-pi: POSTs to `{url}/heartbeat` over
+    // the same HMAC channel, bumps `runs.last_heartbeat_at`, the server
+    // watchdog sweeps rows whose heartbeat slipped past the threshold
+    // and finalises them as `failed`. A local-only CLI run (no
+    // reportSession) has no platform to talk to — skip.
+    let heartbeat: SinkHeartbeatHandle | null = null;
+    if (reportSession) {
+      heartbeat = startSinkHeartbeat({
+        url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
+        runSecret: reportSession.runSecret,
+        onError: (err) => {
+          if (!opts.json) {
+            process.stderr.write(
+              `warn: heartbeat failed: ${err instanceof Error ? err.message : String(err)}\n`,
+            );
+          }
+        },
+      });
+    }
+
+    try {
+      await runner.run({
+        bundle,
+        context,
+        providerResolver,
+        eventSink: sink,
+        signal: controller.signal,
+      });
+    } finally {
+      heartbeat?.stop();
+    }
   } finally {
     process.removeListener("SIGINT", onSigint);
     await prepared.cleanup().catch(() => {});

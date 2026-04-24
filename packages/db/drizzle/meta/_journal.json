@@ -50,6 +50,13 @@
       "when": 1777766400000,
       "tag": "0006_unified_runner_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777939200000,
+      "tag": "0007_run_heartbeat",
+      "breakpoints": true
     }
   ]
 }

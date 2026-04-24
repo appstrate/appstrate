@@ -12,6 +12,7 @@ import {
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
+import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
 
@@ -46,6 +47,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
         });
       }
     }
+
+    logger.info("Stopping run watchdog...");
+    await stopRunWatchdog();
 
     logger.info("Shutting down schedule worker...");
     await shutdownScheduleWorker();

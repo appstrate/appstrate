@@ -245,9 +245,15 @@ export function createRunsRemoteRouter() {
       // the caller's org. Mismatched ownership or closed sink → 404, which
       // avoids leaking whether a run exists across tenancies.
       const orgId = c.get("orgId");
+      // Bumping `last_heartbeat_at` alongside `sink_expires_at` turns
+      // /sink/extend into the canonical keep-alive: runners that are
+      // alive but idle (waiting on a long LLM call, sleeping between
+      // polls) prove liveness here without needing to fabricate a
+      // low-signal event. The watchdog reads `last_heartbeat_at`
+      // exclusively, so extend must touch it.
       const updated = await db
         .update(runs)
-        .set({ sinkExpiresAt: newExpiresAt })
+        .set({ sinkExpiresAt: newExpiresAt, lastHeartbeatAt: new Date() })
         .where(
           and(
             eq(runs.id, runId),

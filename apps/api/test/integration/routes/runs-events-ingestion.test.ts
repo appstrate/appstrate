@@ -366,3 +366,126 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.result).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Liveness bumps — ingestion + /sink/extend + /events/heartbeat feed the
+// same `last_heartbeat_at` column the stall watchdog reads. If any of
+// these stops updating the column the runner's proof-of-life is
+// invisible to the watchdog and a healthy run gets murdered as "stalled".
+// ---------------------------------------------------------------------------
+describe("runs liveness — unified last_heartbeat_at bumps", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ email: "beat@test.dev", orgSlug: "beat-org" });
+    await seedPackage({ orgId: ctx.orgId, id: "@test/beat-agent", type: "agent" });
+  });
+
+  async function readHeartbeatMs(runId: string): Promise<number> {
+    const [row] = await db
+      .select({ lastHeartbeatAt: runs.lastHeartbeatAt })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    return row!.lastHeartbeatAt.getTime();
+  }
+
+  it("event ingestion bumps last_heartbeat_at to the write-time timestamp", async () => {
+    // Seed with an old heartbeat so any future timestamp is a clear win.
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await db.insert(runs).values({
+      id: runId,
+      packageId: "@test/beat-agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+      runOrigin: "remote",
+      sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
+      sinkExpiresAt: new Date(Date.now() + 3600_000),
+      startedAt: new Date(),
+      lastHeartbeatAt: new Date(Date.now() - 5 * 60_000), // 5 min ago
+      tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+    });
+
+    const before = await readHeartbeatMs(runId);
+
+    // Fire an event — implicit heartbeat.
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "alive", timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(200);
+
+    const after = await readHeartbeatMs(runId);
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("POST /events/heartbeat is HMAC-authed and bumps last_heartbeat_at without advancing sequence", async () => {
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await db.insert(runs).values({
+      id: runId,
+      packageId: "@test/beat-agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+      runOrigin: "remote",
+      sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
+      sinkExpiresAt: new Date(Date.now() + 3600_000),
+      startedAt: new Date(),
+      lastHeartbeatAt: new Date(Date.now() - 5 * 60_000),
+      tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+    });
+
+    const before = await readHeartbeatMs(runId);
+    const [rowBefore] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+
+    // Non-empty JSON body — Hono/undici drop a truly empty body on fetch,
+    // making the HMAC-signed bytes differ between client and server.
+    // The route ignores the payload, so any valid JSON works.
+    const body = "{}";
+    const res = await app.request(`/api/runs/${runId}/events/heartbeat`, {
+      method: "POST",
+      headers: signedHeaders(RUN_SECRET, body),
+      body,
+    });
+    expect(res.status).toBe(200);
+
+    const after = await readHeartbeatMs(runId);
+    const [rowAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+
+    expect(after).toBeGreaterThan(before);
+    // Sequence counter untouched — heartbeat is out-of-band from the
+    // event stream on purpose (no log row, no ordering semantics).
+    expect(rowAfter?.lastEventSequence).toBe(rowBefore?.lastEventSequence);
+  });
+
+  it("heartbeat without a valid signature is rejected (same auth surface as events)", async () => {
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await db.insert(runs).values({
+      id: runId,
+      packageId: "@test/beat-agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+      runOrigin: "remote",
+      sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
+      sinkExpiresAt: new Date(Date.now() + 3600_000),
+      startedAt: new Date(),
+      tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+    });
+
+    // Signed with the wrong secret — middleware must reject. An attacker
+    // who could spoof heartbeats would keep dead runs alive forever.
+    const body = "{}";
+    const res = await app.request(`/api/runs/${runId}/events/heartbeat`, {
+      method: "POST",
+      headers: signedHeaders("z".repeat(43), body),
+      body,
+    });
+    expect(res.status).toBe(401);
+  });
+});

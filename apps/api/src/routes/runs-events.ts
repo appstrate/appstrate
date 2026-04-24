@@ -18,6 +18,9 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { and, eq, sql } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { runs } from "@appstrate/db/schema";
 import { invalidRequest } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
@@ -163,6 +166,30 @@ export function createRunsEventsRouter() {
 
     await finalizeRun({ run, result, webhookId });
 
+    return c.json({ ok: true });
+  });
+
+  // POST /api/runs/:runId/events/heartbeat — runner-driven keep-alive.
+  //
+  // Same HMAC auth as event ingestion, so both platform containers
+  // (runSecret only, no user principal) and remote CLIs can call it
+  // through the same helper. Intentionally distinct from
+  // `PATCH /sink/extend` which uses API-key auth for the human/CLI-user
+  // owner-side lifecycle control: here the runner itself proves it is
+  // alive without touching the event stream.
+  //
+  // Side effect: bumps `last_heartbeat_at = now()` atomically on an
+  // open-sink row. No sequence advance, no log row, no ordering
+  // semantics. The watchdog reads `last_heartbeat_at` exclusively,
+  // so this endpoint is the minimum-viable liveness beacon.
+  router.post("/runs/:runId/events/heartbeat", eventLimiter, verifyRunSignature, async (c) => {
+    const run = c.get("run")!;
+    // Short-circuit if the sink is already closing — the runner's next
+    // event will observe 410 anyway, no need to race.
+    await db
+      .update(runs)
+      .set({ lastHeartbeatAt: new Date() })
+      .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`));
     return c.json({ ok: true });
   });
 

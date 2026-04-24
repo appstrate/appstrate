@@ -105,6 +105,12 @@ export const runs = pgTable(
     // Highest successfully persisted sequence number; drives the ordering
     // buffer fast-path (CAS update on sequence = last_event_sequence + 1).
     lastEventSequence: integer("last_event_sequence").notNull().default(0),
+    // Liveness marker — bumped on every event POST and every /sink/extend.
+    // The stall watchdog sweeps open-sink rows whose `last_heartbeat_at`
+    // slipped past the threshold and routes them through `finalizeRun` as
+    // `failed` (same convergence point as natural termination and
+    // container-exit synthesis — identical for platform + remote runners).
+    lastHeartbeatAt: timestamp("last_heartbeat_at").defaultNow().notNull(),
     // CLI-provided execution environment metadata (os, cli version, git sha,
     // ...). Capped at 16 KiB by the route Zod schema.
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
@@ -127,6 +133,11 @@ export const runs = pgTable(
     index("idx_runs_sink_expires_at")
       .on(table.sinkExpiresAt)
       .where(sql`${table.sinkExpiresAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL`),
+    // Stall-watchdog sweep: scans only open-sink rows ordered by
+    // liveness, so the range scan is bounded by the stall threshold.
+    index("idx_runs_stall_sweep")
+      .on(table.lastHeartbeatAt)
+      .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
     check(
       "runs_at_most_one_actor",
       sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,

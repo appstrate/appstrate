@@ -36,6 +36,7 @@ import { markOrphanRunsFailed } from "../services/state/index.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
+import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
@@ -199,6 +200,15 @@ export async function boot(): Promise<void> {
     }),
     initInlineCompactionWorker().catch((err) => {
       logger.warn("Could not initialize inline compaction worker", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+    startRunWatchdog({
+      intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
+      stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
+      maxFinalizesPerTick: 200,
+    }).catch((err) => {
+      logger.warn("Could not start run watchdog", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),

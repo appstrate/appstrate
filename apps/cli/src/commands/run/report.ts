@@ -60,6 +60,19 @@ export interface ReportSession {
    * so per-run cost rollup works at `/events/finalize` time.
    */
   proxyHeaders: Record<string, string>;
+  /**
+   * Base events URL (same one HttpSink POSTs to). Exposed so the
+   * caller can derive the heartbeat endpoint and start a liveness
+   * keep-alive — same mechanism the runtime-pi container uses.
+   */
+  sinkUrl: string;
+  /**
+   * Raw run secret. Required to sign heartbeat requests via the shared
+   * `startSinkHeartbeat` helper. Also held inside `httpSink`, but not
+   * exposed there on purpose — keeping the secret explicit at the
+   * session boundary makes its use auditable.
+   */
+  runSecret: string;
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -162,6 +175,8 @@ export async function startReportSession(
     runId: payload.runId,
     httpSink,
     proxyHeaders: { "X-Run-Id": payload.runId },
+    sinkUrl: payload.url,
+    runSecret: payload.secret,
   };
 }
 

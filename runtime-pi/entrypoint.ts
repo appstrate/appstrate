@@ -40,6 +40,7 @@ import {
   prepareBundleForPi,
   buildProviderExtensionFactories,
   emitRuntimeReady,
+  startSinkHeartbeat,
 } from "@appstrate/runner-pi";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
@@ -382,6 +383,27 @@ await emitRuntimeReady(teeSink, AGENT_RUN_ID, {
   extensions: extensionFactories.length,
 });
 
+// --- 6a. Liveness keep-alive ---
+//
+// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
+// The server bumps `runs.last_heartbeat_at` on every ping; the stall
+// watchdog reads that column to detect a crashed container (network
+// partition, SIGKILL, Docker daemon drop). This path is identical to
+// the CLI's — same helper, same endpoint, same HMAC auth — so platform
+// and remote runs share one liveness mechanism.
+const heartbeatInterval = Number(process.env.APPSTRATE_HEARTBEAT_INTERVAL_MS) || 30_000;
+const heartbeat = startSinkHeartbeat({
+  url: `${SINK_URL.replace(/\/$/, "")}/heartbeat`,
+  runSecret: SINK_SECRET,
+  intervalMs: heartbeatInterval,
+  onError: (err) => {
+    // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
+    // container log forwarding captures it without polluting the event
+    // stream.
+    process.stderr.write(`[heartbeat] ${err instanceof Error ? err.message : String(err)}\n`);
+  },
+});
+
 // --- 7. Run via PiRunner ---
 //
 // PiRunner calls `sink.finalize(result)` on both happy path and its own
@@ -408,8 +430,10 @@ try {
     providerResolver,
     eventSink: teeSink,
   });
+  heartbeat.stop();
   process.exit(0);
 } catch (err) {
+  heartbeat.stop();
   const message = err instanceof Error ? err.message : String(err);
   await emitError(message);
   try {

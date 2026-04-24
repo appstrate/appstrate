@@ -859,6 +859,51 @@ export const runsPaths = {
       },
     },
   },
+  "/api/runs/{runId}/events/heartbeat": {
+    post: {
+      operationId: "heartbeatRemoteRun",
+      tags: ["Runs"],
+      summary: "Runner liveness keep-alive (HMAC)",
+      description:
+        "Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              description: "Empty body — the HMAC covers the zero-length payload.",
+            },
+          },
+        },
+      },
+      security: [],
+      responses: {
+        "200": {
+          description: "Heartbeat accepted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["ok"],
+                properties: { ok: { const: true } },
+              },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/runs/{runId}/sink/extend": {
     patch: {
       operationId: "extendRunSink",

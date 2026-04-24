@@ -29,3 +29,9 @@ export {
 } from "./container-env.ts";
 
 export { emitRuntimeReady, type RuntimeReadyPayload } from "./runtime-ready.ts";
+
+export {
+  startSinkHeartbeat,
+  type StartSinkHeartbeatOptions,
+  type SinkHeartbeatHandle,
+} from "./sink-heartbeat.ts";
