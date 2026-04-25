@@ -49,7 +49,38 @@ import {
   exchangeDeviceCodeForTokens,
   revokeRefreshToken,
   rotateRefreshToken,
+  type DeviceMetadata,
 } from "../services/cli-tokens.ts";
+import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+
+/** Header the CLI uses to declare a human-friendly device label
+ *  (mirrors `gh auth login --hostname`). Optional — when absent, the UI
+ *  falls back to a UA-derived label. Capped to a sane length to keep the
+ *  device list scannable; longer values are truncated. */
+const DEVICE_NAME_HEADER = "x-appstrate-device-name";
+const DEVICE_NAME_MAX_LENGTH = 120;
+
+/** Reasonable upper bound on `User-Agent` storage. Real-world UAs sit
+ *  well under 1 KB; we cap to defang a misbehaving client that ships a
+ *  multi-KB blob into a freshly-indexable text column. */
+const USER_AGENT_MAX_LENGTH = 1024;
+
+function clamp(s: string | null | undefined, max: number): string | null {
+  if (!s) return null;
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+}
+
+function metadataFromRequest(request: Request | undefined): DeviceMetadata {
+  if (!request) return {};
+  const headers = request.headers;
+  return {
+    deviceName: clamp(headers.get(DEVICE_NAME_HEADER), DEVICE_NAME_MAX_LENGTH),
+    userAgent: clamp(headers.get("user-agent"), USER_AGENT_MAX_LENGTH),
+    ip: getClientIpFromRequest(request),
+  };
+}
 
 // RFC 6749 §5.2 error → HTTP status. Polling errors (authorization_pending,
 // slow_down) are 400 per RFC 8628 §3.5.
@@ -179,6 +210,7 @@ export function cliTokenPlugin() {
               const tokens = await exchangeDeviceCodeForTokens({
                 deviceCodeValue: device_code,
                 clientId: client_id,
+                metadata: metadataFromRequest(ctx.request),
               });
               return ctx.json(
                 {
@@ -202,6 +234,12 @@ export function cliTokenPlugin() {
               const tokens = await rotateRefreshToken({
                 refreshToken: refresh_token,
                 clientId: client_id,
+                // Only the IP is meaningful on rotations — `last_used_at`
+                // is set by the service from `Date.now()`. UA/deviceName
+                // are head-of-family attributes captured at login time;
+                // re-capturing them on every refresh would let a CLI
+                // silently mutate its declared identity.
+                metadata: { ip: getClientIpFromRequest(ctx.request) },
               });
               return ctx.json(
                 {

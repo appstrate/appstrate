@@ -122,6 +122,22 @@ export interface TokenPair {
 }
 
 /**
+ * Device metadata captured at device-code exchange. Persisted on the head
+ * of family for the listing/revocation UI (issue #251). All fields
+ * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name` and
+ * deployments with `TRUST_PROXY=false` (which yields `"unknown"` from
+ * `getClientIpFromRequest`) will produce rows with partial metadata.
+ */
+export interface DeviceMetadata {
+  /** Optional user-supplied label (`X-Appstrate-Device-Name`). */
+  deviceName?: string | null;
+  /** Raw `User-Agent` header at exchange/rotation time. */
+  userAgent?: string | null;
+  /** Resolved client IP, honors `TRUST_PROXY`. */
+  ip?: string | null;
+}
+
+/**
  * Exchange an approved device code for a JWT + refresh pair. Called by
  * the BA plugin `/cli/token` endpoint after device-flow approval.
  *
@@ -151,8 +167,9 @@ export interface TokenPair {
 export async function exchangeDeviceCodeForTokens(params: {
   deviceCodeValue: string;
   clientId: string;
+  metadata?: DeviceMetadata;
 }): Promise<TokenPair> {
-  const { deviceCodeValue, clientId } = params;
+  const { deviceCodeValue, clientId, metadata } = params;
 
   // Two-phase exchange. Minting the JWT calls Better Auth's `signJWT`
   // plugin which issues its own DB reads via the BA adapter; nesting
@@ -308,9 +325,11 @@ export async function exchangeDeviceCodeForTokens(params: {
       userId: user.id,
       clientId,
       scope,
-      // No parent — head of a fresh family.
+      // No parent — head of a fresh family. Device metadata is persisted
+      // on this head row only; rotation rows leave the columns NULL.
       parentId: null,
       familyId: prefixedId("crf"),
+      metadata,
     });
     // One-shot contract.
     await tx.delete(deviceCode).where(eq(deviceCode.id, rowId));
@@ -361,8 +380,12 @@ type ExchangeOutcome =
 export async function rotateRefreshToken(params: {
   refreshToken: string;
   clientId: string;
+  /** Optional last-used metadata. Updates the head of family in the same
+   *  transaction that marks the presented row used; rotation children stay
+   *  light. */
+  metadata?: DeviceMetadata;
 }): Promise<TokenPair> {
-  const { refreshToken, clientId } = params;
+  const { refreshToken, clientId, metadata } = params;
   const tokenHash = hashRefreshToken(refreshToken);
 
   // Two-phase rotation — same split as `exchangeDeviceCodeForTokens`:
@@ -457,6 +480,20 @@ export async function rotateRefreshToken(params: {
       .update(cliRefreshToken)
       .set({ usedAt: new Date() })
       .where(eq(cliRefreshToken.id, row.id));
+
+    // Bump last-used metadata on the family head (`parent_id IS NULL`).
+    // Activity attribution lives on the head row so the listing UI can
+    // join children to the head by `family_id` and surface a single
+    // "last used" timestamp per device, regardless of how many rotations
+    // have occurred. The UPDATE is scoped by `family_id` AND
+    // `parent_id IS NULL` so we never accidentally write metadata onto a
+    // rotation row even if the head was somehow deleted or revoked.
+    const lastUsedAt = new Date();
+    const lastUsedIp = metadata?.ip ?? null;
+    await tx
+      .update(cliRefreshToken)
+      .set({ lastUsedAt, lastUsedIp })
+      .where(and(eq(cliRefreshToken.familyId, row.familyId), isNull(cliRefreshToken.parentId)));
 
     const [clientRow] = await tx
       .select({ scopes: oauthClient.scopes })
@@ -624,12 +661,16 @@ async function persistRefreshTokenInTx(
     scope: string;
     parentId: string | null;
     familyId: string;
+    /** Only honored on the head of family (`parentId === null`). Rotation
+     *  children always store `null` for the metadata columns. */
+    metadata?: DeviceMetadata;
   },
 ): Promise<{ refreshPlain: string }> {
-  const { userId, clientId, scope, parentId, familyId } = params;
+  const { userId, clientId, scope, parentId, familyId, metadata } = params;
   const refreshPlain = generateRefreshToken();
   const refreshHash = hashRefreshToken(refreshPlain);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
+  const isHead = parentId === null;
   await tx.insert(cliRefreshToken).values({
     id: prefixedId("crf"),
     tokenHash: refreshHash,
@@ -643,6 +684,11 @@ async function persistRefreshTokenInTx(
     usedAt: null,
     revokedAt: null,
     revokedReason: null,
+    deviceName: isHead ? (metadata?.deviceName ?? null) : null,
+    userAgent: isHead ? (metadata?.userAgent ?? null) : null,
+    createdIp: isHead ? (metadata?.ip ?? null) : null,
+    lastUsedIp: null,
+    lastUsedAt: null,
   });
   return { refreshPlain };
 }
