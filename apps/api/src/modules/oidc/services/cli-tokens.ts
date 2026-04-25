@@ -67,10 +67,10 @@
  */
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
-import { user as userTable } from "@appstrate/db/schema";
+import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -122,6 +122,23 @@ export interface TokenPair {
 }
 
 /**
+ * Device metadata captured at device-code exchange. Persisted on the head
+ * of family for the listing/revocation UI (issue #251). All fields
+ * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name`, and
+ * deployments where `getClientIpFromRequest` returns `null` (no
+ * forwarded header trusted, no socket address surfaced), will produce
+ * rows with partial metadata.
+ */
+export interface DeviceMetadata {
+  /** Optional user-supplied label (`X-Appstrate-Device-Name`). */
+  deviceName?: string | null;
+  /** Raw `User-Agent` header at exchange/rotation time. */
+  userAgent?: string | null;
+  /** Resolved client IP, honors `TRUST_PROXY`. */
+  ip?: string | null;
+}
+
+/**
  * Exchange an approved device code for a JWT + refresh pair. Called by
  * the BA plugin `/cli/token` endpoint after device-flow approval.
  *
@@ -151,8 +168,9 @@ export interface TokenPair {
 export async function exchangeDeviceCodeForTokens(params: {
   deviceCodeValue: string;
   clientId: string;
+  metadata?: DeviceMetadata;
 }): Promise<TokenPair> {
-  const { deviceCodeValue, clientId } = params;
+  const { deviceCodeValue, clientId, metadata } = params;
 
   // Two-phase exchange. Minting the JWT calls Better Auth's `signJWT`
   // plugin which issues its own DB reads via the BA adapter; nesting
@@ -275,6 +293,11 @@ export async function exchangeDeviceCodeForTokens(params: {
   }
   const { rowId, user, scope } = readOutcome;
 
+  // Pre-compute the family id so we can stamp it on the JWT (for
+  // server-side revocation enforcement on every Bearer call) AND on the
+  // refresh-token head row inserted below. Both must agree.
+  const familyId = prefixedId("crf");
+
   // JWT mint OUTSIDE any transaction — goes through BA's jwt() plugin
   // which opens its own DB queries via the BA adapter.
   const accessToken = await mintAccessJwt({
@@ -284,6 +307,7 @@ export async function exchangeDeviceCodeForTokens(params: {
     emailVerified: user.emailVerified === true,
     scope,
     clientId,
+    cliFamilyId: familyId,
   });
 
   // Second transaction: persist refresh token + consume device_code row
@@ -308,9 +332,11 @@ export async function exchangeDeviceCodeForTokens(params: {
       userId: user.id,
       clientId,
       scope,
-      // No parent — head of a fresh family.
+      // No parent — head of a fresh family. Device metadata is persisted
+      // on this head row only; rotation rows leave the columns NULL.
       parentId: null,
-      familyId: prefixedId("crf"),
+      familyId,
+      metadata,
     });
     // One-shot contract.
     await tx.delete(deviceCode).where(eq(deviceCode.id, rowId));
@@ -361,8 +387,12 @@ type ExchangeOutcome =
 export async function rotateRefreshToken(params: {
   refreshToken: string;
   clientId: string;
+  /** Optional last-used metadata. Updates the head of family in the same
+   *  transaction that marks the presented row used; rotation children stay
+   *  light. */
+  metadata?: DeviceMetadata;
 }): Promise<TokenPair> {
-  const { refreshToken, clientId } = params;
+  const { refreshToken, clientId, metadata } = params;
   const tokenHash = hashRefreshToken(refreshToken);
 
   // Two-phase rotation — same split as `exchangeDeviceCodeForTokens`:
@@ -458,6 +488,20 @@ export async function rotateRefreshToken(params: {
       .set({ usedAt: new Date() })
       .where(eq(cliRefreshToken.id, row.id));
 
+    // Bump last-used metadata on the family head (`parent_id IS NULL`).
+    // Activity attribution lives on the head row so the listing UI can
+    // join children to the head by `family_id` and surface a single
+    // "last used" timestamp per device, regardless of how many rotations
+    // have occurred. The UPDATE is scoped by `family_id` AND
+    // `parent_id IS NULL` so we never accidentally write metadata onto a
+    // rotation row even if the head was somehow deleted or revoked.
+    const lastUsedAt = new Date();
+    const lastUsedIp = metadata?.ip ?? null;
+    await tx
+      .update(cliRefreshToken)
+      .set({ lastUsedAt, lastUsedIp })
+      .where(and(eq(cliRefreshToken.familyId, row.familyId), isNull(cliRefreshToken.parentId)));
+
     const [clientRow] = await tx
       .select({ scopes: oauthClient.scopes })
       .from(oauthClient)
@@ -510,6 +554,7 @@ export async function rotateRefreshToken(params: {
     emailVerified: user.emailVerified === true,
     scope,
     clientId,
+    cliFamilyId: familyId,
   });
   const { refreshPlain, selfRevoked } = await db.transaction(async (tx) => {
     const persisted = await persistRefreshTokenInTx(tx, {
@@ -599,11 +644,432 @@ export async function revokeRefreshToken(params: {
   return { revoked: true };
 }
 
+/**
+ * Active device session shape returned to the dashboard. Each entry maps
+ * to one `family_id` (= one device's lifetime), surfacing only the head
+ * row's metadata. Rotation children are intentionally hidden — exposing
+ * them would let an observer enumerate the rotation history of a session,
+ * leaking activity-pattern information unrelated to "is this device
+ * currently active and what was it called when it logged in?".
+ *
+ * `current` is omitted (always `false`) for callers that don't present a
+ * refresh token — the dashboard SPA has no way to identify "this very
+ * session" because BA cookie sessions are orthogonal to refresh-token
+ * families. The CLI, when it ever reuses this endpoint, can populate it.
+ */
+export interface CliSessionListEntry {
+  familyId: string;
+  deviceName: string | null;
+  userAgent: string | null;
+  createdIp: string | null;
+  lastUsedIp: string | null;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+  expiresAt: Date;
+  current: boolean;
+}
+
+/**
+ * List a user's active CLI sessions. "Active" = head of family
+ * (`parent_id IS NULL`) AND not revoked AND not expired. Yields one entry
+ * per device the user is currently signed into.
+ *
+ * Sort order: most recent activity first, falling back to creation time
+ * for sessions that have never rotated. This puts the device that was
+ * "actually used last" at the top — what users typically want to see in
+ * a session list.
+ */
+export async function listSessionsForUser(userId: string): Promise<CliSessionListEntry[]> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      familyId: cliRefreshToken.familyId,
+      deviceName: cliRefreshToken.deviceName,
+      userAgent: cliRefreshToken.userAgent,
+      createdIp: cliRefreshToken.createdIp,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      createdAt: cliRefreshToken.createdAt,
+      expiresAt: cliRefreshToken.expiresAt,
+    })
+    .from(cliRefreshToken)
+    .where(
+      and(
+        eq(cliRefreshToken.userId, userId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  return rows
+    .filter((r) => r.expiresAt > now)
+    .map((r) => ({
+      familyId: r.familyId,
+      deviceName: r.deviceName,
+      userAgent: r.userAgent,
+      createdIp: r.createdIp,
+      lastUsedIp: r.lastUsedIp,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      current: false,
+    }))
+    .sort((a, b) => {
+      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
+      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
+      return bTs - aTs;
+    });
+}
+
+/**
+ * Revoke a single CLI session family on behalf of its owner. The ownership
+ * check (`userId === head.userId`) is the only authorization gate — the
+ * caller is expected to have already authenticated as `userId` (cookie
+ * session in the dashboard, or platform auth in the CLI).
+ *
+ * Returns `false` when the family doesn't exist, doesn't belong to
+ * `userId`, or is already fully revoked. The caller maps this to either
+ * 404 (genuinely unknown / not yours) or 200-no-op (already revoked) at
+ * its discretion — surface the boolean and let the route layer decide.
+ *
+ * Reason `user_revoked` is distinct from `logout` (set by the
+ * RFC 7009 self-revoke path) and `reuse` (set by the security-event
+ * branch in `rotateRefreshToken`). The audit log can therefore separate
+ * "user actively signed device out from the dashboard" from "CLI sent
+ * its own revoke" from "potential token theft".
+ */
+export async function revokeFamilyForUser(params: {
+  userId: string;
+  familyId: string;
+}): Promise<boolean> {
+  const { userId, familyId } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+    })
+    .from(cliRefreshToken)
+    .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+    .limit(1);
+  if (!head || head.userId !== userId) return false;
+  if (head.revokedAt) return false;
+  await revokeFamily(familyId, "user_revoked");
+  return true;
+}
+
+/**
+ * Revoke every active CLI session family belonging to a user. Server
+ * primitive backing `appstrate logout --all` (ADR-006) and the dashboard
+ * "Revoke all sessions" button. Idempotent — already-revoked families
+ * are skipped at the SQL level.
+ *
+ * Returns the count of families newly revoked so the caller can render a
+ * meaningful confirmation toast ("Signed out 3 devices.").
+ *
+ * Implementation: a single UPDATE scoped by `user_id` + active
+ * (`revoked_at IS NULL`). We don't need to enumerate families first —
+ * the rotation children carry the same `revoked_at` column and the same
+ * UPDATE flips both heads and children. The audit reason is
+ * `user_revoked_all` so it is distinguishable from per-family revocation
+ * in the security log.
+ */
+export async function revokeAllFamiliesForUser(userId: string): Promise<{ revokedCount: number }> {
+  // Count families that will be touched BEFORE the UPDATE, so the return
+  // value matches "number of devices signed out" rather than "number of
+  // rows touched" (rotation rows would inflate the latter into something
+  // that doesn't reflect user-visible state).
+  const heads = await db
+    .select({ familyId: cliRefreshToken.familyId })
+    .from(cliRefreshToken)
+    .where(
+      and(
+        eq(cliRefreshToken.userId, userId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  if (heads.length === 0) return { revokedCount: 0 };
+  await db
+    .update(cliRefreshToken)
+    .set({ revokedAt: new Date(), revokedReason: "user_revoked_all" })
+    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
+  // Drop device-name cache entries for the revoked families — same race
+  // window as `revokeFamily` (see comment there). Bulk path bypasses the
+  // single-family helper, so invalidate inline.
+  for (const { familyId } of heads) _runnerDeviceNameCache.delete(familyId);
+  return { revokedCount: heads.length };
+}
+
+/**
+ * Hot-path check called from `oidcAuthStrategy` on every CLI Bearer
+ * authentication. Verifies the family is still active (not revoked, not
+ * expired, head row exists for the user), and opportunistically bumps
+ * `last_used_at` + `last_used_ip` on the head row when the previous bump
+ * is more than `LAST_USED_TOUCH_INTERVAL_MS` old. The throttle keeps the
+ * write rate to at most one UPDATE per minute per family even under
+ * sustained Bearer traffic, while still surfacing recent activity in the
+ * dashboard within ~60 s.
+ *
+ * Returns `false` when the family has been revoked or no longer matches
+ * the user (deleted, transferred, etc.) — the strategy maps this to
+ * "auth fails", same as a malformed/expired JWT. Returns `true` for
+ * still-active families.
+ */
+const LAST_USED_TOUCH_INTERVAL_MS = 60 * 1000;
+
+export async function checkFamilyAndTouch(params: {
+  familyId: string;
+  userId: string;
+  ip: string | null;
+}): Promise<boolean> {
+  const { familyId, userId, ip } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+      expiresAt: cliRefreshToken.expiresAt,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+    })
+    .from(cliRefreshToken)
+    .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+    .limit(1);
+  if (!head) return false;
+  if (head.userId !== userId) return false;
+  if (head.revokedAt) return false;
+  if (head.expiresAt < new Date()) return false;
+
+  const now = Date.now();
+  const stale = !head.lastUsedAt || now - head.lastUsedAt.getTime() >= LAST_USED_TOUCH_INTERVAL_MS;
+  if (stale) {
+    // Best-effort. A failed UPDATE here must not break authentication —
+    // log and continue. Concurrent writers landing in the same window
+    // produce a small redundant write at worst.
+    try {
+      await db
+        .update(cliRefreshToken)
+        .set({
+          lastUsedAt: new Date(now),
+          lastUsedIp: ip ?? head.lastUsedIp,
+        })
+        .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)));
+    } catch (err) {
+      logger.warn("oidc: cli last_used_at bump failed — auth still allowed", {
+        module: "oidc",
+        familyId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return true;
+}
+
+/**
+ * Module-owned lookup consumed by the platform's runner-name resolver
+ * (`apps/api/src/lib/runner-context.ts`). Returns the device name
+ * recorded on a CLI session's head row, used as the human-friendly label
+ * stamped on `runs.runner_name` at run-creation time when the caller
+ * authenticated via a CLI JWT and didn't override via
+ * `X-Appstrate-Runner-Name`.
+ *
+ * Cached in-memory (TTL 60 s) — runner-name resolution sits on the
+ * run-creation hot path and the underlying row barely ever changes
+ * (device names are stamped at login and never re-captured on rotation).
+ * A short TTL also bounds the staleness window after a manual rename
+ * via the dashboard.
+ */
+const RUNNER_DEVICE_NAME_CACHE_TTL_MS = 60 * 1000;
+/** Coarse upper bound on the cache. The 60 s TTL means dead keys naturally
+ *  expire on read, but `Map.delete` is never called on a TTL miss — so a
+ *  stream of distinct family ids would grow the Map unbounded between
+ *  reads of the same key. At ~10 k entries (~1 MB at typical key+name
+ *  sizes) we wholesale-clear and let the cache rebuild from cold. Cheaper
+ *  than maintaining LRU bookkeeping for a path whose miss is one indexed
+ *  query. */
+const RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES = 10_000;
+const _runnerDeviceNameCache = new Map<string, { name: string | null; expiresAt: number }>();
+
+export async function lookupCliDeviceName(familyId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = _runnerDeviceNameCache.get(familyId);
+  if (cached && cached.expiresAt > now) return cached.name;
+  try {
+    const [row] = await db
+      .select({ deviceName: cliRefreshToken.deviceName })
+      .from(cliRefreshToken)
+      .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+      .limit(1);
+    const name = row?.deviceName ?? null;
+    if (_runnerDeviceNameCache.size >= RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES) {
+      _runnerDeviceNameCache.clear();
+    }
+    _runnerDeviceNameCache.set(familyId, {
+      name,
+      expiresAt: now + RUNNER_DEVICE_NAME_CACHE_TTL_MS,
+    });
+    return name;
+  } catch (err) {
+    logger.warn("oidc: cli device-name lookup failed (runner attribution)", {
+      module: "oidc",
+      familyId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Test-only — drop the device-name cache between fixtures so stale
+ * entries from one test don't bleed into the next.
+ */
+export function _resetRunnerDeviceNameCacheForTesting(): void {
+  _runnerDeviceNameCache.clear();
+}
+
+// ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
+
+/**
+ * Admin-facing variant of {@link CliSessionListEntry}. Carries the
+ * owning member's identity in addition to the session metadata so the
+ * Members tab can render "X's MacBook · last used 3 min ago" without
+ * the dashboard performing a second per-row lookup.
+ */
+export interface AdminCliSessionListEntry extends CliSessionListEntry {
+  userId: string;
+  userEmail: string | null;
+  userName: string | null;
+}
+
+/**
+ * List every active CLI session held by a member of `orgId`. Admin/owner
+ * route visibility — gated by the route layer, not this service.
+ *
+ * Implementation: join `cli_refresh_tokens` heads to `org_members`, then
+ * left-join to `user` for name/email enrichment. Rows are scoped to the
+ * org's roster the moment the query runs — a member who left the org
+ * yesterday no longer appears here, even though their head row remains
+ * present (cascade is on `user`, not `org_members`).
+ *
+ * The shape MIRRORS the user-facing list rather than diverging into a
+ * new contract — admins get the same per-device columns plus owner
+ * identity, so the Members tab can reuse the icon/UA-categorization
+ * helpers built for the personal Devices page.
+ */
+export async function listSessionsForOrg(orgId: string): Promise<AdminCliSessionListEntry[]> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      familyId: cliRefreshToken.familyId,
+      deviceName: cliRefreshToken.deviceName,
+      userAgent: cliRefreshToken.userAgent,
+      createdIp: cliRefreshToken.createdIp,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      createdAt: cliRefreshToken.createdAt,
+      expiresAt: cliRefreshToken.expiresAt,
+      userId: cliRefreshToken.userId,
+      userEmail: userTable.email,
+      userName: userTable.name,
+    })
+    .from(cliRefreshToken)
+    .innerJoin(organizationMembers, eq(organizationMembers.userId, cliRefreshToken.userId))
+    .leftJoin(userTable, eq(userTable.id, cliRefreshToken.userId))
+    .where(
+      and(
+        eq(organizationMembers.orgId, orgId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  return rows
+    .filter((r) => r.expiresAt > now)
+    .map((r) => ({
+      familyId: r.familyId,
+      deviceName: r.deviceName,
+      userAgent: r.userAgent,
+      createdIp: r.createdIp,
+      lastUsedIp: r.lastUsedIp,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      current: false,
+      userId: r.userId,
+      userEmail: r.userEmail,
+      userName: r.userName,
+    }))
+    .sort((a, b) => {
+      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
+      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
+      return bTs - aTs;
+    });
+}
+
+/**
+ * Revoke a CLI session on behalf of an org admin. The family must belong
+ * to a CURRENT member of `orgId` — a session whose owner has since left
+ * the org is invisible to admins of that org and cannot be revoked
+ * through this surface (the user themselves still can via the Phase 2
+ * personal endpoints).
+ *
+ * Returns `false` when the family is unknown, doesn't belong to a member
+ * of `orgId`, or is already fully revoked. Reason `org_admin_revoked` is
+ * distinct from the personal `user_revoked` so the audit log can
+ * separate "the user signed their own device out" from "an org admin
+ * forced a member's device out".
+ *
+ * The two-query shape (lookup head → revoke family) is deliberate: a
+ * single UPDATE with the membership join would silently skip the
+ * "already revoked" case without surfacing it to the caller, and we
+ * want the boolean discriminator for the route layer.
+ */
+export async function revokeFamilyForOrgAdmin(params: {
+  orgId: string;
+  familyId: string;
+}): Promise<boolean> {
+  const { orgId, familyId } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+    })
+    .from(cliRefreshToken)
+    .innerJoin(organizationMembers, eq(organizationMembers.userId, cliRefreshToken.userId))
+    .where(
+      and(
+        eq(cliRefreshToken.familyId, familyId),
+        isNull(cliRefreshToken.parentId),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!head) return false;
+  if (head.revokedAt) return false;
+  await revokeFamily(familyId, "org_admin_revoked");
+  return true;
+}
+
+/**
+ * Test-only export — covers a regression around membership scoping.
+ * Production callers always go through {@link listSessionsForOrg} or
+ * {@link revokeFamilyForOrgAdmin}.
+ */
+export async function _orgMembersUserIdsForTesting(orgId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(inArray(organizationMembers.orgId, [orgId]));
+  return rows.map((r) => r.userId);
+}
+
 async function revokeFamily(familyId: string, reason: string): Promise<void> {
   await db
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: reason })
     .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.revokedAt)));
+  // Drop the device-name cache entry so a run created in the next 60 s
+  // doesn't stamp the dead session's label on `runs.runner_name`. The
+  // strategy already rejects bearers from a revoked family, but a request
+  // admitted just before the revocation can still reach run creation.
+  _runnerDeviceNameCache.delete(familyId);
 }
 
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -624,12 +1090,16 @@ async function persistRefreshTokenInTx(
     scope: string;
     parentId: string | null;
     familyId: string;
+    /** Only honored on the head of family (`parentId === null`). Rotation
+     *  children always store `null` for the metadata columns. */
+    metadata?: DeviceMetadata;
   },
 ): Promise<{ refreshPlain: string }> {
-  const { userId, clientId, scope, parentId, familyId } = params;
+  const { userId, clientId, scope, parentId, familyId, metadata } = params;
   const refreshPlain = generateRefreshToken();
   const refreshHash = hashRefreshToken(refreshPlain);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
+  const isHead = parentId === null;
   await tx.insert(cliRefreshToken).values({
     id: prefixedId("crf"),
     tokenHash: refreshHash,
@@ -643,6 +1113,11 @@ async function persistRefreshTokenInTx(
     usedAt: null,
     revokedAt: null,
     revokedReason: null,
+    deviceName: isHead ? (metadata?.deviceName ?? null) : null,
+    userAgent: isHead ? (metadata?.userAgent ?? null) : null,
+    createdIp: isHead ? (metadata?.ip ?? null) : null,
+    lastUsedIp: null,
+    lastUsedAt: null,
   });
   return { refreshPlain };
 }
@@ -671,6 +1146,10 @@ async function mintAccessJwt(claims: {
   emailVerified: boolean;
   scope: string;
   clientId: string;
+  /** CLI refresh-token family id this access token belongs to. Stamped on
+   *  the JWT so the OIDC strategy can reject tokens whose family has been
+   *  revoked, without waiting for the next refresh. */
+  cliFamilyId: string;
 }): Promise<string> {
   const env = getEnv();
   // Strip any trailing slash from APP_URL before composing iss/aud so
@@ -704,6 +1183,11 @@ async function mintAccessJwt(claims: {
     email: claims.email,
     email_verified: claims.emailVerified,
     name: claims.name,
+    // Custom claim — read by `oidcAuthStrategy.resolveInstanceUser` to
+    // gate the token on the family's revocation state. Absent on
+    // non-CLI instance tokens (e.g. satellite admin app `/oauth2/token`),
+    // which the strategy treats as "no family check applies".
+    cli_family_id: claims.cliFamilyId,
   };
   if (claims.scope.length > 0) {
     payload.scope = claims.scope;

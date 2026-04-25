@@ -820,3 +820,184 @@ describe("POST /api/auth/cli/revoke", () => {
     expect(row?.revokedAt).toBeNull();
   });
 });
+
+describe("device-session metadata (issue #251)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+    overrideJwksResolver(null);
+    await createTestContext({ orgSlug: "climeta" });
+    await ensureCliClient();
+  });
+
+  // `TRUST_PROXY` defaults to `false` in the test env, so
+  // `getClientIpFromRequest` returns `null` when reading from a test
+  // request that carries no socket address — the cli-plugin layer
+  // persists null directly so the dashboard renders an empty cell
+  // (instead of a noise word). Tests that want a non-null `created_ip`
+  // must therefore push an explicit `X-Forwarded-For` header AND run
+  // with `TRUST_PROXY=1` so the resolver actually reads it. The current
+  // suite asserts on the null vs non-null distinction.
+
+  async function loginWithMetadata(headers: Record<string, string>): Promise<{
+    refreshToken: string;
+    familyId: string;
+    headRowId: string;
+  }> {
+    const { cookie } = await signUpPlatformUser();
+    const { deviceCodeValue } = await runDeviceFlow(cookie);
+    const res = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deviceCodeValue,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { refresh_token: string };
+    const [row] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.tokenHash, _hashRefreshTokenForTesting(body.refresh_token)))
+      .limit(1);
+    expect(row).toBeDefined();
+    return {
+      refreshToken: body.refresh_token,
+      familyId: row!.familyId,
+      headRowId: row!.id,
+    };
+  }
+
+  it("captures user_agent + device_name + created_ip on the head row at device-code exchange", async () => {
+    const { headRowId } = await loginWithMetadata({
+      "User-Agent": "appstrate-cli/2.4.0 (darwin arm64; node 20.11.1)",
+      "X-Appstrate-Device-Name": "pierre's macbook",
+      "X-Forwarded-For": "203.0.113.7",
+    });
+
+    const [row] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.id, headRowId))
+      .limit(1);
+    expect(row).toBeDefined();
+    expect(row!.parentId).toBeNull(); // confirm this is the head
+    expect(row!.userAgent).toBe("appstrate-cli/2.4.0 (darwin arm64; node 20.11.1)");
+    expect(row!.deviceName).toBe("pierre's macbook");
+    // `TRUST_PROXY=false` (test default) → XFF ignored, resolver returns
+    // `"unknown"`, normalized to `null` at the cli-plugin layer so the
+    // dashboard doesn't render the sentinel as a real IP.
+    expect(row!.createdIp).toBeNull();
+    expect(row!.lastUsedAt).toBeNull();
+    expect(row!.lastUsedIp).toBeNull();
+  });
+
+  it("clamps device_name to 120 chars and trims whitespace", async () => {
+    const longName = "a".repeat(500);
+    const { headRowId } = await loginWithMetadata({
+      "X-Appstrate-Device-Name": `   ${longName}   `,
+    });
+    const [row] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.id, headRowId))
+      .limit(1);
+    expect(row?.deviceName?.length).toBe(120);
+    expect(row?.deviceName).toMatch(/^a+$/);
+  });
+
+  it("treats empty/whitespace device_name as null", async () => {
+    const { headRowId } = await loginWithMetadata({
+      "X-Appstrate-Device-Name": "   ",
+    });
+    const [row] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.id, headRowId))
+      .limit(1);
+    expect(row?.deviceName).toBeNull();
+  });
+
+  it("updates last_used_at + last_used_ip on the head row when a child rotates", async () => {
+    const { refreshToken, familyId, headRowId } = await loginWithMetadata({
+      "User-Agent": "appstrate-cli/2.4.0",
+    });
+
+    const before = Date.now();
+    const rotateRes = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(rotateRes.status).toBe(200);
+    const after = Date.now();
+    const body = (await rotateRes.json()) as { refresh_token: string };
+
+    // Head row: last_used_* updated
+    const [head] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.id, headRowId))
+      .limit(1);
+    expect(head?.lastUsedAt).not.toBeNull();
+    const ts = new Date(head!.lastUsedAt!).getTime();
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
+
+    // Child row: NULL metadata (rotation rows stay light)
+    const [child] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.tokenHash, _hashRefreshTokenForTesting(body.refresh_token)))
+      .limit(1);
+    expect(child).toBeDefined();
+    expect(child!.parentId).toBe(headRowId);
+    expect(child!.familyId).toBe(familyId);
+    expect(child!.deviceName).toBeNull();
+    expect(child!.userAgent).toBeNull();
+    expect(child!.createdIp).toBeNull();
+    expect(child!.lastUsedAt).toBeNull();
+    expect(child!.lastUsedIp).toBeNull();
+  });
+
+  it("does not overwrite head user_agent or device_name on rotation (head-only-on-login contract)", async () => {
+    const { refreshToken, headRowId } = await loginWithMetadata({
+      "User-Agent": "appstrate-cli/2.4.0",
+      "X-Appstrate-Device-Name": "original-name",
+    });
+
+    // Rotate with a *different* UA + a different (would-be) device-name header.
+    // Per the contract these MUST NOT be re-captured — only `last_used_*` may
+    // change on the head, otherwise a CLI could silently mutate its
+    // declared identity through a refresh.
+    const rotateRes = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "evil-cli/9.9.9",
+        "X-Appstrate-Device-Name": "attacker-relabel",
+      },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(rotateRes.status).toBe(200);
+
+    const [head] = await db
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.id, headRowId))
+      .limit(1);
+    expect(head?.userAgent).toBe("appstrate-cli/2.4.0");
+    expect(head?.deviceName).toBe("original-name");
+  });
+});

@@ -27,7 +27,10 @@ import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { user, applications } from "@appstrate/db/schema";
-import { getOrgSettings } from "../../services/organizations.ts";
+import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
+import { resolvePermissions } from "../../lib/permissions.ts";
+import type { OrgRole } from "../../types/index.ts";
+import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
   deleteClient,
@@ -2307,7 +2310,93 @@ export function createOidcRouter() {
     return c.json(payload as never);
   });
 
+  // ── Phase 3 admin oversight (#251) ─────────────────────────────────────────
+  //
+  // `/api/orgs/:orgId/cli-sessions` is mounted at the OIDC module's HTTP
+  // origin root rather than under `/api/oauth/*` because semantically the
+  // resource is an org sub-resource, not an OAuth-client management
+  // surface. The platform's `skipOrgContext` rule already covers
+  // `/api/orgs/*` so the X-Org-Id header is unnecessary — the orgId path
+  // param IS the org context.
+  //
+  // Authorization is the standard module RBAC contract: `ensureOrgMembership`
+  // resolves the caller's role from `org_members`, populates
+  // `c.var.permissions` via `resolvePermissions(role)`, and then
+  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces
+  // membership in that Set — same fail-closed primitive as every other
+  // module-owned route in the file. The `cli-sessions` resource is
+  // declared by the OIDC module's `permissionsContribution()` and granted
+  // to `owner`/`admin` only.
+
+  router.get(
+    "/api/orgs/:orgId/cli-sessions",
+    rateLimit(120),
+    ensureOrgMembership(),
+    requireModulePermission("cli-sessions", "read"),
+    async (c) => {
+      const orgId = c.req.param("orgId")!;
+      const sessions = await listSessionsForOrg(orgId);
+      return c.json({ sessions });
+    },
+  );
+
+  router.delete(
+    "/api/orgs/:orgId/cli-sessions/:familyId",
+    rateLimit(30),
+    ensureOrgMembership(),
+    requireModulePermission("cli-sessions", "delete"),
+    async (c) => {
+      const orgId = c.req.param("orgId")!;
+      const familyId = c.req.param("familyId")!;
+      const revoked = await revokeFamilyForOrgAdmin({ orgId, familyId });
+      if (!revoked) {
+        // Hide the not-found vs already-revoked vs not-yours distinction
+        // behind a single 404 — admins cannot probe membership of users
+        // outside the org through this endpoint.
+        throw notFound("CLI session not found");
+      }
+      logger.info("oidc: org admin revoked a CLI session", {
+        module: "oidc",
+        audit: true,
+        event: "cli.session.org_admin_revoked",
+        orgId,
+        familyId,
+        actorUserId: c.get("user").id,
+      });
+      return c.body(null, 204);
+    },
+  );
+
   return router;
+}
+
+/**
+ * Resolve the caller's membership in `:orgId` from the path param, then
+ * stamp `orgId` / `orgRole` / `permissions` on the Hono context so the
+ * standard `requireModulePermission` / `requireCorePermission` guards
+ * downstream see a fully-populated authz state. Used by org-scoped
+ * module routes mounted directly under `/api/orgs/:orgId/...` — those
+ * paths skip core's `requireOrgContext` middleware (per `skipOrgContext`
+ * in `auth-pipeline.ts`) because the org id lives in the URL, not in
+ * the `X-Org-Id` header.
+ *
+ * Throws 403 when the caller is not a member of the org. Does NOT
+ * itself enforce a role floor — that is the responsibility of the
+ * `requireModulePermission(...)` guard chained after it.
+ */
+function ensureOrgMembership() {
+  return async (c: Context<AppEnv>, next: () => Promise<void>) => {
+    const orgId = c.req.param("orgId");
+    if (!orgId) throw notFound("orgId path param required");
+    const userId = c.get("user").id;
+    const member = await getOrgMember(orgId, userId);
+    if (!member) throw forbidden("Not a member of this organization");
+    const role = member.role as OrgRole;
+    c.set("orgId", orgId);
+    c.set("orgRole", role);
+    c.set("permissions", resolvePermissions(role));
+    return next();
+  };
 }
 
 function prefersHtml(acceptHeader: string | undefined | null): boolean {

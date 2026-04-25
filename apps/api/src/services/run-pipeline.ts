@@ -79,6 +79,9 @@ export interface RunPipelineParams {
    * background runners (scheduler) leave it unset.
    */
   traceparent?: string;
+  /** Resolved by `lib/runner-context.ts` from request headers + auth context. */
+  runnerName?: string | null;
+  runnerKind?: string | null;
 }
 
 /**
@@ -279,6 +282,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
+      runnerName: params.runnerName ?? null,
+      runnerKind: params.runnerKind ?? null,
     },
   );
 

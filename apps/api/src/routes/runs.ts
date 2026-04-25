@@ -33,6 +33,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
+import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
@@ -319,6 +320,7 @@ export function createRunsRouter() {
         size: f.size,
       }));
 
+      const runner = await resolveRunnerContext(c);
       const result = await prepareAndExecuteRun({
         runId,
         agent: effectiveAgent,
@@ -336,6 +338,8 @@ export function createRunsRouter() {
         uploadedFiles,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         traceparent: c.get("traceparent"),
+        runnerName: runner.name,
+        runnerKind: runner.kind,
       });
 
       if (!result.ok) {

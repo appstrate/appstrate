@@ -9,6 +9,7 @@ import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
+import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
@@ -68,6 +69,12 @@ app.onError(errorHandler);
 
 // Request-Id — generates req_ prefixed ID, sets header + context variable
 app.use("*", requestId());
+
+// Client IP — captures `getConnInfo(c).remote.address` into a per-Request
+// WeakMap so downstream code that only sees the bare `Request` (Better
+// Auth plugin endpoints, OIDC strategy) can resolve the IP without
+// trusting forwarded headers.
+app.use("*", clientIp());
 
 // Middleware
 const trustedOrigins = env.TRUSTED_ORIGINS;

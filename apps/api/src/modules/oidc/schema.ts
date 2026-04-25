@@ -252,6 +252,17 @@ export const cliRefreshToken = pgTable(
     usedAt: timestamp("used_at"),
     revokedAt: timestamp("revoked_at"),
     revokedReason: text("revoked_reason"),
+    // Device-session metadata, populated on the head of family only
+    // (`parent_id IS NULL`). Rotation rows leave these NULL; read paths
+    // resolve metadata by joining children to the family head. See
+    // migration `0006_cli_refresh_tokens_metadata.sql` for the rationale
+    // (one UPDATE per "rename"/"last_used" event regardless of family
+    // size, no per-rotation duplication).
+    deviceName: text("device_name"),
+    userAgent: text("user_agent"),
+    createdIp: text("created_ip"),
+    lastUsedIp: text("last_used_ip"),
+    lastUsedAt: timestamp("last_used_at"),
   },
   (t) => [
     index("idx_cli_refresh_tokens_family").on(t.familyId),

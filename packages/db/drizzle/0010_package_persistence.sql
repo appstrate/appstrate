@@ -1,4 +1,4 @@
--- 0009_package_persistence.sql
+-- 0010_package_persistence.sql
 --
 -- Unify `runs.state` + `package_memories` into a single `package_persistence`
 -- table with scope (user / end_user / shared) as a first-class dimension.

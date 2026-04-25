@@ -438,6 +438,16 @@ export const schemas = {
         type: ["string", "null"],
         description: "Name of the schedule that triggered the run",
       },
+      runnerName: {
+        type: ["string", "null"],
+        description:
+          "Human-friendly label for the runner that triggered the run — CLI host (`os.hostname()`), GitHub Action workflow, or whatever the caller passes via `X-Appstrate-Runner-Name`. Stamped at INSERT and never updated.",
+      },
+      runnerKind: {
+        type: ["string", "null"],
+        description:
+          "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context.",
+      },
       agentScope: {
         type: ["string", "null"],
         description:

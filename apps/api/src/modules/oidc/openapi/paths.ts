@@ -994,4 +994,95 @@ export const oidcPaths = {
       },
     },
   },
+
+  // ── Phase 3 admin oversight (#251) ────────────────────────────────────────
+
+  "/api/orgs/{orgId}/cli-sessions": {
+    get: {
+      tags: ["Device Authorization"],
+      operationId: "listOrgCliSessions",
+      summary: "List CLI sessions for org members (admin)",
+      description:
+        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.\n\nCLI sessions are user-scoped, NOT application-scoped: a session is created by `appstrate login` against a user account, and is reusable across every application the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which application(s) that member operates in — an admin auditing one application surface still sees CLI sessions that the same human is using to drive a different application in the same org.",
+      parameters: [
+        {
+          name: "orgId",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Active org CLI sessions",
+          headers: commonHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["sessions"],
+                properties: {
+                  sessions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        familyId: { type: "string" },
+                        userId: { type: "string" },
+                        userEmail: { type: ["string", "null"] },
+                        userName: { type: ["string", "null"] },
+                        deviceName: { type: ["string", "null"] },
+                        userAgent: { type: ["string", "null"] },
+                        createdIp: { type: ["string", "null"] },
+                        lastUsedIp: { type: ["string", "null"] },
+                        lastUsedAt: {
+                          type: ["string", "null"],
+                          format: "date-time",
+                        },
+                        createdAt: { type: "string", format: "date-time" },
+                        expiresAt: { type: "string", format: "date-time" },
+                        current: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { description: "Authentication required." },
+        "403": { description: "Caller is not an admin/owner of the org." },
+      },
+    },
+  },
+
+  "/api/orgs/{orgId}/cli-sessions/{familyId}": {
+    delete: {
+      tags: ["Device Authorization"],
+      operationId: "revokeOrgCliSession",
+      summary: "Revoke a member's CLI session (admin)",
+      description:
+        "Force a member's CLI session out from the dashboard. Logged with `revoked_reason='org_admin_revoked'` so the audit trail distinguishes admin force-outs from user-initiated logouts and reuse-detection revocations. Returns 404 when the family is unknown, doesn't belong to a current member of `orgId`, or has already been revoked — the route layer collapses these cases so an admin cannot probe membership outside the org through this endpoint.",
+      parameters: [
+        {
+          name: "orgId",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+        },
+        {
+          name: "familyId",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "204": { description: "Revoked." },
+        "401": { description: "Authentication required." },
+        "403": { description: "Caller is not an admin/owner of the org." },
+        "404": { description: "Session not found / not in this org / already revoked." },
+      },
+    },
+  },
 };

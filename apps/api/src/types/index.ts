@@ -82,6 +82,12 @@ export type AppEnv = {
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
     /**
+     * Opaque strategy-specific metadata propagated from `AuthResolution.extra`.
+     * The OIDC strategy stamps `cliFamilyId` here when resolving a CLI
+     * Bearer; route handlers cast to the shape they expect.
+     */
+    authExtra?: Record<string, unknown>;
+    /**
      * Realm captured from the BA session row (or user row) at auth time.
      * `"platform"` for platform audiences (default, dashboard, org/instance
      * OIDC clients); `"end_user:<applicationId>"` for end-users of an

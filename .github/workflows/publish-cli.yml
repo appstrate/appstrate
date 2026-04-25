@@ -96,6 +96,11 @@ jobs:
         # inlined assets (the #175 regression), we fail BEFORE polluting
         # the npm registry — unlike a post-publish smoke test, this
         # failure mode is recoverable without `npm deprecate`.
+        #
+        # APPSTRATE_INSTALL_SOURCE=bun stamps the bundled CLI as the
+        # npm-channel artefact (see `src/lib/install-source.ts`, issue #249).
+        env:
+          APPSTRATE_INSTALL_SOURCE: bun
         run: |
           npm pack
           # `npm pack` names the tarball `<package>-<version>.tgz` deterministically;

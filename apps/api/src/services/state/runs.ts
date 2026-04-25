@@ -125,6 +125,18 @@ interface CreateRunParams {
   sinkExpiresAt?: Date;
   /** Runner-provided execution environment metadata (os, cli version, git sha, ...). */
   contextSnapshot?: Record<string, unknown>;
+  /**
+   * Human-friendly runner label (e.g. CLI host, GitHub Action workflow id).
+   * Resolved by `lib/runner-context.ts` from the request headers + auth
+   * context and stamped on the run row at INSERT — denormalized so the
+   * label survives session revocation and device rename.
+   */
+  runnerName?: string | null;
+  /**
+   * Free-form runner classifier driving the dashboard icon (`cli`,
+   * `github-action`, …). Resolved alongside `runnerName`.
+   */
+  runnerKind?: string | null;
 }
 
 export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
@@ -161,6 +173,8 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       : {}),
     ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
     ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
+    runnerName: params.runnerName ?? null,
+    runnerKind: params.runnerKind ?? null,
   });
 }
 

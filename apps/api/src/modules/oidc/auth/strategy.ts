@@ -36,12 +36,14 @@ import { logger } from "../../../lib/logger.ts";
 import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/enduser-token.ts";
 import { lookupEndUser } from "../services/enduser-mapping.ts";
 import { getClientCached } from "../services/oauth-admin.ts";
+import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { scopesToPermissions } from "./claims.ts";
+import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
   id: "oidc-jwt",
 
-  async authenticate({ headers }): Promise<AuthResolution | null> {
+  async authenticate({ headers, request }): Promise<AuthResolution | null> {
     const authHeader = headers.get("authorization") ?? headers.get("Authorization");
     if (!authHeader) return null;
     if (!authHeader.startsWith("Bearer ey")) return null;
@@ -49,6 +51,30 @@ export const oidcAuthStrategy: AuthStrategy = {
     const token = authHeader.slice(7);
     const claims = await verifyEndUserAccessToken(token);
     if (!claims) return null;
+
+    // CLI-issued instance tokens carry a `cli_family_id` claim. Gate them
+    // on the family's revocation state so a `revoke` endpoint takes
+    // effect on the next Bearer call (within the throttle window) instead
+    // of waiting for the 15-min access-token TTL. Also bumps
+    // `last_used_at` + `last_used_ip` on the head row so the dashboard
+    // surfaces meaningful activity for tokens that haven't yet rotated.
+    // Non-CLI instance tokens (e.g. satellite admin app `/oauth2/token`)
+    // simply have no `cli_family_id` claim and skip this check.
+    if (claims.cliFamilyId) {
+      const stillActive = await checkFamilyAndTouch({
+        familyId: claims.cliFamilyId,
+        userId: claims.authUserId,
+        ip: getClientIpFromRequest(request),
+      });
+      if (!stillActive) {
+        logger.info("OIDC strategy: CLI session revoked or unknown — rejecting token", {
+          module: "oidc",
+          userId: claims.authUserId,
+          cliFamilyId: claims.cliFamilyId,
+        });
+        return null;
+      }
+    }
 
     // Defense-in-depth: reject tokens from disabled clients. The `azp`
     // claim carries the OAuth client_id — load the client and verify it
@@ -90,7 +116,18 @@ export const oidcAuthStrategy: AuthStrategy = {
     }
 
     if (claims.actorType === "user") {
-      return resolveInstanceUser(claims);
+      return resolveInstanceUser(claims).then((resolution) => {
+        // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
+        // handlers (and `lib/runner-context.ts`) can resolve the runner's
+        // device name without re-parsing the JWT.
+        if (resolution && claims.cliFamilyId) {
+          return {
+            ...resolution,
+            extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
+          };
+        }
+        return resolution;
+      });
     }
     if (claims.actorType === "dashboard_user") {
       return resolveDashboardUser(claims);

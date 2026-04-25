@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165).
+ * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165, #251).
  *
  * Exposes the rotating-refresh-token surface that replaces BA's default
  * session-minting `/device/token`. Mounted alongside the existing
@@ -27,19 +27,42 @@
  *     body: { token, client_id }   // `token` = refresh_token
  *     200: { revoked: boolean }
  *
+ *   GET  /api/auth/cli/sessions                    [issue #251]
+ *     Cookie auth required (BA session). Lists the caller's active
+ *     CLI sessions (one entry per `family_id` head, not revoked, not
+ *     expired). 200: { sessions: [...] }
+ *
+ *   POST /api/auth/cli/sessions/revoke              [issue #251]
+ *     Cookie auth required. Body: { familyId }. Revokes a single
+ *     session owned by the caller. 200: { revoked: boolean } —
+ *     `false` when the family is unknown / not owned / already revoked.
+ *
+ *   POST /api/auth/cli/sessions/revoke-all          [issue #251]
+ *     Cookie auth required. Server primitive backing
+ *     `appstrate logout --all`. 200: { revokedCount: number }.
+ *
  * Error vocabulary matches `CliTokenError` — the client renders these
  * directly (`authorization_pending`, `slow_down`, `access_denied`,
  * `expired_token`, `invalid_grant`, `invalid_request`, `invalid_client`,
- * `server_error`).
+ * `server_error`). The session-management endpoints return ordinary BA
+ * error shapes (`UNAUTHORIZED` when the cookie is missing).
  *
  * Client validation: we re-use the same `validateDeviceFlowClient`
  * allowlist the BA `deviceAuthorization()` plugin uses (grant_types
  * must include `device_code`). For refresh_token grants we additionally
  * check the token's `client_id` column matches.
+ *
+ * Why cookie-only on the session endpoints: these are dashboard-facing
+ * surfaces; the API-key story for managing CLI sessions is intentionally
+ * deferred — granting `cli-sessions:delete` to an API key would let a
+ * compromised key sign every device of every account out of the platform,
+ * which is a much wider blast radius than the key holder's intent.
+ * If a future use case justifies the scope, it lands as a Phase 3
+ * extension with its own RBAC contribution.
  */
 
 import { eq } from "drizzle-orm";
-import { createAuthEndpoint } from "better-auth/api";
+import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
 import { db } from "@appstrate/db/client";
@@ -47,9 +70,43 @@ import { oauthClient } from "../schema.ts";
 import {
   CliTokenError,
   exchangeDeviceCodeForTokens,
+  listSessionsForUser,
+  revokeAllFamiliesForUser,
+  revokeFamilyForUser,
   revokeRefreshToken,
   rotateRefreshToken,
+  type DeviceMetadata,
 } from "../services/cli-tokens.ts";
+import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+
+/** Header the CLI uses to declare a human-friendly device label
+ *  (mirrors `gh auth login --hostname`). Optional — when absent, the UI
+ *  falls back to a UA-derived label. Capped to a sane length to keep the
+ *  device list scannable; longer values are truncated. */
+const DEVICE_NAME_HEADER = "x-appstrate-device-name";
+const DEVICE_NAME_MAX_LENGTH = 120;
+
+/** Reasonable upper bound on `User-Agent` storage. Real-world UAs sit
+ *  well under 1 KB; we cap to defang a misbehaving client that ships a
+ *  multi-KB blob into a freshly-indexable text column. */
+const USER_AGENT_MAX_LENGTH = 1024;
+
+function clamp(s: string | null | undefined, max: number): string | null {
+  if (!s) return null;
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+}
+
+function metadataFromRequest(request: Request | undefined): DeviceMetadata {
+  if (!request) return {};
+  const headers = request.headers;
+  return {
+    deviceName: clamp(headers.get(DEVICE_NAME_HEADER), DEVICE_NAME_MAX_LENGTH),
+    userAgent: clamp(headers.get("user-agent"), USER_AGENT_MAX_LENGTH),
+    ip: getClientIpFromRequest(request),
+  };
+}
 
 // RFC 6749 §5.2 error → HTTP status. Polling errors (authorization_pending,
 // slow_down) are 400 per RFC 8628 §3.5.
@@ -179,6 +236,7 @@ export function cliTokenPlugin() {
               const tokens = await exchangeDeviceCodeForTokens({
                 deviceCodeValue: device_code,
                 clientId: client_id,
+                metadata: metadataFromRequest(ctx.request),
               });
               return ctx.json(
                 {
@@ -202,6 +260,12 @@ export function cliTokenPlugin() {
               const tokens = await rotateRefreshToken({
                 refreshToken: refresh_token,
                 clientId: client_id,
+                // Only the IP is meaningful on rotations — `last_used_at`
+                // is set by the service from `Date.now()`. UA/deviceName
+                // are head-of-family attributes captured at login time;
+                // re-capturing them on every refresh would let a CLI
+                // silently mutate its declared identity.
+                metadata: { ip: getClientIpFromRequest(ctx.request) },
               });
               return ctx.json(
                 {
@@ -263,6 +327,145 @@ export function cliTokenPlugin() {
             clientId: client_id,
           });
           return ctx.json({ revoked: true });
+        },
+      ),
+
+      // ── Issue #251: dashboard-facing session management ────────────────
+
+      cliListSessions: createAuthEndpoint(
+        "/cli/sessions",
+        {
+          method: "GET",
+          metadata: {
+            openapi: {
+              description:
+                'List the caller\'s active CLI sessions (one entry per device). Cookie auth required — the listing is scoped to `c.get("user").id` derived from the BA session. `current` is always `false` for cookie callers because the dashboard does not present a refresh token.',
+              responses: {
+                200: {
+                  description: "Session list",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          sessions: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                familyId: { type: "string" },
+                                deviceName: { type: "string", nullable: true },
+                                userAgent: { type: "string", nullable: true },
+                                createdIp: { type: "string", nullable: true },
+                                lastUsedIp: { type: "string", nullable: true },
+                                lastUsedAt: {
+                                  type: "string",
+                                  format: "date-time",
+                                  nullable: true,
+                                },
+                                createdAt: { type: "string", format: "date-time" },
+                                expiresAt: { type: "string", format: "date-time" },
+                                current: { type: "boolean" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const sessions = await listSessionsForUser(session.user.id);
+          return ctx.json({ sessions });
+        },
+      ),
+
+      cliRevokeSession: createAuthEndpoint(
+        "/cli/sessions/revoke",
+        {
+          method: "POST",
+          body: z.object({ familyId: z.string().min(1) }),
+          metadata: {
+            openapi: {
+              description:
+                "Revoke a single CLI session owned by the caller. Cookie auth required. `revoked: false` is returned when the family does not exist, does not belong to the caller, or has already been revoked — the route layer does not distinguish these cases at the HTTP shape so an attacker who somehow guessed a `family_id` cannot probe ownership through the response.",
+              responses: {
+                200: {
+                  description: "Revocation outcome",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { revoked: { type: "boolean" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const revoked = await revokeFamilyForUser({
+            userId: session.user.id,
+            familyId: ctx.body.familyId,
+          });
+          return ctx.json({ revoked });
+        },
+      ),
+
+      cliRevokeAllSessions: createAuthEndpoint(
+        "/cli/sessions/revoke-all",
+        {
+          method: "POST",
+          metadata: {
+            openapi: {
+              description:
+                "Revoke every active CLI session belonging to the caller. Server primitive backing `appstrate logout --all`. Cookie auth required. Idempotent — calling on an account with no active sessions returns `{ revokedCount: 0 }`.",
+              responses: {
+                200: {
+                  description: "Bulk revocation outcome",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { revokedCount: { type: "integer", minimum: 0 } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const result = await revokeAllFamiliesForUser(session.user.id);
+          return ctx.json(result);
         },
       ),
     },

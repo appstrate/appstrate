@@ -3,7 +3,7 @@
 /**
  * Migration data-preservation test (ADR-011 Phase 1).
  *
- * The 0009_package_persistence migration back-fills:
+ * The 0010_package_persistence migration back-fills:
  *   - every `package_memories` row → `kind='memory', actor_type='shared'`
  *   - the latest `runs.state` per `(package, app, actor)` →
  *     `kind='checkpoint'` with the right actor_type/actor_id derived
@@ -26,7 +26,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedEndUser } from "../../helpers/seed.ts";
 
 // ---------------------------------------------------------------------------
-// Back-fill SQL — copies from 0009_package_persistence.sql verbatim (sans
+// Back-fill SQL — copies from 0010_package_persistence.sql verbatim (sans
 // the CREATE TABLE/INDEX clauses, which are already in place).
 // ---------------------------------------------------------------------------
 

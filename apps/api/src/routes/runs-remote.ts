@@ -33,6 +33,7 @@ import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
+import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRemoteAgentIdentity } from "../services/remote-run-identity.ts";
 import { getPackage } from "../services/agent-service.ts";
 import type { LoadedPackage } from "../types/index.ts";
@@ -174,6 +175,7 @@ export function createRunsRemoteRouter() {
       }
 
       const runId = `run_${crypto.randomUUID()}`;
+      const runner = await resolveRunnerContext(c);
       const result = await createRun({
         origin: "remote",
         runId,
@@ -190,6 +192,8 @@ export function createRunsRemoteRouter() {
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink,
         contextSnapshot: body.contextSnapshot,
+        runnerName: runner.name,
+        runnerKind: runner.kind,
       });
 
       if (!result.ok) {
