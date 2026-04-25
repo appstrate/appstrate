@@ -8,7 +8,7 @@
  * CloudEvents 1.0 envelope so it is interoperable with Knative, Argo,
  * observability tooling, and the wider eventing ecosystem. The CloudEvent
  * `type` mirrors the RunEvent `type` verbatim — e.g. `memory.added`,
- * `state.set`, or any third-party `@scope/tool.verb`.
+ * `checkpoint.set`, or any third-party `@scope/tool.verb`.
  *
  * Specification: see AFPS spec §8 and CloudEvents 1.0.
  */

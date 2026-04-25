@@ -17,7 +17,6 @@ describe("isCanonicalRunEvent", () => {
     const events: RunEvent[] = [
       { ...baseEnvelope, type: "memory.added", content: "hello" },
       { ...baseEnvelope, type: "memory.added", content: "scoped", scope: "shared" },
-      { ...baseEnvelope, type: "state.set", state: { counter: 1 } },
       { ...baseEnvelope, type: "checkpoint.set", data: { counter: 1 } },
       { ...baseEnvelope, type: "checkpoint.set", data: { c: 2 }, scope: "actor" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },

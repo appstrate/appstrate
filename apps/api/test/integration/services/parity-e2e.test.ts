@@ -63,7 +63,7 @@ describe("Parity E2E — full adapter stack", () => {
         runId,
         data: { deliverable: "shipped" },
       },
-      { type: "state.set", timestamp: Date.now(), runId, state: { counter: 7 } },
+      { type: "checkpoint.set", timestamp: Date.now(), runId, data: { counter: 7 } },
       { type: "report.appended", timestamp: Date.now(), runId, content: "work done" },
     ];
 

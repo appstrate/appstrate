@@ -25,7 +25,7 @@ class RecordingSink implements EventSink {
 
 const emptyResult: RunResult = {
   memories: [],
-  state: null,
+  checkpoint: null,
   output: null,
   report: null,
   logs: [],

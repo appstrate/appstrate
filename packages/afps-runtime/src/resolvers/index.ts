@@ -84,12 +84,11 @@ export {
   type CreateSidecarRunHistoryCallOptions,
 } from "./run-history-tool.ts";
 
-// Spec-compliant platform tools (memory, state, output, report, log)
+// Spec-compliant platform tools (memory, checkpoint, output, report, log)
 // — the runtime no longer hardcodes these internally; agents declare
 // them in dependencies.tools[] and a BundledToolResolver loads them.
 export {
   memoryTool,
-  stateTool,
   checkpointTool,
   outputTool,
   reportTool,

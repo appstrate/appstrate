@@ -4,7 +4,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   memoryTool,
-  stateTool,
   checkpointTool,
   outputTool,
   reportTool,
@@ -43,13 +42,6 @@ describe("platform tools — open envelope emission", () => {
         content: "remember me",
       }),
     ]);
-  });
-
-  it("stateTool emits state.set with arbitrary payload (legacy)", async () => {
-    const { ctx, events } = makeCtx();
-    await stateTool.execute({ state: { step: 3 } }, ctx);
-    expect(events[0]!.type).toBe("state.set");
-    expect(events[0]!.state).toEqual({ step: 3 });
   });
 
   it("checkpointTool emits checkpoint.set with data + default scope omitted", async () => {
@@ -97,18 +89,17 @@ describe("platform tools — open envelope emission", () => {
     expect(events[0]!.message).toBe("slow");
   });
 
-  it("PLATFORM_TOOLS maps all canonical tool names (incl. legacy set_state alias)", () => {
+  it("PLATFORM_TOOLS maps all canonical tool names", () => {
     expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(
-      ["add_memory", "log", "output", "report", "set_checkpoint", "set_state"].sort(),
+      ["add_memory", "log", "output", "report", "set_checkpoint"].sort(),
     );
     expect(PLATFORM_TOOLS.add_memory).toBe(memoryTool);
     expect(PLATFORM_TOOLS.set_checkpoint).toBe(checkpointTool);
-    expect(PLATFORM_TOOLS.set_state).toBe(stateTool);
     expect(PLATFORM_TOOLS.log).toBe(logTool);
   });
 });
 
-describe("dual-event acceptance — state.set and checkpoint.set", () => {
+describe("checkpoint.set fold semantics", () => {
   it("reducer folds checkpoint.set into result.checkpoint with scope captured", () => {
     const events: RunEvent[] = [
       {
@@ -124,19 +115,9 @@ describe("dual-event acceptance — state.set and checkpoint.set", () => {
     expect(result.checkpointScope).toBe("shared");
   });
 
-  it("reducer still folds legacy state.set into result.checkpoint (back-compat)", () => {
+  it("reducer last-write-wins across multiple checkpoint.set events", () => {
     const events: RunEvent[] = [
-      { type: "state.set", timestamp: 1, runId: "r", state: { legacy: true } },
-    ];
-    const result = reduceEvents(events);
-    expect(result.checkpoint).toEqual({ legacy: true });
-    // No checkpointScope: state.set carries no scope, consumer defaults to actor.
-    expect(result.checkpointScope).toBeUndefined();
-  });
-
-  it("reducer last-write-wins across mixed legacy + new events", () => {
-    const events: RunEvent[] = [
-      { type: "state.set", timestamp: 1, runId: "r", state: { v: 1 } },
+      { type: "checkpoint.set", timestamp: 1, runId: "r", data: { v: 1 } },
       { type: "checkpoint.set", timestamp: 2, runId: "r", data: { v: 2 }, scope: "actor" },
     ];
     const result = reduceEvents(events);
@@ -163,7 +144,7 @@ describe("reduceEvents", () => {
     const events: RunEvent[] = [
       { ...base, type: "memory.added", timestamp: 1, content: "a" },
       { ...base, type: "memory.added", timestamp: 2, content: "b" },
-      { ...base, type: "state.set", timestamp: 3, state: { x: 1 } },
+      { ...base, type: "checkpoint.set", timestamp: 3, data: { x: 1 } },
       { ...base, type: "output.emitted", timestamp: 4, data: { a: 1 } },
       { ...base, type: "output.emitted", timestamp: 5, data: { b: 2 } },
       { ...base, type: "report.appended", timestamp: 6, content: "line 1" },

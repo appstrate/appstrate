@@ -73,7 +73,7 @@ export interface ConformanceAdapter {
    *
    * 1. Emit each event through its internal sink in arrival order.
    * 2. Reduce the events into a `RunResult` using the canonical
-   *    semantics (`memory.added` → append, `state.set` → last-write-wins,
+   *    semantics (`memory.added` → append, `checkpoint.set` → last-write-wins,
    *    `output.emitted` → merge-patch, `report.appended` → concat,
    *    `log.written` → append).
    *

@@ -37,7 +37,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
           "@appstrate/log": "*",
           "@appstrate/output": "*",
           "@appstrate/report": "*",
-          "@appstrate/set-state": "*",
+          "@appstrate/set-checkpoint": "*",
           "@appstrate/add-memory": "*",
         },
       },

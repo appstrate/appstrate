@@ -168,10 +168,10 @@ describe("createConsoleSink — human mode", () => {
   it("remains silent on unmapped events (no stdout, no stderr)", async () => {
     const sink = createConsoleSink({});
     await sink.handle({
-      type: "state.set",
+      type: "@my-org/audit.logged",
       timestamp: 0,
       runId: RUN_ID,
-      state: {},
+      actor: "u_1",
     } as RunEvent);
     expect(streams.stdout).toBe("");
     expect(streams.stderr).toBe("");

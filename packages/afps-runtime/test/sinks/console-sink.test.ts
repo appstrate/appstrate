@@ -45,13 +45,13 @@ describe("ConsoleSink", () => {
   });
 
   it("formats each canonical event kind distinctly", async () => {
-    await sink.handle(event("state.set", { state: { a: 1 } }));
+    await sink.handle(event("checkpoint.set", { data: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: "x" }));
     await sink.handle(event("report.appended", { content: "# R" }));
     await sink.handle(event("log.written", { level: "warn", message: "careful" }));
     const lines = buf.output.trim().split("\n");
     expect(lines).toHaveLength(4);
-    expect(lines[0]).toContain("state");
+    expect(lines[0]).toContain("checkpoint");
     expect(lines[1]).toContain("output");
     expect(lines[2]).toContain("report");
     expect(lines[3]).toContain("careful");
@@ -73,7 +73,7 @@ describe("ConsoleSink", () => {
   it("writes a summary on finalize", async () => {
     await sink.finalize({
       memories: [{ content: "a" }, { content: "b" }],
-      state: { foo: 1 },
+      checkpoint: { foo: 1 },
       output: { done: true },
       report: "# Done",
       logs: [{ level: "info", message: "ok", timestamp: 0 }],
@@ -82,13 +82,13 @@ describe("ConsoleSink", () => {
     expect(buf.output).toContain("logs=1");
     expect(buf.output).toContain("output=set");
     expect(buf.output).toContain("report=set");
-    expect(buf.output).toContain("state=set");
+    expect(buf.output).toContain("checkpoint=set");
   });
 
   it("surfaces errors in the summary", async () => {
     await sink.finalize({
       memories: [],
-      state: null,
+      checkpoint: null,
       output: null,
       report: null,
       logs: [],

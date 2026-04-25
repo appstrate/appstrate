@@ -110,34 +110,6 @@ export const checkpointTool: Tool = {
   },
 };
 
-/**
- * @deprecated Pre-AFPS-1.4 alias kept so already-published bundles that
- * declare `@appstrate/set-state@1.0.0` keep loading. The runtime accepts
- * both `state.set` and `checkpoint.set` events; this tool emits the
- * legacy event for back-compat. New bundles should depend on
- * `@appstrate/set-checkpoint@2.0.0` and use {@link checkpointTool}.
- */
-export const stateTool: Tool = {
-  name: "set_state",
-  description:
-    "Overwrite the agent's carry-over state for the next run. Last-write-wins; the most recent call fully replaces any previous state.",
-  parameters: {
-    type: "object",
-    required: ["state"],
-    additionalProperties: false,
-    properties: {
-      state: {
-        description: "Arbitrary JSON value stored as carry-over state.",
-      },
-    },
-  } satisfies JSONSchema,
-  async execute(args, ctx) {
-    const { state } = args as { state: unknown };
-    emit(ctx, "state.set", { state });
-    return successResult("State updated");
-  },
-};
-
 // ─────────────────────────────────────────────
 // @afps/output — output → output.emitted
 // ─────────────────────────────────────────────
@@ -220,11 +192,6 @@ export const logTool: Tool = {
 export const PLATFORM_TOOLS = {
   add_memory: memoryTool,
   set_checkpoint: checkpointTool,
-  // `set_state` is the deprecated AFPS ≤ 1.3 name. Kept in the catalogue
-  // so bundles declaring `@appstrate/set-state@1.0.0` keep resolving;
-  // emits the legacy `state.set` event which the reducer aliases to
-  // `checkpoint.set`. Remove when the floor of supported bundles ≥ 1.4.
-  set_state: stateTool,
   output: outputTool,
   report: reportTool,
   log: logTool,

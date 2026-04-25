@@ -20,10 +20,10 @@
     "content": "Client prefers bullet-point summaries over prose."
   },
   {
-    "type": "state.set",
+    "type": "checkpoint.set",
     "timestamp": 0,
     "runId": "brief_001",
-    "state": { "lastBriefing": "2026-04-20", "sourceCount": 5 }
+    "data": { "lastBriefing": "2026-04-20", "sourceCount": 5 }
   },
   {
     "type": "output.emitted",

@@ -167,7 +167,11 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
     availableTools: [
       { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
       { id: "@appstrate/output", name: "Output", description: "Return run result" },
-      { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
+      {
+        id: "@appstrate/set-checkpoint",
+        name: "Set Checkpoint",
+        description: "Persist checkpoint",
+      },
       { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
     ],
     ...overrides,
@@ -223,16 +227,23 @@ describe("buildEnrichedPrompt — tool documentation", () => {
   it("includes multiple tool docs", () => {
     const ctx = baseContext({
       availableTools: [
-        { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
+        {
+          id: "@appstrate/set-checkpoint",
+          name: "Set Checkpoint",
+          description: "Persist checkpoint",
+        },
         { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
       ],
       toolDocs: [
-        { id: "@appstrate/set-state", content: "## State Persistence\n\nUse `set_state`." },
+        {
+          id: "@appstrate/set-checkpoint",
+          content: "## Checkpoint Persistence\n\nUse `set_checkpoint`.",
+        },
         { id: "@appstrate/add-memory", content: "## Memory\n\nUse `add_memory`." },
       ],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## State Persistence");
+    expect(prompt).toContain("## Checkpoint Persistence");
     expect(prompt).toContain("## Memory");
   });
 

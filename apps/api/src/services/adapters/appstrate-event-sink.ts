@@ -26,7 +26,7 @@
  * Event routing (identical for both sinks):
  *
  *   AFPS canonical (reserved domains) → reducer snapshot (aggregating only):
- *     memory.added / state.set / output.emitted / report.appended / log.written
+ *     memory.added / checkpoint.set / output.emitted / report.appended / log.written
  *
  *   Platform write-through (always, both sinks):
  *     output.emitted  → run_logs (result/output)
@@ -196,7 +196,7 @@ export class PersistingEventSink implements EventSink {
       }
 
       default:
-        // memory.added / state.set / third-party — no run_logs row.
+        // memory.added / checkpoint.set / third-party — no run_logs row.
         break;
     }
   }

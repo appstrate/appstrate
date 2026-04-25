@@ -19,7 +19,7 @@
  *      the complete row) which would fail in either infra mode if the
  *      abstractions were bypassed.
  *
- *   2. `result.report` / `result.output` / `result.state` sent with
+ *   2. `result.report` / `result.output` / `result.checkpoint` sent with
  *      finalize land on `runs.result`. Before the tee sink merged
  *      aggregator fields into the finalize POST, tools that emitted
  *      `report.appended` via stdout produced an empty report column.

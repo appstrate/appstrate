@@ -9,7 +9,7 @@
  * envelope (`type: string` + open index signature) so third-party tools
  * can emit any payload without amending the spec. That openness is
  * correct at the spec layer but defeats TypeScript exhaustiveness in
- * the runtime, where five reserved namespaces (`memory.*`, `state.*`,
+ * the runtime, where five reserved namespaces (`memory.*`, `checkpoint.*`,
  * `output.*`, `report.*`, `log.*`) carry stable, runtime-meaningful
  * shapes.
  *
@@ -58,25 +58,10 @@ export interface MemoryAddedEvent extends BaseEnvelope {
 }
 
 /**
- * `@afps/state` — legacy `set_state()` tool event (AFPS ≤ 1.3).
+ * `@afps/checkpoint` — `set_checkpoint()` tool (AFPS 1.4+).
  *
- * @deprecated Renamed to {@link CheckpointSetEvent} (`checkpoint.set`) in
- * AFPS 1.4 alongside the unified persistence model. Kept for dual-event
- * acceptance — pre-1.4 runners and shipped agent bundles still emit this
- * shape and the reducer continues to fold it. Remove in a future major
- * once the floor of supported AFPS bundles is ≥ 1.4.
- */
-export interface StateSetEvent extends BaseEnvelope {
-  type: "state.set";
-  state: unknown;
-}
-
-/**
- * `@afps/state` — `set_checkpoint()` tool (AFPS 1.4+).
- *
- * Replaces {@link StateSetEvent} — same fold semantics (last-write-wins
- * into `RunResult.state`) but carries a `scope` dimension matching the
- * unified persistence store.
+ * Last-write-wins fold into `RunResult.checkpoint`, carries a `scope`
+ * dimension matching the unified persistence store.
  *
  * `scope` defaults to `"actor"` (per-run-actor isolation) when omitted.
  * Agents that genuinely want app-wide checkpoints (cron-scheduled jobs,
@@ -143,7 +128,6 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
   | MemoryAddedEvent
-  | StateSetEvent
   | CheckpointSetEvent
   | OutputEmittedEvent
   | ReportAppendedEvent
@@ -155,7 +139,6 @@ export type CanonicalRunEvent =
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
   "memory.added",
-  "state.set",
   "checkpoint.set",
   "output.emitted",
   "report.appended",
@@ -186,8 +169,6 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
       return true;
     }
-    case "state.set":
-      return "state" in event;
     case "checkpoint.set": {
       const e = event as Record<string, unknown>;
       if (!("data" in e)) return false;

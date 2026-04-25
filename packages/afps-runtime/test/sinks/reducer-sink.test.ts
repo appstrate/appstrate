@@ -25,11 +25,11 @@ describe("createReducerSink", () => {
     expect(snapshot().memories).toEqual([{ content: "a" }, { content: "b" }]);
   });
 
-  it("tracks the last state.set value", async () => {
+  it("tracks the last checkpoint.set value", async () => {
     const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("state.set", { state: { a: 1 } }));
-    await sink.handle(event("state.set", { state: { b: 2 } }));
-    expect(snapshot().state).toEqual({ b: 2 });
+    await sink.handle(event("checkpoint.set", { data: { a: 1 } }));
+    await sink.handle(event("checkpoint.set", { data: { b: 2 } }));
+    expect(snapshot().checkpoint).toEqual({ b: 2 });
   });
 
   it("replaces output on each output.emitted event", async () => {
@@ -79,7 +79,7 @@ describe("createReducerSink", () => {
   it("produces the same result as reduceEvents over the event stream", async () => {
     const events = [
       event("memory.added", { content: "m1" }),
-      event("state.set", { state: { c: 1 } }),
+      event("checkpoint.set", { data: { c: 1 } }),
       event("output.emitted", { data: { a: 1 } }),
       event("output.emitted", { data: { b: 2 } }),
       event("report.appended", { content: "part one" }),

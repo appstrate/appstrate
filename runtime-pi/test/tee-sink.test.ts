@@ -270,17 +270,17 @@ describe("attachTeeSink — stdout bridge", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachTeeSink — aggregation via finalize", () => {
-  it("aggregates report.appended + output.emitted + state.set across session + stdout", async () => {
+  it("aggregates report.appended + output.emitted + checkpoint.set across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
 
     // Session-style: emit via the tee sink directly (what PiRunner does).
     await tee.sink.handle({
-      type: "state.set",
+      type: "checkpoint.set",
       timestamp: 1,
       runId: "r",
-      checkpoint: { step: 1 },
+      data: { step: 1 },
     });
 
     // Stdout-style: tool writes a JSON line.
@@ -370,29 +370,6 @@ describe("attachTeeSink — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.checkpoint).toEqual({ cursor: "abc" });
     expect(final.checkpointScope).toBe("shared");
-    tee.restore();
-  });
-
-  it("dual-event acceptance: legacy state.set and new checkpoint.set both write into result.checkpoint", async () => {
-    const underlying = recordingSink();
-    const stdout = makeFakeStdout();
-    const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
-
-    // Old runner emits state.set.
-    stdout.write.call(null as never, '{"type":"state.set","state":{"v":1},"timestamp":1}\n');
-    // Then a new runner overwrites via checkpoint.set with scope.
-    stdout.write.call(
-      null as never,
-      '{"type":"checkpoint.set","data":{"v":2},"scope":"actor","timestamp":2}\n',
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-
-    await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
-
-    const final = underlying.finalized!;
-    expect(final.checkpoint).toEqual({ v: 2 });
-    expect(final.checkpointScope).toBe("actor");
     tee.restore();
   });
 });

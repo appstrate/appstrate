@@ -75,18 +75,18 @@ describe("AggregatingEventSink", () => {
     expect(sink.snapshot().memories).toEqual([{ content: "first" }, { content: "second" }]);
   });
 
-  it("stores state.set as-is when payload is an object", async () => {
+  it("stores checkpoint.set as-is when payload is an object", async () => {
     const sink = newSink();
-    await sink.handle(event("state.set", { state: { counter: 42 } }));
+    await sink.handle(event("checkpoint.set", { data: { counter: 42 } }));
 
-    expect(sink.snapshot().state).toEqual({ counter: 42 });
+    expect(sink.snapshot().checkpoint).toEqual({ counter: 42 });
   });
 
-  it("stores state.set raw values verbatim (no projection — runtime keeps the payload)", async () => {
+  it("stores checkpoint.set raw values verbatim (no projection — runtime keeps the payload)", async () => {
     const sink = newSink();
-    await sink.handle(event("state.set", { state: "just a string" }));
+    await sink.handle(event("checkpoint.set", { data: "just a string" }));
 
-    expect(sink.snapshot().state).toBe("just a string");
+    expect(sink.snapshot().checkpoint).toBe("just a string");
   });
 
   it("replaces output on each emission + writes a run log per call", async () => {

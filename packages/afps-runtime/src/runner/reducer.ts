@@ -5,7 +5,7 @@
  * RunEvent → RunResult reducer.
  *
  * Consumes {@link RunEvent}s whose `type` is one of the reserved core
- * domains (`memory.added` / `state.set` / `output.emitted` /
+ * domains (`memory.added` / `checkpoint.set` / `output.emitted` /
  * `report.appended` / `log.written`). Events with any other `type` are
  * passed through silently — the sink still sees them, but they do not
  * contribute to the aggregated result.
@@ -39,7 +39,7 @@ export function emptyRunResult(): RunResult {
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
  * Open-envelope `RunEvent`s flow in; the canonical narrower projects
- * the five reserved namespaces (memory / state / output / report / log)
+ * the five reserved namespaces (memory / checkpoint / output / report / log)
  * + the runner-internal `appstrate.*` namespace into a discriminated
  * union, so the switch is exhaustively typed. Third-party / unknown
  * events are silently passed through — the sink still sees them, they
@@ -55,14 +55,6 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         content: canonical.content,
         ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
       });
-      return;
-    case "state.set":
-      // Pre-AFPS-1.4 alias for `checkpoint.set`. Folded into the same
-      // accumulator so dual-event acceptance is invisible to downstream
-      // consumers (HttpSink, run-event-ingestion). No `checkpointScope`
-      // is set — `state.set` carries no scope, so consumers default to
-      // the run's actor at the storage boundary.
-      result.checkpoint = canonical.state ?? null;
       return;
     case "checkpoint.set":
       result.checkpoint = canonical.data ?? null;

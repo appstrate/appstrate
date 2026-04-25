@@ -12,9 +12,8 @@
  * - "shared" makes the checkpoint app-wide — useful for cron-scheduled
  *   syncs that have no actor of their own.
  *
- * Replaces the deprecated `@appstrate/set-state` tool. The platform
- * accepts both `state.set` (legacy) and `checkpoint.set` events for the
- * back-compat window — new bundles should use this tool.
+ * Supersedes the dropped `@appstrate/set-state` tool — the platform
+ * only accepts `checkpoint.set` events now (AFPS 1.4 final cut).
  */
 
 import { Type } from "@mariozechner/pi-ai";
