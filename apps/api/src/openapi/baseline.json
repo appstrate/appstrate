@@ -733,8 +733,8 @@
       "get": {
         "operationId": "listAgentPersistence",
         "tags": ["Agents"],
-        "summary": "List unified agent persistence (checkpoint + memories)",
-        "description": "Returns the agent's checkpoint and memory list visible to the caller's actor scope. Admins may filter by `actorType` (`user` | `end_user` | `shared`) + `actorId` to inspect a specific scope. Members always see their own actor scope plus shared rows. See ADR-011.",
+        "summary": "List unified agent persistence (checkpoints + memories)",
+        "description": "Returns the agent's checkpoints and memory list visible to the caller's actor scope. Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's checkpoints; members always see their own actor scope plus shared rows. See ADR-011.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -776,6 +776,15 @@
               "type": "string"
             },
             "description": "Required when `actorType` is `user` or `end_user`."
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Narrow `memories` to those produced during a specific run. Has no effect on `checkpoints`."
           }
         ],
         "responses": {
@@ -794,8 +803,35 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "checkpoint": {
-                      "description": "Latest checkpoint content (any JSON value), or null if absent."
+                    "checkpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "content": {},
+                          "runId": {
+                            "type": ["string", "null"]
+                          },
+                          "actorType": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actorId": {
+                            "type": ["string", "null"]
+                          },
+                          "createdAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          }
+                        }
+                      }
                     },
                     "memories": {
                       "type": "array",
@@ -954,6 +990,70 @@
         "responses": {
           "200": {
             "description": "Memory deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/agents/{scope}/{name}/persistence/checkpoints/{id}": {
+      "delete": {
+        "operationId": "deleteAgentPersistenceCheckpoint",
+        "tags": ["Agents"],
+        "summary": "Delete a single checkpoint by id",
+        "description": "Admin-only. The id must belong to the targeted agent in the current app.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoint deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1617,7 +1717,7 @@
               }
             },
             "content": {
-              "application/vnd.appstrate.bundle+zip": {
+              "application/zip": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
@@ -3112,7 +3212,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run.status\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run.status` (status change), `run.log` (log entry, single-run stream only). Heartbeat `:ping` every 30s.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run.status\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run.status` (status change), `run.log` (log entry, single-run stream only). Heartbeat `:ping` every 30s.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -3149,7 +3249,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "id",
@@ -3194,7 +3294,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "packageId",
@@ -14729,7 +14829,8 @@
         "operationId": "listEndUsers",
         "tags": ["End Users"],
         "summary": "List end-users",
-        "description": "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
+        "description": "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.\n\n**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most one. Encoded via the `x-mutually-exclusive` extension below for client generators that honour it; the server enforces the constraint at runtime regardless.",
+        "x-mutually-exclusive": ["startingAfter", "endingBefore"],
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15328,11 +15429,45 @@
               "type": "string",
               "pattern": "^eu_"
             }
+          },
+          {
+            "name": "X-Stream-Request",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`.",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim).",
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "headers": {
+              "X-Truncated": {
+                "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "X-Truncated-Size": {
+                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "*/*": {}
             }

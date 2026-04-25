@@ -214,9 +214,9 @@ export const agentsPaths = {
     get: {
       operationId: "listAgentPersistence",
       tags: ["Agents"],
-      summary: "List unified agent persistence (checkpoint + memories)",
+      summary: "List unified agent persistence (checkpoints + memories)",
       description:
-        "Returns the agent's checkpoint and memory list visible to the caller's actor scope. Admins may filter by `actorType` (`user` | `end_user` | `shared`) + `actorId` to inspect a specific scope. Members always see their own actor scope plus shared rows. See ADR-011.",
+        "Returns the agent's checkpoints and memory list visible to the caller's actor scope. Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's checkpoints; members always see their own actor scope plus shared rows. See ADR-011.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -243,6 +243,14 @@ export const agentsPaths = {
           schema: { type: "string" },
           description: "Required when `actorType` is `user` or `end_user`.",
         },
+        {
+          name: "runId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Narrow `memories` to those produced during a specific run. Has no effect on `checkpoints`.",
+        },
       ],
       responses: {
         "200": {
@@ -256,8 +264,20 @@ export const agentsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  checkpoint: {
-                    description: "Latest checkpoint content (any JSON value), or null if absent.",
+                  checkpoints: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        content: {},
+                        runId: { type: ["string", "null"] },
+                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actorId: { type: ["string", "null"] },
+                        createdAt: { type: ["string", "null"], format: "date-time" },
+                        updatedAt: { type: ["string", "null"], format: "date-time" },
+                      },
+                    },
                   },
                   memories: {
                     type: "array",
@@ -354,6 +374,41 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Memory deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { deleted: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/agents/{scope}/{name}/persistence/checkpoints/{id}": {
+    delete: {
+      operationId: "deleteAgentPersistenceCheckpoint",
+      tags: ["Agents"],
+      summary: "Delete a single checkpoint by id",
+      description: "Admin-only. The id must belong to the targeted agent in the current app.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        { name: "id", in: "path", required: true, schema: { type: "integer" } },
+      ],
+      responses: {
+        "200": {
+          description: "Checkpoint deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

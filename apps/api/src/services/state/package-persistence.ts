@@ -14,7 +14,7 @@
  * the DB boundary — callers never see `"user"` vs `"member"` divergence.
  */
 
-import { and, asc, count, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
@@ -42,6 +42,16 @@ export interface Memory {
   createdAt: Date;
   actorType: "user" | "end_user" | "shared";
   actorId: string | null;
+}
+
+export interface CheckpointRow {
+  id: number;
+  content: unknown;
+  runId: string | null;
+  actorType: "user" | "end_user" | "shared";
+  actorId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // --- Actor ↔ storage translation --------------------------------------------
@@ -176,6 +186,26 @@ export async function upsertCheckpoint(
   `);
 }
 
+/** Delete a single checkpoint by id, scoped to (package, app). Returns true if a row was deleted. */
+export async function deleteCheckpointById(
+  id: number,
+  packageId: string,
+  applicationId: string,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(packagePersistence)
+    .where(
+      and(
+        eq(packagePersistence.id, id),
+        eq(packagePersistence.packageId, packageId),
+        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.kind, "checkpoint"),
+      ),
+    )
+    .returning({ id: packagePersistence.id });
+  return deleted.length > 0;
+}
+
 /** Delete the checkpoint row for a specific scope. Returns true if a row was deleted. */
 export async function deleteCheckpoint(
   packageId: string,
@@ -207,6 +237,7 @@ export async function listMemories(
   packageId: string,
   applicationId: string,
   scope: PersistenceScope,
+  runId?: string,
 ): Promise<Memory[]> {
   const { actorType, actorId } = storageActor(scope);
 
@@ -240,11 +271,67 @@ export async function listMemories(
         eq(packagePersistence.applicationId, applicationId),
         eq(packagePersistence.kind, "memory"),
         scopeFilter!,
+        ...(runId ? [eq(packagePersistence.runId, runId)] : []),
       ),
     )
     .orderBy(asc(packagePersistence.createdAt));
 
   return rows as Memory[];
+}
+
+/**
+ * List every checkpoint row for an agent.
+ *
+ * Scoping mirrors {@link listMemories}: `shared` rows are always visible,
+ * actor-specific rows only when they match the caller's scope. Passing
+ * `scope: undefined` means "no filter" — admin paths can use that to inspect
+ * checkpoints across every actor.
+ *
+ * Sorted by `updatedAt DESC` so the most recently checkpointed scope shows
+ * up first in admin listings.
+ */
+export async function listCheckpoints(
+  packageId: string,
+  applicationId: string,
+  scope?: PersistenceScope,
+): Promise<CheckpointRow[]> {
+  let scopeFilter;
+  if (scope) {
+    const { actorType, actorId } = storageActor(scope);
+    scopeFilter =
+      actorType === "shared"
+        ? and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
+        : or(
+            and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId)),
+            and(
+              eq(packagePersistence.actorType, actorType),
+              eq(packagePersistence.actorId, actorId!),
+            ),
+          );
+  }
+
+  const rows = await db
+    .select({
+      id: packagePersistence.id,
+      content: packagePersistence.content,
+      runId: packagePersistence.runId,
+      actorType: packagePersistence.actorType,
+      actorId: packagePersistence.actorId,
+      createdAt: packagePersistence.createdAt,
+      updatedAt: packagePersistence.updatedAt,
+    })
+    .from(packagePersistence)
+    .where(
+      and(
+        eq(packagePersistence.packageId, packageId),
+        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.kind, "checkpoint"),
+        ...(scopeFilter ? [scopeFilter] : []),
+      ),
+    )
+    .orderBy(desc(packagePersistence.updatedAt));
+
+  return rows as CheckpointRow[];
 }
 
 /**

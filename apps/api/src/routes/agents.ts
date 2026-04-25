@@ -4,11 +4,12 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getRunningRunCounts,
-  getCheckpoint,
+  listCheckpoints,
   listMemories,
   deleteMemory,
   deleteAllMemories,
   deleteCheckpoint,
+  deleteCheckpointById,
   scopeFromActor,
   type PersistenceScope,
 } from "../services/state/index.ts";
@@ -271,6 +272,7 @@ export function createAgentsRouter() {
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actorType");
       const actorIdParam = c.req.query("actorId");
+      const runIdParam = c.req.query("runId");
 
       // Default scope = caller's actor. Admin filtering by other actors
       // is controlled by `persistence:read` (admin-grade); members see
@@ -292,13 +294,31 @@ export function createAgentsRouter() {
         throw invalidRequest("kind must be 'checkpoint' or 'memory'");
       }
 
-      const [checkpoint, memories] = await Promise.all([
-        wantsCheckpoint ? getCheckpoint(agent.id, applicationId, scope) : Promise.resolve(null),
-        wantsMemory ? listMemories(agent.id, applicationId, scope) : Promise.resolve([]),
+      // Admins inspecting at agent-level (no scope override, no runId) see
+      // every actor's checkpoint; everyone else is narrowed to their scope.
+      const checkpointScope = isAdmin && !scopeOverride ? undefined : scope;
+
+      const [checkpoints, memories] = await Promise.all([
+        wantsCheckpoint
+          ? listCheckpoints(agent.id, applicationId, checkpointScope)
+          : Promise.resolve([]),
+        wantsMemory
+          ? listMemories(agent.id, applicationId, scope, runIdParam)
+          : Promise.resolve([]),
       ]);
 
       return c.json({
-        checkpoint: wantsCheckpoint ? checkpoint : undefined,
+        checkpoints: wantsCheckpoint
+          ? checkpoints.map((cp) => ({
+              id: cp.id,
+              content: cp.content,
+              runId: cp.runId,
+              actorType: cp.actorType,
+              actorId: cp.actorId,
+              createdAt: cp.createdAt?.toISOString() ?? null,
+              updatedAt: cp.updatedAt?.toISOString() ?? null,
+            }))
+          : undefined,
         memories: wantsMemory
           ? memories.map((m) => ({
               id: m.id,
@@ -328,6 +348,26 @@ export function createAgentsRouter() {
       const deleted = await deleteMemory(result.data, agent.id, applicationId);
       if (!deleted) {
         throw notFound("Memory not found");
+      }
+      return c.json({ deleted: true });
+    },
+  );
+
+  // DELETE /api/agents/:scope/:name/persistence/checkpoints/:id
+  router.delete(
+    "/:scope{@[^/]+}/:name/persistence/checkpoints/:id",
+    requireAgent(),
+    requirePermission("persistence", "delete"),
+    async (c) => {
+      const agent = c.get("agent");
+      const applicationId = c.get("applicationId");
+      const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
+      if (!result.success) {
+        throw invalidRequest("Invalid checkpoint id", "id");
+      }
+      const deleted = await deleteCheckpointById(result.data, agent.id, applicationId);
+      if (!deleted) {
+        throw notFound("Checkpoint not found");
       }
       return c.json({ deleted: true });
     },

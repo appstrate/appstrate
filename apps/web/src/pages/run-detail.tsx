@@ -26,6 +26,10 @@ import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
+import { useRunMemories } from "../hooks/use-persistence";
+import { MemoryRow } from "../components/persistence/memory-row";
+import { EmptyState } from "../components/page-states";
+import { BrainCircuit } from "lucide-react";
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -106,11 +110,15 @@ export function RunDetailPage() {
   const checkpointData = (run?.checkpoint as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
+  // Run-level memories (only the rows produced during this run).
+  const { data: runMemories } = useRunMemories(packageId, runId);
+  const hasRunMemories = !!runMemories && runMemories.length > 0;
+
   // Default tab: "result" if results exist, otherwise "logs".
   // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "checkpoint", "info"] as const,
+    ["result", "logs", "checkpoint", "memories", "info"] as const,
     defaultTab,
   );
 
@@ -204,7 +212,9 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "checkpoint" | "info")}
+          onValueChange={(v) =>
+            setActiveTab(v as "logs" | "result" | "checkpoint" | "memories" | "info")
+          }
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
@@ -218,6 +228,14 @@ export function RunDetailPage() {
             </TabsTrigger>
             {checkpointData && (
               <TabsTrigger value="checkpoint">{t("exec.tabCheckpoint")}</TabsTrigger>
+            )}
+            {hasRunMemories && (
+              <TabsTrigger value="memories">
+                {t("exec.tabRunMemories")}
+                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                  {runMemories!.length}
+                </span>
+              </TabsTrigger>
             )}
             <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
@@ -267,6 +285,17 @@ export function RunDetailPage() {
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
       {activeTab === "checkpoint" && checkpointData && <JsonView data={checkpointData} />}
+
+      {activeTab === "memories" &&
+        (hasRunMemories ? (
+          <div className="space-y-1">
+            {runMemories!.map((mem) => (
+              <MemoryRow key={mem.id} memory={mem} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState message={t("exec.emptyRunMemories")} icon={BrainCircuit} compact />
+        ))}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

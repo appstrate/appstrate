@@ -66,6 +66,7 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
+  "DELETE /api/agents/{scope}/{name}/persistence/checkpoints/{id}",
   "PUT /api/agents/{scope}/{name}/skills",
   "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",

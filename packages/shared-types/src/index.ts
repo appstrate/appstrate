@@ -366,6 +366,18 @@ export interface AgentMemoryItem {
   createdAt: string | null;
 }
 
+export interface AgentCheckpointItem {
+  id: number;
+  /** Checkpoint payload — agent-defined JSON. */
+  content: unknown;
+  /** Run that wrote the latest snapshot, if any. */
+  runId: string | null;
+  actorType: PersistenceActorType;
+  actorId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 // --- Org Proxy Types ---
 
 export interface OrgProxyInfo {

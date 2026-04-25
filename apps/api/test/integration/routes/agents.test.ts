@@ -9,6 +9,7 @@ import { seedAgent, seedRun, seedConnectionProfile, seedApplication } from "../.
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { runs } from "@appstrate/db/schema";
+import { addMemories, upsertCheckpoint } from "../../../src/services/state/package-persistence.ts";
 
 const app = getTestApp();
 
@@ -579,6 +580,152 @@ describe("Agents API", () => {
       const body = (await res.json()) as any;
       expect(body.agent.agentAppProfileId).toBeNull();
       expect(body.agent.agentAppProfileName).toBeNull();
+    });
+  });
+
+  // ─── Persistence Routes (ADR-011 — checkpoints + memories) ──────────
+
+  describe("GET /api/agents/:scope/:name/persistence", () => {
+    it("returns checkpoints as an array (admin sees every actor's row)", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-list",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      // Two distinct scopes write checkpoints
+      await upsertCheckpoint(
+        "@myorg/persist-list",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        { step: "user-checkpoint" },
+        null,
+      );
+      await upsertCheckpoint(
+        "@myorg/persist-list",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        { step: "shared-checkpoint" },
+        null,
+      );
+
+      const res = await app.request("/api/agents/@myorg/persist-list/persistence?kind=checkpoint", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        checkpoints: Array<{ actorType: string; content: { step: string } }>;
+      };
+      expect(Array.isArray(body.checkpoints)).toBe(true);
+      expect(body.checkpoints).toHaveLength(2);
+      const actorTypes = body.checkpoints.map((c) => c.actorType).sort();
+      expect(actorTypes).toEqual(["shared", "user"]);
+    });
+
+    it("filters memories by runId", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+      const r1 = await seedRun({
+        packageId: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+      });
+      const r2 = await seedRun({
+        packageId: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+      });
+      await addMemories(
+        "@myorg/persist-runid",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["from-r1-a", "from-r1-b"],
+        r1.id,
+      );
+      await addMemories(
+        "@myorg/persist-runid",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["from-r2"],
+        r2.id,
+      );
+
+      const res = await app.request(
+        `/api/agents/@myorg/persist-runid/persistence?kind=memory&runId=${r1.id}`,
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: Array<{ runId: string }> };
+      expect(body.memories).toHaveLength(2);
+      expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
+    });
+  });
+
+  describe("DELETE /api/agents/:scope/:name/persistence/checkpoints/:id", () => {
+    it("deletes a single checkpoint by id", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-del-cp",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+      await upsertCheckpoint(
+        "@myorg/persist-del-cp",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        { step: "x" },
+        null,
+      );
+
+      const listRes = await app.request(
+        "/api/agents/@myorg/persist-del-cp/persistence?kind=checkpoint",
+        { headers: authHeaders(ctx) },
+      );
+      const listBody = (await listRes.json()) as { checkpoints: Array<{ id: number }> };
+      expect(listBody.checkpoints).toHaveLength(1);
+      const cpId = listBody.checkpoints[0]!.id;
+
+      const delRes = await app.request(
+        `/api/agents/@myorg/persist-del-cp/persistence/checkpoints/${cpId}`,
+        { method: "DELETE", headers: authHeaders(ctx) },
+      );
+      expect(delRes.status).toBe(200);
+
+      const after = await app.request(
+        "/api/agents/@myorg/persist-del-cp/persistence?kind=checkpoint",
+        { headers: authHeaders(ctx) },
+      );
+      const afterBody = (await after.json()) as { checkpoints: unknown[] };
+      expect(afterBody.checkpoints).toHaveLength(0);
+    });
+
+    it("returns 404 for unknown checkpoint id", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-del-404",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request(
+        "/api/agents/@myorg/persist-del-404/persistence/checkpoints/999999",
+        { method: "DELETE", headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(404);
     });
   });
 });

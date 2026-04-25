@@ -47,6 +47,7 @@ import {
   AgentRunsTab,
   AgentSchedulesTab,
   AgentMemoriesTab,
+  AgentCheckpointsTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
 import { AgentModals } from "../components/package-detail/agent-modals";
@@ -63,6 +64,7 @@ type DetailTab =
   | "configuration"
   | "schedules"
   | "memories"
+  | "checkpoints"
   | "api"
   | "versions"
   | "diff"
@@ -233,6 +235,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "configuration",
     "schedules",
     "memories",
+    "checkpoints",
     "api",
     "versions",
     "diff",
@@ -337,6 +340,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       : []),
     { id: "schedules", label: t("detail.tabSchedules") },
     { id: "memories", label: t("detail.tabMemories") },
+    { id: "checkpoints", label: t("detail.tabCheckpoints") },
     { id: "api", label: t("detail.tabApi") },
   ];
 
@@ -537,6 +541,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
       {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
       {type === "agent" && tab === "memories" && <AgentMemoriesTab packageId={packageId} />}
+      {type === "agent" && tab === "checkpoints" && <AgentCheckpointsTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
       {type !== "agent" && tab === "content" && pkgDetail && (
