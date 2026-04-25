@@ -6,7 +6,7 @@ import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   makeProviderTool,
   readProviderMeta,
-  resolveBodyStream,
+  resolveBodyForFetch,
   serializeFetchResponse,
   type ProviderCallFn,
   type ProviderMeta,
@@ -68,8 +68,16 @@ export class SidecarProviderResolver implements ProviderResolver {
 
   private buildCall(ref: ProviderRef, _meta: ProviderMeta): ProviderCallFn {
     return async (req, ctx) => {
-      const bodyBytes = await resolveBodyStream(req.body, {
+      // Resolve the request body. `allowStreaming` opts the upload
+      // path into streaming mode for `{ fromFile }` references larger
+      // than STREAMING_THRESHOLD (1 MB) — the file is read lazily and
+      // piped to the sidecar with `duplex: "half"`, keeping memory
+      // bound regardless of file size. Smaller bodies stay buffered
+      // so the sidecar's transparent 401-refresh-and-retry path keeps
+      // working unchanged.
+      const resolved = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
+        allowStreaming: true,
         workspace: ctx.workspace,
       });
       // The sidecar owns credential injection server-side — it fetches
@@ -84,29 +92,52 @@ export class SidecarProviderResolver implements ProviderResolver {
         "X-Provider": ref.name,
         "X-Target": req.target,
       };
-      // Lift the sidecar's default 50KB response cap when the agent
-      // explicitly asks for a larger inline payload OR routes the
-      // response to a file. Without this header the sidecar truncates
-      // mid-flight and the resolver never sees the bytes that should
-      // have spilled to disk.
-      const maxInline = req.responseMode?.maxInlineBytes;
+      // Routing the response to a file? Opt the sidecar into the
+      // zero-copy streaming response path (X-Stream-Response: 1) so
+      // it pipes upstream bytes through without buffering or
+      // truncation. The runtime then writes them to disk
+      // incrementally via writeStreamToFile, which is bounded by
+      // MAX_STREAMED_BODY_SIZE on this side.
       const wantsFile = typeof req.responseMode?.toFile === "string";
-      if (wantsFile || (typeof maxInline === "number" && maxInline > 0)) {
-        const cap = wantsFile
-          ? ABSOLUTE_MAX_RESPONSE_SIZE
-          : Math.min(maxInline ?? 0, ABSOLUTE_MAX_RESPONSE_SIZE);
-        headers["X-Max-Response-Size"] = String(cap);
+      if (wantsFile) {
+        headers["X-Stream-Response"] = "1";
+      } else {
+        // Inline-only path: lift the sidecar's default cap when the
+        // agent explicitly asks for a larger inline payload. Without
+        // this the sidecar truncates at MAX_RESPONSE_SIZE and the
+        // resolver never sees the bytes that should have spilled.
+        const maxInline = req.responseMode?.maxInlineBytes;
+        if (typeof maxInline === "number" && maxInline > 0) {
+          const cap = Math.min(maxInline, ABSOLUTE_MAX_RESPONSE_SIZE);
+          headers["X-Max-Response-Size"] = String(cap);
+        }
       }
-      const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, {
+      // Streaming uploads need duplex: "half" — required by the
+      // fetch spec when the body is a ReadableStream.
+      const init: RequestInit & Record<string, unknown> = {
         method: req.method,
         headers,
-        body: bodyBytes,
         signal: ctx.signal,
-      });
+      };
+      if (resolved.kind === "stream") {
+        init.body = resolved.stream;
+        init.duplex = "half";
+        // Some upstreams require an explicit Content-Length on
+        // streaming uploads. We set it on the sidecar request — the
+        // sidecar already forwards request headers, including this
+        // one, so the upstream sees a properly framed body.
+        if (!("content-length" in headers) && !("Content-Length" in headers)) {
+          headers["Content-Length"] = String(resolved.size);
+        }
+      } else {
+        init.body = resolved.bytes;
+      }
+      const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, init);
       return serializeFetchResponse(res, {
         workspace: ctx.workspace,
         toolCallId: ctx.toolCallId,
         ...(req.responseMode ? { responseMode: req.responseMode } : {}),
+        ...(wantsFile ? { streaming: true } : {}),
       });
     };
   }

@@ -36,6 +36,22 @@ export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
 export const MAX_REQUEST_BODY_SIZE = 5 * 1024 * 1024;
 
 /**
+ * Above this size, `{ fromFile }` uploads are streamed from disk to
+ * the sidecar instead of being read into memory first. Mirrors the
+ * sidecar's own `STREAMING_THRESHOLD` so the two layers transition
+ * together.
+ */
+export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
+
+/**
+ * Hard upper bound on streamed request/response bodies. Mirrors
+ * `MAX_STREAMED_BODY_SIZE` on the sidecar — `{ fromFile }` uploads
+ * larger than this fail client-side with a typed error before any
+ * bytes hit the wire.
+ */
+export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
+
+/**
  * Runtime projection of the provider manifest — a flat view over the
  * subset of fields that `makeProviderTool` actually consumes. The
  * canonical wire shape nests these fields under `definition.*` per AFPS
@@ -408,7 +424,31 @@ export interface ResolveBodyStreamOptions {
    * resolve outside this directory.
    */
   workspace?: string;
+  /**
+   * When true, `{ fromFile }` references larger than
+   * {@link STREAMING_THRESHOLD} are returned as a `ReadableStream`
+   * instead of being read into memory. The caller must then pass the
+   * stream as `body` with `duplex: "half"` to fetch. Files above
+   * {@link MAX_STREAMED_BODY_SIZE} are still rejected up front.
+   *
+   * When false (default), the runtime continues to buffer the file in
+   * memory up to {@link MAX_REQUEST_BODY_SIZE} — preserving the legacy
+   * 401-refresh-and-retry semantics on the transport.
+   */
+  allowStreaming?: boolean;
 }
+
+/**
+ * Result of {@link resolveBodyStream} when streaming is enabled. Two
+ * cases:
+ *  - `bytes`: small payloads (or string bodies) — pass to fetch as-is.
+ *  - `stream`: large `{ fromFile }` references — pass to fetch with
+ *    `duplex: "half"`. `size` is included so the caller can set
+ *    Content-Length explicitly (some upstreams require it).
+ */
+export type ResolvedRequestBody =
+  | { kind: "bytes"; bytes: string | Uint8Array<ArrayBuffer> | undefined }
+  | { kind: "stream"; stream: ReadableStream<Uint8Array>; size: number };
 
 /**
  * Materialise a request body into a `BodyInit`-compatible value.
@@ -471,6 +511,108 @@ export async function resolveBodyStream(
   return toArrayBufferUint8(await fs.readFile(safePath));
 }
 
+/**
+ * Streaming-aware variant of {@link resolveBodyStream}. When
+ * `allowStreaming` is set AND the body is a `{ fromFile }` reference
+ * pointing at a file larger than {@link STREAMING_THRESHOLD}, returns a
+ * `ReadableStream` that reads the file lazily from disk; otherwise
+ * returns the bytes as before.
+ *
+ * The streaming path uses `Bun.file(path).stream()` when running under
+ * Bun (preferred) and falls back to `fs.createReadStream` wrapped as a
+ * web `ReadableStream` otherwise. Files above
+ * {@link MAX_STREAMED_BODY_SIZE} are rejected client-side with
+ * {@link ResolverError.code} `RESOLVER_BODY_TOO_LARGE` so an oversized
+ * upload never opens a socket.
+ *
+ * Path safety, symlink refusal, and workspace rooting are identical to
+ * {@link resolveBodyStream} — same {@link resolveSafePath} + lstat
+ * pipeline.
+ */
+export async function resolveBodyForFetch(
+  body: string | Uint8Array | null | { fromFile: string } | undefined,
+  opts: ResolveBodyStreamOptions = {},
+): Promise<ResolvedRequestBody> {
+  if (body === undefined || body === null) {
+    return { kind: "bytes", bytes: undefined };
+  }
+  if (typeof body === "string") {
+    return {
+      kind: "bytes",
+      bytes: opts.transformString ? opts.transformString(body) : body,
+    };
+  }
+  if (body instanceof Uint8Array) {
+    return { kind: "bytes", bytes: toArrayBufferUint8(body) };
+  }
+  if (!opts.allowFromFile) {
+    throw new ResolverError(
+      "RESOLVER_BODY_REFERENCE_FORBIDDEN",
+      `resolveBodyForFetch: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use a resolver with allowFromFile`,
+      { fromFile: body.fromFile },
+    );
+  }
+  if (!opts.workspace) {
+    throw new ResolverError(
+      "RESOLVER_MISSING_REQUIRED",
+      `resolveBodyForFetch: { fromFile } resolution requires a workspace; resolver did not pass one`,
+      { fromFile: body.fromFile },
+    );
+  }
+  const fs = await import("node:fs/promises");
+  const safePath = await resolveSafePath(opts.workspace, body.fromFile);
+  const lst = await fs.lstat(safePath);
+  if (lst.isSymbolicLink()) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+      `resolveBodyForFetch: refusing to read symlink ${JSON.stringify(body.fromFile)}`,
+      { fromFile: body.fromFile, resolved: safePath },
+    );
+  }
+  // Streaming path: file size > threshold AND caller opted in. Hard
+  // cap at MAX_STREAMED_BODY_SIZE — beyond that the upload is refused
+  // before any bytes hit the wire.
+  if (opts.allowStreaming && lst.size > STREAMING_THRESHOLD) {
+    if (lst.size > MAX_STREAMED_BODY_SIZE) {
+      throw new ResolverError(
+        "RESOLVER_BODY_TOO_LARGE",
+        `resolveBodyForFetch: ${JSON.stringify(body.fromFile)} is ${lst.size} bytes; streaming max is ${MAX_STREAMED_BODY_SIZE}`,
+        { fromFile: body.fromFile, size: lst.size, max: MAX_STREAMED_BODY_SIZE },
+      );
+    }
+    const stream = await openFileReadStream(safePath);
+    return { kind: "stream", stream, size: lst.size };
+  }
+  // Buffered path: same hard cap as the legacy resolveBodyStream.
+  if (lst.size > MAX_REQUEST_BODY_SIZE) {
+    throw new ResolverError(
+      "RESOLVER_BODY_TOO_LARGE",
+      `resolveBodyForFetch: ${JSON.stringify(body.fromFile)} is ${lst.size} bytes; max is ${MAX_REQUEST_BODY_SIZE}`,
+      { fromFile: body.fromFile, size: lst.size, max: MAX_REQUEST_BODY_SIZE },
+    );
+  }
+  return { kind: "bytes", bytes: toArrayBufferUint8(await fs.readFile(safePath)) };
+}
+
+/**
+ * Open a file as a web `ReadableStream<Uint8Array>` suitable for use
+ * with fetch + `duplex: "half"`. Prefers `Bun.file().stream()` when
+ * running under Bun; falls back to `node:fs.createReadStream` wrapped
+ * via the standard `Readable.toWeb` adapter otherwise.
+ */
+async function openFileReadStream(absPath: string): Promise<ReadableStream<Uint8Array>> {
+  const bunGlobal = (
+    globalThis as { Bun?: { file: (p: string) => { stream: () => ReadableStream<Uint8Array> } } }
+  ).Bun;
+  if (bunGlobal && typeof bunGlobal.file === "function") {
+    return bunGlobal.file(absPath).stream();
+  }
+  const fs = await import("node:fs");
+  const { Readable } = await import("node:stream");
+  const node = fs.createReadStream(absPath);
+  return Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>;
+}
+
 function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
   if (
     source.buffer instanceof ArrayBuffer &&
@@ -523,6 +665,79 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Pipe a `ReadableStream` to disk while computing the running size +
+ * sha256 hash. Uses the streaming hash interface (Node's
+ * `crypto.createHash` / Bun's `Bun.CryptoHasher` are equivalent here)
+ * so the digest finalises after the last chunk, no buffering required.
+ *
+ * Throws {@link ResolverError} `RESOLVER_BODY_TOO_LARGE` if the
+ * cumulative byte count exceeds {@link MAX_STREAMED_BODY_SIZE} — guards
+ * against an upstream that ignores Content-Length and dribbles bytes
+ * forever.
+ *
+ * Aborts cleanly on writer error: cancels the source, closes the file
+ * handle, and rethrows so callers see the same error path as the
+ * buffered writeFile.
+ */
+async function writeStreamToFile(
+  source: ReadableStream<Uint8Array>,
+  absPath: string,
+): Promise<{ size: number; sha256: string }> {
+  const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+  const crypto = await import("node:crypto");
+  await fs.mkdir(path.dirname(absPath), { recursive: true });
+
+  const hasher = crypto.createHash("sha256");
+  const handle = await fs.open(absPath, "w");
+  let size = 0;
+  const reader = source.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      size += value.byteLength;
+      if (size > MAX_STREAMED_BODY_SIZE) {
+        // Drain remaining bytes from upstream and bail. Better to
+        // surface a clear error than silently truncate a stream the
+        // caller asked us to mirror byte-for-byte.
+        await reader.cancel().catch(() => {});
+        throw new ResolverError(
+          "RESOLVER_BODY_TOO_LARGE",
+          `writeStreamToFile: streamed response exceeded ${MAX_STREAMED_BODY_SIZE} bytes`,
+          { max: MAX_STREAMED_BODY_SIZE, observed: size },
+        );
+      }
+      hasher.update(value);
+      await handle.write(value);
+    }
+    return { size, sha256: hasher.digest("hex") };
+  } catch (err) {
+    // Best-effort cleanup: drop the partial file so the agent doesn't
+    // pick up half-written bytes on the next call. Swallow cleanup
+    // errors so the original cause surfaces.
+    try {
+      await handle.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await fs.unlink(absPath);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    try {
+      await handle.close();
+    } catch {
+      /* idempotent: handle may already be closed by the catch path */
+    }
+  }
+}
+
 function base64Encode(bytes: Uint8Array): string {
   // Buffer is available in both Node and Bun.
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
@@ -532,6 +747,18 @@ export interface SerializeFetchResponseContext {
   workspace: string;
   toolCallId: string;
   responseMode?: { toFile?: string; maxInlineBytes?: number };
+  /**
+   * When true, prefer streaming the response body straight to disk
+   * (computing size + sha256 incrementally) instead of buffering into
+   * memory. Only used when the caller has routed the response to a
+   * file (`responseMode.toFile`) or auto-spill triggers — small
+   * inline bodies always go through the buffered path.
+   *
+   * The caller is responsible for adding the `X-Stream-Response: 1`
+   * header to its sidecar request so the sidecar pipes upstream bytes
+   * without truncation; otherwise the buffered/truncated path applies.
+   */
+  streaming?: boolean;
 }
 
 /**
@@ -555,6 +782,37 @@ export async function serializeFetchResponse(
   res.headers.forEach((value, key) => {
     headers[key] = value;
   });
+
+  const requestedToFileEarly = ctx.responseMode?.toFile;
+  const contentTypeEarly = res.headers.get("content-type");
+  const mimeTypeEarly = parseMimeType(contentTypeEarly);
+
+  // Streaming response → file: write the body to disk in chunks while
+  // computing size + sha256 on the fly. Avoids buffering large
+  // payloads (Drive media downloads, bulk exports, …) into memory.
+  // Only triggered when the caller opts in via ctx.streaming AND has
+  // routed the response to a file — inline bodies always go through
+  // the buffered path so the LLM sees a well-formed text/inline body.
+  if (
+    ctx.streaming &&
+    typeof requestedToFileEarly === "string" &&
+    requestedToFileEarly.length > 0 &&
+    res.body
+  ) {
+    const safePath = await resolveSafePath(ctx.workspace, requestedToFileEarly);
+    const written = await writeStreamToFile(res.body, safePath);
+    return {
+      status: res.status,
+      headers,
+      body: {
+        kind: "file",
+        path: requestedToFileEarly,
+        size: written.size,
+        mimeType: mimeTypeEarly,
+        sha256: written.sha256,
+      },
+    };
+  }
 
   const arrayBuffer = await res.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);

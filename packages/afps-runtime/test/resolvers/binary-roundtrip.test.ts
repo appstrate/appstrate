@@ -334,8 +334,12 @@ describe("provider-tool binary round-trip", () => {
       }
     });
 
-    it("refuses { fromFile } larger than MAX_REQUEST_BODY_SIZE with RESOLVER_BODY_TOO_LARGE", async () => {
-      const big = new Uint8Array(5 * 1024 * 1024 + 1); // 5MB + 1 byte
+    it("streams { fromFile } above STREAMING_THRESHOLD via sidecar resolver (5 MB + 1 byte)", async () => {
+      // After PR-4 the sidecar resolver opts `{ fromFile }` references
+      // larger than STREAMING_THRESHOLD (1 MB) into the streaming path
+      // — they no longer hit the legacy 5 MB MAX_REQUEST_BODY_SIZE cap.
+      // The hard ceiling is now MAX_STREAMED_BODY_SIZE (100 MB).
+      const big = new Uint8Array(5 * 1024 * 1024 + 1);
       const path = join(workspace, "huge.bin");
       await writeFile(path, big);
 
@@ -345,25 +349,28 @@ describe("provider-tool binary round-trip", () => {
       });
       const bundle = makeBundle(root, [providerPkg]);
 
-      const { fetchImpl } = makeFetchCapture(async () => new Response("", { status: 200 }));
+      const { calls, fetchImpl } = makeFetchCapture(async () => new Response("", { status: 200 }));
       const resolver = new SidecarProviderResolver({
         sidecarUrl: "http://sidecar:8080",
         fetch: fetchImpl,
       });
       const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], bundle);
-      try {
-        await tools[0]!.execute(
-          {
-            method: "POST",
-            target: "https://api.example.com/x",
-            body: { fromFile: "huge.bin" },
-          },
-          makeCtx(workspace, "tc_too_big"),
-        );
-        throw new Error("expected throw");
-      } catch (err) {
-        expect((err as { code?: string }).code).toBe("RESOLVER_BODY_TOO_LARGE");
-      }
+      const result = await tools[0]!.execute(
+        {
+          method: "POST",
+          target: "https://api.example.com/x",
+          body: { fromFile: "huge.bin" },
+        },
+        makeCtx(workspace, "tc_5mb_stream"),
+      );
+      // Returns a normal response — no throw, body was streamed.
+      expect(result).toBeDefined();
+      expect(calls).toHaveLength(1);
+      // Streaming mode: fetch saw a ReadableStream body, NOT bytes.
+      expect(calls[0]!.init.body).toBeInstanceOf(ReadableStream);
+      // The resolver sets Content-Length explicitly + duplex: "half".
+      const headers = (calls[0]!.init.headers ?? {}) as Record<string, string>;
+      expect(headers["Content-Length"]).toBe(String(big.byteLength));
     });
   });
 

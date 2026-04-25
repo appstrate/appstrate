@@ -47,10 +47,13 @@ export {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   defaultInlineLimit,
   MAX_REQUEST_BODY_SIZE,
+  MAX_STREAMED_BODY_SIZE,
+  STREAMING_THRESHOLD,
   makeProviderTool,
   matchesAuthorizedUriSpec,
   providerToolName,
   readProviderMeta,
+  resolveBodyForFetch,
   resolveBodyStream,
   resolveSafePath,
   serializeFetchResponse,
@@ -63,6 +66,7 @@ export {
   type ProviderCallResponseBody,
   type ProviderMeta,
   type ResolveBodyStreamOptions,
+  type ResolvedRequestBody,
   type SerializeFetchResponseContext,
 } from "./provider-tool.ts";
 export {
