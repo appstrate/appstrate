@@ -1,18 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} — composition of the runtime
- * reducer (source of truth for canonical AFPS aggregation) with a
- * platform write-through that persists `run_logs`, snapshots token
- * usage onto the run row, and appends cost to the unified `llm_usage`
- * ledger.
+ * Appstrate-backed {@link EventSink} implementations — composition of
+ * the runtime reducer (source of truth for canonical AFPS aggregation)
+ * with a platform write-through that persists `run_logs`, snapshots
+ * token usage onto the run row, and appends cost to the unified
+ * `llm_usage` ledger.
  *
- * Event routing:
+ * Two flavours, no flags:
  *
- *   AFPS canonical (reserved domains) → reducer snapshot:
+ *   {@link PersistingEventSink} — fan-out only. Used by the ingestion
+ *     hot path: each request rebuilds one sink, calls `handle()`, and
+ *     drops it. No reducer is constructed, no in-memory state is kept.
+ *
+ *   {@link AggregatingEventSink} — long-lived sink for parity tests
+ *     and in-process runners that read back `current` / `result`
+ *     between events. Wraps {@link PersistingEventSink} and feeds the
+ *     same events into a runtime reducer + platform projection.
+ *
+ * Splitting the two eliminates the previous `persistOnly` flag whose
+ * `current` getter threw — every method on every public surface is now
+ * total. Liskov substitution: an `AggregatingEventSink` is a
+ * `PersistingEventSink` with extra read-back capabilities, never less.
+ *
+ * Event routing (identical for both sinks):
+ *
+ *   AFPS canonical (reserved domains) → reducer snapshot (aggregating only):
  *     memory.added / state.set / output.emitted / report.appended / log.written
  *
- *   Platform write-through (always, independent of reducer):
+ *   Platform write-through (always, both sinks):
  *     output.emitted  → run_logs (result/output)
  *     report.appended → run_logs (result/report)
  *     log.written     → run_logs (progress/progress) with level
@@ -24,13 +40,9 @@
  *                         + llm_usage ledger row (source="runner")
  *
  * `runs.cost` is NEVER written here — it is the cached aggregate written
- * exactly once by `finalizeRun`. This sink is the single writer of the
- * `llm_usage` runner rows and the single reader/writer of
+ * exactly once by `finalizeRun`. These sinks are the single writer of
+ * the `llm_usage` runner rows and the single reader/writer of
  * `runs.tokenUsage`.
- *
- * The sink performs NO status update, NO webhook dispatch, and NO
- * post-run metadata collection — those remain the route handler's
- * responsibility.
  */
 
 import { createReducerSink, type ReducerSinkHandle } from "@appstrate/afps-runtime/sinks";
@@ -48,9 +60,10 @@ import type { TokenUsage } from "./types.ts";
 
 /**
  * Platform-facing projection of the runtime {@link RunResult} + the
- * platform-specific accumulators. Shapes match the DB persistence
- * expectations (memories as `string[]`, state/output as plain objects,
- * report as string, never null).
+ * platform-specific accumulators. Only exposed by the
+ * {@link AggregatingEventSink} for in-process consumers that read back
+ * the running snapshot. The ingestion path uses the persisting sink
+ * which has no `current` projection.
  */
 export interface AggregatedRunState {
   /** Latest `output.emitted` object payload (replaces previous). Non-object payloads project to `{}`. */
@@ -69,49 +82,60 @@ export interface AggregatedRunState {
   lastAdapterError: string | null;
 }
 
-export interface AppstrateEventSinkOptions {
+export interface PersistingEventSinkOptions {
   scope: AppScope;
   runId: string;
-  /**
-   * When `true`, skips the in-memory AFPS reducer entirely. The ingestion
-   * route re-instantiates the sink per event and never reads `current` /
-   * `result`, so the reducer is dead work on the hot path. Long-lived
-   * callers (parity tests, in-process runners) leave this unset to keep
-   * reading the canonical snapshot.
-   */
-  persistOnly?: boolean;
   /**
    * When `true`, `appstrate.metric` events write a runner-source row to
    * the `llm_usage` ledger. At most one runner row per run; concurrent
    * writers race via ON CONFLICT DO NOTHING. The ingestion path turns
-   * this on; long-lived in-process runners (parity tests) leave it off.
+   * this on; long-lived in-process runners (parity tests) leave it off
+   * — they go through {@link AggregatingEventSink} which never enables
+   * ledger writes.
    */
   writeLedger?: boolean;
 }
 
-export class AppstrateEventSink implements EventSink {
+export type AggregatingEventSinkOptions = Pick<PersistingEventSinkOptions, "scope" | "runId">;
+
+/**
+ * Persists each {@link RunEvent} to `run_logs` + (for `appstrate.metric`)
+ * to `runs.tokenUsage` + the `llm_usage` ledger.
+ *
+ * Stateless across events: a fresh instance is built per ingested
+ * envelope by the route handler. Calls to this sink are total —
+ * no method ever throws because of an unsupported mode.
+ */
+export class PersistingEventSink implements EventSink {
   readonly runId: string;
-  private readonly scope: AppScope;
-  private readonly reducer: ReducerSinkHandle | null;
-  private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
-  private accumulatedCost = 0;
-  private lastAdapterError: string | null = null;
-  private finalResult: RunResult | null = null;
+  protected readonly scope: AppScope;
+  protected lastAdapterError: string | null = null;
   private readonly writeLedger: boolean;
 
-  constructor(opts: AppstrateEventSinkOptions) {
+  constructor(opts: PersistingEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
-    this.reducer = opts.persistOnly ? null : createReducerSink();
     this.writeLedger = opts.writeLedger ?? false;
   }
 
   async handle(event: RunEvent): Promise<void> {
-    // Delegate canonical events to the runtime reducer (skipped in
-    // persist-only mode — ingestion fan-out doesn't need the snapshot).
-    if (this.reducer) await this.reducer.sink.handle(event);
+    await this.persist(event);
+  }
 
-    // Platform write-through + metrics accumulation.
+  async finalize(_result: RunResult): Promise<void> {
+    // Persistence-only sink — finalize is the route handler's job.
+    // The interface contract requires the method, so we no-op.
+  }
+
+  /**
+   * Last `appstrate.error.message` observed during the lifetime of this
+   * sink instance. Per-instance — short-lived in the ingestion path.
+   */
+  get lastError(): string | null {
+    return this.lastAdapterError;
+  }
+
+  protected async persist(event: RunEvent): Promise<void> {
     switch (event.type) {
       case "output.emitted": {
         await appendRunLog(
@@ -181,14 +205,6 @@ export class AppstrateEventSink implements EventSink {
         const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
         const cost = typeof event.cost === "number" ? event.cost : null;
 
-        // In-memory accumulators feed `sink.current` for long-lived sinks
-        // (parity tests, in-process runners). Skip in persistOnly mode
-        // where `sink.current` throws.
-        if (this.reducer) {
-          if (usage) accumulateUsage(this.usage, usage);
-          if (cost !== null) this.accumulatedCost += cost;
-        }
-
         // Token usage is a running-total snapshot on the run row.
         if (usage) {
           await updateRun(this.scope, this.runId, {
@@ -204,27 +220,59 @@ export class AppstrateEventSink implements EventSink {
       }
 
       default:
-        // memory.added / state.set / third-party — reducer-only, no run_logs row.
+        // memory.added / state.set / third-party — no run_logs row.
         break;
     }
   }
+}
 
-  async finalize(result: RunResult): Promise<void> {
-    if (this.reducer) await this.reducer.sink.finalize(result);
+/**
+ * Long-lived sink that wraps {@link PersistingEventSink} with an
+ * additional in-memory reducer + platform projection. Use when a caller
+ * needs to read `current` / `result` between events (parity tests,
+ * in-process runners). The ingestion path does not need this — it
+ * builds a fresh persisting sink per event.
+ */
+export class AggregatingEventSink extends PersistingEventSink {
+  private readonly reducer: ReducerSinkHandle;
+  private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+  private accumulatedCost = 0;
+  private finalResult: RunResult | null = null;
+
+  constructor(opts: AggregatingEventSinkOptions) {
+    // Aggregating sinks never write the ledger — they are never on the
+    // ingestion hot path. Pass `writeLedger: false` explicitly so the
+    // base class's metric handler skips the ledger write.
+    super({ ...opts, writeLedger: false });
+    this.reducer = createReducerSink();
+  }
+
+  override async handle(event: RunEvent): Promise<void> {
+    // 1. Feed the runtime reducer so `current` reflects every event.
+    await this.reducer.sink.handle(event);
+
+    // 2. Accumulate platform-specific running totals from metric events.
+    if (event.type === "appstrate.metric") {
+      const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
+      const cost = typeof event.cost === "number" ? event.cost : null;
+      if (usage) accumulateUsage(this.usage, usage);
+      if (cost !== null) this.accumulatedCost += cost;
+    }
+
+    // 3. Run the persistence write-through (delegates to base).
+    await super.handle(event);
+  }
+
+  override async finalize(result: RunResult): Promise<void> {
+    await this.reducer.sink.finalize(result);
     this.finalResult = result;
   }
 
   /**
-   * Platform-facing projection of the runtime snapshot + platform accumulators.
-   * Safe to read at any point during or after a run.
-   *
-   * Throws when the sink was created with `persistOnly: true` — that
-   * mode is reserved for fan-out-only consumers that never read back.
+   * Live snapshot — projects the runtime reducer + platform
+   * accumulators into the platform DTO shape. Total: never throws.
    */
   get current(): Readonly<AggregatedRunState> {
-    if (!this.reducer) {
-      throw new Error("AppstrateEventSink.current is unavailable in persistOnly mode");
-    }
     const snapshot = this.reducer.snapshot();
     return {
       output: isPlainObject(snapshot.output) ? snapshot.output : {},
@@ -233,7 +281,7 @@ export class AppstrateEventSink implements EventSink {
       report: snapshot.report ?? "",
       usage: this.usage,
       cost: this.accumulatedCost,
-      lastAdapterError: this.lastAdapterError,
+      lastAdapterError: this.lastError,
     };
   }
 

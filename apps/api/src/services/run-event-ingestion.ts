@@ -33,7 +33,7 @@ import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
-  AppstrateEventSink,
+  PersistingEventSink,
   hasRunnerLedgerRow,
   writeRunnerLedgerRow,
 } from "./adapters/appstrate-event-sink.ts";
@@ -469,12 +469,9 @@ async function persistEventAndAdvance(
 ): Promise<void> {
   // Dispatch first; advance the counter only on success so a crashing handler
   // lets the same event retry (deduped via replay cache if already acked).
-  const sink = new AppstrateEventSink({
+  const sink = new PersistingEventSink({
     scope: { orgId: run.orgId, applicationId: run.applicationId },
     runId: run.id,
-    // Ingestion never reads `sink.current` / `sink.result` — the reducer
-    // would be built and thrown away for every event. Skip it.
-    persistOnly: true,
     // The metric event handler is one of the two writers of the
     // runner-source ledger row (the other is the finalize fallback).
     writeLedger: true,
