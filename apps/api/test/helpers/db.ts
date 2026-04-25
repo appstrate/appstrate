@@ -28,6 +28,7 @@ const CORE_TABLES = [
   "credential_proxy_usage",
   "run_logs",
   "package_memories",
+  "package_persistence",
   "package_version_dependencies",
   "package_dist_tags",
   "application_packages",
