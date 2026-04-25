@@ -52,6 +52,7 @@ import { PreferencesAppearancePage } from "./pages/preferences/appearance";
 import { PreferencesSecurityPage } from "./pages/preferences/security";
 import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
 import { PreferencesProfilesPage } from "./pages/preferences/profiles";
+import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -389,6 +390,7 @@ export function App() {
               <Route path="general" element={<PreferencesGeneralPage />} />
               <Route path="appearance" element={<PreferencesAppearancePage />} />
               <Route path="security" element={<PreferencesSecurityPage />} />
+              <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connectors" element={<PreferencesConnectorsPage />} />
               <Route path="profiles" element={<PreferencesProfilesPage />} />
             </Route>

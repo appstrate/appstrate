@@ -636,6 +636,157 @@ export async function revokeRefreshToken(params: {
   return { revoked: true };
 }
 
+/**
+ * Active device session shape returned to the dashboard. Each entry maps
+ * to one `family_id` (= one device's lifetime), surfacing only the head
+ * row's metadata. Rotation children are intentionally hidden — exposing
+ * them would let an observer enumerate the rotation history of a session,
+ * leaking activity-pattern information unrelated to "is this device
+ * currently active and what was it called when it logged in?".
+ *
+ * `current` is omitted (always `false`) for callers that don't present a
+ * refresh token — the dashboard SPA has no way to identify "this very
+ * session" because BA cookie sessions are orthogonal to refresh-token
+ * families. The CLI, when it ever reuses this endpoint, can populate it.
+ */
+export interface CliSessionListEntry {
+  familyId: string;
+  deviceName: string | null;
+  userAgent: string | null;
+  createdIp: string | null;
+  lastUsedIp: string | null;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+  expiresAt: Date;
+  current: boolean;
+}
+
+/**
+ * List a user's active CLI sessions. "Active" = head of family
+ * (`parent_id IS NULL`) AND not revoked AND not expired. Yields one entry
+ * per device the user is currently signed into.
+ *
+ * Sort order: most recent activity first, falling back to creation time
+ * for sessions that have never rotated. This puts the device that was
+ * "actually used last" at the top — what users typically want to see in
+ * a session list.
+ */
+export async function listSessionsForUser(userId: string): Promise<CliSessionListEntry[]> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      familyId: cliRefreshToken.familyId,
+      deviceName: cliRefreshToken.deviceName,
+      userAgent: cliRefreshToken.userAgent,
+      createdIp: cliRefreshToken.createdIp,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      createdAt: cliRefreshToken.createdAt,
+      expiresAt: cliRefreshToken.expiresAt,
+    })
+    .from(cliRefreshToken)
+    .where(
+      and(
+        eq(cliRefreshToken.userId, userId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  return rows
+    .filter((r) => r.expiresAt > now)
+    .map((r) => ({
+      familyId: r.familyId,
+      deviceName: r.deviceName,
+      userAgent: r.userAgent,
+      createdIp: r.createdIp,
+      lastUsedIp: r.lastUsedIp,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      current: false,
+    }))
+    .sort((a, b) => {
+      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
+      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
+      return bTs - aTs;
+    });
+}
+
+/**
+ * Revoke a single CLI session family on behalf of its owner. The ownership
+ * check (`userId === head.userId`) is the only authorization gate — the
+ * caller is expected to have already authenticated as `userId` (cookie
+ * session in the dashboard, or platform auth in the CLI).
+ *
+ * Returns `false` when the family doesn't exist, doesn't belong to
+ * `userId`, or is already fully revoked. The caller maps this to either
+ * 404 (genuinely unknown / not yours) or 200-no-op (already revoked) at
+ * its discretion — surface the boolean and let the route layer decide.
+ *
+ * Reason `user_revoked` is distinct from `logout` (set by the
+ * RFC 7009 self-revoke path) and `reuse` (set by the security-event
+ * branch in `rotateRefreshToken`). The audit log can therefore separate
+ * "user actively signed device out from the dashboard" from "CLI sent
+ * its own revoke" from "potential token theft".
+ */
+export async function revokeFamilyForUser(params: {
+  userId: string;
+  familyId: string;
+}): Promise<boolean> {
+  const { userId, familyId } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+    })
+    .from(cliRefreshToken)
+    .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+    .limit(1);
+  if (!head || head.userId !== userId) return false;
+  if (head.revokedAt) return false;
+  await revokeFamily(familyId, "user_revoked");
+  return true;
+}
+
+/**
+ * Revoke every active CLI session family belonging to a user. Server
+ * primitive backing `appstrate logout --all` (ADR-006) and the dashboard
+ * "Revoke all sessions" button. Idempotent — already-revoked families
+ * are skipped at the SQL level.
+ *
+ * Returns the count of families newly revoked so the caller can render a
+ * meaningful confirmation toast ("Signed out 3 devices.").
+ *
+ * Implementation: a single UPDATE scoped by `user_id` + active
+ * (`revoked_at IS NULL`). We don't need to enumerate families first —
+ * the rotation children carry the same `revoked_at` column and the same
+ * UPDATE flips both heads and children. The audit reason is
+ * `user_revoked_all` so it is distinguishable from per-family revocation
+ * in the security log.
+ */
+export async function revokeAllFamiliesForUser(userId: string): Promise<{ revokedCount: number }> {
+  // Count families that will be touched BEFORE the UPDATE, so the return
+  // value matches "number of devices signed out" rather than "number of
+  // rows touched" (rotation rows would inflate the latter into something
+  // that doesn't reflect user-visible state).
+  const heads = await db
+    .select({ familyId: cliRefreshToken.familyId })
+    .from(cliRefreshToken)
+    .where(
+      and(
+        eq(cliRefreshToken.userId, userId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  if (heads.length === 0) return { revokedCount: 0 };
+  await db
+    .update(cliRefreshToken)
+    .set({ revokedAt: new Date(), revokedReason: "user_revoked_all" })
+    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
+  return { revokedCount: heads.length };
+}
+
 async function revokeFamily(familyId: string, reason: string): Promise<void> {
   await db
     .update(cliRefreshToken)

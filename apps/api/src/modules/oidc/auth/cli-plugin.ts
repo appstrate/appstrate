@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165).
+ * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165, #251).
  *
  * Exposes the rotating-refresh-token surface that replaces BA's default
  * session-minting `/device/token`. Mounted alongside the existing
@@ -27,19 +27,42 @@
  *     body: { token, client_id }   // `token` = refresh_token
  *     200: { revoked: boolean }
  *
+ *   GET  /api/auth/cli/sessions                    [issue #251]
+ *     Cookie auth required (BA session). Lists the caller's active
+ *     CLI sessions (one entry per `family_id` head, not revoked, not
+ *     expired). 200: { sessions: [...] }
+ *
+ *   POST /api/auth/cli/sessions/revoke              [issue #251]
+ *     Cookie auth required. Body: { familyId }. Revokes a single
+ *     session owned by the caller. 200: { revoked: boolean } —
+ *     `false` when the family is unknown / not owned / already revoked.
+ *
+ *   POST /api/auth/cli/sessions/revoke-all          [issue #251]
+ *     Cookie auth required. Server primitive backing
+ *     `appstrate logout --all`. 200: { revokedCount: number }.
+ *
  * Error vocabulary matches `CliTokenError` — the client renders these
  * directly (`authorization_pending`, `slow_down`, `access_denied`,
  * `expired_token`, `invalid_grant`, `invalid_request`, `invalid_client`,
- * `server_error`).
+ * `server_error`). The session-management endpoints return ordinary BA
+ * error shapes (`UNAUTHORIZED` when the cookie is missing).
  *
  * Client validation: we re-use the same `validateDeviceFlowClient`
  * allowlist the BA `deviceAuthorization()` plugin uses (grant_types
  * must include `device_code`). For refresh_token grants we additionally
  * check the token's `client_id` column matches.
+ *
+ * Why cookie-only on the session endpoints: these are dashboard-facing
+ * surfaces; the API-key story for managing CLI sessions is intentionally
+ * deferred — granting `cli-sessions:delete` to an API key would let a
+ * compromised key sign every device of every account out of the platform,
+ * which is a much wider blast radius than the key holder's intent.
+ * If a future use case justifies the scope, it lands as a Phase 3
+ * extension with its own RBAC contribution.
  */
 
 import { eq } from "drizzle-orm";
-import { createAuthEndpoint } from "better-auth/api";
+import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
 import { db } from "@appstrate/db/client";
@@ -47,6 +70,9 @@ import { oauthClient } from "../schema.ts";
 import {
   CliTokenError,
   exchangeDeviceCodeForTokens,
+  listSessionsForUser,
+  revokeAllFamiliesForUser,
+  revokeFamilyForUser,
   revokeRefreshToken,
   rotateRefreshToken,
   type DeviceMetadata,
@@ -301,6 +327,145 @@ export function cliTokenPlugin() {
             clientId: client_id,
           });
           return ctx.json({ revoked: true });
+        },
+      ),
+
+      // ── Issue #251: dashboard-facing session management ────────────────
+
+      cliListSessions: createAuthEndpoint(
+        "/cli/sessions",
+        {
+          method: "GET",
+          metadata: {
+            openapi: {
+              description:
+                'List the caller\'s active CLI sessions (one entry per device). Cookie auth required — the listing is scoped to `c.get("user").id` derived from the BA session. `current` is always `false` for cookie callers because the dashboard does not present a refresh token.',
+              responses: {
+                200: {
+                  description: "Session list",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          sessions: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                familyId: { type: "string" },
+                                deviceName: { type: "string", nullable: true },
+                                userAgent: { type: "string", nullable: true },
+                                createdIp: { type: "string", nullable: true },
+                                lastUsedIp: { type: "string", nullable: true },
+                                lastUsedAt: {
+                                  type: "string",
+                                  format: "date-time",
+                                  nullable: true,
+                                },
+                                createdAt: { type: "string", format: "date-time" },
+                                expiresAt: { type: "string", format: "date-time" },
+                                current: { type: "boolean" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const sessions = await listSessionsForUser(session.user.id);
+          return ctx.json({ sessions });
+        },
+      ),
+
+      cliRevokeSession: createAuthEndpoint(
+        "/cli/sessions/revoke",
+        {
+          method: "POST",
+          body: z.object({ familyId: z.string().min(1) }),
+          metadata: {
+            openapi: {
+              description:
+                "Revoke a single CLI session owned by the caller. Cookie auth required. `revoked: false` is returned when the family does not exist, does not belong to the caller, or has already been revoked — the route layer does not distinguish these cases at the HTTP shape so an attacker who somehow guessed a `family_id` cannot probe ownership through the response.",
+              responses: {
+                200: {
+                  description: "Revocation outcome",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { revoked: { type: "boolean" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const revoked = await revokeFamilyForUser({
+            userId: session.user.id,
+            familyId: ctx.body.familyId,
+          });
+          return ctx.json({ revoked });
+        },
+      ),
+
+      cliRevokeAllSessions: createAuthEndpoint(
+        "/cli/sessions/revoke-all",
+        {
+          method: "POST",
+          metadata: {
+            openapi: {
+              description:
+                "Revoke every active CLI session belonging to the caller. Server primitive backing `appstrate logout --all`. Cookie auth required. Idempotent — calling on an account with no active sessions returns `{ revokedCount: 0 }`.",
+              responses: {
+                200: {
+                  description: "Bulk revocation outcome",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { revokedCount: { type: "integer", minimum: 0 } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        async (ctx) => {
+          const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+          if (!session?.user?.id) {
+            throw new APIError("UNAUTHORIZED", {
+              error: "unauthorized",
+              error_description: "Authentication required.",
+            });
+          }
+          const result = await revokeAllFamiliesForUser(session.user.id);
+          return ctx.json(result);
         },
       ),
     },
