@@ -50,37 +50,43 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
+import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 
 // Captured as early as possible so the "runtime ready in {N}ms" signal
 // reflects the full bootloader cost (bundle extract, providers wiring,
 // dynamic tool imports) — not just the post-init slice.
 const BOOT_STARTED_AT = Date.now();
 
-// --- 0. Sink bootstrap ---
+// --- 0. Env validation + sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
-// refuse to boot without them — running without a destination defeats
-// the point of the unified protocol and would produce orphaned work.
+// validate the full env contract once, fail-fast with a structured
+// list of issues (better DX than first-failure), and bail out before
+// touching any heavy module.
 
-const SINK_URL = process.env.APPSTRATE_SINK_URL;
-const SINK_FINALIZE_URL = process.env.APPSTRATE_SINK_FINALIZE_URL;
-const SINK_SECRET = process.env.APPSTRATE_SINK_SECRET;
-const AGENT_RUN_ID = process.env.AGENT_RUN_ID;
-
-if (!AGENT_RUN_ID || !SINK_URL || !SINK_FINALIZE_URL || !SINK_SECRET) {
+let env: ReturnType<typeof parseRuntimeEnv>;
+try {
+  env = parseRuntimeEnv(process.env);
+} catch (err) {
   // Before the sink is live, stderr is the only channel — the platform's
   // container monitor will synthesise a `failed` finalize from the exit
   // code so the run record still reaches a terminal state.
-  process.stderr.write(
-    "runtime-pi: missing required sink env (AGENT_RUN_ID, APPSTRATE_SINK_URL, APPSTRATE_SINK_FINALIZE_URL, APPSTRATE_SINK_SECRET)\n",
-  );
+  if (err instanceof RuntimeEnvError) {
+    process.stderr.write(`${err.message}\n`);
+  } else {
+    process.stderr.write(
+      `runtime-pi: env validation failed — ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
   process.exit(1);
 }
 
+const AGENT_RUN_ID = env.runId;
+
 const sink = new HttpSink({
-  url: SINK_URL,
-  finalizeUrl: SINK_FINALIZE_URL,
-  runSecret: SINK_SECRET,
+  url: env.sink.url,
+  finalizeUrl: env.sink.finalizeUrl,
+  runSecret: env.sink.secret,
 });
 
 // --- 0a. Tee sink + stdout bridge ---
@@ -139,7 +145,7 @@ const exists = (p: string) =>
 
 // --- 1. Init workspace ---
 
-const WORKSPACE = process.env.WORKSPACE_DIR || "/workspace";
+const WORKSPACE = env.workspaceDir;
 
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
 async function initGitWorkspace(): Promise<void> {
@@ -240,16 +246,13 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 // prompts. The sidecar HTTP contract (`/proxy`, `/run-history`) is
 // unchanged — this is a client-surface migration only.
 
-const sidecarUrl = process.env.SIDECAR_URL;
+const sidecarUrl = env.sidecarUrl;
 let providerResolver: ProviderResolver = { resolve: async () => [] };
 const workspaceForProviders = WORKSPACE;
 
 if (bundle && sidecarUrl) {
   try {
-    providerResolver = new SidecarProviderResolver({
-      sidecarUrl,
-      providerPrefix: "providers/",
-    });
+    providerResolver = new SidecarProviderResolver({ sidecarUrl });
     const providerFactories = await buildProviderExtensionFactories({
       bundle,
       providerResolver,
@@ -308,28 +311,21 @@ delete process.env.SIDECAR_URL;
 
 // --- 3. Model + system prompt from env ---
 
-const api = process.env.MODEL_API;
-if (!api) await die("MODEL_API environment variable is required");
-const modelId = process.env.MODEL_ID;
-if (!modelId) await die("MODEL_ID environment variable is required");
-const systemPrompt = process.env.AGENT_PROMPT;
-if (!systemPrompt) await die("AGENT_PROMPT environment variable is required");
+const api = env.modelApi;
+const modelId = env.modelId;
+const systemPrompt = env.agentPrompt;
 
 const model: Model<Api> = {
   id: modelId,
   name: modelId,
   api: api as Api,
   provider: "", // PiRunner will derive this via deriveProviderFromApi
-  baseUrl: process.env.MODEL_BASE_URL || "",
-  reasoning: process.env.MODEL_REASONING === "true",
-  input: process.env.MODEL_INPUT
-    ? (JSON.parse(process.env.MODEL_INPUT) as Array<"text" | "image">)
-    : ["text"],
-  cost: process.env.MODEL_COST
-    ? JSON.parse(process.env.MODEL_COST)
-    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW) || 128000,
-  maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
+  baseUrl: env.modelBaseUrl ?? "",
+  reasoning: env.modelReasoning,
+  input: [...env.modelInput],
+  cost: env.modelCost,
+  contextWindow: env.modelContextWindow,
+  maxTokens: env.modelMaxTokens,
 };
 
 // Derive provider (matching PiRunner's table)
@@ -348,19 +344,9 @@ if (!model.provider) await die(`Unknown MODEL_API: "${api}"`);
 
 // --- 4. Build ExecutionContext from env ---
 
-let parsedInput: Record<string, unknown> = {};
-if (process.env.AGENT_INPUT) {
-  try {
-    parsedInput = JSON.parse(process.env.AGENT_INPUT);
-  } catch {
-    // Leave input empty on malformed JSON — don't silently accept
-    // half-parsed input that could confuse the prompt template.
-  }
-}
-
 const context: ExecutionContext = {
   runId: AGENT_RUN_ID,
-  input: parsedInput,
+  input: env.agentInput,
   memories: [],
   config: {},
 };
@@ -437,11 +423,10 @@ await emitRuntimeReady(teeSink, AGENT_RUN_ID, {
 // partition, SIGKILL, Docker daemon drop). This path is identical to
 // the CLI's — same helper, same endpoint, same HMAC auth — so platform
 // and remote runs share one liveness mechanism.
-const heartbeatInterval = Number(process.env.APPSTRATE_HEARTBEAT_INTERVAL_MS) || 30_000;
 const heartbeat = startSinkHeartbeat({
-  url: `${SINK_URL.replace(/\/$/, "")}/heartbeat`,
-  runSecret: SINK_SECRET,
-  intervalMs: heartbeatInterval,
+  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
+  runSecret: env.sink.secret,
+  intervalMs: env.heartbeatIntervalMs,
   onError: (err) => {
     // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
     // container log forwarding captures it without polluting the event
@@ -462,7 +447,7 @@ const startTime = Date.now();
 try {
   const runner = new PiRunner({
     model,
-    apiKey: process.env.MODEL_API_KEY,
+    apiKey: env.modelApiKey,
     systemPrompt,
     cwd: WORKSPACE,
     agentDir: "/tmp/pi-agent",
