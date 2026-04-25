@@ -10,6 +10,7 @@
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
 
+import { z } from "zod";
 import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
@@ -52,6 +53,109 @@ export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 
+// ─── Zod schemas for provider_call arguments ─────────────────────────────────
+// Single source of truth: derive the JSON schema surfaced to the LLM and the
+// runtime validation in execute() from these definitions. Aligned with CLAUDE.md:
+// "All route request bodies validated with Zod .safeParse()."
+
+const fromFileBodySchema = z.object({
+  fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),
+});
+
+const fromBytesBodySchema = z.object({
+  fromBytes: z
+    .string()
+    .describe(
+      "Base64-encoded body bytes (for inline binary uploads up to 5 MB). " +
+        "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
+        "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
+    ),
+  encoding: z.literal("base64"),
+});
+
+const multipartTextPartSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+});
+
+const multipartFilePartSchema = z.object({
+  name: z.string(),
+  fromFile: z.string().describe("Workspace-relative path to a file"),
+  filename: z.string().optional(),
+  contentType: z.string().optional(),
+});
+
+const multipartBytesPartSchema = z.object({
+  name: z.string(),
+  fromBytes: z.string().describe("Base64-encoded part bytes (standard RFC 4648 §4 only)"),
+  encoding: z.literal("base64"),
+  filename: z.string().optional(),
+  contentType: z.string().optional(),
+});
+
+const multipartPartSchema = z.union([
+  multipartTextPartSchema,
+  multipartFilePartSchema,
+  multipartBytesPartSchema,
+]);
+
+const multipartBodySchema = z.object({
+  multipart: z
+    .array(multipartPartSchema)
+    .min(1)
+    .describe(
+      "Compose a multipart/form-data body mixing text fields and workspace files or inline bytes",
+    ),
+});
+
+const requestBodySchema = z.union([
+  z.string(),
+  fromFileBodySchema,
+  fromBytesBodySchema,
+  multipartBodySchema,
+  z.null(),
+]);
+
+const responseModeSchema = z
+  .object({
+    toFile: z
+      .string()
+      .optional()
+      .describe(
+        "Workspace-relative path to stream the response body into (use for binary downloads)",
+      ),
+    maxInlineBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(ABSOLUTE_MAX_RESPONSE_SIZE)
+      .optional()
+      .describe(
+        `Inline size cap; defaults to ${defaultInlineLimit} bytes when absent. Larger responses auto-spill to a file.`,
+      ),
+  })
+  .optional();
+
+/** Zod schema for `provider_call` arguments — validated at runtime in execute(). */
+export const providerCallRequestSchema = z.object({
+  method: z
+    .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+    .describe("HTTP method for the upstream request"),
+  target: z.string().describe("Absolute URL of the upstream endpoint"),
+  headers: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe("Headers forwarded to the upstream (credential headers are injected server-side)"),
+  body: requestBodySchema
+    .optional()
+    .describe(
+      "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
+        "{ fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB (standard base64 RFC 4648 §4 only — alphabet `+/`, no URL-safe `-_` or MIME line-folding), " +
+        "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
+    ),
+  responseMode: responseModeSchema,
+});
+
 /**
  * Runtime projection of the provider manifest — a flat view over the
  * subset of fields that `makeProviderTool` actually consumes. The
@@ -91,44 +195,22 @@ export interface ProviderMeta {
   allowAllUris?: boolean;
 }
 
-export interface ProviderCallRequest {
-  method: string;
-  target: string;
-  headers?: Record<string, string>;
+/**
+ * Public type for provider_call arguments. Structurally compatible with
+ * `z.infer<typeof providerCallRequestSchema>` plus a `Uint8Array` variant
+ * on `body` (for programmatic callers who already have bytes in memory —
+ * this variant cannot be expressed in JSON Schema and is not surfaced to
+ * the LLM).
+ */
+export type ProviderCallRequest = Omit<z.infer<typeof providerCallRequestSchema>, "body"> & {
   /**
    * Request body. Either raw bytes / string (forwarded verbatim), a
    * file reference that the transport resolves before dispatch, or a
    * base64-encoded inline binary payload (for computed/in-memory bytes
    * up to {@link MAX_REQUEST_BODY_SIZE}).
    */
-  body?:
-    | string
-    | Uint8Array
-    | null
-    | { fromFile: string }
-    | { fromBytes: string; encoding: "base64" }
-    | {
-        multipart: Array<
-          | { name: string; value: string }
-          | { name: string; fromFile: string; filename?: string; contentType?: string }
-          | {
-              name: string;
-              fromBytes: string;
-              encoding: "base64";
-              filename?: string;
-              contentType?: string;
-            }
-        >;
-      };
-  /**
-   * How the response should be surfaced back to the LLM. Defaults to
-   * inline (bytes up to `maxInlineBytes`, file reference above).
-   */
-  responseMode?: {
-    toFile?: string;
-    maxInlineBytes?: number;
-  };
-}
+  body?: z.infer<typeof requestBodySchema> | Uint8Array;
+};
 
 /**
  * Discriminated union for response bodies surfaced to the LLM:
@@ -159,12 +241,29 @@ export type ProviderCallResponseBody =
       data: string;
       encoding: "base64";
       mimeType: string;
+      /**
+       * When `true`, the `mimeType` was determined by file-type content
+       * sniffing rather than the upstream Content-Type header. Only set
+       * when the declared type was absent or `application/octet-stream`.
+       */
+      mimeTypeSniffed?: true;
       size: number;
       /** When `true`, the sidecar capped the upstream response. Absent means `false`. */
       truncated?: true;
       truncatedSize?: number;
     }
-  | { kind: "file"; path: string; size: number; mimeType: string; sha256: string };
+  | {
+      kind: "file";
+      path: string;
+      size: number;
+      mimeType: string;
+      /**
+       * When `true`, the `mimeType` was determined by file-type content
+       * sniffing rather than the upstream Content-Type header.
+       */
+      mimeTypeSniffed?: true;
+      sha256: string;
+    };
 
 export interface ProviderCallResponse {
   status: number;
@@ -295,116 +394,14 @@ export function makeProviderTool(
       `Pass binary uploads via { fromFile } and route binary downloads via responseMode.toFile — ` +
       `inline bytes are decoded as text and bloat the LLM context.`;
 
-  const parameters: JSONSchema = {
-    type: "object",
-    required: ["method", "target"],
-    additionalProperties: false,
-    properties: {
-      method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] },
-      target: { type: "string", description: "Absolute URL of the upstream endpoint" },
-      headers: {
-        type: "object",
-        additionalProperties: { type: "string" },
-        description:
-          "Headers forwarded to the upstream (credential headers are injected server-side)",
-      },
-      body: {
-        oneOf: [
-          { type: "string" },
-          {
-            type: "object",
-            required: ["fromFile"],
-            additionalProperties: false,
-            properties: { fromFile: { type: "string" } },
-          },
-          {
-            type: "object",
-            required: ["fromBytes", "encoding"],
-            additionalProperties: false,
-            properties: {
-              fromBytes: {
-                type: "string",
-                description:
-                  "Base64-encoded body bytes (for inline binary uploads up to 5 MB). " +
-                  "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
-                  "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
-              },
-              encoding: { type: "string", enum: ["base64"] },
-            },
-          },
-          {
-            type: "object",
-            required: ["multipart"],
-            additionalProperties: false,
-            properties: {
-              multipart: {
-                type: "array",
-                minItems: 1,
-                items: {
-                  oneOf: [
-                    {
-                      type: "object",
-                      required: ["name", "value"],
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: "string" },
-                        value: { type: "string" },
-                      },
-                    },
-                    {
-                      type: "object",
-                      required: ["name", "fromFile"],
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: "string" },
-                        fromFile: { type: "string" },
-                        filename: { type: "string" },
-                        contentType: { type: "string" },
-                      },
-                    },
-                    {
-                      type: "object",
-                      required: ["name", "fromBytes", "encoding"],
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: "string" },
-                        fromBytes: { type: "string" },
-                        encoding: { type: "string", enum: ["base64"] },
-                        filename: { type: "string" },
-                        contentType: { type: "string" },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-          { type: "null" },
-        ],
-        description:
-          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
-          "{ fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB (standard base64 RFC 4648 §4 only — alphabet `+/`, no URL-safe `-_` or MIME line-folding), " +
-          "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
-      },
-      responseMode: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          toFile: {
-            type: "string",
-            description:
-              "Workspace-relative path to stream the response body into (use for binary downloads)",
-          },
-          maxInlineBytes: {
-            type: "integer",
-            minimum: 0,
-            maximum: ABSOLUTE_MAX_RESPONSE_SIZE,
-            description: `Inline size cap; defaults to ${defaultInlineLimit} bytes when absent. Larger responses auto-spill to a file.`,
-          },
-        },
-      },
-    },
-  };
+  // Generate the JSON schema from the Zod definition — single source of truth.
+  // target: "draft-7" matches AJV's validator (used for dynamic manifest schemas
+  // elsewhere) and produces the same structural shape as the former hand-written
+  // schema. Post-processing adds "description" fields already carried in the Zod
+  // definitions via .describe().
+  const parameters: JSONSchema = z.toJSONSchema(providerCallRequestSchema, {
+    target: "draft-7",
+  }) as JSONSchema;
 
   const emit = opts.emitProviderEvent ?? true;
 
@@ -413,7 +410,20 @@ export function makeProviderTool(
     description,
     parameters,
     async execute(args, ctx: ToolContext): Promise<ToolResult> {
-      const req = args as ProviderCallRequest;
+      // Validate args with Zod before casting to ProviderCallRequest.
+      // Note: Uint8Array bodies are valid at the TypeScript level but
+      // cannot arrive from the LLM (JSON has no binary type) — the Zod
+      // schema covers every variant the LLM can produce.
+      const parsed = providerCallRequestSchema.safeParse(args);
+      if (!parsed.success) {
+        throw new ResolverError(
+          "RESOLVER_BODY_INVALID",
+          `Invalid provider_call arguments: ${parsed.error.issues
+            .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+            .join(", ")}`,
+        );
+      }
+      const req: ProviderCallRequest = parsed.data;
       enforceAuthorizedUris(meta, req.target);
 
       const callCtx: ProviderCallContext = {
@@ -1197,6 +1207,39 @@ function base64Encode(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
+/**
+ * Attempt to determine the true MIME type of `buffer` by inspecting its
+ * magic bytes (WHATWG MIME Sniffing). Only overrides generic or absent
+ * Content-Types (`application/octet-stream` or empty) — if the upstream
+ * already declared a specific type it is kept as-is.
+ *
+ * Uses `file-type` (^22) for the magic-byte lookup. Reads at most the
+ * first 4 100 bytes (the library's internal look-ahead window).
+ *
+ * Streaming responses (responseMode.toFile) are NOT sniffed by this
+ * helper — bytes are written to disk before we buffer them. A future
+ * improvement could sniff from the first chunk of the stream.
+ */
+async function maybeSniffMimeType(
+  declaredMime: string,
+  buffer: Uint8Array,
+): Promise<{ mime: string; sniffed: boolean }> {
+  // Per WHATWG MIME Sniffing: only override unknown/generic types.
+  const isAmbiguous = !declaredMime || declaredMime === "application/octet-stream";
+  if (!isAmbiguous) return { mime: declaredMime, sniffed: false };
+
+  try {
+    const { fileTypeFromBuffer } = await import("file-type");
+    const sniffSlice = buffer.subarray(0, 4100);
+    const result = await fileTypeFromBuffer(sniffSlice);
+    if (!result) return { mime: declaredMime || "application/octet-stream", sniffed: false };
+    return { mime: result.mime, sniffed: true };
+  } catch {
+    // file-type not available or sniff failed — fall back to declared type.
+    return { mime: declaredMime || "application/octet-stream", sniffed: false };
+  }
+}
+
 export interface SerializeFetchResponseContext {
   workspace: string;
   toolCallId: string;
@@ -1311,10 +1354,18 @@ export async function serializeFetchResponse(
     await fs.mkdir(path.dirname(safePath), { recursive: true });
     await fs.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
+    const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {
       status: res.status,
       headers,
-      body: { kind: "file", path: requestedToFile, size, mimeType, sha256 },
+      body: {
+        kind: "file",
+        path: requestedToFile,
+        size,
+        mimeType: finalMime,
+        ...(sniffed ? { mimeTypeSniffed: true as const } : {}),
+        sha256,
+      },
     };
   }
 
@@ -1327,16 +1378,25 @@ export async function serializeFetchResponse(
     await fs.mkdir(path.dirname(safePath), { recursive: true });
     await fs.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
+    const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {
       status: res.status,
       headers,
-      body: { kind: "file", path: relative, size, mimeType, sha256 },
+      body: {
+        kind: "file",
+        path: relative,
+        size,
+        mimeType: finalMime,
+        ...(sniffed ? { mimeTypeSniffed: true as const } : {}),
+        sha256,
+      },
     };
   }
 
   // 3. Text-like Content-Type: decode UTF-8 with replacement characters
   //    on invalid bytes (`fatal: false`) — we already know the upstream
   //    declared text, so a stray byte should not crash the call.
+  //    Text bodies are not sniffed — the declared type is authoritative.
   if (isTextLikeMimeType(contentType)) {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     return {
@@ -1357,6 +1417,8 @@ export async function serializeFetchResponse(
   //    the bytes happen to be ASCII (e.g. `application/octet-stream`
   //    carrying "hello"), the strict whitelist above keeps us in the
   //    binary path so the LLM doesn't conflate the two.
+  //    Attempt magic-byte sniffing to provide a more useful mimeType.
+  const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
   return {
     status: res.status,
     headers,
@@ -1364,7 +1426,8 @@ export async function serializeFetchResponse(
       kind: "inline",
       data: base64Encode(bytes),
       encoding: "base64",
-      mimeType,
+      mimeType: finalMime,
+      ...(sniffed ? { mimeTypeSniffed: true as const } : {}),
       size,
       // Omit `truncated` entirely when false — absence means false.
       ...(truncated ? { truncated: true as const } : {}),

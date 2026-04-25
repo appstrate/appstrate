@@ -622,20 +622,26 @@ describe("provider-tool binary round-trip", () => {
       expect(headers["X-Max-Response-Size"]).toBe("200000");
     });
 
-    it("caps X-Max-Response-Size at ABSOLUTE_MAX_RESPONSE_SIZE", async () => {
-      const { calls, execute } = buildSidecarResolver(
+    it("rejects maxInlineBytes above ABSOLUTE_MAX_RESPONSE_SIZE with RESOLVER_BODY_INVALID", async () => {
+      // Zod schema enforces max: ABSOLUTE_MAX_RESPONSE_SIZE (1_000_000) — values above
+      // this are now a validation error rather than silently capped by the transport layer.
+      const { execute } = buildSidecarResolver(
         async () => new Response("ok", { status: 200, headers: { "content-type": "text/plain" } }),
       );
-      await execute(
-        {
-          method: "GET",
-          target: "https://api.example.com/x",
-          responseMode: { maxInlineBytes: 9_000_000 },
-        },
-        makeCtx(workspace, "tc_xmax_cap"),
-      );
-      const headers = calls[0]!.init.headers as Record<string, string>;
-      expect(headers["X-Max-Response-Size"]).toBe("1000000");
+      try {
+        await execute(
+          {
+            method: "GET",
+            target: "https://api.example.com/x",
+            responseMode: { maxInlineBytes: 9_000_000 },
+          },
+          makeCtx(workspace, "tc_xmax_cap"),
+        );
+        throw new Error("expected throw");
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe("RESOLVER_BODY_INVALID");
+        expect((err as Error).message).toMatch(/maxInlineBytes/);
+      }
     });
   });
 

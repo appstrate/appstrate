@@ -474,7 +474,8 @@ describe("multipart body variant", () => {
     });
 
     it("empty multipart array → schema minItems:1 enforced via JSON schema shape", () => {
-      // Directly verify the schema minItems constraint rather than running AJV
+      // Directly verify the schema minItems constraint rather than running AJV.
+      // Zod 4 uses anyOf for unions (equivalent to oneOf for discriminated unions).
       const tool = makeProviderTool({ name: "@acme/provider", allowAllUris: true }, async () => {
         throw new Error("not called");
       });
@@ -482,7 +483,12 @@ describe("multipart body variant", () => {
         tool.parameters as {
           properties: {
             body: {
-              oneOf: Array<{
+              anyOf?: Array<{
+                type?: string;
+                required?: string[];
+                properties?: { multipart?: { minItems?: number } };
+              }>;
+              oneOf?: Array<{
                 type?: string;
                 required?: string[];
                 properties?: { multipart?: { minItems?: number } };
@@ -492,7 +498,8 @@ describe("multipart body variant", () => {
         }
       ).properties.body;
 
-      const multipartVariant = bodySchema.oneOf.find((v) => v.required?.includes("multipart"));
+      const variants = bodySchema.anyOf ?? bodySchema.oneOf ?? [];
+      const multipartVariant = variants.find((v) => v.required?.includes("multipart"));
       expect(multipartVariant).toBeDefined();
       expect(multipartVariant!.properties!.multipart!.minItems).toBe(1);
     });
@@ -548,32 +555,50 @@ describe("multipart body variant", () => {
   // ─── Schema shape ───────────────────────────────────────────────────────
 
   describe("JSON schema", () => {
-    it("schema oneOf has 5 variants: string, fromFile, fromBytes, multipart, null", () => {
+    it("schema union has 5 variants: string, fromFile, fromBytes, multipart, null", () => {
+      // Zod 4 generates anyOf for unions (both anyOf and oneOf are semantically
+      // equivalent for discriminated unions in JSON Schema draft-7).
       const tool = makeProviderTool({ name: "@acme/p", allowAllUris: true }, async () => {
         throw new Error("not called");
       });
-      const bodySchema = (tool.parameters as { properties: { body: { oneOf: unknown[] } } })
-        .properties.body;
-      expect(bodySchema.oneOf.length).toBe(5);
+      const bodySchema = (
+        tool.parameters as {
+          properties: { body: { anyOf?: unknown[]; oneOf?: unknown[] } };
+        }
+      ).properties.body;
+      const variants = bodySchema.anyOf ?? bodySchema.oneOf ?? [];
+      expect(variants.length).toBe(5);
     });
 
-    it("multipart variant requires 'multipart' field with items oneOf[3]", () => {
+    it("multipart variant requires 'multipart' field with items union[3]", () => {
       const tool = makeProviderTool({ name: "@acme/p", allowAllUris: true }, async () => {
         throw new Error("not called");
       });
       type BodyVariant = {
         required?: string[];
         properties?: {
-          multipart?: { type?: string; minItems?: number; items?: { oneOf?: unknown[] } };
+          multipart?: {
+            type?: string;
+            minItems?: number;
+            items?: { anyOf?: unknown[]; oneOf?: unknown[] };
+          };
         };
       };
-      const bodySchema = (tool.parameters as { properties: { body: { oneOf: BodyVariant[] } } })
-        .properties.body;
-      const mpVariant = bodySchema.oneOf.find((v) => v.required?.includes("multipart"));
+      const bodySchema = (
+        tool.parameters as {
+          properties: { body: { anyOf?: BodyVariant[]; oneOf?: BodyVariant[] } };
+        }
+      ).properties.body;
+      const variants = bodySchema.anyOf ?? bodySchema.oneOf ?? [];
+      const mpVariant = variants.find((v) => v.required?.includes("multipart"));
       expect(mpVariant).toBeDefined();
       expect(mpVariant!.properties!.multipart!.type).toBe("array");
       expect(mpVariant!.properties!.multipart!.minItems).toBe(1);
-      expect(mpVariant!.properties!.multipart!.items!.oneOf!.length).toBe(3);
+      const partVariants =
+        mpVariant!.properties!.multipart!.items!.anyOf ??
+        mpVariant!.properties!.multipart!.items!.oneOf ??
+        [];
+      expect(partVariants.length).toBe(3);
     });
 
     it("missing 'name' in multipart part is caught by additionalProperties:false on each part variant", () => {
@@ -586,16 +611,24 @@ describe("multipart body variant", () => {
         properties?: {
           multipart?: {
             items?: {
+              anyOf?: Array<{ required?: string[]; additionalProperties?: boolean }>;
               oneOf?: Array<{ required?: string[]; additionalProperties?: boolean }>;
             };
           };
         };
       };
-      const bodySchema = (tool.parameters as { properties: { body: { oneOf: BodyVariant[] } } })
-        .properties.body;
-      const mpVariant = bodySchema.oneOf.find((v) => v.required?.includes("multipart"))!;
-      const partOneOf = mpVariant.properties!.multipart!.items!.oneOf!;
-      for (const partVariant of partOneOf) {
+      const bodySchema = (
+        tool.parameters as {
+          properties: { body: { anyOf?: BodyVariant[]; oneOf?: BodyVariant[] } };
+        }
+      ).properties.body;
+      const variants = bodySchema.anyOf ?? bodySchema.oneOf ?? [];
+      const mpVariant = variants.find((v) => v.required?.includes("multipart"))!;
+      const partVariants =
+        mpVariant.properties!.multipart!.items!.anyOf ??
+        mpVariant.properties!.multipart!.items!.oneOf ??
+        [];
+      for (const partVariant of partVariants) {
         expect(partVariant.required).toContain("name");
         expect(partVariant.additionalProperties).toBe(false);
       }

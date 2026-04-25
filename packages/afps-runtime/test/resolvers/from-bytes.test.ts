@@ -253,7 +253,6 @@ describe("fromBytes body variant", () => {
 
     it("wrong encoding ('hex') — throws RESOLVER_BODY_INVALID", async () => {
       try {
-         
         await resolveBodyStream({ fromBytes: "deadbeef", encoding: "hex" as any });
         throw new Error("expected throw");
       } catch (err) {
@@ -303,7 +302,6 @@ describe("fromBytes body variant", () => {
 
     it("wrong encoding — throws RESOLVER_BODY_INVALID", async () => {
       try {
-         
         await resolveBodyForFetch({ fromBytes: "aGVsbG8=", encoding: "hex" as any });
         throw new Error("expected throw");
       } catch (err) {
@@ -402,14 +400,17 @@ describe("fromBytes body variant", () => {
         },
       );
 
-      const bodySchema = (tool.parameters as { properties: { body: { oneOf: unknown[] } } })
-        .properties.body;
-      const oneOf = bodySchema.oneOf;
+      // Zod 4 generates anyOf for unions (both oneOf and anyOf are semantically
+      // equivalent for discriminated unions; LLMs consume either form).
+      const bodySchema = (
+        tool.parameters as { properties: { body: { anyOf?: unknown[]; oneOf?: unknown[] } } }
+      ).properties.body;
+      const variants = bodySchema.anyOf ?? bodySchema.oneOf ?? [];
 
       // Should have 5 variants: string, fromFile object, fromBytes object, multipart object, null
-      expect(oneOf.length).toBe(5);
+      expect(variants.length).toBe(5);
 
-      const fromBytesVariant = oneOf.find(
+      const fromBytesVariant = variants.find(
         (v) =>
           typeof v === "object" &&
           v !== null &&
