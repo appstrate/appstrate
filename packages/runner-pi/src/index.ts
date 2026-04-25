@@ -16,16 +16,11 @@ export {
 } from "./bundle-extensions.ts";
 
 export {
-  buildProviderExtensionFactories,
+  buildProviderCallExtensionFactory,
   readProviderRefs,
-  afpsToolToPiExtension,
+  type BuildProviderCallExtensionFactoryOptions,
   type ProviderEventEmitter,
 } from "./provider-bridge.ts";
-
-export {
-  buildRunHistoryExtensionFactory,
-  type BuildRunHistoryExtensionFactoryOptions,
-} from "./run-history-bridge.ts";
 
 export {
   buildRuntimePiEnv,

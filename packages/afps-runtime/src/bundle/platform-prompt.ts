@@ -92,7 +92,8 @@ export interface PlatformPromptOptions {
   /**
    * Providers to surface in the `## Connected Providers` section.
    * Caller-filtered — pass only those for which credentials are wired.
-   * `toolName` defaults to `providerToolName(id)` when absent.
+   * The LLM-facing tool surface is the canonical `provider_call`;
+   * each entry contributes one `providerId` to that tool's enum.
    */
   providers?: ReadonlyArray<PlatformPromptProvider>;
 

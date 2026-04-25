@@ -298,9 +298,12 @@ export type ProviderCallFn = (
 /**
  * Apply transport control headers to an outgoing provider call.
  *
- * Shared by both {@link SidecarProviderResolver} and
- * {@link RemoteAppstrateProviderResolver} so the two transports stay in
- * lockstep — any change to the streaming protocol only needs to land here.
+ * Used by {@link RemoteAppstrateProviderResolver}. The historical
+ * `SidecarProviderResolver` was retired in favour of the MCP
+ * `provider_call` tool, which talks to the sidecar's `executeProviderCall`
+ * directly without serialising over `X-Stream-Response` / `X-Stream-Request`
+ * — this transport-control layer survives only for the CLI's HTTP path
+ * to the platform's `/api/internal/credential-proxy/...` route.
  *
  * Rules applied (mirrors the sidecar server contract):
  *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).

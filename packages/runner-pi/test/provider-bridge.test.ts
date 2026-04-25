@@ -2,8 +2,8 @@
 
 /**
  * Unit tests for `provider-bridge.ts` — the adapter that turns AFPS
- * `ProviderResolver` output (typed `*_call` tools) into Pi SDK extension
- * factories. Drives the full flow without instantiating PiRunner.
+ * `ProviderResolver` output into a single Pi SDK `provider_call`
+ * extension factory.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -14,11 +14,7 @@ import type {
   ProviderResolver,
   Tool as AfpsTool,
 } from "@appstrate/afps-runtime/resolvers";
-import {
-  afpsToolToPiExtension,
-  buildProviderExtensionFactories,
-  readProviderRefs,
-} from "../src/provider-bridge.ts";
+import { buildProviderCallExtensionFactory, readProviderRefs } from "../src/provider-bridge.ts";
 import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────
@@ -29,29 +25,46 @@ function makeBundle(providers: Record<string, string> | null = null): Bundle {
   return makeTestBundle(makeBundlePackage("@acme/agent", "1.0.0", "agent", {}, extra));
 }
 
-function makeFakePi(): {
-  api: ExtensionAPI;
-  tools: Array<{
-    name: string;
-    label?: string;
-    description?: string;
-    parameters: unknown;
-    execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<unknown>;
-  }>;
-} {
-  const tools: Array<{
-    name: string;
-    label?: string;
-    description?: string;
-    parameters: unknown;
-    execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<unknown>;
-  }> = [];
+interface RegisteredTool {
+  name: string;
+  label?: string;
+  description?: string;
+  parameters: unknown;
+  execute: (
+    toolCallId: string,
+    params: unknown,
+    signal?: AbortSignal,
+  ) => Promise<{ content: unknown[]; isError?: boolean }>;
+}
+
+function makeFakePi(): { api: ExtensionAPI; tools: RegisteredTool[] } {
+  const tools: RegisteredTool[] = [];
   const api = {
-    registerTool(tool: (typeof tools)[number]) {
+    registerTool(tool: RegisteredTool) {
       tools.push(tool);
     },
   } as unknown as ExtensionAPI;
   return { api, tools };
+}
+
+function makeAfpsTool(name: string, handler: (params: unknown) => Promise<unknown>): AfpsTool {
+  return {
+    name,
+    description: `${name} tool`,
+    parameters: { type: "object" },
+    async execute(params: unknown) {
+      const out = await handler(params);
+      return { content: [{ type: "text", text: JSON.stringify(out) }] };
+    },
+  } as unknown as AfpsTool;
+}
+
+function makeResolver(refsToTools: Record<string, AfpsTool>): ProviderResolver {
+  return {
+    async resolve(refs: ProviderRef[]): Promise<AfpsTool[]> {
+      return refs.map((r) => refsToTools[r.name]!).filter(Boolean);
+    },
+  };
 }
 
 // ─── readProviderRefs ──────────────────────────────────────────────────
@@ -76,175 +89,100 @@ describe("readProviderRefs", () => {
   });
 });
 
-// ─── afpsToolToPiExtension ─────────────────────────────────────────────
+// ─── buildProviderCallExtensionFactory ────────────────────────────────
 
-describe("afpsToolToPiExtension", () => {
-  it("registers a Pi tool whose execute forwards to the AFPS tool", async () => {
-    const events: Array<{ type: string; [k: string]: unknown }> = [];
-    const calls: unknown[] = [];
-    const afpsTool: AfpsTool = {
-      name: "gmail_call",
-      description: "Call Gmail",
-      parameters: { type: "object", required: [], properties: {} },
-      async execute(args, ctx) {
-        calls.push({ args, ctx });
-        ctx.emit({
-          type: "provider.called",
-          timestamp: Date.now(),
-          runId: ctx.runId,
-          providerId: "@appstrate/gmail",
-          status: 200,
-        } as unknown as Parameters<typeof ctx.emit>[0]);
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-    };
-    const factory = afpsToolToPiExtension(afpsTool, "run_1", "/workspace", (e) => events.push(e));
-    const { api, tools } = makeFakePi();
-    factory(api);
-
-    expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("gmail_call");
-    expect(tools[0]!.label).toBe("gmail_call");
-
-    const result = (await tools[0]!.execute("tc_1", { method: "GET", target: "https://x/y" })) as {
-      content: unknown[];
-      details: unknown;
-    };
-    expect(result).toEqual({ content: [{ type: "text", text: "ok" }], details: undefined });
-    expect(calls).toHaveLength(1);
-    expect(
-      (calls[0] as { ctx: { runId: string; toolCallId: string; workspace: string } }).ctx,
-    ).toMatchObject({ runId: "run_1", toolCallId: "tc_1", workspace: "/workspace" });
-    expect(events).toHaveLength(1);
-    expect(events[0]!).toMatchObject({
-      type: "provider.called",
-      providerId: "@appstrate/gmail",
-      status: 200,
-    });
-  });
-
-  it("coerces AFPS resource content into text stubs (Pi has no resource variant)", async () => {
-    const afpsTool: AfpsTool = {
-      name: "test_call",
-      description: "",
-      parameters: { type: "object", required: [], properties: {} },
-      async execute() {
-        return {
-          content: [
-            { type: "text", text: "hello" },
-            { type: "resource", uri: "file:///tmp/x.bin" },
-          ],
-        };
-      },
-    };
-    const factory = afpsToolToPiExtension(afpsTool, "r", "/w", () => {});
-    const { api, tools } = makeFakePi();
-    factory(api);
-
-    const result = (await tools[0]!.execute("tc", {})) as { content: unknown[] };
-    expect(result.content).toEqual([
-      { type: "text", text: "hello" },
-      { type: "text", text: "[resource file:///tmp/x.bin]" },
-    ]);
-  });
-
-  it("forwards a caller-supplied AbortSignal into ctx.signal", async () => {
-    let seenAborted = false;
-    const afpsTool: AfpsTool = {
-      name: "slow_call",
-      description: "",
-      parameters: { type: "object", required: [], properties: {} },
-      async execute(_, ctx) {
-        seenAborted = ctx.signal.aborted;
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-    };
-    const factory = afpsToolToPiExtension(afpsTool, "r", "/w", () => {});
-    const { api, tools } = makeFakePi();
-    factory(api);
-
-    const controller = new AbortController();
-    controller.abort();
-    await tools[0]!.execute("tc", {}, controller.signal);
-    expect(seenAborted).toBe(true);
-  });
-});
-
-// ─── buildProviderExtensionFactories ───────────────────────────────────
-
-describe("buildProviderExtensionFactories", () => {
-  it("returns [] for a bundle with no providers (no resolver call)", async () => {
-    let called = false;
-    const resolver: ProviderResolver = {
-      resolve: async () => {
-        called = true;
-        return [];
-      },
-    };
-    const factories = await buildProviderExtensionFactories({
+describe("buildProviderCallExtensionFactory", () => {
+  it("returns [] when the bundle declares no providers", async () => {
+    const factories = await buildProviderCallExtensionFactory({
       bundle: makeBundle(),
-      providerResolver: resolver,
-      runId: "r",
+      providerResolver: makeResolver({}),
+      runId: "run_1",
       workspace: "/w",
       emitProvider: () => {},
     });
     expect(factories).toEqual([]);
-    expect(called).toBe(false);
   });
 
-  it("resolves refs from the manifest and produces one factory per tool", async () => {
-    const seen: { refs: ProviderRef[]; bundle: Bundle } = { refs: [], bundle: null as never };
-    const resolver: ProviderResolver = {
-      resolve: async (refs, bundle) => {
-        seen.refs = refs;
-        seen.bundle = bundle;
-        return refs.map((ref) => ({
-          name: `${ref.name.replace(/[^a-z]/gi, "_")}_call`,
-          description: "",
-          parameters: { type: "object", required: [], properties: {} },
-          async execute() {
-            return { content: [{ type: "text", text: ref.name }] };
-          },
-        }));
-      },
-    };
-
-    const factories = await buildProviderExtensionFactories({
-      bundle: makeBundle({ "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "^2.0.0" }),
-      providerResolver: resolver,
+  it("registers a single `provider_call` Pi tool with providerId enum", async () => {
+    const factories = await buildProviderCallExtensionFactory({
+      bundle: makeBundle({ "@appstrate/gmail": "1", "@appstrate/clickup": "1" }),
+      providerResolver: makeResolver({
+        "@appstrate/gmail": makeAfpsTool("appstrate_gmail_call", async () => ({ ok: true })),
+        "@appstrate/clickup": makeAfpsTool("appstrate_clickup_call", async () => ({ ok: true })),
+      }),
       runId: "r",
       workspace: "/w",
       emitProvider: () => {},
     });
-
-    expect(factories).toHaveLength(2);
-    expect(seen.refs).toEqual([
-      { name: "@appstrate/gmail", version: "1.0.0" },
-      { name: "@appstrate/clickup", version: "^2.0.0" },
-    ]);
-    // Resolver receives the full spec Bundle it can introspect.
-    expect(seen.bundle.packages instanceof Map).toBe(true);
-    expect(seen.bundle.root).toBe("@acme/agent@1.0.0");
-
+    expect(factories).toHaveLength(1);
     const { api, tools } = makeFakePi();
-    for (const f of factories) f(api);
-    expect(tools.map((t) => t.name)).toEqual(["_appstrate_gmail_call", "_appstrate_clickup_call"]);
+    factories[0]!(api);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("provider_call");
+    const params = tools[0]!.parameters as { properties: { providerId: { enum: string[] } } };
+    expect(params.properties.providerId.enum).toEqual(["@appstrate/gmail", "@appstrate/clickup"]);
   });
 
-  it("surfaces resolver errors to the caller", async () => {
-    const resolver: ProviderResolver = {
-      resolve: async () => {
-        throw new Error("boom");
-      },
-    };
-    await expect(
-      buildProviderExtensionFactories({
-        bundle: makeBundle({ "@appstrate/gmail": "1.0.0" }),
-        providerResolver: resolver,
-        runId: "r",
-        workspace: "/w",
-        emitProvider: () => {},
+  it("dispatches by providerId, stripping it from the forwarded params", async () => {
+    const seen: Array<{ tool: string; params: unknown }> = [];
+    const factories = await buildProviderCallExtensionFactory({
+      bundle: makeBundle({ "@appstrate/gmail": "1" }),
+      providerResolver: makeResolver({
+        "@appstrate/gmail": makeAfpsTool("appstrate_gmail_call", async (params) => {
+          seen.push({ tool: "gmail", params });
+          return { ok: true };
+        }),
       }),
-    ).rejects.toThrow("boom");
+      runId: "r",
+      workspace: "/w",
+      emitProvider: () => {},
+    });
+    const { api, tools } = makeFakePi();
+    factories[0]!(api);
+    await tools[0]!.execute("call_1", {
+      providerId: "@appstrate/gmail",
+      method: "GET",
+      target: "https://api.gmail.com/x",
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.params).toEqual({ method: "GET", target: "https://api.gmail.com/x" });
+  });
+
+  it("returns isError when providerId is unknown — does not throw", async () => {
+    const factories = await buildProviderCallExtensionFactory({
+      bundle: makeBundle({ "@appstrate/gmail": "1" }),
+      providerResolver: makeResolver({
+        "@appstrate/gmail": makeAfpsTool("appstrate_gmail_call", async () => ({})),
+      }),
+      runId: "r",
+      workspace: "/w",
+      emitProvider: () => {},
+    });
+    const { api, tools } = makeFakePi();
+    factories[0]!(api);
+    const res = await tools[0]!.execute("c", { providerId: "@appstrate/unknown", target: "x" });
+    expect(res.isError).toBe(true);
+  });
+
+  it("emits provider.called and provider.completed events", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const factories = await buildProviderCallExtensionFactory({
+      bundle: makeBundle({ "@appstrate/gmail": "1" }),
+      providerResolver: makeResolver({
+        "@appstrate/gmail": makeAfpsTool("appstrate_gmail_call", async () => ({})),
+      }),
+      runId: "r",
+      workspace: "/w",
+      emitProvider: (e) => events.push(e),
+    });
+    const { api, tools } = makeFakePi();
+    factories[0]!(api);
+    await tools[0]!.execute("call_1", {
+      providerId: "@appstrate/gmail",
+      target: "https://api.gmail.com/x",
+    });
+    const types = events.map((e) => e.type);
+    expect(types).toContain("provider.called");
+    expect(types).toContain("provider.completed");
   });
 });

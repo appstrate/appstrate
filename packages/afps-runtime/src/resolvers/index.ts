@@ -69,10 +69,6 @@ export {
   type SerializeFetchResponseContext,
 } from "./provider-tool.ts";
 export {
-  SidecarProviderResolver,
-  type SidecarProviderResolverOptions,
-} from "./sidecar-provider-resolver.ts";
-export {
   LocalProviderResolver,
   type LocalCredentialsFile,
   type LocalProviderResolverOptions,
