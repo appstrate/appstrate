@@ -105,6 +105,50 @@ describe("isCanonicalRunEvent", () => {
       } as RunEvent),
     ).toBe(true);
   });
+
+  it("accepts run lifecycle events (#278 item I)", () => {
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.started" })).toBe(true);
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.started",
+        runnerKind: "platform",
+        runnerName: "appstrate-pi@1.0.0",
+      }),
+    ).toBe(true);
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.succeeded", durationMs: 4200 })).toBe(
+      true,
+    );
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.timedout" })).toBe(true);
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "run.cancelled", reason: "user_cancelled" }),
+    ).toBe(true);
+  });
+
+  it("accepts run.failed with structured error", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { code: "manifest_invalid", message: "missing scope" },
+      }),
+    ).toBe(true);
+    // Error is optional.
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed" })).toBe(true);
+  });
+
+  it("rejects run.failed with malformed error (no message)", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { code: "x" },
+      } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed", error: 42 } as RunEvent),
+    ).toBe(false);
+  });
 });
 
 describe("narrowCanonicalEvent", () => {
@@ -137,7 +181,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    expect(arr.length).toBe(8);
+    // 8 reserved namespaces (memory/state/output/report/log + appstrate.{progress,error,metric})
+    // + 5 run lifecycle events (run.{started,succeeded,failed,timedout,cancelled}, #278 item I).
+    expect(arr.length).toBe(13);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

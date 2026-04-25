@@ -305,7 +305,11 @@ export function createAgentsRouter() {
       return new Response(new Uint8Array(bytes), {
         status: 200,
         headers: {
-          "Content-Type": "application/vnd.appstrate.bundle+zip",
+          // Standard `application/zip` so generic ZIP tooling, browser
+          // download flows, and proxy/CDN content sniffing all work without
+          // special-casing. The vendor type added no compatibility benefit
+          // and broke streaming clients that match on MIME.
+          "Content-Type": "application/zip",
           "Content-Length": String(bytes.byteLength),
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle"`,
           "X-Bundle-Integrity": bundle.integrity,

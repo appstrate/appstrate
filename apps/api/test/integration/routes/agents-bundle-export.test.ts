@@ -151,7 +151,11 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toBe("application/vnd.appstrate.bundle+zip");
+    // #278 item F — standard `application/zip` so generic ZIP tooling and
+    // browser download flows work without special-casing. The vendor MIME
+    // type added no compatibility benefit and broke streaming clients that
+    // matched on MIME.
+    expect(res.headers.get("Content-Type")).toBe("application/zip");
     expect(res.headers.get("Content-Disposition")).toContain("attachment");
     expect(res.headers.get("Content-Disposition")).toContain("exportorg-agent-root.afps-bundle");
 

@@ -126,6 +126,31 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.data).toBe("");
     });
 
+    // #278 item E — every SSE frame must carry an `id:` field per the HTML SSE
+    // spec so browsers/EventSource clients can resume via `Last-Event-ID` after
+    // disconnects. The id is monotonic per stream.
+    it("emits a monotonic `id:` field on every SSE frame", async () => {
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        id: run.id,
+        status: "running",
+        package_id: agentPkg.id,
+      });
+
+      const events = await collectSSEEvents(res.body!, 2, { timeoutMs: 3000 });
+      // First frame is the ping (id "1"), second is the run_update (id "2").
+      expect(events.length).toBe(2);
+      expect(events[0]!.id).toBe("1");
+      expect(events[1]!.id).toBe("2");
+      // Monotonic strictly-increasing.
+      expect(Number(events[1]!.id)).toBeGreaterThan(Number(events[0]!.id));
+    });
+
     it("returns 401 without cookie", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`);
       expect(res.status).toBe(401);

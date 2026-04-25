@@ -130,8 +130,17 @@ function openRealtimeStream(
       wake?.();
     });
 
-    // Immediate ping confirms the connection is alive
-    await stream.writeSSE({ event: "ping", data: "" });
+    // Per-stream monotonic event id. Resumable from `Last-Event-ID` only
+    // within the same subscriber instance — events live in PG NOTIFY land,
+    // not in a replayable log, so reconnect resumes the live tail rather
+    // than replaying gaps. The id still lets browsers/EventSource clients
+    // correlate frames and avoid duplicate processing across reconnects.
+    // HTML SSE spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
+    let nextEventId = 0;
+    const allocateId = (): string => String(++nextEventId);
+
+    // Immediate ping confirms the connection is alive.
+    await stream.writeSSE({ event: "ping", data: "", id: allocateId() });
 
     const PING_INTERVAL = 30_000;
     let lastWrite = Date.now();
@@ -140,7 +149,7 @@ function openRealtimeStream(
       // Drain any queued events
       while (pending.length > 0) {
         const msg = pending.shift()!;
-        await stream.writeSSE(msg);
+        await stream.writeSSE({ ...msg, id: allocateId() });
         lastWrite = Date.now();
       }
 
@@ -159,7 +168,7 @@ function openRealtimeStream(
 
       // If no events were queued during the wait, send a keep-alive ping
       if (pending.length === 0) {
-        await stream.writeSSE({ event: "ping", data: "" });
+        await stream.writeSSE({ event: "ping", data: "", id: allocateId() });
         lastWrite = Date.now();
       }
     }

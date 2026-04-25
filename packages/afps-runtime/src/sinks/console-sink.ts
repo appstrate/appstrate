@@ -77,6 +77,16 @@ export class ConsoleSink implements EventSink {
           };
           return `${seq} ⊘ metric: ${truncate(safeStringify(summary), 200)}`;
         }
+        case "run.started":
+          return `${seq} ▶ run.started${canonical.runnerKind ? ` (${canonical.runnerKind})` : ""}`;
+        case "run.succeeded":
+          return `${seq} ✓ run.succeeded`;
+        case "run.failed":
+          return `${seq} ✗ run.failed${canonical.error ? `: ${canonical.error.message}` : ""}`;
+        case "run.timedout":
+          return `${seq} ⏱ run.timedout`;
+        case "run.cancelled":
+          return `${seq} ⊘ run.cancelled${canonical.reason ? ` (${canonical.reason})` : ""}`;
         default: {
           const _exhaustive: never = canonical;
           void _exhaustive;

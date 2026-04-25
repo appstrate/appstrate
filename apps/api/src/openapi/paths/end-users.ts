@@ -90,7 +90,11 @@ export const endUsersPaths = {
       tags: ["End Users"],
       summary: "List end-users",
       description:
-        "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
+        "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.\n\n" +
+        "**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most " +
+        "one. Encoded via the `x-mutually-exclusive` extension below for client generators that " +
+        "honour it; the server enforces the constraint at runtime regardless.",
+      "x-mutually-exclusive": ["startingAfter", "endingBefore"],
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

@@ -101,6 +101,51 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
   durationMs?: number;
 }
 
+/**
+ * `run.started` — runtime crossed from `pending` to `running`.
+ *
+ * Emitted exactly once per run, on the first event POST that establishes
+ * proof-of-life. Useful for webhook subscribers and audit log sinks that
+ * want a discrete "starting work" signal instead of inferring it from the
+ * absence of terminal events.
+ */
+export interface RunStartedEvent extends BaseEnvelope {
+  type: "run.started";
+  /** Runner topology — `"platform"` (in-container Pi runner) or `"remote"` (CLI / GitHub Action). */
+  runnerKind?: "platform" | "remote";
+  /** Free-form runner identifier (e.g. `"appstrate-cli@0.4.0"`, `"github-action"`). */
+  runnerName?: string;
+}
+
+interface BaseRunCompletedEvent extends BaseEnvelope {
+  /** Wall-clock duration of the run in milliseconds. */
+  durationMs?: number;
+}
+
+/** `run.succeeded` — terminal: run completed with `status: "success"`. */
+export interface RunSucceededEvent extends BaseRunCompletedEvent {
+  type: "run.succeeded";
+}
+
+/** `run.failed` — terminal: run completed with `status: "failed"`. */
+export interface RunFailedEvent extends BaseRunCompletedEvent {
+  type: "run.failed";
+  /** Optional structured error from `RunResult.error`. */
+  error?: { code?: string; message: string };
+}
+
+/** `run.timedout` — terminal: run exceeded its timeout budget. */
+export interface RunTimedOutEvent extends BaseRunCompletedEvent {
+  type: "run.timedout";
+}
+
+/** `run.cancelled` — terminal: run was cancelled by user or scheduler. */
+export interface RunCancelledEvent extends BaseRunCompletedEvent {
+  type: "run.cancelled";
+  /** Free-form reason ("user_cancelled", "shutdown", …). */
+  reason?: string;
+}
+
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
   | MemoryAddedEvent
@@ -110,7 +155,12 @@ export type CanonicalRunEvent =
   | LogWrittenEvent
   | AppstrateProgressEvent
   | AppstrateErrorEvent
-  | AppstrateMetricEvent;
+  | AppstrateMetricEvent
+  | RunStartedEvent
+  | RunSucceededEvent
+  | RunFailedEvent
+  | RunTimedOutEvent
+  | RunCancelledEvent;
 
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
@@ -122,6 +172,11 @@ export const CANONICAL_EVENT_TYPES = [
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
+  "run.started",
+  "run.succeeded",
+  "run.failed",
+  "run.timedout",
+  "run.cancelled",
 ] as const satisfies ReadonlyArray<CanonicalRunEvent["type"]>;
 
 const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_TYPES);
@@ -167,6 +222,20 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
         if (typeof e.cost !== "number" || !Number.isFinite(e.cost) || e.cost < 0) return false;
       }
       return true;
+    }
+    case "run.started":
+      // No required payload — proof-of-life envelope alone is enough.
+      return true;
+    case "run.succeeded":
+    case "run.timedout":
+    case "run.cancelled":
+      return true;
+    case "run.failed": {
+      const e = event as Record<string, unknown>;
+      if (e.error === undefined) return true;
+      if (e.error === null || typeof e.error !== "object" || Array.isArray(e.error)) return false;
+      const err = e.error as Record<string, unknown>;
+      return typeof err.message === "string";
     }
     default:
       return false;
