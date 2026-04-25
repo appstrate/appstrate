@@ -284,6 +284,22 @@ export {
   type SubprocessTransportOptions,
 } from "./transports/subprocess.ts";
 
+// Manifest-driven loader — Phase 4 §D4.2 of #276. Lets a tool package
+// declare itself as a subprocess MCP server in its manifest's
+// `definition` block; one helper spawns + connects + wraps in a
+// vetted AppstrateMcpClient.
+export {
+  MCP_SERVER_RUNTIME,
+  TRANSPORTS,
+  TRUST_LEVELS,
+  isMcpServerManifestDefinition,
+  parseMcpServerManifest,
+  type ManifestTransport,
+  type McpServerManifest,
+  type TrustLevel,
+} from "./manifest.ts";
+export { loadToolMcpServer, type LoadToolMcpServerOptions } from "./loader.ts";
+
 // Tool descriptor sanitisation — Phase 5 of #276. Strip hidden
 // Unicode, cap field lengths, defeat Full-Schema Poisoning before any
 // third-party tool descriptor reaches the agent's LLM.
