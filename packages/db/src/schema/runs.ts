@@ -121,6 +121,20 @@ export const runs = pgTable(
     // CLI-provided execution environment metadata (os, cli version, git sha,
     // ...). Capped at 16 KiB by the route Zod schema.
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
+    // Human-friendly label for the runner that triggered this run — CLI host
+    // name (`os.hostname()`), GitHub Action workflow descriptor, or any other
+    // string the caller supplies via `X-Appstrate-Runner-Name` (cap 120 chars,
+    // resolved at INSERT time and never updated). Fallback resolution at
+    // INSERT time: explicit header → CLI device name from
+    // `cli_refresh_tokens.device_name` (joined via the JWT's `cli_family_id`
+    // claim) → null. Denormalized so a run keeps its label even after the CLI
+    // session is revoked or the device is renamed.
+    runnerName: text("runner_name"),
+    // Free-form classifier driving icon selection in the UI: `cli`,
+    // `github-action`, or any other tag a future runner declares via
+    // `X-Appstrate-Runner-Kind`. Stamped at INSERT alongside `runner_name`
+    // and never updated.
+    runnerKind: text("runner_kind"),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),

@@ -8,6 +8,7 @@ import {
   CreditCard,
   Globe,
   KeyRound,
+  Laptop,
   LayoutGrid,
   Settings,
   Shield,
@@ -67,6 +68,15 @@ export function OrgSettingsLayout() {
           icon: KeyRound,
           label: t("orgSettings.tabOauth"),
           show: isAdmin && oidcEnabled && dashboardSsoEnabled,
+        },
+        // CLI sessions oversight (issue #251 Phase 3) — admin only and
+        // gated on the OIDC module being loaded (the backing endpoints
+        // live in `apps/api/src/modules/oidc/routes.ts`).
+        {
+          to: "/org-settings/cli-sessions",
+          icon: Laptop,
+          label: t("orgSettings.tabCliSessions"),
+          show: isAdmin && oidcEnabled,
         },
         {
           to: "/org-settings/billing",
@@ -139,6 +149,7 @@ export function OrgSettingsLayout() {
         proxies: "/org-settings/proxies",
         oauth: "/org-settings/oauth",
         billing: "/org-settings/billing",
+        "cli-sessions": "/org-settings/cli-sessions",
       }}
       sections={sections}
     />

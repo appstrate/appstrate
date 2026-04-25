@@ -32,6 +32,7 @@ import { OrgSettingsModelsPage } from "./pages/org-settings/models";
 import { OrgSettingsProxiesPage } from "./pages/org-settings/proxies";
 import { OrgSettingsOAuthPage } from "./pages/org-settings/oauth";
 import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
+import { OrgSettingsCliSessionsPage } from "./pages/org-settings/cli-sessions";
 import { OrgSettingsApplicationsPage } from "./pages/org-settings/applications";
 import { OrgSettingsAppGeneralPage } from "./pages/org-settings/app/general";
 import { OrgSettingsAppProfilesPage } from "./pages/org-settings/app/profiles";
@@ -52,6 +53,7 @@ import { PreferencesAppearancePage } from "./pages/preferences/appearance";
 import { PreferencesSecurityPage } from "./pages/preferences/security";
 import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
 import { PreferencesProfilesPage } from "./pages/preferences/profiles";
+import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -389,6 +391,7 @@ export function App() {
               <Route path="general" element={<PreferencesGeneralPage />} />
               <Route path="appearance" element={<PreferencesAppearancePage />} />
               <Route path="security" element={<PreferencesSecurityPage />} />
+              <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connectors" element={<PreferencesConnectorsPage />} />
               <Route path="profiles" element={<PreferencesProfilesPage />} />
             </Route>
@@ -426,6 +429,7 @@ export function App() {
               <Route path="models" element={<OrgSettingsModelsPage />} />
               <Route path="proxies" element={<OrgSettingsProxiesPage />} />
               <Route path="oauth" element={<OrgSettingsOAuthPage />} />
+              <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
               <Route path="app/profiles" element={<OrgSettingsAppProfilesPage />} />

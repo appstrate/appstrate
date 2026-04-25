@@ -23,7 +23,37 @@
  */
 
 import { setTimeout as delay } from "node:timers/promises";
+import { hostname } from "node:os";
 import { assertSafeVerificationUrl, normalizeInstance } from "./instance-url.ts";
+import { CLI_USER_AGENT } from "./version.ts";
+
+/**
+ * Headers sent on every device-flow request that should be associated
+ * with this device on the server. The User-Agent lets the dashboard
+ * categorize the session as `cli` (vs `github-action`); the
+ * `X-Appstrate-Device-Name` header is the canonical human-friendly
+ * label and falls back to the OS hostname when the user did not pass
+ * `--device-name`. Both are best-effort — the server tolerates either
+ * being absent and the dashboard derives a label from the UA when
+ * `device_name` is null.
+ */
+function deviceMetadataHeaders(deviceName?: string | null): Record<string, string> {
+  const headers: Record<string, string> = { "User-Agent": CLI_USER_AGENT };
+  const name = deviceName ?? safeHostname();
+  if (name) headers["X-Appstrate-Device-Name"] = name;
+  return headers;
+}
+
+function safeHostname(): string | null {
+  try {
+    const h = hostname();
+    if (typeof h !== "string") return null;
+    const trimmed = h.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface DeviceCodeResponse {
   deviceCode: string;
@@ -163,6 +193,14 @@ export interface PollOptions {
    * in prod.
    */
   now?: () => number;
+  /**
+   * Optional human-friendly device label sent to the server as
+   * `X-Appstrate-Device-Name`. When unset, the CLI auto-populates from
+   * `os.hostname()`. The header is best-effort — a server too old to
+   * recognize it ignores the value, and the dashboard falls back to a
+   * UA-derived label.
+   */
+  deviceName?: string | null;
 }
 
 /**
@@ -224,7 +262,10 @@ export async function pollDeviceFlow(
 
     const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...deviceMetadataHeaders(opts.deviceName),
+      },
       body,
     });
 
@@ -298,7 +339,10 @@ export async function refreshCliTokens(
   }).toString();
   const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": CLI_USER_AGENT,
+    },
     body,
   });
   if (!res.ok) {
@@ -350,7 +394,10 @@ export async function revokeCliRefreshToken(
   }).toString();
   const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/revoke`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": CLI_USER_AGENT,
+    },
     body,
   });
   if (!res.ok) {

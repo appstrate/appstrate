@@ -233,6 +233,10 @@ program
     "--no-app",
     "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-App-Id: …` or pin later via `appstrate app switch`.",
   )
+  .option(
+    "--device-name <name>",
+    "Human-friendly label for this device in the dashboard's authorized-devices list. Defaults to the OS hostname.",
+  )
   .action(async (opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await loginCommand({
@@ -247,6 +251,7 @@ program
       app: typeof opts.app === "string" ? opts.app : undefined,
       createApp: typeof opts.createApp === "string" ? opts.createApp : undefined,
       noApp: opts.app === false,
+      deviceName: typeof opts.deviceName === "string" ? opts.deviceName : undefined,
     });
   });
 
