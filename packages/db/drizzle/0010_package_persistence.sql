@@ -47,3 +47,10 @@ CREATE INDEX IF NOT EXISTS "pkp_lookup"
 
 CREATE INDEX IF NOT EXISTS "pkp_org"
   ON "package_persistence" ("org_id");
+--> statement-breakpoint
+
+-- Drop the legacy app-wide memory table. The unified `package_persistence`
+-- store above is the single source of truth for both checkpoints and
+-- memories with first-class actor scoping.
+DROP TABLE IF EXISTS "package_memories";
+

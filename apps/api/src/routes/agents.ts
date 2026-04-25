@@ -4,9 +4,6 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getRunningRunCounts,
-  getPackageMemories,
-  deletePackageMemory,
-  deleteAllPackageMemories,
   getCheckpoint,
   listMemories,
   deleteMemory,
@@ -233,55 +230,6 @@ export function createAgentsRouter() {
       await updateInstalledPackage(scope, agent.id, { appProfileId: data.appProfileId });
 
       return c.json({ success: true });
-    },
-  );
-
-  // GET /api/agents/:scope/:name/memories — list agent memories
-  router.get("/:scope{@[^/]+}/:name/memories", requireAgent(), async (c) => {
-    const agent = c.get("agent");
-    const applicationId = c.get("applicationId");
-    const memories = await getPackageMemories(agent.id, applicationId);
-    return c.json({
-      memories: memories.map((m) => ({
-        id: m.id,
-        content: m.content,
-        runId: m.runId,
-        createdAt: m.createdAt?.toISOString() ?? null,
-      })),
-    });
-  });
-
-  // DELETE /api/agents/:scope/:name/memories — delete all memories (admin only)
-  router.delete(
-    "/:scope{@[^/]+}/:name/memories",
-    requireAgent(),
-    requirePermission("memories", "delete"),
-    async (c) => {
-      const agent = c.get("agent");
-      const applicationId = c.get("applicationId");
-      const deleted = await deleteAllPackageMemories(agent.id, applicationId);
-      return c.json({ deleted });
-    },
-  );
-
-  // DELETE /api/agents/:scope/:name/memories/:memoryId — delete single memory (admin only)
-  router.delete(
-    "/:scope{@[^/]+}/:name/memories/:memoryId",
-    requireAgent(),
-    requirePermission("memories", "delete"),
-    async (c) => {
-      const agent = c.get("agent");
-      const applicationId = c.get("applicationId");
-      const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
-      if (!result.success) {
-        throw invalidRequest("Invalid memory ID", "memoryId");
-      }
-      const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, agent.id, applicationId);
-      if (!deleted) {
-        throw notFound("Memory not found");
-      }
-      return c.json({ deleted: true });
     },
   );
 

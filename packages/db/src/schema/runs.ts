@@ -198,55 +198,23 @@ export const runLogs = pgTable(
   ],
 );
 
-export const packageMemories = pgTable(
-  "package_memories",
-  {
-    id: serial("id").primaryKey(),
-    packageId: text("package_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
-      .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
-    content: text("content").notNull(),
-    runId: text("run_id").references(() => runs.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_package_memories_package_app").on(table.packageId, table.applicationId),
-    index("idx_package_memories_org_id").on(table.orgId),
-    index("idx_package_memories_app_id").on(table.applicationId),
-  ],
-);
-
 /**
  * Unified agent persistence — one row per piece of cross-run state the agent
- * chooses to keep, regardless of its shape. Replaces `runs.state` (which was
- * per-actor but keyed on a specific run row) and `package_memories` (which
- * was app-wide without actor scoping) with a single store where `scope` is
- * a first-class dimension.
+ * chooses to keep, regardless of its shape. Single store where `scope` is a
+ * first-class dimension.
  *
  * - `kind = 'checkpoint'` — one row per `(package, app, actor)`, upserted
- *   last-write-wins (legacy: `runs.state`). Used for tactical carry-over
- *   like pagination cursors or "last synced at".
+ *   last-write-wins. Used for tactical carry-over like pagination cursors
+ *   or "last synced at".
  * - `kind = 'memory'`     — append-only list, bounded at 100 per
- *   `(package, app, actor)` with content capped at 2000 chars (legacy:
- *   `package_memories`). Used for durable facts — user preferences, API
- *   quirks, workflow patterns.
+ *   `(package, app, actor)` with content capped at 2000 chars. Used for
+ *   durable facts — user preferences, API quirks, workflow patterns.
  *
  * The actor columns mirror the `runs` convention: `actor_type ∈
  * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type = 'shared'`.
  * Headless applications serving many end-users get per-actor isolation by
  * default; OSS single-tenant stacks can opt into shared rows explicitly.
  *
- * Transition window: `runs.state` + `package_memories` are kept alive
- * (double-write on finalize) and will be dropped in a follow-up migration
- * once production has been running on this table exclusively for 1-2 weeks.
  * See `docs/adr/ADR-011-checkpoint-unification.md`.
  */
 export const packagePersistence = pgTable(

@@ -868,16 +868,6 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  AgentMemory: {
-    type: "object",
-    required: ["id", "content", "createdAt"],
-    properties: {
-      id: { type: "integer" },
-      content: { type: "string" },
-      runId: { type: ["string", "null"] },
-      createdAt: { type: ["string", "null"], format: "date-time" },
-    },
-  },
   OrgProviderKey: {
     type: "object",
     required: ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],

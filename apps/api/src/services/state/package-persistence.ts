@@ -19,12 +19,9 @@ import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 
-// Per-entry char cap is shared with the legacy `package_memories` service —
-// imported from there to keep a single source of truth. NOT re-exported
-// from this module: the state-service barrel would otherwise expose two
-// declarations of the same identifier.
-import { MAX_MEMORY_CONTENT } from "./package-memories.ts";
-
+// Per-entry char cap and per-scope row cap. Single source of truth now that
+// the legacy `package_memories` service is gone.
+export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 
 /**

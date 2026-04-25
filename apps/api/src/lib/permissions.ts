@@ -112,9 +112,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Memories (legacy resource — back-compat for API keys minted pre-unification)
-  "memories:read",
-  "memories:delete",
   // Persistence (unified checkpoints + memories — see ADR-011)
   "persistence:read",
   "persistence:delete",
@@ -181,8 +178,6 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Memories (read only — legacy resource)
-  "memories:read",
   // Persistence (read only — unified checkpoints + memories)
   "persistence:read",
   // Connections (full self-service)
@@ -215,7 +210,6 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "providers:read",
   "runs:read",
   "schedules:read",
-  "memories:read",
   "persistence:read",
   "connections:read",
   "profiles:read",

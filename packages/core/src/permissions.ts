@@ -67,11 +67,8 @@ export interface CoreResources {
   providers: "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
-  memories: "read" | "delete";
-  // Unified `package_persistence` (checkpoints + memories) — supersedes
-  // the legacy `memories` resource. The new routes hang off this resource;
-  // `memories` stays for back-compat with API keys minted before the
-  // rename and gets dropped together with the legacy column/table.
+  // Unified `package_persistence` (checkpoints + memories) with first-class
+  // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
   connections: "read" | "connect" | "disconnect";
   profiles: "read" | "write" | "delete";
@@ -117,7 +114,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "providers",
   "runs",
   "schedules",
-  "memories",
   "persistence",
   "connections",
   "profiles",
