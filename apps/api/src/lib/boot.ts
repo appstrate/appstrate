@@ -32,6 +32,7 @@ import { initRunLimits } from "../services/run-limits.ts";
 import {
   initSystemPackages,
   getSystemPackages,
+  getAllSystemPackageVersions,
   type SystemPackageEntry,
 } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
@@ -288,25 +289,29 @@ export async function boot(): Promise<void> {
  */
 async function loadAndSyncSystemPackages(): Promise<void> {
   await initSystemPackages();
-  const allPackages = getSystemPackages();
-  if (allPackages.size === 0) return;
+  const canonicalPackages = getSystemPackages();
+  const allVersions = getAllSystemPackageVersions();
+  if (canonicalPackages.size === 0) return;
 
-  let synced = 0;
+  let syncedPackages = 0;
+  let syncedVersions = 0;
 
-  const syncOne = async (id: string, entry: SystemPackageEntry) => {
-    const { manifest, zipBuffer, type } = entry;
-    const version = manifest.version as string;
+  // Step 1 — UPSERT one `packages` row per packageId, using the canonical
+  // (highest semver) version. This drives `draftManifest`/`draftContent`,
+  // file uploads, and the public package-list UI.
+  const syncCanonical = async (id: string, entry: SystemPackageEntry) => {
+    const { manifest, type, version } = entry;
 
-    // Check if this exact version already exists (nothing changed since last boot)
+    // `updatedAt` is bumped only when this canonical version is genuinely
+    // new — re-boots over an unchanged set must remain side-effect-free
+    // for downstream consumers that watch `updatedAt`.
     const [existingVersion] = await db
       .select({ id: packageVersions.id })
       .from(packageVersions)
       .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
       .limit(1);
-
     const isNewVersion = !existingVersion;
 
-    // 1. UPSERT packages row (source: "system", orgId: null — global)
     await db
       .insert(packages)
       .values({
@@ -328,7 +333,6 @@ async function loadAndSyncSystemPackages(): Promise<void> {
         },
       });
 
-    // 2. Upload system package files to global _system/ namespace (once, not per-org)
     if (Object.keys(entry.files).length > 1) {
       await uploadPackageFiles(
         storageFolderForType(type),
@@ -338,31 +342,49 @@ async function loadAndSyncSystemPackages(): Promise<void> {
       );
     }
 
-    // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
-    await createVersionAndUpload({
-      packageId: id,
-      version,
-      createdBy: null,
-      zipBuffer,
-      manifest: manifest as unknown as Record<string, unknown>,
-    });
-
-    synced++;
+    syncedPackages++;
   };
 
-  // Sync all system packages concurrently (per-package error isolation)
+  // Step 2 — register every loaded version in `package_versions` so semver
+  // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
+  // alongside the legacy line. createVersionAndUpload is idempotent.
+  const syncVersion = async (entry: SystemPackageEntry) => {
+    await createVersionAndUpload({
+      packageId: entry.packageId,
+      version: entry.version,
+      createdBy: null,
+      zipBuffer: entry.zipBuffer,
+      manifest: entry.manifest as unknown as Record<string, unknown>,
+    });
+    syncedVersions++;
+  };
+
   await Promise.all(
-    Array.from(allPackages).map(([id, entry]) =>
-      syncOne(id, entry).catch((err) => {
-        logger.warn("Failed to sync system package", {
+    Array.from(canonicalPackages).map(([id, entry]) =>
+      syncCanonical(id, entry).catch((err) => {
+        logger.warn("Failed to sync canonical system package", {
           packageId: id,
           error: err instanceof Error ? err.message : String(err),
         });
       }),
     ),
   );
+  await Promise.all(
+    allVersions.map((entry) =>
+      syncVersion(entry).catch((err) => {
+        logger.warn("Failed to register system package version", {
+          packageId: entry.packageId,
+          version: entry.version,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    ),
+  );
 
-  logger.info("System packages synced", { packages: synced });
+  logger.info("System packages synced", {
+    packages: syncedPackages,
+    versions: syncedVersions,
+  });
 }
 
 /**
