@@ -86,11 +86,13 @@ describe("Parity E2E — full adapter stack", () => {
     // external runtime consumer would get from reducing the same event stream.
     expect(sink.result).toEqual(result);
 
-    // Sink aggregate projects the runtime snapshot into DB-friendly shapes.
-    expect(sink.current.output).toEqual({ deliverable: "shipped" });
-    expect(sink.current.state).toEqual({ counter: 7 });
-    expect(sink.current.memories).toEqual(["learned A", "learned B"]);
-    expect(sink.current.report).toBe("work done");
+    // Live snapshot exposes the runtime reducer's RunResult directly —
+    // no platform projection.
+    const snap = sink.snapshot();
+    expect(snap.output).toEqual({ deliverable: "shipped" });
+    expect(snap.state).toEqual({ counter: 7 });
+    expect(snap.memories).toEqual([{ content: "learned A" }, { content: "learned B" }]);
+    expect(snap.report).toBe("work done");
 
     // DB side-effect: run_logs received one row per observable event
     // (output + report + progress).
