@@ -16,16 +16,11 @@ export {
 } from "./bundle-extensions.ts";
 
 export {
-  buildProviderExtensionFactories,
+  buildProviderCallExtensionFactory,
   readProviderRefs,
-  afpsToolToPiExtension,
+  type BuildProviderCallExtensionFactoryOptions,
   type ProviderEventEmitter,
 } from "./provider-bridge.ts";
-
-export {
-  buildRunHistoryExtensionFactory,
-  type BuildRunHistoryExtensionFactoryOptions,
-} from "./run-history-bridge.ts";
 
 export {
   buildRuntimePiEnv,
@@ -33,7 +28,11 @@ export {
   type RuntimePiModelConfig,
 } from "./container-env.ts";
 
-export { emitRuntimeReady, type RuntimeReadyPayload } from "./runtime-ready.ts";
+export {
+  emitRuntimeReady,
+  CURRENT_RUNTIME_PROTOCOL_VERSION,
+  type RuntimeReadyPayload,
+} from "./runtime-ready.ts";
 
 export {
   startSinkHeartbeat,

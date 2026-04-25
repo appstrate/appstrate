@@ -183,8 +183,11 @@ export function createInternalRouter() {
     const { runId, run } = await verifyRunToken(c);
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
-    // Load the agent to validate the requested provider
-    const agent = await getPackage(run.packageId, run.orgId);
+    // Load the agent to validate the requested provider. Inline runs use
+    // an ephemeral shadow package — `includeEphemeral` keeps the lookup
+    // working for `POST /api/runs/inline` flows without changing the
+    // strict default that public package listings exclude shadows.
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
     if (!agent) {
       throw notFound("Agent not found");
     }

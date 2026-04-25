@@ -65,7 +65,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Be careful");
   });
 
-  it("emits the Connected Providers section with tool mapping", () => {
+  it("emits the Connected Providers section pointing to the provider_call MCP tool", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
@@ -80,10 +80,12 @@ describe("renderPlatformPrompt", () => {
       ],
     });
     expect(out).toContain("## Connected Providers");
+    expect(out).toContain("provider_call");
     expect(out).toContain("**Gmail** (`@appstrate/gmail`)");
-    expect(out).toContain("appstrate_gmail_call");
     expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/**");
     expect(out).toContain(".pi/providers/@appstrate/gmail/PROVIDER.md");
+    // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
+    expect(out).not.toContain("appstrate_gmail_call");
   });
 
   it("documents binary upload/download contract when providers are connected", () => {

@@ -1,59 +1,63 @@
-# Sidecar — credential-isolating HTTP proxy
+# Sidecar — credential-isolating MCP server
 
-A small Hono server that runs in its own Docker container alongside every Appstrate agent run. The agent container talks to the sidecar over the run's private bridge network; the sidecar holds the credentials, talks to upstream provider APIs, and returns the response bytes back to the agent.
+A small Hono server that runs in its own Docker container alongside every Appstrate agent run. The agent container talks to the sidecar over the run's private bridge network. Agent tool calls flow exclusively over the **Model Context Protocol** (Streamable HTTP, stateless); the in-container Pi SDK additionally reaches the sidecar over plain HTTP for chat completions, where it streams the LLM provider's native protocol back unchanged. The sidecar holds the credentials, talks to upstream provider/LLM APIs, and returns responses to the agent as MCP `tools/call` results, `resource_link` blocks, or — for `/llm/*` — a transparent stream-through.
 
-The agent container has no platform credentials, no access to `host.docker.internal`, and no `SIDECAR_URL` env var after bootstrap (Phase 2e). All sidecar-backed capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
+The agent container has no platform credentials, no access to `host.docker.internal`, and no `SIDECAR_URL` env var after bootstrap. All credential-bearing capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
 
-## Endpoints
+## HTTP surface
 
-- `GET /health` — Readiness check. Returns 200 when the forward proxy is ready, 503 (`{ status: "degraded" }`) otherwise.
+The sidecar's external HTTP surface is intentionally small:
+
+- `GET /health` — Readiness probe. Returns 200 when ready, 503 (`{ status: "degraded" }`) otherwise.
 - `POST /configure` — One-time runtime configuration for pool-pre-warmed sidecars (`runToken`, `platformApiUrl`, `proxyUrl`, optional `llm`). Authenticated via `Bearer ${CONFIG_SECRET}` and locked after first use. Permanently locked when the sidecar was started fresh with `RUN_TOKEN` already in the environment.
-- `ALL /proxy` — The credential-injecting transparent proxy. Routes via `X-Provider` + `X-Target` headers, validates the resolved URL against the provider's `authorizedUris`, applies SSRF blocklist, injects the credential header server-side, and forwards bytes both ways.
-- `ALL /llm/*` — LLM reverse proxy for the agent's model calls. Replaces the SDK's placeholder API key with the real key, streams the response zero-copy.
-- `GET /run-history` — Thin pass-through to the platform's `/internal/run-history` (authorized via `RUN_TOKEN`).
+- `ALL /llm/*` — LLM reverse proxy consumed by the in-container Pi SDK as `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The sidecar substitutes the per-run placeholder embedded in SDK-generated headers for the real LLM API key, then streams the upstream response back zero-copy. SSRF-blocked against private/metadata addresses; bound by `LLM_PROXY_TIMEOUT_MS`.
+- `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. Authenticated via `Authorization: Bearer ${runToken}`. The Host header is validated against `{sidecar, 127.0.0.1, localhost}` regardless of port (DNS-rebinding defence).
+
+## MCP tools
+
+The `/mcp` endpoint advertises three first-party tools, all backed by `executeProviderCall` and the platform's per-run-token internal endpoints:
+
+| Tool            | Purpose                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                                          |
+| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                                                     |
+| `llm_complete`  | LLM-as-a-tool for sub-agent workflows. The agent's primary completions go over the HTTP `/llm/*` route consumed by the Pi SDK; `llm_complete` is for tool-call paths where the agent itself wants to invoke a completion. |
+
+Third-party MCP servers can be mounted alongside the first-party tools via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
 
 ## Binary safety
 
-`/proxy` reads the request body as `c.req.arrayBuffer()` and returns the upstream body via `targetRes.arrayBuffer()`. Both directions are byte-exact — no `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting. This was originally regressed in #149 and re-fixed in #151; the binary roundtrip suite in `test/app.test.ts` (`describe("binary roundtrip via /proxy")`) pins the contract end-to-end.
+`provider_call` upstream responses are byte-exact: the sidecar reads the upstream body via `arrayBuffer()` and either returns the bytes inline (text under `INLINE_RESPONSE_THRESHOLD`) or stores them in the run-scoped `BlobStore` and returns a `resource_link` block. No `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting.
 
-The only path that decodes the request body to UTF-8 is the optional `X-Substitute-Body: true` header, which performs `{{variable}}` placeholder substitution. Without that header, the body is forwarded as raw bytes.
+The only path that decodes the request body to UTF-8 is the optional `substituteBody: true` argument, which performs `{{variable}}` placeholder substitution on a buffered body.
 
 ## Size limits
 
-| Constant                     | Value  | Header override       | Purpose                                                          |
-| ---------------------------- | ------ | --------------------- | ---------------------------------------------------------------- |
-| `MAX_RESPONSE_SIZE`          | 256 KB | `X-Max-Response-Size` | Default cap on upstream response bytes returned to the agent.    |
-| `ABSOLUTE_MAX_RESPONSE_SIZE` | 1 MB   | (hard cap)            | Ceiling on `X-Max-Response-Size` regardless of header value.     |
-| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | —                     | Maximum buffered request body size accepted by `/proxy`.         |
-| `STREAMING_THRESHOLD`        | 1 MB   | (auto)                | Above this `Content-Length` `/proxy` switches to streaming mode. |
-| `MAX_STREAMED_BODY_SIZE`     | 100 MB | (hard cap)            | Ceiling on streamed request and response bodies.                 |
-| `OUTBOUND_TIMEOUT_MS`        | 30 s   | —                     | Upstream `/proxy` request timeout.                               |
-| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | —                     | `/llm/*` request timeout (long enough for streamed completions). |
+| Constant                     | Value  | Purpose                                                                |
+| ---------------------------- | ------ | ---------------------------------------------------------------------- |
+| `MAX_RESPONSE_SIZE`          | 256 KB | Default cap on upstream response bytes returned inline to the agent.   |
+| `ABSOLUTE_MAX_RESPONSE_SIZE` | 1 MB   | Ceiling on `responseMode.maxInlineBytes` regardless of caller request. |
+| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.     |
+| `STREAMING_THRESHOLD`        | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.     |
+| `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                       |
+| `INLINE_RESPONSE_THRESHOLD`  | 32 KB  | Above this responses spill to the `BlobStore` as a `resource_link`.    |
+| `OUTBOUND_TIMEOUT_MS`        | 30 s   | Upstream `provider_call` request timeout.                              |
+| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `llm_complete` request timeout (long enough for streamed completions). |
 
-When the upstream response exceeds the effective cap, the sidecar returns the prefix and sets `X-Truncated: true`. Agents that legitimately need larger payloads should opt in via `responseMode.toFile` on the AFPS provider tool — the runtime resolver then sets `X-Stream-Response: 1` and the sidecar pipes upstream bytes through without truncation.
-
-## Streaming pass-through (PR-4)
-
-`/proxy` supports two opt-in streaming paths to keep memory bounded on large binary uploads (Drive resumable uploads ≥ 8 MiB) and downloads (Drive media exports, build artifacts):
-
-- **Request side** — When the incoming `Content-Length` exceeds `STREAMING_THRESHOLD` (1 MB) AND `X-Substitute-Body` is unset, the sidecar pipes the body directly to upstream with `duplex: "half"`. No buffering. Upper-bounded at `MAX_STREAMED_BODY_SIZE` (100 MB) — over-sized uploads return 413 before the upstream socket opens.
-
-- **Response side** — When the caller sets `X-Stream-Response: 1`, the sidecar returns a zero-copy `Response` wrapping `targetRes.body`. No buffering, no truncation. The sidecar enforces `MAX_STREAMED_BODY_SIZE` up front via the upstream `Content-Length` header when present; chunked / unknown-size responses fall back on the 30 s outbound timeout.
-
-- **401 in streaming-request mode** — The request body has already been consumed by the first upstream call and cannot be replayed. The sidecar still refreshes the credentials (so the _next_ idempotent retry succeeds) and surfaces the 401 with `X-Auth-Refreshed: true`. The AFPS resolver (`{ fromFile }` is reproducible) interprets this header as "transient, retry me" and re-calls. The transparent retry is preserved on the buffered path (Content-Length below `STREAMING_THRESHOLD`), so non-streaming flows are unaffected.
-
-Streaming is opt-in by request shape — agents that don't need it (the common case) keep the existing buffered semantics with the existing 256 KB / 1 MB / 5 MB caps.
+When the upstream response exceeds the inline threshold, the bytes are stored in the run-scoped `BlobStore` (256 MB cap, ULID URIs, traversal-safe) and the tool returns a `resource_link` block. The agent reads the bytes on demand via `client.readResource({ uri })`.
 
 ## The `body.fromFile` contract
 
-The AFPS provider tool exposes `body.fromFile` so agents can upload workspace files without ever having to base64-encode them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
+The AFPS provider tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
 
-1. The agent calls the provider tool with `{ body: { fromFile: "report.pdf" } }`.
-2. The AFPS resolver in `packages/afps-runtime/src/resolvers/provider-tool.ts` reads the workspace bytes locally.
-3. The resolver POSTs the raw bytes to `/proxy` as the request body, with the appropriate `Content-Type` and `X-Provider` / `X-Target` headers.
-4. The sidecar sees only bytes — by design.
+1. The agent calls `provider_call` with `{ body: { fromFile: "report.pdf" } }`.
+2. The runner-pi `McpProviderResolver` (in container mode) — or `RemoteAppstrateProviderResolver` (in CLI mode) — reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
+3. JSON-RPC has no native byte type, so the resolver base64-encodes the bytes and ships them over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
+4. The sidecar's `provider_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
 
-The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver requests a higher `X-Max-Response-Size`, reads the response bytes, and writes them to the workspace before handing a `{ savedTo, byteLength }` summary back to the agent.
+The MCP `provider_call.body` schema accepts either `string` (text/JSON) or `{ fromBytes, encoding: "base64" }` (binary). The `{ fromFile }`, `{ multipart }`, and inline-`Uint8Array` shapes are runtime-side conveniences resolved client-side before MCP — the sidecar only sees the canonical wire forms.
+
+The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver reads the response bytes (inline text block or `resource_link` → `resources/read`) and writes them to the workspace before handing a `{ kind: "file", path, size, sha256 }` summary back to the agent.
 
 ## What lives outside this README
 

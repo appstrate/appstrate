@@ -298,11 +298,12 @@ export type ProviderCallFn = (
 /**
  * Apply transport control headers to an outgoing provider call.
  *
- * Shared by both {@link SidecarProviderResolver} and
- * {@link RemoteAppstrateProviderResolver} so the two transports stay in
- * lockstep — any change to the streaming protocol only needs to land here.
+ * Used by {@link RemoteAppstrateProviderResolver} for the CLI's HTTP
+ * path to the platform's `/api/credential-proxy/proxy` route.
+ * Container runs reach the sidecar's `executeProviderCall` over MCP
+ * `provider_call` and bypass this header layer entirely.
  *
- * Rules applied (mirrors the sidecar server contract):
+ * Rules applied (mirrors the platform server contract):
  *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
  *    `X-Max-Response-Size` is omitted — it is redundant when streaming.
  *  - `isStreamingBody` → `X-Stream-Request: 1` + explicit `Content-Length`
@@ -489,19 +490,22 @@ export function makeProviderTool(
  * Canonical slug applied to every provider id before we form a tool name.
  * Strips a leading `@` and replaces any non-word character with `_` so
  * scoped package ids like `@appstrate/gmail` become safe tool identifiers.
+ *
+ * Internal: still used by {@link makeProviderTool} to derive the default
+ * Pi-tool name for {@link LocalProviderResolver} /
+ * {@link RemoteAppstrateProviderResolver} (the CLI's local-resolver path —
+ * the platform/agent runtime now exposes providers via the canonical MCP
+ * `provider_call` tool, not per-provider aliases).
  */
-export function slugifyProviderId(providerId: string): string {
+function slugifyProviderId(providerId: string): string {
   return providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
 /**
- * The tool name `makeProviderTool` registers for a given provider id.
- * Consumers that need to reference the tool before the resolver runs
- * (e.g. the platform system prompt listing connected providers) should
- * call this helper rather than recomputing the slug locally — any future
- * change to the slug rules only needs to land here.
+ * The default tool name {@link makeProviderTool} registers for a given
+ * provider id. Internal: only consumed inside this file.
  */
-export function providerToolName(providerId: string): string {
+function providerToolName(providerId: string): string {
   return `${slugifyProviderId(providerId)}_call`;
 }
 
@@ -683,9 +687,9 @@ export interface ResolveBodyStreamOptions {
    * stream as `body` with `duplex: "half"` to fetch. Files above
    * {@link MAX_STREAMED_BODY_SIZE} are still rejected up front.
    *
-   * When false (default), the runtime continues to buffer the file in
-   * memory up to {@link MAX_REQUEST_BODY_SIZE} — preserving the legacy
-   * 401-refresh-and-retry semantics on the transport.
+   * When false (default), the runtime buffers the file in memory up
+   * to {@link MAX_REQUEST_BODY_SIZE} — preserving 401-refresh-and-retry
+   * semantics on the transport.
    */
   allowStreaming?: boolean;
 }
@@ -984,7 +988,7 @@ export async function resolveBodyForFetch(
     const stream = await openFileReadStream(safePath);
     return { kind: "stream", stream, size: lst.size };
   }
-  // Buffered path: same hard cap as the legacy resolveBodyStream.
+  // Buffered path: same hard cap as the streaming variant.
   if (lst.size > MAX_REQUEST_BODY_SIZE) {
     throw new ResolverError(
       "RESOLVER_BODY_TOO_LARGE",

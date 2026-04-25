@@ -6,7 +6,6 @@ import {
   makeProviderTool,
   matchesAuthorizedUriSpec,
   readProviderMeta,
-  SidecarProviderResolver,
   LocalProviderResolver,
   RemoteAppstrateProviderResolver,
   type Bundle,
@@ -133,43 +132,6 @@ describe("makeProviderTool", () => {
     const { ctx } = makeCtx();
     const result = await tool.execute({ method: "GET", target: "https://api.acme.com/x" }, ctx);
     expect(result.isError).toBe(true);
-  });
-});
-
-describe("SidecarProviderResolver", () => {
-  it("POSTs to /proxy with X-Provider + X-Target headers", async () => {
-    const calls: RequestInit[] = [];
-    const capture = (init?: RequestInit): RequestInit => {
-      calls.push(init ?? {});
-      return init ?? {};
-    };
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@afps/gmail", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: { authorizedUris: ["https://gmail.googleapis.com/**"] },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: "http://sidecar:8080",
-      fetch: ((_url: string, init: RequestInit) => {
-        capture(init);
-        return Promise.resolve(
-          new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
-        );
-      }) as typeof fetch,
-    });
-    const tools = await resolver.resolve([{ name: "@afps/gmail", version: "^1" }], bundle);
-    expect(tools).toHaveLength(1);
-    const { ctx } = makeCtx();
-    await tools[0]!.execute(
-      { method: "GET", target: "https://gmail.googleapis.com/v1/users/me" },
-      ctx,
-    );
-    expect(calls).toHaveLength(1);
-    const headers = calls[0]!.headers as Record<string, string>;
-    expect(headers["X-Provider"]).toBe("@afps/gmail");
-    expect(headers["X-Target"]).toBe("https://gmail.googleapis.com/v1/users/me");
   });
 });
 
@@ -379,130 +341,5 @@ describe("matchesAuthorizedUriSpec", () => {
     const pat = "https://*.acme.com/**";
     expect(matchesAuthorizedUriSpec(pat, "https://eu.acme.com/v1/users/42")).toBe(true);
     expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x.acme.com/y")).toBe(false);
-  });
-});
-
-describe("SidecarProviderResolver — wire protocol is credential-free", () => {
-  // Option C (issue #250) moved credential injection server-side. The
-  // sidecar now owns the injection — the runtime forwards only
-  // routing headers (`X-Provider`, `X-Target`) plus any custom headers
-  // the LLM explicitly set. No Authorization, no placeholders, no
-  // credential field at all on the wire from agent to sidecar.
-  it("forwards only routing headers — no auth metadata leaks from the manifest", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: {
-          authMode: "oauth2",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-
-    const calls: RequestInit[] = [];
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: "http://sidecar:8080",
-      fetch: ((_url: string, init: RequestInit) => {
-        calls.push(init);
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }) as typeof fetch,
-    });
-    const tools = await resolver.resolve([{ name: "@appstrate/gmail", version: "^1" }], bundle);
-    const { ctx } = makeCtx();
-    await tools[0]!.execute(
-      { method: "GET", target: "https://gmail.googleapis.com/gmail/v1/users/me" },
-      ctx,
-    );
-    const h = calls[0]!.headers as Record<string, string>;
-    expect(h["X-Provider"]).toBe("@appstrate/gmail");
-    expect(h["X-Target"]).toBe("https://gmail.googleapis.com/gmail/v1/users/me");
-    // The canonical Option C guarantee: the credential header never
-    // crosses the agent → sidecar boundary. The sidecar writes it
-    // server-side from the platform's internal credentials payload.
-    expect(h.Authorization).toBeUndefined();
-    expect(h.authorization).toBeUndefined();
-  });
-
-  it("passes caller-supplied headers through untouched for agent-driven overrides", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        definition: {
-          authMode: "oauth2",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-    const calls: RequestInit[] = [];
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: "http://sidecar:8080",
-      fetch: ((_url: string, init: RequestInit) => {
-        calls.push(init);
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }) as typeof fetch,
-    });
-    const tools = await resolver.resolve([{ name: "@appstrate/gmail", version: "^1" }], bundle);
-    const { ctx } = makeCtx();
-    await tools[0]!.execute(
-      {
-        method: "GET",
-        target: "https://gmail.googleapis.com/gmail/v1/users/me",
-        headers: { "X-Dual-Auth-Token": "agent-override" },
-      },
-      ctx,
-    );
-    const h = calls[0]!.headers as Record<string, string>;
-    // Custom headers pass through to the sidecar, which then honours
-    // them over the server-side injection for non-Authorization
-    // keys — preserves dual-auth / exotic flows without giving up the
-    // pinned-header guarantee for the 99% default.
-    expect(h["X-Dual-Auth-Token"]).toBe("agent-override");
-  });
-});
-
-describe("SidecarProviderResolver — end-to-end enforcement on a multi-segment target", () => {
-  // Integration guard that reproduces the exact regression we just fixed:
-  // manifest with nested definition.authorizedUris + a realistic target
-  // URL that has more than one path segment below the host. If either
-  // readProviderMeta's projection or the /** matcher semantics regress,
-  // this test fails before the container run does.
-  it("accepts a multi-segment upstream call when definition.authorizedUris matches /**", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const providerPkg = makePackage("@appstrate/gmail", "1.0.0", "provider", {
-      "provider.json": JSON.stringify({
-        name: "@appstrate/gmail",
-        definition: {
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [providerPkg]);
-
-    const calls: RequestInit[] = [];
-    const resolver = new SidecarProviderResolver({
-      sidecarUrl: "http://sidecar:8080",
-      fetch: ((_url: string, init: RequestInit) => {
-        calls.push(init);
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }) as typeof fetch,
-    });
-    const tools = await resolver.resolve([{ name: "@appstrate/gmail", version: "^1" }], bundle);
-    const { ctx } = makeCtx();
-    const res = await tools[0]!.execute(
-      {
-        method: "GET",
-        target: "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=10",
-      },
-      ctx,
-    );
-    expect(res.isError).toBeUndefined();
-    expect(calls).toHaveLength(1);
   });
 });

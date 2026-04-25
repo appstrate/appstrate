@@ -51,14 +51,12 @@ export {
   STREAMING_THRESHOLD,
   makeProviderTool,
   matchesAuthorizedUriSpec,
-  providerToolName,
   readProviderMeta,
   isReproducibleBody,
   resolveBodyForFetch,
   resolveBodyStream,
   resolveSafePath,
   serializeFetchResponse,
-  slugifyProviderId,
   type MakeProviderToolOptions,
   type ProviderCallContext,
   type ProviderCallFn,
@@ -71,10 +69,6 @@ export {
   type SerializeFetchResponseContext,
 } from "./provider-tool.ts";
 export {
-  SidecarProviderResolver,
-  type SidecarProviderResolverOptions,
-} from "./sidecar-provider-resolver.ts";
-export {
   LocalProviderResolver,
   type LocalCredentialsFile,
   type LocalProviderResolverOptions,
@@ -83,19 +77,6 @@ export {
   RemoteAppstrateProviderResolver,
   type RemoteAppstrateProviderResolverOptions,
 } from "./remote-appstrate-provider-resolver.ts";
-
-// Run history tool — sidecar-backed fetch of prior-run metadata.
-export {
-  makeRunHistoryTool,
-  createSidecarRunHistoryCall,
-  type RunHistoryRequest,
-  type RunHistoryResponse,
-  type RunHistoryEntry,
-  type RunHistoryField,
-  type RunHistoryCallFn,
-  type MakeRunHistoryToolOptions,
-  type CreateSidecarRunHistoryCallOptions,
-} from "./run-history-tool.ts";
 
 // Spec-compliant platform tools (memory, state, output, report, log)
 // — the runtime no longer hardcodes these internally; agents declare

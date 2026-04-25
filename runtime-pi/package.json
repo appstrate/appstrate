@@ -7,6 +7,8 @@
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/core": "workspace:*",
+    "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@mariozechner/pi-coding-agent": "^0.67.2",
     "@mariozechner/pi-ai": "^0.67.2"

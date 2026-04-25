@@ -21,7 +21,7 @@ import * as path from "node:path";
 import {
   PiRunner,
   prepareBundleForPi,
-  buildProviderExtensionFactories,
+  buildProviderCallExtensionFactory,
   emitRuntimeReady,
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
@@ -200,10 +200,12 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   });
 
   // ─── 7a. Provider tools — bridge AFPS ProviderResolver → Pi factories ──
-  // PiRunner takes pre-built Pi extension factories; AFPS provider tools
-  // (e.g. `gmail_call`) are produced by the resolver so we convert them
-  // here, splice them next to the bundle's own tool factories.
-  const providerFactories = await buildProviderExtensionFactories({
+  // PiRunner takes pre-built Pi extension factories; the AFPS provider
+  // resolver yields one tool per declared provider, exposed to the LLM
+  // through a single `provider_call({providerId, ...})` Pi tool — same
+  // surface as runtime-pi's MCP-backed `provider_call` so prompts are
+  // identical regardless of execution mode.
+  const providerFactories = await buildProviderCallExtensionFactory({
     bundle,
     providerResolver,
     runId,

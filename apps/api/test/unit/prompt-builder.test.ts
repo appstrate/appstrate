@@ -503,7 +503,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).not.toContain("Documentation:");
   });
 
-  it("advertises a `<slug>_call` tool per connected provider (no curl / no $SIDECAR_URL)", () => {
+  it("advertises the `provider_call` MCP tool with the bare providerId per connected provider (no curl / no $SIDECAR_URL)", () => {
     const ctx = baseContext({
       tokens: { "@test/gmail": "access_token_123" },
       providers: [
@@ -520,10 +520,12 @@ describe("buildEnrichedPrompt — provider documentation", () => {
 
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Connected Providers");
-    // Tool name matches the slug produced by makeProviderTool.
-    expect(prompt).toContain("test_gmail_call");
+    // Single MCP tool — `provider_call` — replaces every per-provider alias.
+    expect(prompt).toContain("provider_call");
     expect(prompt).toContain("Gmail");
     expect(prompt).toContain("@test/gmail");
+    // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
+    expect(prompt).not.toContain("test_gmail_call");
     // No more legacy curl / sidecar boilerplate inside the provider section.
     expect(prompt).not.toContain("## Authenticated Provider API");
     expect(prompt).not.toContain("$SIDECAR_URL/proxy");
@@ -592,7 +594,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
   it("does not leak credential placeholders — the provider tool injects them server-side", () => {
     // Previously the prompt enumerated `{{access_token}}` / `{{api_key}}`
     // so the agent could substitute them in a curl header. With the
-    // `<provider>_call` tool, credential injection is entirely server-side
+    // `provider_call` MCP tool, credential injection is entirely server-side
     // and placeholders MUST not appear in the prompt.
     const ctx = baseContext({
       tokens: { "@test/stripe": "tok", "@test/custom": "tok" },
@@ -621,10 +623,12 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    // Tool names appear…
-    expect(prompt).toContain("test_stripe_call");
-    expect(prompt).toContain("test_custom_call");
-    // …but credential placeholders / header hints do NOT.
+    // The single canonical MCP tool name appears…
+    expect(prompt).toContain("provider_call");
+    // …per-provider alias names do NOT…
+    expect(prompt).not.toContain("test_stripe_call");
+    expect(prompt).not.toContain("test_custom_call");
+    // …and credential placeholders / header hints do NOT either.
     expect(prompt).not.toContain("{{api_key}}");
     expect(prompt).not.toContain("{{secret}}");
     expect(prompt).not.toContain("Authorization: Bearer");
