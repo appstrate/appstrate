@@ -60,7 +60,7 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (249 endpoints)
+│   │   └── paths/            # One file per route domain (251 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -283,7 +283,7 @@ Appstrate exposes a headless API for developers to integrate agents into their o
   - `run_history({ limit?, fields? })` — recent past-run metadata. Dispatched to the sidecar's MCP handler, which reads from the platform's internal run-history endpoint via the per-run token.
   - `llm_complete(...)` — platform-configured LLM passthrough. Same MCP path; the sidecar holds the LLM provider key, the agent never sees it.
   - **Zero-knowledge enforcement**: after the MCP client connects, `runtime-pi/entrypoint.ts` runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence. The legacy `curl $SIDECAR_URL/…` bash pattern is fully retired — no prompt path documents it anymore.
-- The sidecar exposes `/mcp` (Streamable HTTP, stateless, per-request transport) as the only application-protocol endpoint besides `/health` and `/configure`. The legacy HTTP routes (`/proxy`, `/run-history`, `/llm/*`) were retired with the 2-6 cleanup.
+- The sidecar exposes `/mcp` (Streamable HTTP, stateless, per-request transport) as the agent's MCP entrypoint, alongside `/health`, `/configure`, and `ALL /llm/*`. The legacy `/proxy` and `/run-history` HTTP routes were retired with the 2-6 cleanup. `/llm/*` is intentionally kept: the in-container Pi SDK calls `${MODEL_BASE_URL}/v1/chat/completions` and consumes the upstream stream natively, so the placeholder-substituting reverse proxy is load-bearing for primary chat completions. The MCP `llm_complete` tool coexists for sub-agent flows where the agent itself wants to invoke a completion as a tool call.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `substituteBody: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: agent-supplied `proxyUrl` arg → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
