@@ -7,6 +7,8 @@ import {
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_SUBSTITUTE_BODY_SIZE,
+  STREAMING_THRESHOLD,
+  MAX_STREAMED_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
@@ -34,7 +36,13 @@ export interface AppDeps {
   preConfigured?: boolean; // true when credentials come via env vars (fresh sidecar)
 }
 
-const CREDENTIAL_PROXY_SKIP = new Set(["x-provider", "x-target", "x-substitute-body"]);
+const CREDENTIAL_PROXY_SKIP = new Set([
+  "x-provider",
+  "x-target",
+  "x-substitute-body",
+  "x-stream-response",
+  "x-max-response-size",
+]);
 
 type FetchResult = { ok: true; response: Response } | { ok: false; errorResponse: Response };
 
@@ -289,29 +297,62 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    // 6. Handle body — buffer for potential retry on 401.
-    //    Use ArrayBuffer to preserve binary data (e.g. XLSX uploads).
-    //    Only decode as text when X-Substitute-Body requires placeholder replacement.
+    // 6. Handle body — choose between buffered and streaming paths.
+    //
+    //    Buffered path (default): read the full body into memory so we
+    //    can replay it on a 401 refresh-and-retry. Required when
+    //    X-Substitute-Body is set (we need the bytes in memory to
+    //    perform credential placeholder substitution) or when the
+    //    declared content-length is below STREAMING_THRESHOLD.
+    //
+    //    Streaming path: when content-length exceeds STREAMING_THRESHOLD
+    //    AND no X-Substitute-Body is requested, pass the raw body
+    //    `ReadableStream` directly to fetch with `duplex: "half"`. This
+    //    keeps memory bound on large uploads (Drive resumable uploads,
+    //    bulk exports) at the cost of breaking the transparent
+    //    401-refresh-and-retry — request bodies are not replayable.
+    //    The retry is delegated to the AFPS resolver layer, whose
+    //    `{ fromFile }` resolution is reproducible.
     const method = c.req.method;
+    const hasBody = method !== "GET" && method !== "HEAD";
+    const declaredContentLength = parseInt(c.req.header("content-length") || "0", 10);
+    const useStreamingRequest =
+      hasBody && !substituteBody && declaredContentLength > STREAMING_THRESHOLD;
+
     let rawBodyBytes: ArrayBuffer | undefined;
     let rawBodyText: string | undefined; // lazily decoded only when substituteBody is set
 
-    if (method !== "GET" && method !== "HEAD") {
-      const contentLength = parseInt(c.req.header("content-length") || "0", 10);
-      if (contentLength > MAX_SUBSTITUTE_BODY_SIZE) {
+    if (hasBody && !useStreamingRequest) {
+      if (declaredContentLength > MAX_SUBSTITUTE_BODY_SIZE) {
         return c.json({ error: "Request body too large" }, 413);
       }
-      rawBodyBytes = await c.req.arrayBuffer();
-      if (rawBodyBytes.byteLength > MAX_SUBSTITUTE_BODY_SIZE) {
+      const buffered = await c.req.arrayBuffer();
+      if (buffered.byteLength > MAX_SUBSTITUTE_BODY_SIZE) {
         return c.json({ error: "Request body too large" }, 413);
       }
+      rawBodyBytes = buffered;
       if (substituteBody) {
-        rawBodyText = new TextDecoder().decode(rawBodyBytes);
+        rawBodyText = new TextDecoder().decode(buffered);
+      }
+    } else if (useStreamingRequest) {
+      // Apply the streaming hard cap before we even open the upstream
+      // socket. We can only enforce the declared content-length here —
+      // a chunked / unbounded upload that exceeds the cap mid-stream
+      // will be terminated by upstream timeout / our outbound 30s clock.
+      if (declaredContentLength > MAX_STREAMED_BODY_SIZE) {
+        return c.json({ error: "Request body too large" }, 413);
       }
     }
 
     /** Build the request body with credential substitution applied. */
-    const buildBody = (credentials: Record<string, string>): ArrayBuffer | string | undefined => {
+    const buildBody = (
+      credentials: Record<string, string>,
+    ): ArrayBuffer | string | ReadableStream | undefined => {
+      if (useStreamingRequest) {
+        // Stream the raw incoming body straight through to upstream.
+        // The body is consumed once — no retry replay possible.
+        return c.req.raw.body ?? undefined;
+      }
       if (!rawBodyBytes) return undefined;
       if (substituteBody && rawBodyText) {
         const substituted = substituteVars(rawBodyText, credentials);
@@ -361,24 +402,37 @@ export function createApp(deps: AppDeps): Hono {
       }
 
       const body = buildBody(activeCreds.credentials);
-      return fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
+      const init: RequestInit & Record<string, unknown> = {
         method,
         headers: resolvedHeaders,
         body,
         signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
         proxy: resolvedProxy || undefined,
-      });
+      };
+      if (body instanceof ReadableStream) {
+        // Required by fetch when sending a streaming request body.
+        init.duplex = "half";
+      }
+      return fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, init);
     };
 
     // 7. Make the first request to the target
     let result = await doUpstreamRequest(creds);
     if (!result.ok) return result.errorResponse;
     let targetRes = result.response;
+    let authRefreshed = false;
 
     // 7b. Retry on 401: refresh credentials and retry once. The refresh
     //     endpoint returns the full CredentialsResponse (including
     //     headerName / prefix / fieldName), so credential injection uses
     //     the freshly rotated token without any extra plumbing.
+    //
+    //     Streaming-request mode: the request body has already been
+    //     consumed by the first upstream call, so we cannot replay it.
+    //     We still refresh the credentials (so the *next* call from the
+    //     caller succeeds) and surface the 401 with `X-Auth-Refreshed:
+    //     true` — the AFPS resolver layer interprets this as "the
+    //     transient auth failure has been resolved, retry idempotently".
     if (
       targetRes.status === 401 &&
       deps.refreshCredentials &&
@@ -388,9 +442,15 @@ export function createApp(deps: AppDeps): Hono {
     ) {
       try {
         const refreshed = await deps.refreshCredentials(providerId);
-        const retryResult = await doUpstreamRequest(refreshed);
-        if (retryResult.ok) {
-          targetRes = retryResult.response;
+        if (!useStreamingRequest) {
+          const retryResult = await doUpstreamRequest(refreshed);
+          if (retryResult.ok) {
+            targetRes = retryResult.response;
+          }
+        } else {
+          // Credentials were rotated but we cannot replay the body —
+          // the caller will see 401 + X-Auth-Refreshed and retry.
+          authRefreshed = true;
         }
       } catch {
         // Refresh itself failed (invalid_grant, revoked token) — fall through to report
@@ -416,26 +476,7 @@ export function createApp(deps: AppDeps): Hono {
       cookieJar.set(providerId, [...byName.values()]);
     }
 
-    // 9. Forward upstream response transparently (pass-through proxy)
-    // Read as ArrayBuffer (not text) so non-UTF-8 bytes in binary bodies
-    // (PDF, images, archives) are preserved byte-for-byte. Truncation is
-    // applied by byte length to match the actual payload size.
-    const responseBytes = await targetRes.arrayBuffer();
-    const requestedMaxSize = parseInt(c.req.header("x-max-response-size") || "0", 10);
-    const maxSize =
-      requestedMaxSize > 0
-        ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
-        : MAX_RESPONSE_SIZE;
-    const truncated = responseBytes.byteLength > maxSize;
-    const body = truncated ? responseBytes.slice(0, maxSize) : responseBytes;
-
-    const contentType = targetRes.headers.get("content-type") || "application/octet-stream";
-    const responseHeaders: Record<string, string> = { "Content-Type": contentType };
-    if (truncated) {
-      responseHeaders["X-Truncated"] = "true";
-    }
-
-    // Report auth failures to platform (once per provider per run, only if retry didn't fix it)
+    // 9. Report auth failures to platform (once per provider per run, only if retry didn't fix it)
     if (
       targetRes.status === 401 &&
       config.platformApiUrl &&
@@ -452,6 +493,55 @@ export function createApp(deps: AppDeps): Hono {
         body: JSON.stringify({ providerId }),
       }).catch(() => {});
     }
+
+    // 10. Forward upstream response — choose between buffered (default,
+    //     with truncation) and streaming (zero-copy pass-through) paths.
+    //
+    //     Streaming path is opted in by the caller via
+    //     `X-Stream-Response: 1`. The sidecar still enforces
+    //     MAX_STREAMED_BODY_SIZE up front via the upstream
+    //     Content-Length header when present — chunked / unknown-size
+    //     responses fall back on the outbound timeout to bound memory.
+    //     X-Truncated is irrelevant in streaming mode (the AFPS
+    //     resolver decides when to spill bytes to disk via
+    //     responseMode.toFile / maxInlineBytes).
+    const wantsStreamResponse = c.req.header("x-stream-response") === "1";
+    const contentType = targetRes.headers.get("content-type") || "application/octet-stream";
+
+    if (wantsStreamResponse) {
+      const upstreamLength = parseInt(targetRes.headers.get("content-length") || "0", 10);
+      if (upstreamLength > MAX_STREAMED_BODY_SIZE) {
+        // Drain to release the upstream connection promptly.
+        targetRes.body?.cancel().catch(() => {});
+        return c.json({ error: "Response body too large" }, 413);
+      }
+
+      const streamHeaders: Record<string, string> = { "Content-Type": contentType };
+      if (authRefreshed) streamHeaders["X-Auth-Refreshed"] = "true";
+      const upstreamCl = targetRes.headers.get("content-length");
+      if (upstreamCl) streamHeaders["Content-Length"] = upstreamCl;
+
+      return new Response(targetRes.body, {
+        status: targetRes.status,
+        headers: streamHeaders,
+      });
+    }
+
+    // Buffered path (default): read as ArrayBuffer so non-UTF-8 bytes
+    // (PDF, images, archives) are preserved byte-for-byte. Truncation
+    // applied by byte length to match the actual payload size.
+    const responseBytes = await targetRes.arrayBuffer();
+    const requestedMaxSize = parseInt(c.req.header("x-max-response-size") || "0", 10);
+    const maxSize =
+      requestedMaxSize > 0
+        ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
+        : MAX_RESPONSE_SIZE;
+    const truncated = responseBytes.byteLength > maxSize;
+    const body = truncated ? responseBytes.slice(0, maxSize) : responseBytes;
+
+    const responseHeaders: Record<string, string> = { "Content-Type": contentType };
+    if (truncated) responseHeaders["X-Truncated"] = "true";
+    if (authRefreshed) responseHeaders["X-Auth-Refreshed"] = "true";
 
     return new Response(body, { status: targetRes.status, headers: responseHeaders });
   });
