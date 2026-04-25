@@ -278,18 +278,27 @@ export async function getLastRunState(
   return asRecordOrNull(row?.state);
 }
 
+/**
+ * `state` is the legacy field name (AFPS ≤ 1.3 / pre-ADR-011) for the
+ * carry-over checkpoint. The current name is `checkpoint` — accepted on
+ * the wire alongside `state` for back-compat. The internal handler
+ * folds the wire shape into this canonical type before calling
+ * {@link getRecentRuns}, so the service never sees the legacy alias.
+ */
+export type RecentRunsField = "checkpoint" | "result";
+
 export async function getRecentRuns(
   scope: AppScope,
   packageId: string,
   actor: Actor | null,
   options: {
     limit?: number;
-    fields?: ("state" | "result")[];
+    fields?: RecentRunsField[];
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
   const limit = options.limit ?? 10;
-  const fields = options.fields ?? ["state"];
+  const fields = options.fields ?? ["checkpoint"];
 
   const conditions = [
     eq(runs.packageId, packageId),
@@ -297,6 +306,11 @@ export async function getRecentRuns(
     eq(runs.applicationId, scope.applicationId),
     eq(runs.status, "success"),
   ];
+  // Actor isolation is mandatory — never leak cross-actor checkpoints.
+  // Scheduled / system runs (`actor === null`) explicitly read the
+  // shared bucket only (legacy table semantics: they had no actor
+  // column at all, which the same `null` branch in `actorFilter`
+  // matched).
   if (actor) {
     conditions.push(
       actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
@@ -313,6 +327,9 @@ export async function getRecentRuns(
       status: runs.status,
       startedAt: runs.startedAt,
       duration: runs.duration,
+      // `runs.state` is the column name — the response key is
+      // `checkpoint`. The legacy column is kept until the schema drop
+      // PR; no SQL rename here, just a service-layer projection.
       state: runs.state,
       result: runs.result,
     })
@@ -328,7 +345,7 @@ export async function getRecentRuns(
       date: toISO(row.startedAt),
       duration: row.duration,
     };
-    if (fields.includes("state")) entry.state = row.state;
+    if (fields.includes("checkpoint")) entry.checkpoint = row.state;
     if (fields.includes("result")) entry.result = row.result;
     return entry;
   });

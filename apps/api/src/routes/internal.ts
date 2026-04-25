@@ -144,16 +144,32 @@ export function createInternalRouter() {
       .catch(10)
       .parse(limitParam ?? 10);
 
-    const validFields = ["state", "result"] as const;
-    const parsed = fieldsParam
+    // `state` is the AFPS ≤ 1.3 wire name for the carry-over field.
+    // Accepted as a deprecated alias for one release alongside the new
+    // `checkpoint` name (ADR-011 Phase 5). Both fold into the same
+    // service-layer field; the response key is always `checkpoint`.
+    // TODO(ADR-011 final-cut): remove the `state` alias once the floor
+    // of supported runners ≥ AFPS 1.4.
+    const VALID_WIRE_FIELDS = ["checkpoint", "state", "result"] as const;
+    type WireField = (typeof VALID_WIRE_FIELDS)[number];
+
+    const wireFields = fieldsParam
       ?.split(",")
       .map((f) => f.trim())
-      .filter((f): f is "state" | "result" =>
-        validFields.includes(f as (typeof validFields)[number]),
+      .filter((f): f is WireField =>
+        VALID_WIRE_FIELDS.includes(f as (typeof VALID_WIRE_FIELDS)[number]),
       );
-    const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
+    const seen = new Set<"checkpoint" | "result">();
+    for (const f of wireFields ?? []) {
+      seen.add(f === "state" ? "checkpoint" : f);
+    }
+    const fields: ("checkpoint" | "result")[] = seen.size > 0 ? [...seen] : ["checkpoint"];
 
     try {
+      // Actor isolation is mandatory: `getRecentRuns` filters runs by
+      // dashboardUserId / endUserId so an end-user run never sees
+      // another actor's checkpoint, and a scheduled run (actor === null)
+      // sees only the shared / no-actor bucket.
       const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
       const recentRuns = await getRecentRuns(
         { orgId: run.orgId, applicationId: run.applicationId },

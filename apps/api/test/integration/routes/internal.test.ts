@@ -10,6 +10,7 @@ import {
   seedConnectionProfile,
   seedConnectionForApp,
   seedPackage,
+  seedEndUser,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
@@ -201,7 +202,7 @@ describe("Internal API", () => {
       expect(body.runs).toHaveLength(0);
     });
 
-    it("accepts fields=state,result query parameter", async () => {
+    it("accepts fields=checkpoint,result and returns the canonical `checkpoint` key", async () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
@@ -212,7 +213,7 @@ describe("Internal API", () => {
         result: { output: "done" },
       });
 
-      const res = await app.request("/internal/run-history?fields=state,result", {
+      const res = await app.request("/internal/run-history?fields=checkpoint,result", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -220,8 +221,66 @@ describe("Internal API", () => {
       const body = (await res.json()) as { runs: Record<string, unknown>[] };
       expect(body.runs).toHaveLength(1);
       const entry = body.runs[0]!;
-      expect(entry.state).toEqual({ key: "value" });
+      expect(entry.checkpoint).toEqual({ key: "value" });
       expect(entry.result).toEqual({ output: "done" });
+      // Legacy key never leaks back out — response speaks the new vocabulary.
+      expect(entry.state).toBeUndefined();
+    });
+
+    it("accepts the legacy fields=state alias and returns under `checkpoint`", async () => {
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+        state: { key: "v" },
+      });
+
+      const res = await app.request("/internal/run-history?fields=state", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runs: Record<string, unknown>[] };
+      expect(body.runs).toHaveLength(1);
+      expect(body.runs[0]!.checkpoint).toEqual({ key: "v" });
+      expect(body.runs[0]!.state).toBeUndefined();
+    });
+
+    it("does not return checkpoints from a different end-user (actor isolation)", async () => {
+      // The current `runningToken` belongs to a run triggered by
+      // `ctx.user.id` (a dashboard user). Seed a successful end-user
+      // run for the SAME agent + SAME app and assert that its
+      // checkpoint never appears in the running run's history — the
+      // internal endpoint filters by the run's actor.
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: `ext_${Date.now()}`,
+      });
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: null,
+        endUserId: eu.id,
+        status: "success",
+        state: { secret: true },
+      });
+
+      const res = await app.request("/internal/run-history?fields=checkpoint", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runs: Record<string, unknown>[] };
+      // No `secret` checkpoint may leak through — the end-user run is
+      // a different actor than the running run's dashboard-user actor.
+      for (const r of body.runs) {
+        const cp = r.checkpoint as Record<string, unknown> | null;
+        if (cp) expect(cp.secret).toBeUndefined();
+      }
     });
   });
 

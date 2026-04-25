@@ -28,12 +28,18 @@ import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
 // Wire shapes
 // ─────────────────────────────────────────────
 
-export type RunHistoryField = "state" | "result";
+/**
+ * AFPS 1.4 field names. `state` (the legacy AFPS ≤ 1.3 alias for
+ * `checkpoint`) is NOT part of the canonical type — the runtime emits
+ * `checkpoint`, the platform's `/internal/run-history` endpoint accepts
+ * both alongside the new name for one release of dual-event compat.
+ */
+export type RunHistoryField = "checkpoint" | "result";
 
 export interface RunHistoryRequest {
   /** 1..50. Default 10 (applied by {@link makeRunHistoryTool}). */
   limit: number;
-  /** Non-empty subset of `{"state","result"}`. Default `["state"]`. */
+  /** Non-empty subset of `{"checkpoint","result"}`. Default `["checkpoint"]`. */
   fields: RunHistoryField[];
 }
 
@@ -44,8 +50,8 @@ export interface RunHistoryEntry {
   date: string;
   /** Run duration in milliseconds. */
   duration: number;
-  /** Carry-over state from that run (present when requested). */
-  state?: unknown;
+  /** Carry-over checkpoint from that run (present when requested). */
+  checkpoint?: unknown;
   /** Final structured output from that run (present when requested). */
   result?: unknown;
 }
@@ -67,8 +73,15 @@ export type RunHistoryCallFn = (req: RunHistoryRequest) => Promise<RunHistoryRes
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
-const DEFAULT_FIELDS: readonly RunHistoryField[] = ["state"];
-const VALID_FIELDS: readonly RunHistoryField[] = ["state", "result"];
+const DEFAULT_FIELDS: readonly RunHistoryField[] = ["checkpoint"];
+const VALID_FIELDS: readonly RunHistoryField[] = ["checkpoint", "result"];
+
+/**
+ * Wire-level field vocabulary the platform's `/internal/run-history`
+ * endpoint still accepts for one release. `state` is the deprecated
+ * pre-1.4 alias — see {@link normalizeRequest} for the alias collapse.
+ */
+const WIRE_FIELDS: readonly string[] = ["checkpoint", "state", "result"];
 
 export interface MakeRunHistoryToolOptions {
   /** Emit `run_history.called` events via `ctx.emit`. Default: true. */
@@ -102,7 +115,7 @@ export function makeRunHistoryTool(
         minItems: 1,
         maxItems: VALID_FIELDS.length,
         uniqueItems: true,
-        description: `Data fields to include per run. Default: ["state"].`,
+        description: `Data fields to include per run. Default: ["checkpoint"].`,
       },
     },
   };
@@ -110,7 +123,7 @@ export function makeRunHistoryTool(
   return {
     name: "run_history",
     description:
-      "Fetch metadata and optionally the carry-over state or final output of the agent's most recent past runs (current run excluded). Use for trend analysis, auditing prior executions, or recovering from a failed run. Returns { runs: [{ id, status, date, duration, state?, result? }] } sorted most-recent first.",
+      "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's most recent past runs (current run excluded). Use for trend analysis, auditing prior executions, or recovering from a failed run. Returns { runs: [{ id, status, date, duration, checkpoint?, result? }] } sorted most-recent first. Results are scoped to the current actor — checkpoints from other actors are never visible.",
     parameters,
     async execute(args, ctx: ToolContext): Promise<ToolResult> {
       const req = normalizeRequest(args);
@@ -158,16 +171,20 @@ function normalizeRequest(args: unknown): RunHistoryRequest {
     typeof raw.limit === "number" && Number.isFinite(raw.limit) && raw.limit >= 1
       ? Math.min(Math.floor(raw.limit), MAX_LIMIT)
       : DEFAULT_LIMIT;
-  const fields = Array.isArray(raw.fields)
-    ? Array.from(
-        new Set(
-          raw.fields.filter((f): f is RunHistoryField =>
-            VALID_FIELDS.includes(f as RunHistoryField),
-          ),
-        ),
-      )
-    : [];
-  return { limit, fields: fields.length > 0 ? fields : [...DEFAULT_FIELDS] };
+  // Accept legacy `state` and the new `checkpoint` interchangeably from
+  // the LLM input — both collapse to `checkpoint` on the wire. Anything
+  // outside `WIRE_FIELDS` is dropped silently.
+  const collected = new Set<RunHistoryField>();
+  if (Array.isArray(raw.fields)) {
+    for (const v of raw.fields) {
+      if (typeof v !== "string" || !WIRE_FIELDS.includes(v)) continue;
+      collected.add(v === "state" ? "checkpoint" : (v as RunHistoryField));
+    }
+  }
+  return {
+    limit,
+    fields: collected.size > 0 ? [...collected] : [...DEFAULT_FIELDS],
+  };
 }
 
 function emitCalled(

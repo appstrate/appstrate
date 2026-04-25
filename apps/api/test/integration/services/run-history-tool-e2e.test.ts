@@ -191,12 +191,22 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
     expect(pi.tools).toHaveLength(1);
     expect(pi.tools[0]!.name).toBe("run_history");
 
-    const result = await pi.tools[0]!.execute("call_1", { limit: 2, fields: ["state"] }, undefined);
+    const result = await pi.tools[0]!.execute(
+      "call_1",
+      { limit: 2, fields: ["checkpoint"] },
+      undefined,
+    );
 
     const content = (result as { content: Array<{ type: string; text: string }> }).content;
     expect(content).toHaveLength(1);
     const body = JSON.parse(content[0]!.text) as {
-      runs: Array<{ id: string; status: string; date: string; duration: number; state?: unknown }>;
+      runs: Array<{
+        id: string;
+        status: string;
+        date: string;
+        duration: number;
+        checkpoint?: unknown;
+      }>;
     };
 
     expect(body.runs).toHaveLength(2);
@@ -204,7 +214,7 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
       expect(typeof entry.id).toBe("string");
       expect(typeof entry.date).toBe("string");
       expect(typeof entry.duration).toBe("number");
-      expect(entry).toHaveProperty("state");
+      expect(entry).toHaveProperty("checkpoint");
       // Current run excluded
       expect(entry.id).not.toBe(runningRunId);
     }
@@ -224,14 +234,18 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
     const pi = makeFakePi();
     factory(pi.api);
 
-    await pi.tools[0]!.execute("call_2", { limit: 50, fields: ["state", "result"] }, undefined);
+    await pi.tools[0]!.execute(
+      "call_2",
+      { limit: 50, fields: ["checkpoint", "result"] },
+      undefined,
+    );
 
     const called = events.find((e) => e.type === "run_history.called");
     expect(called).toBeDefined();
     expect(called!.status).toBe("success");
     expect(called!.count).toBe(3);
     expect(called!.limit).toBe(50);
-    expect(called!.fields).toEqual(["state", "result"]);
+    expect(called!.fields).toEqual(["checkpoint", "result"]);
   });
 
   it("does not leak sidecar URL or run token through the tool response", async () => {

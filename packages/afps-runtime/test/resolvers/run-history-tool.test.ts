@@ -33,7 +33,13 @@ function okCall(runs: RunHistoryResponse["runs"]): RunHistoryCallFn {
 }
 
 const sampleRuns = [
-  { id: "run_a", status: "success", date: "2026-04-01T00:00:00Z", duration: 1234, state: { n: 1 } },
+  {
+    id: "run_a",
+    status: "success",
+    date: "2026-04-01T00:00:00Z",
+    duration: 1234,
+    checkpoint: { n: 1 },
+  },
   { id: "run_b", status: "failed", date: "2026-03-31T00:00:00Z", duration: 4567 },
 ];
 
@@ -64,7 +70,7 @@ describe("makeRunHistoryTool — tool surface", () => {
       uniqueItems: true,
     });
     const fieldsSchema = params.properties.fields as { items: { enum: string[] } };
-    expect(fieldsSchema.items.enum).toEqual(["state", "result"]);
+    expect(fieldsSchema.items.enum).toEqual(["checkpoint", "result"]);
   });
 
   it("mentions use-cases in the description (replaces legacy Run History prompt section)", () => {
@@ -87,7 +93,7 @@ describe("makeRunHistoryTool — request normalisation", () => {
     });
     const { ctx } = makeCtx();
     await tool.execute({}, ctx);
-    expect(captured!).toEqual({ limit: 10, fields: ["state"] });
+    expect(captured!).toEqual({ limit: 10, fields: ["checkpoint"] });
   });
 
   it("applies defaults on undefined args (LLM omits the parameters entirely)", async () => {
@@ -98,7 +104,7 @@ describe("makeRunHistoryTool — request normalisation", () => {
     });
     const { ctx } = makeCtx();
     await tool.execute(undefined, ctx);
-    expect(captured!).toEqual({ limit: 10, fields: ["state"] });
+    expect(captured!).toEqual({ limit: 10, fields: ["checkpoint"] });
   });
 
   it("clamps limit above MAX_LIMIT (50) defensively", async () => {
@@ -109,7 +115,7 @@ describe("makeRunHistoryTool — request normalisation", () => {
     });
     const { ctx } = makeCtx();
     await tool.execute({ limit: 9999 }, ctx);
-    expect(captured!).toEqual({ limit: 50, fields: ["state"] });
+    expect(captured!).toEqual({ limit: 50, fields: ["checkpoint"] });
   });
 
   it("falls back to default limit for non-integer or < 1 values", async () => {
@@ -138,15 +144,27 @@ describe("makeRunHistoryTool — request normalisation", () => {
     expect(captured!.limit).toBe(7);
   });
 
-  it("deduplicates and filters fields to known values", async () => {
+  it("deduplicates and filters fields to known values, collapsing legacy state alias", async () => {
     let captured: RunHistoryRequest | null = null;
     const tool = makeRunHistoryTool(async (req) => {
       captured = req;
       return { runs: [] };
     });
     const { ctx } = makeCtx();
-    await tool.execute({ fields: ["state", "state", "result", "unknown"] }, ctx);
-    expect(captured!.fields.sort()).toEqual(["result", "state"]);
+    await tool.execute({ fields: ["checkpoint", "state", "checkpoint", "result", "unknown"] }, ctx);
+    // `state` collapses into `checkpoint` — the canonical wire name.
+    expect(captured!.fields.sort()).toEqual(["checkpoint", "result"]);
+  });
+
+  it("accepts the legacy `state` alias on its own and rewrites to `checkpoint`", async () => {
+    let captured: RunHistoryRequest | null = null;
+    const tool = makeRunHistoryTool(async (req) => {
+      captured = req;
+      return { runs: [] };
+    });
+    const { ctx } = makeCtx();
+    await tool.execute({ fields: ["state"] }, ctx);
+    expect(captured!.fields).toEqual(["checkpoint"]);
   });
 
   it("falls back to default fields when the filtered set is empty", async () => {
@@ -157,7 +175,7 @@ describe("makeRunHistoryTool — request normalisation", () => {
     });
     const { ctx } = makeCtx();
     await tool.execute({ fields: ["garbage"] }, ctx);
-    expect(captured!.fields).toEqual(["state"]);
+    expect(captured!.fields).toEqual(["checkpoint"]);
   });
 });
 
@@ -190,7 +208,7 @@ describe("makeRunHistoryTool — execution + events", () => {
     expect(event.status).toBe("success");
     expect(event.count).toBe(2);
     expect(event.limit).toBe(2);
-    expect(event.fields).toEqual(["state"]);
+    expect(event.fields).toEqual(["checkpoint"]);
     expect(typeof event.durationMs).toBe("number");
     expect(event.durationMs as number).toBeGreaterThanOrEqual(0);
     expect(event.error).toBeUndefined();
@@ -241,9 +259,11 @@ describe("createSidecarRunHistoryCall — URL + headers", () => {
         );
       }) as typeof fetch,
     });
-    await call({ limit: 7, fields: ["state", "result"] });
+    await call({ limit: 7, fields: ["checkpoint", "result"] });
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.url).toBe("http://sidecar:8080/run-history?limit=7&fields=state%2Cresult");
+    expect(captured[0]!.url).toBe(
+      "http://sidecar:8080/run-history?limit=7&fields=checkpoint%2Cresult",
+    );
     expect(captured[0]!.init.method).toBe("GET");
   });
 
@@ -256,8 +276,8 @@ describe("createSidecarRunHistoryCall — URL + headers", () => {
         return Promise.resolve(new Response(JSON.stringify({ runs: [] })));
       }) as typeof fetch,
     });
-    await call({ limit: 1, fields: ["state"] });
-    expect(captured[0]).toBe("http://sidecar:8080/run-history?limit=1&fields=state");
+    await call({ limit: 1, fields: ["checkpoint"] });
+    expect(captured[0]).toBe("http://sidecar:8080/run-history?limit=1&fields=checkpoint");
   });
 
   it("forwards baseHeaders on every dispatch", async () => {
@@ -270,7 +290,7 @@ describe("createSidecarRunHistoryCall — URL + headers", () => {
         return Promise.resolve(new Response(JSON.stringify({ runs: [] })));
       }) as typeof fetch,
     });
-    await call({ limit: 1, fields: ["state"] });
+    await call({ limit: 1, fields: ["checkpoint"] });
     const headers = captured[0]!.headers as Record<string, string>;
     expect(headers["X-Trace-Id"]).toBe("trace-xyz");
   });
@@ -285,7 +305,7 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
           new Response("sidecar unavailable", { status: 503 }),
         )) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(
       /HTTP 503.*sidecar unavailable/,
     );
   });
@@ -298,7 +318,7 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
           new Response("<html>nope</html>", { status: 200 }),
         )) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(/non-JSON body/);
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(/non-JSON body/);
   });
 
   it("rejects responses missing the runs array", async () => {
@@ -309,7 +329,9 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
           new Response(JSON.stringify({ wrong: "shape" }), { status: 200 }),
         )) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(/missing "runs" array/);
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(
+      /missing "runs" array/,
+    );
   });
 
   it("rejects entries with missing mandatory fields", async () => {
@@ -323,7 +345,9 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
           ),
         )) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(/missing "runs" array/);
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(
+      /missing "runs" array/,
+    );
   });
 
   it("reports a clean timeout message when the call is aborted", async () => {
@@ -339,7 +363,7 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
           });
         })) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(/timed out after 5ms/);
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(/timed out after 5ms/);
   });
 
   it("wraps network failures with a contextual message", async () => {
@@ -348,7 +372,7 @@ describe("createSidecarRunHistoryCall — error surfaces", () => {
       fetch: ((_url: string, _init: RequestInit) =>
         Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch,
     });
-    await expect(call({ limit: 1, fields: ["state"] })).rejects.toThrow(
+    await expect(call({ limit: 1, fields: ["checkpoint"] })).rejects.toThrow(
       /sidecar call failed.*ECONNREFUSED/,
     );
   });
