@@ -38,7 +38,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import type { AppScope } from "../../lib/scope.ts";
@@ -81,12 +81,12 @@ export interface AppstrateEventSinkOptions {
    */
   persistOnly?: boolean;
   /**
-   * Envelope sequence for the single event this sink instance will handle.
-   * Required only in `persistOnly` mode because the ledger dedup key is
-   * `(run_id, source='runner', sequence)`. Long-lived sinks (parity tests,
-   * in-process runners) never hit the ledger so they omit it.
+   * When `true`, `appstrate.metric` events write a runner-source row to
+   * the `llm_usage` ledger. At most one runner row per run; concurrent
+   * writers race via ON CONFLICT DO NOTHING. The ingestion path turns
+   * this on; long-lived in-process runners (parity tests) leave it off.
    */
-  sequence?: number;
+  writeLedger?: boolean;
 }
 
 export class AppstrateEventSink implements EventSink {
@@ -97,13 +97,13 @@ export class AppstrateEventSink implements EventSink {
   private accumulatedCost = 0;
   private lastAdapterError: string | null = null;
   private finalResult: RunResult | null = null;
-  private readonly sequence: number | undefined;
+  private readonly writeLedger: boolean;
 
   constructor(opts: AppstrateEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
     this.reducer = opts.persistOnly ? null : createReducerSink();
-    this.sequence = opts.sequence;
+    this.writeLedger = opts.writeLedger ?? false;
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -189,23 +189,16 @@ export class AppstrateEventSink implements EventSink {
           if (cost !== null) this.accumulatedCost += cost;
         }
 
-        // Persistence — always, regardless of mode. Token usage is a
-        // running-total snapshot on the run row; cost is appended to the
-        // `llm_usage` ledger so finalize can aggregate it. Ledger writes
-        // only happen in the ingestion path (persistOnly sink carries a
-        // sequence); long-lived sinks keep the in-memory accumulators
-        // above and nothing else.
+        // Token usage is a running-total snapshot on the run row.
         if (usage) {
           await updateRun(this.scope, this.runId, {
             tokenUsage: usage as unknown as Record<string, unknown>,
           });
         }
-        if (this.sequence !== undefined) {
-          await appendRunnerLedgerRow(this.scope, this.runId, {
-            sequence: this.sequence,
-            cost,
-            usage,
-          });
+        // Ledger row — only the ingestion path opts in. Concurrent
+        // writers race via ON CONFLICT DO NOTHING.
+        if (this.writeLedger) {
+          await writeRunnerLedgerRow(this.scope, this.runId, { cost, usage });
         }
         break;
       }
@@ -258,41 +251,21 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
 }
 
 /**
- * Synthetic sequence reserved for the finalize-time ledger write — real
- * `appstrate.metric` events use sequence ≥ 1 (HttpSink's counter starts
- * at 1), so the unique key (run_id, source, sequence) cannot collide.
- * Co-owned by `run-event-ingestion.ts` which falls back to this writer
- * when the metric POST is aborted by `process.exit()`.
- */
-export const SYNTHESISED_RUNNER_LEDGER_SEQUENCE = 0;
-
-/**
- * Append one runner-source row to the `llm_usage` ledger.
+ * Write the runner-source row for a run to the `llm_usage` ledger.
  *
- * Runners emit running totals, not deltas. The per-event delta is derived
- * from `(running_total − previously_persisted_total)` so `SUM(ledger)`
- * stays equal to the final running total regardless of how many metric
- * events a run produces (one today; multi-turn agents tomorrow).
- *
- * Concurrency: the read-then-insert is wrapped in a transaction with a
- * per-run `pg_advisory_xact_lock(hashtext(run_id))` so two concurrent
- * metric events for the same run cannot both read the same prior SUM and
- * over-count the delta. The lock is keyed on the run id alone; concurrent
- * writes for OTHER runs are unaffected. Lock is released automatically
- * when the transaction commits or rolls back.
- *
- * Dedup on `(run_id, sequence)` makes envelope replay a no-op — the
- * ingestion route guarantees the sequence is monotonic per run.
+ * The metric event carries the runner's full LLM cost + token usage for
+ * the run. At most one runner row per run — concurrent writers (the
+ * `appstrate.metric` event handler and the finalize-time fallback)
+ * race via the partial unique index `uq_llm_usage_runner_run_id`;
+ * whichever lands first wins, the other no-ops.
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.
- * Errors are logged; correctness is self-healing because the next
- * metric event carries the full running total.
+ * Errors are logged.
  */
-export async function appendRunnerLedgerRow(
+export async function writeRunnerLedgerRow(
   scope: AppScope,
   runId: string,
   row: {
-    sequence: number;
     cost: number | null;
     usage: TokenUsage | null;
   },
@@ -302,62 +275,46 @@ export async function appendRunnerLedgerRow(
   if (row.cost === null && !row.usage) return;
 
   try {
-    await db.transaction(async (tx) => {
-      // Per-run advisory lock — serialises concurrent metric inserts for
-      // THIS run, leaves all other runs unaffected. Auto-released on
-      // commit / rollback.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${runId}))`);
-
-      const [prior] = await tx
-        .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })
-        .from(llmUsage)
-        .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
-      const existing = Number(prior?.total ?? 0);
-      const delta = Math.max(0, (row.cost ?? 0) - existing);
-
-      await tx
-        .insert(llmUsage)
-        .values({
-          source: "runner",
-          orgId: scope.orgId,
-          runId,
-          sequence: row.sequence,
-          inputTokens: row.usage?.input_tokens ?? 0,
-          outputTokens: row.usage?.output_tokens ?? 0,
-          cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
-          cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
-          costUsd: delta,
-        })
-        .onConflictDoNothing();
-    });
+    await db
+      .insert(llmUsage)
+      .values({
+        source: "runner",
+        orgId: scope.orgId,
+        runId,
+        inputTokens: row.usage?.input_tokens ?? 0,
+        outputTokens: row.usage?.output_tokens ?? 0,
+        cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
+        cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
+        costUsd: row.cost ?? 0,
+      })
+      .onConflictDoNothing();
   } catch (err) {
-    logger.error("Failed to append runner ledger row", {
+    logger.error("Failed to write runner ledger row", {
       runId,
-      sequence: row.sequence,
       error: err instanceof Error ? err.message : String(err),
     });
   }
 }
 
 /**
- * SUM of runner-source cost_usd persisted so far for this run.
- * Read-only — safe to call without a lock for post-finalize snapshots.
- * Do NOT use to compute deltas in concurrent writers; use the
- * transactional read inside {@link appendRunnerLedgerRow} instead.
+ * Whether a runner-source row has already been persisted for this run.
+ * Used by the finalize-time fallback to decide whether to synthesise the
+ * row or trust the metric event handler that already ran.
  */
-export async function sumRunnerCost(runId: string): Promise<number> {
+export async function hasRunnerLedgerRow(runId: string): Promise<boolean> {
   try {
     const [row] = await db
-      .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })
+      .select({ id: llmUsage.id })
       .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
-    return Number(row?.total ?? 0);
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")))
+      .limit(1);
+    return row !== undefined;
   } catch (err) {
-    logger.warn("Failed to read prior runner ledger; treating delta as running total", {
+    logger.warn("Failed to read runner ledger; assuming row absent", {
       runId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return 0;
+    return false;
   }
 }
 

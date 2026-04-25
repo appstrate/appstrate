@@ -57,6 +57,13 @@
       "when": 1777939200000,
       "tag": "0007_run_heartbeat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777939300000,
+      "tag": "0008_runner_ledger_simple",
+      "breakpoints": true
     }
   ]
 }
