@@ -42,6 +42,7 @@ storage/
 
 docs/*
 !docs/adr/
+!docs/specs/
 flows/*
 
 claudedocs/
