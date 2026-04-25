@@ -264,6 +264,10 @@ const envSchema = z
     // emails whose domain matches one entry. Empty / unset = no domain
     // restriction. Case-insensitive, no leading "@". Example:
     //   AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io
+    //
+    // Validation rejects clearly malformed entries (whitespace inside,
+    // missing TLD, invalid chars) at boot — silently treating "acme . com"
+    // as "no match" would only surface as "why doesn't signup work" later.
     AUTH_ALLOWED_SIGNUP_DOMAINS: z
       .string()
       .default("")
@@ -272,6 +276,16 @@ const envSchema = z
           .split(",")
           .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
           .filter(Boolean),
+      )
+      .refine(
+        (arr) =>
+          arr.every((d) =>
+            /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d),
+          ),
+        {
+          message:
+            "AUTH_ALLOWED_SIGNUP_DOMAINS must be a comma-separated list of valid domains (e.g. 'acme.com,foo.io')",
+        },
       ),
     // AUTH_PLATFORM_ADMIN_EMAILS — comma-separated email allowlist of
     // platform-level admins. Bypass AUTH_DISABLE_SIGNUP and may call
@@ -286,16 +300,26 @@ const envSchema = z
           .split(",")
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean),
-      ),
+      )
+      .refine((arr) => arr.every((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)), {
+        message: "AUTH_PLATFORM_ADMIN_EMAILS must be a comma-separated list of valid emails",
+      }),
     // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
     // self-hosted instances in closed mode. When set, this email is allowed
     // to sign up even with AUTH_DISABLE_SIGNUP=true, and an organization is
     // auto-created with this user as owner on first signup. Idempotent: if
     // the user already owns an org, the after-hook is a no-op.
+    //
+    // Empty is allowed (open mode); anything else must look like an email
+    // so a typo (`AUTH_BOOTSTRAP_OWNER_EMAIL=admin`) is caught at boot
+    // rather than silently disabling the bootstrap path.
     AUTH_BOOTSTRAP_OWNER_EMAIL: z
       .string()
       .default("")
-      .transform((s) => s.trim().toLowerCase()),
+      .transform((s) => s.trim().toLowerCase())
+      .refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), {
+        message: "AUTH_BOOTSTRAP_OWNER_EMAIL must be a valid email or empty",
+      }),
     // AUTH_BOOTSTRAP_ORG_NAME — display name of the bootstrap org. Defaults
     // to "Default" when unset. Slug is derived from the name.
     AUTH_BOOTSTRAP_ORG_NAME: z.string().default("Default"),

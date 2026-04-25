@@ -42,6 +42,32 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 }
 
 /**
+ * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
+ * has actually inserted the org row — never on the idempotent no-op path.
+ * apps/api wires this at boot to (a) emit `onOrgCreate` so cloud free-tier
+ * and other module listeners observe the bootstrap org, and (b) provision
+ * the default application + hello-world agent so the post-signup onboarding
+ * path lands on a usable workspace, mirroring `POST /api/orgs`.
+ *
+ * Lives as an injection slot rather than a direct call because the
+ * platform service layer (applications, default-agent, module event bus)
+ * lives in `apps/api`, which `packages/db` cannot import without inverting
+ * the dependency graph.
+ */
+export interface PostBootstrapOrgInfo {
+  orgId: string;
+  slug: string;
+  userId: string;
+  userEmail: string;
+}
+
+let _postBootstrapOrgHook: ((info: PostBootstrapOrgInfo) => Promise<void>) | null = null;
+
+export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Promise<void>): void {
+  _postBootstrapOrgHook = hook;
+}
+
+/**
  * Auto-create the bootstrap organization when the freshly-signed-up user
  * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Delegates the idempotent create-or-noop
  * to `createBootstrapOrg`, which is shared with `apps/api/scripts/bootstrap-org.ts`.
@@ -49,19 +75,48 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
  * Runs in the BA `after` hook, after the profile row is inserted. Errors are
  * swallowed (logged): the user is already created and can be recovered via
  * the explicit `bootstrap-org.ts` script if the auto-path fails transiently.
+ *
+ * Realm-guarded: only fires for `platform` realm signups. Without this guard,
+ * an OIDC end-user flow that happens to target `AUTH_BOOTSTRAP_OWNER_EMAIL`
+ * (`realm = end_user:<applicationId>`) would provision a platform org for an
+ * end-user, mixing audiences that the realm separation exists to keep apart.
  */
-async function maybeBootstrapOrgForOwner(userId: string, email: string): Promise<void> {
+async function maybeBootstrapOrgForOwner(
+  userId: string,
+  email: string,
+  realm: string,
+): Promise<void> {
+  if (realm !== "platform") return;
   if (!isBootstrapOwner(email)) return;
   const env = getEnv();
   try {
     const result = await createBootstrapOrg(userId, env.AUTH_BOOTSTRAP_ORG_NAME);
-    if (result.created) {
-      logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
-        userId,
-        email,
-        orgId: result.orgId,
-        slug: result.slug,
-      });
+    if (!result.created) return;
+    logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
+      userId,
+      email,
+      orgId: result.orgId,
+      slug: result.slug,
+    });
+    if (_postBootstrapOrgHook) {
+      // Side effects (event emit, default app, default agent) run in
+      // apps/api. Failures here are logged but never break signup — the
+      // org itself is already committed.
+      try {
+        await _postBootstrapOrgHook({
+          orgId: result.orgId,
+          slug: result.slug,
+          userId,
+          userEmail: email,
+        });
+      } catch (err) {
+        logger.error("auth: post-bootstrap hook failed", {
+          userId,
+          email,
+          orgId: result.orgId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   } catch (err) {
     logger.error("auth: bootstrap org creation failed", {
@@ -672,12 +727,17 @@ function buildAuth(
               displayName: user.name || user.email,
               language: "fr",
             });
+            // Read the realm written by the before-hook. BA's drizzle adapter
+            // returns the inserted row, so `user.realm` is populated when the
+            // additionalField is declared. Fall back to "platform" if the
+            // adapter strips it (defensive — the SQL default matches anyway).
+            const realm = (user as { realm?: string }).realm ?? "platform";
             // Self-hosting bootstrap path (issue #228) — auto-create the
             // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
             // BEFORE the module after-hook so cloud's free-tier hook etc.
             // see a coherent state.
             try {
-              await maybeBootstrapOrgForOwner(user.id, user.email);
+              await maybeBootstrapOrgForOwner(user.id, user.email, realm);
             } catch (err) {
               logger.error("auth: bootstrap org creation failed", {
                 userId: user.id,
