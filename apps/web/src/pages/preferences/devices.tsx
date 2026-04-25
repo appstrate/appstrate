@@ -55,6 +55,14 @@ function deviceIcon(category: ReturnType<typeof categorizeUserAgent>) {
   }
 }
 
+// Pre-fix rows persisted the literal `"unknown"` string when no IP was
+// available. Treat that as a falsy display value so the dashboard renders
+// nothing instead of the noise word — matches the post-fix NULL handling.
+function displayIp(ip: string | null): string | null {
+  if (!ip) return null;
+  return ip === "unknown" ? null : ip;
+}
+
 function deriveLabel(session: CliSession, t: (k: string) => string): string {
   if (session.deviceName) return session.deviceName;
   const category = categorizeUserAgent(session.userAgent);
@@ -155,10 +163,10 @@ export function PreferencesDevicesPage() {
                         <span className="font-mono">{s.userAgent}</span>
                       </div>
                     )}
-                    {s.createdIp && (
+                    {displayIp(s.createdIp) && (
                       <div>
                         <span className="font-medium">{t("devices.createdIpLabel")}:</span>{" "}
-                        <span className="font-mono">{s.createdIp}</span>
+                        <span className="font-mono">{displayIp(s.createdIp)}</span>
                       </div>
                     )}
                     <div>

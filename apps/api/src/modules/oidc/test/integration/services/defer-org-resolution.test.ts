@@ -177,10 +177,12 @@ describe("deferOrgResolution in auth pipeline", () => {
 
     const token = await mintInstanceToken(authUserId, instanceClientId);
 
+    const headers = new Headers({ Authorization: `Bearer ${token}` });
     const resolution = await oidcAuthStrategy.authenticate({
-      headers: new Headers({ Authorization: `Bearer ${token}` }),
+      headers,
       method: "GET",
       path: "/api/profile",
+      request: new Request("http://localhost/api/profile", { headers }),
     });
 
     expect(resolution).not.toBeNull();

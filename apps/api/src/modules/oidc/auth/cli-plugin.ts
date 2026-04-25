@@ -98,13 +98,22 @@ function clamp(s: string | null | undefined, max: number): string | null {
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
 }
 
+function resolveIp(request: Request | undefined): string | null {
+  if (!request) return null;
+  const ip = getClientIpFromRequest(request);
+  // The helper returns the literal `"unknown"` when no source provides an
+  // IP. Persisting that string in the dashboard is worse than NULL — the
+  // UI can render "—" for null but treats `"unknown"` as a valid value.
+  return ip && ip !== "unknown" ? ip : null;
+}
+
 function metadataFromRequest(request: Request | undefined): DeviceMetadata {
   if (!request) return {};
   const headers = request.headers;
   return {
     deviceName: clamp(headers.get(DEVICE_NAME_HEADER), DEVICE_NAME_MAX_LENGTH),
     userAgent: clamp(headers.get("user-agent"), USER_AGENT_MAX_LENGTH),
-    ip: getClientIpFromRequest(request),
+    ip: resolveIp(request),
   };
 }
 
@@ -265,7 +274,7 @@ export function cliTokenPlugin() {
                 // are head-of-family attributes captured at login time;
                 // re-capturing them on every refresh would let a CLI
                 // silently mutate its declared identity.
-                metadata: { ip: getClientIpFromRequest(ctx.request) },
+                metadata: { ip: resolveIp(ctx.request) },
               });
               return ctx.json(
                 {

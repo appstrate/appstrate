@@ -292,6 +292,11 @@ export async function exchangeDeviceCodeForTokens(params: {
   }
   const { rowId, user, scope } = readOutcome;
 
+  // Pre-compute the family id so we can stamp it on the JWT (for
+  // server-side revocation enforcement on every Bearer call) AND on the
+  // refresh-token head row inserted below. Both must agree.
+  const familyId = prefixedId("crf");
+
   // JWT mint OUTSIDE any transaction — goes through BA's jwt() plugin
   // which opens its own DB queries via the BA adapter.
   const accessToken = await mintAccessJwt({
@@ -301,6 +306,7 @@ export async function exchangeDeviceCodeForTokens(params: {
     emailVerified: user.emailVerified === true,
     scope,
     clientId,
+    cliFamilyId: familyId,
   });
 
   // Second transaction: persist refresh token + consume device_code row
@@ -328,7 +334,7 @@ export async function exchangeDeviceCodeForTokens(params: {
       // No parent — head of a fresh family. Device metadata is persisted
       // on this head row only; rotation rows leave the columns NULL.
       parentId: null,
-      familyId: prefixedId("crf"),
+      familyId,
       metadata,
     });
     // One-shot contract.
@@ -547,6 +553,7 @@ export async function rotateRefreshToken(params: {
     emailVerified: user.emailVerified === true,
     scope,
     clientId,
+    cliFamilyId: familyId,
   });
   const { refreshPlain, selfRevoked } = await db.transaction(async (tx) => {
     const persisted = await persistRefreshTokenInTx(tx, {
@@ -787,6 +794,70 @@ export async function revokeAllFamiliesForUser(userId: string): Promise<{ revoke
   return { revokedCount: heads.length };
 }
 
+/**
+ * Hot-path check called from `oidcAuthStrategy` on every CLI Bearer
+ * authentication. Verifies the family is still active (not revoked, not
+ * expired, head row exists for the user), and opportunistically bumps
+ * `last_used_at` + `last_used_ip` on the head row when the previous bump
+ * is more than `LAST_USED_TOUCH_INTERVAL_MS` old. The throttle keeps the
+ * write rate to at most one UPDATE per minute per family even under
+ * sustained Bearer traffic, while still surfacing recent activity in the
+ * dashboard within ~60 s.
+ *
+ * Returns `false` when the family has been revoked or no longer matches
+ * the user (deleted, transferred, etc.) — the strategy maps this to
+ * "auth fails", same as a malformed/expired JWT. Returns `true` for
+ * still-active families.
+ */
+const LAST_USED_TOUCH_INTERVAL_MS = 60 * 1000;
+
+export async function checkFamilyAndTouch(params: {
+  familyId: string;
+  userId: string;
+  ip: string | null;
+}): Promise<boolean> {
+  const { familyId, userId, ip } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+      expiresAt: cliRefreshToken.expiresAt,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+    })
+    .from(cliRefreshToken)
+    .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+    .limit(1);
+  if (!head) return false;
+  if (head.userId !== userId) return false;
+  if (head.revokedAt) return false;
+  if (head.expiresAt < new Date()) return false;
+
+  const now = Date.now();
+  const stale = !head.lastUsedAt || now - head.lastUsedAt.getTime() >= LAST_USED_TOUCH_INTERVAL_MS;
+  if (stale) {
+    // Best-effort. A failed UPDATE here must not break authentication —
+    // log and continue. Concurrent writers landing in the same window
+    // produce a small redundant write at worst.
+    try {
+      await db
+        .update(cliRefreshToken)
+        .set({
+          lastUsedAt: new Date(now),
+          lastUsedIp: ip ?? head.lastUsedIp,
+        })
+        .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)));
+    } catch (err) {
+      logger.warn("oidc: cli last_used_at bump failed — auth still allowed", {
+        module: "oidc",
+        familyId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return true;
+}
+
 // ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
 
 /**
@@ -1003,6 +1074,10 @@ async function mintAccessJwt(claims: {
   emailVerified: boolean;
   scope: string;
   clientId: string;
+  /** CLI refresh-token family id this access token belongs to. Stamped on
+   *  the JWT so the OIDC strategy can reject tokens whose family has been
+   *  revoked, without waiting for the next refresh. */
+  cliFamilyId: string;
 }): Promise<string> {
   const env = getEnv();
   // Strip any trailing slash from APP_URL before composing iss/aud so
@@ -1036,6 +1111,11 @@ async function mintAccessJwt(claims: {
     email: claims.email,
     email_verified: claims.emailVerified,
     name: claims.name,
+    // Custom claim — read by `oidcAuthStrategy.resolveInstanceUser` to
+    // gate the token on the family's revocation state. Absent on
+    // non-CLI instance tokens (e.g. satellite admin app `/oauth2/token`),
+    // which the strategy treats as "no family check applies".
+    cli_family_id: claims.cliFamilyId,
   };
   if (claims.scope.length > 0) {
     payload.scope = claims.scope;

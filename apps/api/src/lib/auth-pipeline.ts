@@ -91,6 +91,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         headers: c.req.raw.headers,
         method: c.req.method,
         path: c.req.path,
+        request: c.req.raw,
       };
       for (const strategy of strategies) {
         const resolution = await strategy.authenticate(strategyReq);

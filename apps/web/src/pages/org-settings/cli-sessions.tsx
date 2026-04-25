@@ -53,6 +53,11 @@ function deviceIcon(category: ReturnType<typeof categorizeUserAgent>) {
   }
 }
 
+function displayIp(ip: string | null): string | null {
+  if (!ip) return null;
+  return ip === "unknown" ? null : ip;
+}
+
 function deriveLabel(session: AdminCliSession, t: (k: string) => string): string {
   if (session.deviceName) return session.deviceName;
   const category = categorizeUserAgent(session.userAgent);
@@ -127,10 +132,10 @@ export function OrgSettingsCliSessionsPage() {
                         <span className="font-mono">{s.userAgent}</span>
                       </div>
                     )}
-                    {s.createdIp && (
+                    {displayIp(s.createdIp) && (
                       <div>
                         <span className="font-medium">{t("devices.createdIpLabel")}:</span>{" "}
-                        <span className="font-mono">{s.createdIp}</span>
+                        <span className="font-mono">{displayIp(s.createdIp)}</span>
                       </div>
                     )}
                     <div>

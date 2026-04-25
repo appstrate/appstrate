@@ -833,10 +833,12 @@ describe("device-session metadata (issue #251)", () => {
 
   // `TRUST_PROXY` defaults to `false` in the test env, so
   // `getClientIpFromRequest` returns the literal string `"unknown"`
-  // when reading from a test request. Tests that need a real IP must
-  // either set up `TRUST_PROXY=1` + `X-Forwarded-For` or accept the
-  // sentinel. The current suite uses the XFF route — see
-  // `lib/client-ip.ts` for the resolution rules.
+  // when reading from a test request — the cli-plugin layer normalizes
+  // that sentinel to `null` before persisting (so the dashboard renders
+  // an empty cell instead of the noise word). Tests that want a non-null
+  // `created_ip` must therefore push an explicit `X-Forwarded-For` header
+  // AND run with `TRUST_PROXY=1` so the resolver actually reads it.
+  // The current suite asserts on the null vs non-null distinction.
 
   async function loginWithMetadata(headers: Record<string, string>): Promise<{
     refreshToken: string;
@@ -885,10 +887,10 @@ describe("device-session metadata (issue #251)", () => {
     expect(row!.parentId).toBeNull(); // confirm this is the head
     expect(row!.userAgent).toBe("appstrate-cli/2.4.0 (darwin arm64; node 20.11.1)");
     expect(row!.deviceName).toBe("pierre's macbook");
-    // `TRUST_PROXY=false` (test default) → XFF ignored, ip recorded as "unknown".
-    // The point of the assertion is that the column is populated (non-null),
-    // and that `last_used_*` is left blank until the first rotation.
-    expect(typeof row!.createdIp).toBe("string");
+    // `TRUST_PROXY=false` (test default) → XFF ignored, resolver returns
+    // `"unknown"`, normalized to `null` at the cli-plugin layer so the
+    // dashboard doesn't render the sentinel as a real IP.
+    expect(row!.createdIp).toBeNull();
     expect(row!.lastUsedAt).toBeNull();
     expect(row!.lastUsedIp).toBeNull();
   });

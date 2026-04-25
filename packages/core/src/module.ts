@@ -492,6 +492,14 @@ export interface AuthStrategyRequest {
   method: string;
   /** Request path (e.g. "/api/runs"). */
   path: string;
+  /**
+   * Raw `Request` object. Strategies that need IP resolution (for audit
+   * logging or rate limiting) call into helpers keyed on the Request
+   * identity (`getClientIpFromRequest`) — those helpers consult a per-
+   * Request WeakMap populated by an early Hono middleware so they work
+   * even when `TRUST_PROXY=false` and no forwarded header is present.
+   */
+  request: Request;
 }
 
 /**

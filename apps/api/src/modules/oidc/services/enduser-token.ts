@@ -61,6 +61,10 @@ export interface AccessTokenClaims {
   applicationId?: string;
   /** End-user flow: `eu_…` id of the impersonated end-user. */
   endUserId?: string;
+  /** CLI flow: refresh-token family id this access token was issued
+   *  alongside. The OIDC strategy gates the token on the family's
+   *  revocation state — absent for non-CLI instance tokens. */
+  cliFamilyId?: string;
 }
 
 export type JwksResolver = (
@@ -225,6 +229,7 @@ export async function verifyEndUserAccessToken(
     orgRole,
     applicationId: typeof extra.application_id === "string" ? extra.application_id : undefined,
     endUserId: typeof extra.end_user_id === "string" ? extra.end_user_id : undefined,
+    cliFamilyId: typeof extra.cli_family_id === "string" ? extra.cli_family_id : undefined,
   };
 }
 
