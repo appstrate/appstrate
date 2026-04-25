@@ -2,6 +2,7 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
+import { mountMcp } from "./mcp.ts";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
@@ -566,6 +567,11 @@ export function createApp(deps: AppDeps): Hono {
 
     return new Response(body, { status: targetRes.status, headers: responseHeaders });
   });
+
+  // MCP exposure (Phase 1 of #276). Mounts last so the tool handlers'
+  // in-process app.request() calls hit the routes registered above.
+  // `appstrate_*_call` aliases stay intact — this is purely additive.
+  mountMcp(app);
 
   return app;
 }

@@ -156,6 +156,7 @@ describe("fromAfpsTool — Phase 1 bridge for AFPS-shaped tools", () => {
       expect(content).toHaveLength(1);
       expect(content[0]).toMatchObject({
         type: "resource_link",
+        name: "report.pdf", // basename of the URI path, decoded
         uri: "workspace:///out/report.pdf",
         mimeType: "application/pdf",
       });

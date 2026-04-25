@@ -151,4 +151,48 @@ describe("createMcpServer — registration validation", () => {
       await pair.close();
     }
   });
+
+  it("rejects tool names with whitespace or control characters", () => {
+    // The MCP spec leaves the regex unstated, but every reference client
+    // we've audited rejects whitespace; permitting it produces names that
+    // round-trip badly through generated SDK symbols.
+    expect(() =>
+      createMcpServer([
+        {
+          descriptor: { name: "has space", inputSchema: { type: "object" } },
+          handler: async () => ({ content: [] }),
+        },
+      ]),
+    ).toThrow(/tool name must match/);
+  });
+
+  it("rejects empty tool names", () => {
+    expect(() =>
+      createMcpServer([
+        {
+          descriptor: { name: "", inputSchema: { type: "object" } },
+          handler: async () => ({ content: [] }),
+        },
+      ]),
+    ).toThrow(/tool name must match/);
+  });
+
+  it("rejects descriptors whose inputSchema root type is not 'object'", () => {
+    // The MCP spec (2025-06-18+) requires `inputSchema` to be a JSON
+    // Schema object whose root type is `"object"`. Catch this at
+    // registration so misuse cannot drift into a `tools/call` failure.
+    expect(() =>
+      createMcpServer([
+        {
+          descriptor: {
+            name: "bad",
+            // Cast: TS would otherwise refuse the malformed shape. We
+            // exercise the runtime guard, not the compile-time one.
+            inputSchema: { type: "string" } as never,
+          },
+          handler: async () => ({ content: [] }),
+        },
+      ]),
+    ).toThrow(/inputSchema with \{ type: "object" \}/);
+  });
 });

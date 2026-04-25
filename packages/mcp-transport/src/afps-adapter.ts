@@ -154,10 +154,12 @@ function afpsResultToMcp(result: ToolResult): CallToolResult {
     if (block.type === "resource") {
       return {
         type: "resource_link" as const,
-        // ResourceLink requires a `name`; AFPS does not carry one, so
-        // derive a stable label from the URI's tail. Callers that need
-        // a richer name can post-process the descriptor.
-        name: block.uri,
+        // ResourceLink requires a `name`. AFPS resources carry no
+        // human-readable label, so derive a sensible default from the
+        // URI's basename (e.g. `workspace:///out/report.pdf` → `report.pdf`).
+        // Callers needing richer labels can wrap fromAfpsTool in their
+        // own conversion layer.
+        name: deriveResourceName(block.uri),
         uri: block.uri,
         ...(block.mimeType !== undefined ? { mimeType: block.mimeType } : {}),
       };
@@ -168,4 +170,28 @@ function afpsResultToMcp(result: ToolResult): CallToolResult {
     content,
     ...(result.isError !== undefined ? { isError: result.isError } : {}),
   };
+}
+
+/**
+ * Extract a display-name for a `resource_link` from its URI.
+ *
+ * Falls back to the full URI when a basename cannot be cleanly extracted
+ * — empty paths, opaque schemes (e.g. `urn:foo:bar`), or query-only URIs.
+ * Never throws; never returns an empty string.
+ */
+function deriveResourceName(uri: string): string {
+  try {
+    const parsed = new URL(uri);
+    // Strip query/fragment, then the trailing slash so a path like
+    // `s3://bucket/key/` resolves to `key` rather than the empty string.
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (path) {
+      const basename = path.slice(path.lastIndexOf("/") + 1);
+      if (basename) return decodeURIComponent(basename);
+    }
+    if (parsed.hostname) return parsed.hostname;
+  } catch {
+    // Opaque URI (no scheme separator, or malformed). Fall through.
+  }
+  return uri;
 }

@@ -82,6 +82,31 @@ const DEFAULT_SERVER_INFO: Implementation = {
   version: "0.0.0",
 };
 
+// MCP `Tool.name` must be a non-empty string. The spec doesn't pin a
+// regex, but every reference implementation we've audited rejects names
+// containing whitespace or control characters, and they would round-trip
+// poorly through any client that surfaces the name in a generated symbol.
+const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
+
+function validateDescriptor(descriptor: Tool): void {
+  if (typeof descriptor.name !== "string" || !TOOL_NAME_PATTERN.test(descriptor.name)) {
+    throw new Error(
+      `createMcpServer: tool name must match ${TOOL_NAME_PATTERN} (got '${String(descriptor.name)}')`,
+    );
+  }
+  // MCP spec (2025-06-18+) requires `inputSchema` to be a JSON-Schema
+  // object whose root type is `"object"`. The SDK does not enforce this
+  // at registration time — a malformed schema would only surface during
+  // a `tools/call` arg validation failure or, worse, succeed silently if
+  // the LLM happens to send a matching shape. Catch it eagerly.
+  const schema = descriptor.inputSchema as Record<string, unknown> | undefined;
+  if (!schema || typeof schema !== "object" || schema.type !== "object") {
+    throw new Error(
+      `createMcpServer: tool '${descriptor.name}' must declare inputSchema with { type: "object" }`,
+    );
+  }
+}
+
 /**
  * Build an MCP `Server` that exposes the supplied tool definitions via
  * `tools/list` and `tools/call`. The server is *not* yet connected to a
@@ -97,6 +122,7 @@ export function createMcpServer(
 ): Server {
   const registry = new Map<string, AppstrateToolDefinition>();
   for (const tool of tools) {
+    validateDescriptor(tool.descriptor);
     if (registry.has(tool.descriptor.name)) {
       throw new Error(`createMcpServer: duplicate tool registration for '${tool.descriptor.name}'`);
     }
