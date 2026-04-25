@@ -87,7 +87,7 @@ export async function buildRunContext(params: {
   const [
     tokens,
     configFull,
-    previousState,
+    previousCheckpoint,
     providerDefs,
     agentPackageResult,
     latestVersion,
@@ -166,7 +166,7 @@ export async function buildRunContext(params: {
       content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
       createdAt: toEpochMs(m.createdAt),
     })),
-    ...(previousState !== null ? { state: previousState } : {}),
+    ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
     config,
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };

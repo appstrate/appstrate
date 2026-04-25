@@ -210,7 +210,7 @@ describe("buildPlatformPromptInputs", () => {
 
   it("overrides never leak context — caller-supplied context always wins", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const myCtx = ctx({ state: { a: 1 } });
+    const myCtx = ctx({ checkpoint: { a: 1 } });
     const inputs = buildPlatformPromptInputs(bundleOf(root), myCtx);
     expect(inputs.context).toBe(myCtx);
   });

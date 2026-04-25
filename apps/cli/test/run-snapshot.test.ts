@@ -40,14 +40,14 @@ describe("loadSnapshotFile", () => {
     const path = writeSnapshot("ok.json", {
       memories: [{ content: "hello", createdAt: 1 }],
       history: [{ runId: "prev-1", timestamp: 1713369600, output: { summary: "hi" } }],
-      state: "2026-04-23",
+      checkpoint: "2026-04-23",
     });
     const snap = await loadSnapshotFile(path);
     expect(snap.memories).toEqual([{ content: "hello", createdAt: 1 }]);
     expect(snap.history).toEqual([
       { runId: "prev-1", timestamp: 1713369600, output: { summary: "hi" } },
     ]);
-    expect(snap.state).toBe("2026-04-23");
+    expect(snap.checkpoint).toBe("2026-04-23");
   });
 
   it("drops unknown keys instead of passing them through", async () => {
@@ -96,16 +96,16 @@ describe("loadSnapshotFile", () => {
     });
   });
 
-  it("treats an explicit undefined state as absent", async () => {
-    const path = writeSnapshot("undef-state.json", { memories: [] });
+  it("treats an explicit undefined checkpoint as absent", async () => {
+    const path = writeSnapshot("undef-checkpoint.json", { memories: [] });
     const snap = await loadSnapshotFile(path);
-    expect("state" in snap).toBe(false);
+    expect("checkpoint" in snap).toBe(false);
   });
 
-  it("preserves a null state (user opted in)", async () => {
-    const path = writeSnapshot("null-state.json", { state: null });
+  it("preserves a null checkpoint (user opted in)", async () => {
+    const path = writeSnapshot("null-checkpoint.json", { checkpoint: null });
     const snap = await loadSnapshotFile(path);
-    expect(snap.state).toBeNull();
+    expect(snap.checkpoint).toBeNull();
   });
 });
 
@@ -139,18 +139,18 @@ describe("mergeSnapshotIntoContext", () => {
     expect(out.history).toEqual([entry]);
   });
 
-  it("seeds state and preserves unrelated context fields", () => {
-    const out = mergeSnapshotIntoContext(baseContext, { state: "2026-04-13" });
-    expect(out.state).toBe("2026-04-13");
+  it("seeds checkpoint and preserves unrelated context fields", () => {
+    const out = mergeSnapshotIntoContext(baseContext, { checkpoint: "2026-04-13" });
+    expect(out.checkpoint).toBe("2026-04-13");
     expect(out.runId).toBe(baseContext.runId);
     expect(out.input).toEqual(baseContext.input);
     expect(out.config).toEqual(baseContext.config);
   });
 
   it("lets a present snapshot key override an existing context value", () => {
-    const ctxWithState = { ...baseContext, state: "before" } as ExecutionContext;
-    const out = mergeSnapshotIntoContext(ctxWithState, { state: "after" });
-    expect(out.state).toBe("after");
+    const ctxWithCheckpoint = { ...baseContext, checkpoint: "before" } as ExecutionContext;
+    const out = mergeSnapshotIntoContext(ctxWithCheckpoint, { checkpoint: "after" });
+    expect(out.checkpoint).toBe("after");
   });
 
   it("leaves existing context values untouched when the snapshot omits them", () => {
@@ -158,13 +158,13 @@ describe("mergeSnapshotIntoContext", () => {
       ...baseContext,
       memories: [{ content: "keep", createdAt: 1 }],
       history: [{ runId: "prev-keep", timestamp: 1, output: { summary: "keep" } }],
-      state: "keep",
+      checkpoint: "keep",
     };
     const out = mergeSnapshotIntoContext(ctxWithAll, {});
     expect(out.memories).toEqual([{ content: "keep", createdAt: 1 }]);
     expect(out.history).toEqual([
       { runId: "prev-keep", timestamp: 1, output: { summary: "keep" } },
     ]);
-    expect(out.state).toBe("keep");
+    expect(out.checkpoint).toBe("keep");
   });
 });

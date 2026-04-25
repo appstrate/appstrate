@@ -5,7 +5,7 @@
  * Execution Context — the runtime state passed to an AFPS runner at boot.
  *
  * Contains everything that varies between runs (input, prior memories,
- * previous state, sink wiring, credential source). MUST NOT contain
+ * previous checkpoint, sink wiring, credential source). MUST NOT contain
  * authentication material: the HMAC secret used to sign events, API
  * keys, and OAuth tokens all travel through separate channels (env
  * variables, secret files) so that exporting a `context.json` for debug
@@ -83,7 +83,7 @@ export const executionContextSchema = z.object({
   // Optional — absence means the corresponding feature is naturally inactive.
   // See AFPS_EXTENSION_ARCHITECTURE.md §3.2 "pure template / impure context".
   memories: z.array(memorySnapshotSchema).optional(),
-  state: z.unknown().optional(),
+  checkpoint: z.unknown().optional(),
   history: z.array(historyEntrySchema).optional(),
 
   /**

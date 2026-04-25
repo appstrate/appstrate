@@ -5,7 +5,7 @@
  *
  * A snapshot is a small JSON document that seeds the run's
  * {@link ExecutionContext} with prior memories / conversation history
- * / persisted state — the same shape a real platform run would inherit
+ * / persisted checkpoint — the same shape a real platform run would inherit
  * from previous runs. Only the three seedable keys are honoured; extra
  * keys are ignored so the format can evolve without breaking callers.
  *
@@ -20,7 +20,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 export interface SnapshotFile {
   memories?: ExecutionContext["memories"];
   history?: ExecutionContext["history"];
-  state?: unknown;
+  checkpoint?: unknown;
 }
 
 export class SnapshotError extends Error {
@@ -78,7 +78,7 @@ export function mergeSnapshotIntoContext(
     ...context,
     ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
     ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
-    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+    ...(snapshot.checkpoint !== undefined ? { checkpoint: snapshot.checkpoint } : {}),
   };
 }
 
@@ -98,8 +98,8 @@ function pickSeedableKeys(obj: Record<string, unknown>): SnapshotFile {
     }
     if (h !== undefined) out.history = h as ExecutionContext["history"];
   }
-  if ("state" in obj && obj.state !== undefined) {
-    out.state = obj.state;
+  if ("checkpoint" in obj && obj.checkpoint !== undefined) {
+    out.checkpoint = obj.checkpoint;
   }
   return out;
 }

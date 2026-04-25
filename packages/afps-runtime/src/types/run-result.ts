@@ -28,7 +28,8 @@ export interface RunResult {
   checkpoint: unknown | null;
   /**
    * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no
-   * checkpoint event was emitted — consumers default to `"actor"`.
+   * checkpoint event was emitted or when the emitter omitted the field —
+   * consumers default to `"actor"`.
    */
   checkpointScope?: "actor" | "shared";
   output: unknown | null;
@@ -83,7 +84,7 @@ export interface Memory {
   content: string;
   /**
    * AFPS 1.4+ scope dimension for the unified persistence store.
-   * Absent on pre-1.4 events — consumers default to `"actor"`.
+   * 1.4 emitters MAY omit the field — consumers default to `"actor"`.
    */
   scope?: "actor" | "shared";
 }

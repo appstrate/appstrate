@@ -10,6 +10,7 @@ import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentRuns } from "../services/state/index.ts";
+import { RUN_HISTORY_FIELDS, type RunHistoryField } from "@appstrate/afps-runtime/resolvers";
 import { getPackage } from "../services/agent-service.ts";
 import {
   resolveCredentialsForProxy,
@@ -146,20 +147,17 @@ export function createInternalRouter() {
 
     // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
     // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
-    const VALID_WIRE_FIELDS = ["checkpoint", "result"] as const;
-    type WireField = (typeof VALID_WIRE_FIELDS)[number];
-
+    // Vocabulary lives in the runtime so the agent-facing tool schema and
+    // the platform's accept-list stay byte-identical.
     const wireFields = fieldsParam
       ?.split(",")
       .map((f) => f.trim())
-      .filter((f): f is WireField =>
-        VALID_WIRE_FIELDS.includes(f as (typeof VALID_WIRE_FIELDS)[number]),
-      );
-    const seen = new Set<"checkpoint" | "result">();
+      .filter((f): f is RunHistoryField => RUN_HISTORY_FIELDS.includes(f as RunHistoryField));
+    const seen = new Set<RunHistoryField>();
     for (const f of wireFields ?? []) {
       seen.add(f);
     }
-    const fields: ("checkpoint" | "result")[] = seen.size > 0 ? [...seen] : ["checkpoint"];
+    const fields: RunHistoryField[] = seen.size > 0 ? [...seen] : ["checkpoint"];
 
     try {
       // Actor isolation is mandatory: `getRecentRuns` filters runs by

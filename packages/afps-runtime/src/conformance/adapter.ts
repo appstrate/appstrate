@@ -23,14 +23,14 @@ import type { RunResult } from "../types/run-result.ts";
 
 /**
  * Pre-captured snapshot merged onto the {@link ExecutionContext} before
- * rendering. Mirrors the optional `memories` / `history` / `state`
+ * rendering. Mirrors the optional `memories` / `history` / `checkpoint`
  * fields of {@link ExecutionContext} so the suite can inject pull-side
  * data without exposing a provider interface.
  */
 export interface RenderSnapshot {
   memories?: MemorySnapshot[];
   history?: HistoryEntry[];
-  state?: unknown;
+  checkpoint?: unknown;
 }
 
 export interface ConformanceAdapter {

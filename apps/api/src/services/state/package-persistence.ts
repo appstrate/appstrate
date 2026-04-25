@@ -35,8 +35,6 @@ export type PersistenceScope =
   | { type: "end_user"; id: string }
   | { type: "shared" };
 
-export type PersistenceKind = "checkpoint" | "memory";
-
 export interface Memory {
   id: number;
   content: unknown;
@@ -47,20 +45,6 @@ export interface Memory {
 }
 
 // --- Actor ↔ storage translation --------------------------------------------
-
-/**
- * Resolve the default scope for a run context. End-user impersonation wins
- * over the dashboard user (mirrors `getActor()` in `lib/actor.ts`). When
- * neither is set (scheduler / system runs), we fall through to `shared`.
- */
-export function scopeFromRunContext(ctx: {
-  userId?: string | null;
-  endUserId?: string | null;
-}): PersistenceScope {
-  if (ctx.endUserId) return { type: "end_user", id: ctx.endUserId };
-  if (ctx.userId) return { type: "member", id: ctx.userId };
-  return { type: "shared" };
-}
 
 /** Produce the storage-shape `{actor_type, actor_id}` from a scope. */
 function storageActor(scope: PersistenceScope): {

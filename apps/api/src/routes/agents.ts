@@ -46,6 +46,28 @@ export const setProviderProfileSchema = z.object({
 });
 export const removeProviderProfileSchema = z.object({ providerId: z.string().min(1) });
 
+/**
+ * Parse the `actorType` / `actorId` query-param pair shared by the
+ * persistence GET / DELETE routes into a {@link PersistenceScope}.
+ * Returns `null` when the caller did not supply `actorType` (i.e. no
+ * scope override) and throws `invalidRequest` when the combination is
+ * malformed.
+ */
+function scopeFromQueryParams(
+  actorTypeParam: string | undefined,
+  actorIdParam: string | undefined,
+): PersistenceScope | null {
+  if (!actorTypeParam) return null;
+  if (actorTypeParam === "shared") return { type: "shared" };
+  if (actorTypeParam === "user" && actorIdParam) {
+    return { type: "member", id: actorIdParam };
+  }
+  if (actorTypeParam === "end_user" && actorIdParam) {
+    return { type: "end_user", id: actorIdParam };
+  }
+  throw invalidRequest("Invalid actorType / actorId combination");
+}
+
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -261,18 +283,7 @@ export function createAgentsRouter() {
       // for members. Guard:
       const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
 
-      let scopeOverride: PersistenceScope | null = null;
-      if (isAdmin && actorTypeParam) {
-        if (actorTypeParam === "shared") {
-          scopeOverride = { type: "shared" };
-        } else if (actorTypeParam === "user" && actorIdParam) {
-          scopeOverride = { type: "member", id: actorIdParam };
-        } else if (actorTypeParam === "end_user" && actorIdParam) {
-          scopeOverride = { type: "end_user", id: actorIdParam };
-        } else {
-          throw invalidRequest("Invalid actorType / actorId combination");
-        }
-      }
+      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
       const scope = scopeOverride ?? callerScope;
 
       const wantsCheckpoint = !kindParam || kindParam === "checkpoint";
@@ -336,16 +347,7 @@ export function createAgentsRouter() {
       const actorTypeParam = c.req.query("actorType");
       const actorIdParam = c.req.query("actorId");
 
-      let scope: PersistenceScope | undefined;
-      if (actorTypeParam === "shared") {
-        scope = { type: "shared" };
-      } else if (actorTypeParam === "user" && actorIdParam) {
-        scope = { type: "member", id: actorIdParam };
-      } else if (actorTypeParam === "end_user" && actorIdParam) {
-        scope = { type: "end_user", id: actorIdParam };
-      } else if (actorTypeParam) {
-        throw invalidRequest("Invalid actorType / actorId combination");
-      }
+      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

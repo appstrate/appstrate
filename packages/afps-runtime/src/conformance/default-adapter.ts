@@ -82,7 +82,7 @@ function mergeSnapshot(context: ExecutionContext, snapshot: RenderSnapshot): Exe
     ...context,
     ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
     ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
-    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+    ...(snapshot.checkpoint !== undefined ? { checkpoint: snapshot.checkpoint } : {}),
   };
 }
 

@@ -41,8 +41,9 @@ import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertCheckpoint,
-  scopeFromRunContext,
+  scopeFromActor,
 } from "./state/package-persistence.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { getPackage } from "./agent-service.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -385,10 +386,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     .from(runs)
     .where(eq(runs.id, run.id))
     .limit(1);
-  const persistenceScope = scopeFromRunContext({
-    userId: actorRow?.dashboardUserId,
-    endUserId: actorRow?.endUserId,
-  });
+  const persistenceScope = scopeFromActor(
+    actorFromIds(actorRow?.dashboardUserId ?? null, actorRow?.endUserId ?? null),
+  );
 
   if (result.memories?.length) {
     // Split memories by declared scope and write each non-empty bucket

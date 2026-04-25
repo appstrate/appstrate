@@ -159,10 +159,10 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./documents/report.pdf`");
   });
 
-  it("renders the Checkpoint section when context.state is set", () => {
+  it("renders the Checkpoint section when context.checkpoint is set", () => {
     const out = renderPlatformPrompt({
       template: "T",
-      context: ctx({ state: { cursor: "abc", count: 12 } }),
+      context: ctx({ checkpoint: { cursor: "abc", count: 12 } }),
     });
     expect(out).toContain("## Checkpoint");
     expect(out).not.toContain("## Previous State");

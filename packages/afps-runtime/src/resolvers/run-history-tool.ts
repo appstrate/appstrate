@@ -69,10 +69,12 @@ export type RunHistoryCallFn = (req: RunHistoryRequest) => Promise<RunHistoryRes
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 const DEFAULT_FIELDS: readonly RunHistoryField[] = ["checkpoint"];
-const VALID_FIELDS: readonly RunHistoryField[] = ["checkpoint", "result"];
-
-/** Wire-level field vocabulary the platform's `/internal/run-history` endpoint accepts. */
-const WIRE_FIELDS: readonly string[] = ["checkpoint", "result"];
+/**
+ * Wire-level field vocabulary the platform's `/internal/run-history` endpoint
+ * accepts. Single source of truth — drives both the JSON schema exposed to the
+ * LLM and the runtime-side {@link normalizeRequest} projection.
+ */
+export const RUN_HISTORY_FIELDS: readonly RunHistoryField[] = ["checkpoint", "result"];
 
 export interface MakeRunHistoryToolOptions {
   /** Emit `run_history.called` events via `ctx.emit`. Default: true. */
@@ -102,9 +104,9 @@ export function makeRunHistoryTool(
       },
       fields: {
         type: "array",
-        items: { type: "string", enum: [...VALID_FIELDS] },
+        items: { type: "string", enum: [...RUN_HISTORY_FIELDS] },
         minItems: 1,
-        maxItems: VALID_FIELDS.length,
+        maxItems: RUN_HISTORY_FIELDS.length,
         uniqueItems: true,
         description: `Data fields to include per run. Default: ["checkpoint"].`,
       },
@@ -162,11 +164,11 @@ function normalizeRequest(args: unknown): RunHistoryRequest {
     typeof raw.limit === "number" && Number.isFinite(raw.limit) && raw.limit >= 1
       ? Math.min(Math.floor(raw.limit), MAX_LIMIT)
       : DEFAULT_LIMIT;
-  // Anything outside `WIRE_FIELDS` is dropped silently.
+  // Anything outside `RUN_HISTORY_FIELDS` is dropped silently.
   const collected = new Set<RunHistoryField>();
   if (Array.isArray(raw.fields)) {
     for (const v of raw.fields) {
-      if (typeof v !== "string" || !WIRE_FIELDS.includes(v)) continue;
+      if (typeof v !== "string" || !RUN_HISTORY_FIELDS.includes(v as RunHistoryField)) continue;
       collected.add(v as RunHistoryField);
     }
   }

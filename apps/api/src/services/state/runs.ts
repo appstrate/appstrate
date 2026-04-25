@@ -30,6 +30,8 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
+import type { RunHistoryField } from "@appstrate/afps-runtime/resolvers";
+
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
 
@@ -266,7 +268,7 @@ export async function updateRun(
   }
 }
 
-export async function getLastRunState(
+export async function getLastCheckpoint(
   scope: AppScope,
   packageId: string,
   actor: Actor | null,
@@ -292,7 +294,7 @@ export async function getLastRunState(
   return asRecordOrNull(row?.checkpoint);
 }
 
-export type RecentRunsField = "checkpoint" | "result";
+export type RecentRunsField = RunHistoryField;
 
 export async function getRecentRuns(
   scope: AppScope,

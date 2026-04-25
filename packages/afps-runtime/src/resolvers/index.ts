@@ -75,6 +75,7 @@ export {
 export {
   makeRunHistoryTool,
   createSidecarRunHistoryCall,
+  RUN_HISTORY_FIELDS,
   type RunHistoryRequest,
   type RunHistoryResponse,
   type RunHistoryEntry,

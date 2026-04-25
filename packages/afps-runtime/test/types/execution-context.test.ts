@@ -18,7 +18,7 @@ describe("executionContextSchema", () => {
       runId: "run_abc123",
       input: { topic: "climate" },
       memories: [{ content: "user speaks French", createdAt: 1714000000000 }],
-      state: { cursor: "xyz" },
+      checkpoint: { cursor: "xyz" },
       history: [
         {
           runId: "run_previous",

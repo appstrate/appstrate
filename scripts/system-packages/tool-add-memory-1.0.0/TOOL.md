@@ -8,4 +8,4 @@ Good candidates for memories:
 - User preferences observed (e.g. "User prefers CSV format over JSON")
 - Edge cases encountered and how they were resolved
 
-Each memory is limited to 2000 characters. Use `set_state` for structured data needed for the next run — use memory for insights worth remembering long-term.
+Each memory is limited to 2000 characters. Use `set_checkpoint` for structured data needed for the next run — use memory for insights worth remembering long-term.

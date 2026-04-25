@@ -97,11 +97,11 @@ bun apps/cli/src/cli.ts run $E/agent.afps \
 ## What this demonstrates
 
 - **Mustache sections** — `{{#memories}}…{{/memories}}` expands the two
-  memories from `snapshot.json`; `{{^state}}…{{/state}}` would trigger
-  if `state` were absent (it isn't, so the `{{#state}}…{{/state}}`
+  memories from `snapshot.json`; `{{^checkpoint}}…{{/checkpoint}}` would trigger
+  if `checkpoint` were absent (it isn't, so the `{{#checkpoint}}…{{/checkpoint}}`
   branch fires instead).
 - **Event reducer** — run produces `memories=1` (one `add_memory`
-  event), `state=set` (last-write-wins), `output=set` (merge-patch of
+  event), `checkpoint=set` (last-write-wins), `output=set` (merge-patch of
   two partial outputs), `report=set` (final summary), `logs=2`.
 - **Signature round-trip** — `verify` checks the `signature.sig`
   against the `trust-root.json` pinned to the Ed25519 public key in

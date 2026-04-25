@@ -19,12 +19,12 @@ _No prior context — this is the first run._
 
 ## Continuity
 
-{{#state}}
-Last briefing ran with state: `{{state}}` — focus on what has changed since.
-{{/state}}
-{{^state}}
-No prior state. Treat this as a cold start.
-{{/state}}
+{{#checkpoint}}
+Last briefing ran with checkpoint: `{{checkpoint}}` — focus on what has changed since.
+{{/checkpoint}}
+{{^checkpoint}}
+No prior checkpoint. Treat this as a cold start.
+{{/checkpoint}}
 
 ## Deliverable
 

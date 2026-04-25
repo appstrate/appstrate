@@ -105,7 +105,7 @@ function makeContext(): ExecutionContext {
     input: { query: "what is the answer" },
     config: { verbose: true },
     memories: [{ content: "Last run found something useful.", createdAt: 0 }],
-    state: { turn: 3 },
+    checkpoint: { turn: 3 },
   };
 }
 

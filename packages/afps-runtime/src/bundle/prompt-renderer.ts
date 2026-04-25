@@ -60,8 +60,8 @@ export interface PromptView {
   config?: Record<string, unknown>;
   /** Prior memories, most recent first. Empty array when none. */
   memories: ReadonlyArray<{ content: string; createdAt: number }>;
-  /** Snapshot of the agent's previous state. `null` if none. */
-  state: unknown;
+  /** Snapshot of the agent's previous checkpoint. `null` if none. */
+  checkpoint: unknown;
   /** Recent run summaries, most recent first. Empty array when none. */
   history: ReadonlyArray<{ runId: string; timestamp: number; output: unknown }>;
   /**
@@ -96,9 +96,9 @@ export interface RenderPromptOptions {
   template: string;
   /**
    * Execution context — carries `runId`, `input`, and the optional
-   * pre-captured `memories` / `state` / `history` fields. When these
+   * pre-captured `memories` / `checkpoint` / `history` fields. When these
    * fields are absent the view defaults to empty for memories/history
-   * and `null` for state.
+   * and `null` for checkpoint.
    */
   context: ExecutionContext;
   /** Cap memory count injected into the prompt. Default: 50. */
@@ -146,7 +146,7 @@ export async function buildPromptView(
     input: context.input,
     ...(context.config !== undefined ? { config: context.config } : {}),
     memories: sliceMemories(context.memories, memoryLimit),
-    state: context.state ?? null,
+    checkpoint: context.checkpoint ?? null,
     history: sliceHistory(context.history, historyLimit),
     ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
     ...(opts.uploads !== undefined ? { uploads: opts.uploads } : {}),

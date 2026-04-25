@@ -79,7 +79,7 @@ interface PromptContext {
   runId?: string;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
-  previousState: Record<string, unknown> | null;
+  previousCheckpoint: Record<string, unknown> | null;
   runApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
@@ -106,7 +106,7 @@ function splitLegacy(ctx: PromptContext): {
       content: m.content,
       createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
     })),
-    ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
+    ...(ctx.previousCheckpoint !== null ? { checkpoint: ctx.previousCheckpoint } : {}),
     config: ctx.config,
   };
   const bundle = makeTestBundle({
@@ -146,7 +146,7 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
     rawPrompt: "Do the task.",
     tokens: {},
     config: {},
-    previousState: null,
+    previousCheckpoint: null,
     input: {},
     schemas: {},
     providers: [],
@@ -362,7 +362,7 @@ describe("buildEnrichedPrompt — configuration", () => {
 describe("buildEnrichedPrompt — checkpoint", () => {
   it("includes checkpoint when set-checkpoint tool is available", () => {
     const ctx = contextWithSystemTools({
-      previousState: { cursor: "abc123", processedCount: 42 },
+      previousCheckpoint: { cursor: "abc123", processedCount: 42 },
     });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Checkpoint");
@@ -372,14 +372,14 @@ describe("buildEnrichedPrompt — checkpoint", () => {
   });
 
   it("omits checkpoint when null", () => {
-    const ctx = contextWithSystemTools({ previousState: null });
+    const ctx = contextWithSystemTools({ previousCheckpoint: null });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Checkpoint");
   });
 
   it("includes checkpoint regardless of available tools", () => {
     const ctx = baseContext({
-      previousState: { cursor: "abc123" },
+      previousCheckpoint: { cursor: "abc123" },
       availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);

@@ -46,7 +46,7 @@ interface BaseEnvelope {
  * - `"actor"` (default): memory belongs to the run's actor (member or end_user).
  * - `"shared"`: memory is app-wide, visible to every actor.
  *
- * Pre-1.4 emitters omit the field entirely; consumers MUST treat absent
+ * 1.4 emitters MAY omit the field entirely; consumers MUST treat absent
  * `scope` as `"actor"` so the fail-safe is per-actor isolation rather
  * than cross-actor leakage.
  */

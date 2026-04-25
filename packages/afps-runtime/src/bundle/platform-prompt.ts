@@ -75,7 +75,7 @@ export interface PlatformPromptSchema {
 export interface PlatformPromptOptions {
   /** Raw prompt template from the bundle's root package (`prompt.md`). */
   template: string;
-  /** Run context — flows into the 1.1+ template render + state/memory sections. */
+  /** Run context — flows into the 1.1+ template render + checkpoint/memory sections. */
   context: ExecutionContext;
   /** Manifest schemaVersion — gates Mustache render path selection. */
   schemaVersion?: string;
@@ -296,14 +296,14 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   }
 
   // --- Checkpoint ---
-  if (context.state !== undefined && context.state !== null) {
+  if (context.checkpoint !== undefined && context.checkpoint !== null) {
     sections.push("## Checkpoint\n");
     sections.push(
       "This agent supports stateful operation across runs. " +
         "Your most recent run left the following checkpoint:\n",
     );
     sections.push("```json");
-    sections.push(JSON.stringify(context.state, null, 2));
+    sections.push(JSON.stringify(context.checkpoint, null, 2));
     sections.push("```\n");
     sections.push(
       "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
@@ -384,7 +384,7 @@ function buildTemplateView(context: ExecutionContext): PromptView {
     runId: context.runId,
     input: (context.input as Record<string, unknown>) ?? {},
     config: context.config ?? {},
-    state: context.state ?? null,
+    checkpoint: context.checkpoint ?? null,
     memories: context.memories ?? [],
     history: context.history ?? [],
   };

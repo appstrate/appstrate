@@ -23,7 +23,7 @@ describe("buildPromptView", () => {
     const view = await buildPromptView({
       context: ctx({
         memories: MEMORIES,
-        state: { counter: 7 },
+        checkpoint: { counter: 7 },
         history: [{ runId: "prev", timestamp: 100, output: "x" }],
       }),
     });
@@ -31,21 +31,21 @@ describe("buildPromptView", () => {
     expect(view.runId).toBe("run_test");
     expect(view.input).toEqual({ topic: "test" });
     expect(view.memories).toEqual(MEMORIES);
-    expect(view.state).toEqual({ counter: 7 });
+    expect(view.checkpoint).toEqual({ counter: 7 });
     expect(view.history).toHaveLength(1);
   });
 
-  it("defaults memories/history to empty and state to null when absent", async () => {
+  it("defaults memories/history to empty and checkpoint to null when absent", async () => {
     const view = await buildPromptView({ context: ctx() });
 
     expect(view.memories).toEqual([]);
     expect(view.history).toEqual([]);
-    expect(view.state).toBeNull();
+    expect(view.checkpoint).toBeNull();
   });
 
-  it("treats state: null in context as explicit null", async () => {
-    const view = await buildPromptView({ context: ctx({ state: null }) });
-    expect(view.state).toBeNull();
+  it("treats checkpoint: null in context as explicit null", async () => {
+    const view = await buildPromptView({ context: ctx({ checkpoint: null }) });
+    expect(view.checkpoint).toBeNull();
   });
 
   it("respects memoryLimit", async () => {
