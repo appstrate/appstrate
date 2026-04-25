@@ -16,8 +16,8 @@ import {
 // --- Constants ---
 
 describe("constants", () => {
-  it("MAX_RESPONSE_SIZE is 50_000", () => {
-    expect(MAX_RESPONSE_SIZE).toBe(50_000);
+  it("MAX_RESPONSE_SIZE is 256 KB", () => {
+    expect(MAX_RESPONSE_SIZE).toBe(256 * 1024);
   });
 
   it("ABSOLUTE_MAX_RESPONSE_SIZE is 1_000_000", () => {

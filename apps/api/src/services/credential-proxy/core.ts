@@ -23,6 +23,7 @@
 import type { Db } from "@appstrate/db/client";
 import {
   resolveCredentialsForProxy,
+  forceRefreshCredentials,
   getProviderCredentialId,
   substituteVars,
   findUnresolvedPlaceholders,
@@ -77,9 +78,14 @@ export interface ProxyCallInput {
   headers?: Record<string, string>;
   /**
    * Optional request body. String bodies have `{{field}}` placeholders
-   * substituted when `substituteBody` is true.
+   * substituted when `substituteBody` is true. A `ReadableStream` is
+   * forwarded verbatim (streaming upload path — no substitution possible,
+   * no 401-retry). When a `ReadableStream` body is provided and the
+   * upstream returns 401, the result carries `authRefreshed: true` (creds
+   * were refreshed server-side) but the response is passed through as-is —
+   * the caller must replay the next request with a fresh body.
    */
-  body?: string | Uint8Array | null;
+  body?: string | Uint8Array | ReadableStream<Uint8Array> | null;
   substituteBody?: boolean;
 
   /**
@@ -117,6 +123,13 @@ export interface ProxyCallResult {
   body: ReadableStream<Uint8Array> | null;
   /** True when the proxy had to truncate the response body. */
   truncated?: boolean;
+  /**
+   * True when the upstream returned 401 on a streaming-upload call and
+   * credentials were refreshed server-side. The body cannot be replayed
+   * so the caller must surface this flag to the client and let it retry
+   * with a fresh body stream.
+   */
+  authRefreshed?: boolean;
 }
 
 export class ProxyAuthorizationError extends Error {
@@ -232,9 +245,13 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
-  let body: string | Uint8Array | undefined;
+  // ReadableStream bodies bypass substitution — they are forwarded as-is.
+  let body: string | Uint8Array | ReadableStream<Uint8Array> | undefined;
+  const isStreamBody = input.body instanceof ReadableStream;
   if (input.body !== undefined && input.body !== null) {
-    if (typeof input.body === "string" && input.substituteBody) {
+    if (isStreamBody) {
+      body = input.body as ReadableStream<Uint8Array>;
+    } else if (typeof input.body === "string" && input.substituteBody) {
       const substituted = substituteVars(input.body, fields);
       const unresolved = findUnresolvedPlaceholders(substituted);
       if (unresolved.length > 0) {
@@ -244,7 +261,7 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
       }
       body = substituted;
     } else {
-      body = input.body;
+      body = input.body as string | Uint8Array;
     }
   }
 
@@ -259,18 +276,48 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     }
   }
 
-  const res = await fetchImpl(target, {
+  const fetchInit: RequestInit & { duplex?: string } = {
     method: input.method,
     headers,
     body,
     signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-  });
+  };
+  // fetch spec: streaming body requires `duplex: "half"`.
+  if (isStreamBody) {
+    fetchInit.duplex = "half";
+  }
+  const res = await fetchImpl(target, fetchInit as RequestInit);
 
   if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();
     if (setCookies && setCookies.length > 0) {
       await jar.set(jarSessionId, sessionKey, setCookies, jarTtl);
     }
+  }
+
+  // Streaming body on 401: credentials may be stale. Force-refresh them
+  // server-side (so the *next* call from the caller uses fresh tokens)
+  // but we cannot replay the body — surface authRefreshed so the route
+  // can signal the client to retry itself with a fresh body stream.
+  if (res.status === 401 && isStreamBody) {
+    try {
+      await forceRefreshCredentials(
+        db,
+        input.profileId,
+        input.providerId,
+        input.orgId,
+        credentialId,
+      );
+    } catch {
+      // Refresh itself failed (invalid_grant, revoked token, etc.) —
+      // surface the 401 as-is; the caller will handle re-authentication.
+    }
+    return {
+      status: res.status,
+      headers: res.headers,
+      body: res.body,
+      authRefreshed: true,
+    };
   }
 
   const cap = input.maxResponseBytes ?? 0;

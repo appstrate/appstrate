@@ -32,6 +32,14 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+
+// Streaming cap — mirrored from runtime-pi/sidecar constants.
+// The streaming/buffered decision is header-driven (X-Stream-Request),
+// not threshold-driven, so only the hard cap is needed here.
+const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+
+/** Wall-clock timeout for piping an upstream streaming response to the client. */
+export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles } from "@appstrate/db/schema";
@@ -274,28 +282,83 @@ export function createCredentialProxyRouter() {
         );
       }
 
+      // Streaming control headers from the runtime.
+      const streamRequest = c.req.header("x-stream-request") === "1";
+      const streamResponse = c.req.header("x-stream-response") === "1";
+      const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
+
+      // Guard: declared Content-Length already exceeds the hard cap.
+      if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
+        return c.json({ error: "request body too large" }, 413);
+      }
+
+      // Build a combined abort signal for streaming pipes: honours both the
+      // request's client-disconnect signal and the wall-clock deadline.
+      const pipeDeadline = AbortSignal.timeout(STREAMING_PIPE_TIMEOUT_MS);
+      const pipeSignal = AbortSignal.any([c.req.raw.signal, pipeDeadline]);
+
+      const streamLogCtx = {
+        requestId: c.get("requestId"),
+        orgId,
+        providerId,
+        target,
+      };
+
       // Body handling — read raw bytes when present so substitution can
-      // operate on the decoded string.
-      let body: string | Uint8Array | null = null;
+      // operate on the decoded string. Streaming uploads skip the buffer
+      // entirely — the raw body stream is forwarded directly to upstream
+      // through a byte-counting cap (defense in depth when Content-Length
+      // is absent or mis-declared).
+      let body: string | Uint8Array | ReadableStream<Uint8Array> | null = null;
       const method = c.req.method;
       if (method !== "GET" && method !== "HEAD") {
-        const buf = await c.req.arrayBuffer();
-        if (buf.byteLength > 0) {
-          body = substituteBody ? new TextDecoder().decode(buf) : new Uint8Array(buf);
+        if (streamRequest && c.req.raw.body) {
+          // Streaming upload path: forward body stream to upstream.
+          // 401-retry is not possible (body unreplayable); the route
+          // sets X-Auth-Refreshed: true on 401 so the client knows to
+          // refresh credentials and replay the next call itself.
+          // Apply byte-counting cap regardless of Content-Length — a
+          // chunked upload without CL would otherwise bypass the guard above.
+          body = capStreamingBody(
+            c.req.raw.body as ReadableStream<Uint8Array>,
+            MAX_STREAMED_BODY_SIZE,
+            {
+              ...streamLogCtx,
+              direction: "upload",
+            },
+            pipeSignal,
+          );
+        } else {
+          const buf = await c.req.arrayBuffer();
+          if (buf.byteLength > 0) {
+            body = substituteBody ? new TextDecoder().decode(buf) : new Uint8Array(buf);
+          }
         }
       }
 
-      // Forward upstream headers — strip (a) the proxy's control headers,
-      // (b) `host` and `content-length` (caller's inbound Host would poison
-      // the upstream TLS SNI; fetch recomputes Content-Length), and
-      // (c) RFC 7230 hop-by-hop headers. Reuses the same `filterHeaders`
-      // helper as the in-container sidecar for a single source of truth.
+      // Forward upstream headers — strip (a) the proxy's control headers
+      // (including the new x-stream-* transport hints — these must not
+      // reach the upstream provider), (b) `host` and `content-length`
+      // (caller's inbound Host would poison the upstream TLS SNI; fetch
+      // recomputes Content-Length), and (c) RFC 7230 hop-by-hop headers.
+      // Reuses the same `filterHeaders` helper as the in-container sidecar.
       const fwdHeaders = filterHeaders(c.req.header(), PROXY_CONTROL_HEADERS);
+
+      // For streaming uploads, preserve the Content-Length header so the
+      // upstream can frame the request body. Without this, some providers
+      // reject the request with 411 Length Required.
+      if (streamRequest && declaredLen > 0) {
+        fwdHeaders["Content-Length"] = String(declaredLen);
+      }
 
       const jar = await getCookieJarStore();
 
       const started = Date.now();
       try {
+        // proxyCall now accepts ReadableStream bodies directly. When
+        // streamRequest is true, the stream body is forwarded with
+        // duplex: "half" and 401-retry is suppressed (body unreplayable);
+        // authRefreshed is surfaced on the result instead.
         const result = await proxyCall(db, {
           applicationId,
           orgId,
@@ -310,7 +373,10 @@ export function createCredentialProxyRouter() {
           jarSessionId: sessionId,
           cookieJarTtlSeconds: limits.session_ttl_seconds,
           sessionKey: providerId,
-          maxResponseBytes: limits.max_response_bytes,
+          // When the client wants a streamed response, skip the platform
+          // response-size cap — the capping transform stream in this
+          // route enforces MAX_STREAMED_BODY_SIZE instead.
+          maxResponseBytes: streamResponse ? 0 : limits.max_response_bytes,
         });
 
         const durationMs = Date.now() - started;
@@ -359,8 +425,41 @@ export function createCredentialProxyRouter() {
           // `content-length` is dropped for the same reason — the body
           // length changed after decompression.
           if (lower === "content-encoding" || lower === "content-length") return;
+          // Strip X-Stream-* headers: these are transport hints between the
+          // runtime and this proxy; they must not be forwarded to the caller.
+          if (lower === "x-stream-request" || lower === "x-stream-response") return;
           responseHeaders.set(key, value);
         });
+
+        // Streaming upload on a 401: credentials may be stale but the body
+        // cannot be replayed. Signal the client to refresh and retry itself.
+        if (result.authRefreshed) {
+          responseHeaders.set("X-Auth-Refreshed", "true");
+        }
+
+        // Streaming response path: pipe upstream bytes through a 100 MB
+        // capping transform stream and wall-clock timeout. X-Truncated is
+        // not applicable here — the stream throws instead, which closes the
+        // connection and lets the client surface the error naturally.
+        if (streamResponse && result.body) {
+          const cappedStream = capStreamingBody(
+            result.body,
+            MAX_STREAMED_BODY_SIZE,
+            {
+              ...streamLogCtx,
+              direction: "download",
+            },
+            pipeSignal,
+          );
+          // X-Truncated headers are not applicable to streaming responses.
+          responseHeaders.delete("X-Truncated");
+          responseHeaders.delete("X-Truncated-Size");
+          return new Response(cappedStream, {
+            status: result.status,
+            headers: responseHeaders,
+          });
+        }
+
         if (result.truncated) responseHeaders.set("X-Truncated", "true");
 
         return new Response(result.body, {
@@ -408,6 +507,10 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-substitute-body",
   "x-run-id",
   "x-app-id",
+  // Streaming transport hints — consumed by this route, must not reach upstream.
+  "x-stream-request",
+  "x-stream-response",
+  "x-max-response-size",
   "authorization",
   "appstrate-user",
   "appstrate-version",
@@ -442,3 +545,99 @@ const HOP_BY_HOP = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+
+/** Context passed to {@link capStreamingBody} for structured warning logs. */
+interface StreamCapLogCtx {
+  requestId: string;
+  orgId: string;
+  providerId: string;
+  target: string;
+  direction: "upload" | "download";
+}
+
+/**
+ * Wrap a streaming body in a WHATWG TransformStream that:
+ *  - Counts bytes and errors the stream when `maxBytes` is exceeded
+ *    (logs a `warn` with context before signalling the error).
+ *  - Optionally aborts when `signal` fires (wall-clock timeout or
+ *    client disconnect) — logs a `warn` and errors the stream.
+ *
+ * Used on both the upload path (streaming request to upstream) and the
+ * download path (streaming response to the client) so the two directions
+ * share identical cap + timeout semantics.
+ *
+ * Unlike the buffered cap used for inline responses, this does NOT
+ * silently truncate — callers see a broken stream and can surface the
+ * error naturally.
+ */
+function capStreamingBody(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  ctx: StreamCapLogCtx,
+  signal?: AbortSignal,
+): ReadableStream<Uint8Array> {
+  let received = 0;
+  let capped = false;
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      if (capped) return;
+      received += chunk.byteLength;
+      if (received > maxBytes) {
+        capped = true;
+        logger.warn("credential-proxy: streaming body exceeded size cap", {
+          requestId: ctx.requestId,
+          orgId: ctx.orgId,
+          providerId: ctx.providerId,
+          target: ctx.target,
+          direction: ctx.direction,
+          bytesReceived: received,
+          maxBytes,
+        });
+        controller.error(
+          new Error(
+            `Streaming ${ctx.direction} exceeded ${maxBytes} bytes (MAX_STREAMED_BODY_SIZE)`,
+          ),
+        );
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  });
+
+  // Abort handler: fires when either the client disconnects or the
+  // wall-clock deadline elapses. Close the writable side so the
+  // readable side errors and the client/upstream sees the abort.
+  if (signal) {
+    const onAbort = () => {
+      if (capped) return;
+      capped = true;
+      const reason =
+        signal.reason instanceof Error ? signal.reason : new Error("streaming timeout");
+      logger.warn("credential-proxy: streaming pipe aborted", {
+        requestId: ctx.requestId,
+        orgId: ctx.orgId,
+        providerId: ctx.providerId,
+        target: ctx.target,
+        direction: ctx.direction,
+        bytesReceived: received,
+        reason: reason.message,
+      });
+      // Abort the source and error the writable so the readable side closes.
+      source.cancel(reason).catch(() => {});
+      writable.abort(reason).catch(() => {});
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  source.pipeTo(writable).catch(() => {
+    // pipeTo rejection is handled by the TransformStream error or the
+    // abort handler above; swallow here to prevent an unhandled-rejection
+    // in the Bun process.
+  });
+  return readable;
+}

@@ -200,6 +200,21 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
     );
 
+    sections.push(
+      'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, or `body: { fromBytes: "<base64>", encoding: "base64" }` to upload inline binary bytes computed in memory (up to 5 MB; standard base64 RFC 4648 §4 only — alphabet `+/`; URL-safe base64 with `-_` is not accepted). ' +
+        'Use `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
+        'Without `toFile`, responses larger than 64 KB auto-spill to a file under `responses/<toolCallId>.bin`; smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
+        "Inspect `body.kind` on the returned JSON to dispatch.\n",
+    );
+
+    sections.push(
+      "Multipart uploads (e.g. Drive file upload, Gmail send with attachment): pass `body: { multipart: [...] }` to compose a multipart/form-data body mixing text fields and workspace files. " +
+        'Each part is one of: `{ name, value }` (text field), `{ name, fromFile, filename?, contentType? }` (workspace file), or `{ name, fromBytes, encoding: "base64", filename?, contentType? }` (inline bytes). ' +
+        'Example — Drive resumable upload metadata + file: `{ multipart: [{ name: "metadata", value: JSON.stringify({name:"report.pdf"}), contentType: "application/json" }, { name: "file", fromFile: "documents/report.pdf", contentType: "application/pdf" }] }`. ' +
+        'Example — Gmail send with inline attachment: `{ multipart: [{ name: "message", value: rawMimeString }, { name: "attachment", fromFile: "documents/invoice.pdf", filename: "invoice.pdf", contentType: "application/pdf" }] }`. ' +
+        "Total size across all parts is capped at 5 MB; use a single `{ fromFile }` body for larger uploads.\n",
+    );
+
     for (const provider of connectedProviders) {
       const displayName = provider.displayName ?? provider.id;
       const toolName = provider.toolName ?? providerToolName(provider.id);

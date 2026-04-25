@@ -2,12 +2,37 @@
 
 // Log types and pure utility functions shared between log-viewer components and pages.
 
+import { asProviderCallBody, type ProviderCallBody } from "./provider-call-body-utils";
+
 export interface LogEntry {
   message: string;
   type: string;
   level?: string;
   detail?: string;
   createdAt?: Date | string | null;
+  /**
+   * Optional structured provider call response body — when set, log
+   * viewers SHOULD render it via `<ProviderCallBody>` instead of (or
+   * in addition to) the textual `detail`.
+   */
+  providerCallBody?: ProviderCallBody;
+}
+
+/**
+ * Sniff a log payload for a provider call response body. Recognises
+ * either:
+ *   1. The full tool result envelope: `{ status, headers, body: {...} }`
+ *      (matches what `<provider>_call` tools serialise to JSON)
+ *   2. A bare `body: {...}` field
+ * Returns `null` when no recognisable shape is present.
+ */
+export function extractProviderCallBody(
+  data: Record<string, unknown> | null | undefined,
+): ProviderCallBody | null {
+  if (!data) return null;
+  const direct = asProviderCallBody(data.body);
+  if (direct) return direct;
+  return asProviderCallBody(data);
 }
 
 export interface RawLog {
@@ -64,6 +89,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
         const args = logData.args as Record<string, unknown> | undefined;
         const detail = args ? formatToolArgs(args) : undefined;
         const isPlainText = log.type === "progress" && !log.data;
+        const providerCallBody = extractProviderCallBody(logData) ?? undefined;
 
         if (isPlainText && lastWasPlainText && entries.length > 0) {
           entries[entries.length - 1]!.message += "\n" + message;
@@ -74,6 +100,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
             level: log.level || "debug",
             detail,
             createdAt: log.createdAt,
+            providerCallBody,
           });
         }
         lastWasPlainText = isPlainText;
