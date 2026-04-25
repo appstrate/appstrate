@@ -261,4 +261,77 @@ describe("HttpSink", () => {
     await sink.finalize(SAMPLE_RESULT);
     expect(server.received[0]!.url).toBe("/custom-done");
   });
+
+  it("emits a W3C traceparent header on every request", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+    });
+
+    await sink.handle(SAMPLE_EVENT);
+    await sink.handle({ ...SAMPLE_EVENT, content: "second" });
+    await sink.finalize(SAMPLE_RESULT);
+
+    const headers = server.received.map((r) => r.headers["traceparent"]);
+    for (const h of headers) {
+      expect(h).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+    }
+  });
+
+  it("keeps the trace-id constant across event/finalize, refreshes span-id per request", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+    });
+
+    await sink.handle(SAMPLE_EVENT);
+    await sink.handle({ ...SAMPLE_EVENT, content: "second" });
+    await sink.finalize(SAMPLE_RESULT);
+
+    const parsed = server.received.map((r) => {
+      const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(
+        r.headers["traceparent"]!,
+      );
+      return { traceId: match![1], spanId: match![2], flags: match![3] };
+    });
+
+    // Trace-id constant.
+    expect(new Set(parsed.map((p) => p.traceId)).size).toBe(1);
+    // Span-id distinct per request.
+    expect(new Set(parsed.map((p) => p.spanId)).size).toBe(parsed.length);
+  });
+
+  it("inherits the trace-id when a parent traceparent is supplied", async () => {
+    const parent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+      traceparent: parent,
+    });
+
+    await sink.handle(SAMPLE_EVENT);
+
+    const sent = server.received[0]!.headers["traceparent"]!;
+    const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(sent);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe("0af7651916cd43dd8448eb211c80319c");
+    // Span-id refreshed — never echo back the parent.
+    expect(match![2]).not.toBe("b7ad6b7169203331");
+    expect(match![3]).toBe("01");
+  });
+
+  it("falls back to a fresh trace when the parent traceparent is malformed", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      runSecret: RUN_SECRET,
+      traceparent: "garbage",
+    });
+
+    await sink.handle(SAMPLE_EVENT);
+
+    const sent = server.received[0]!.headers["traceparent"]!;
+    expect(sent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    // Not the all-zero forbidden value.
+    expect(sent).not.toContain("00000000000000000000000000000000");
+  });
 });

@@ -335,6 +335,7 @@ export function createRunsRouter() {
         applicationId: c.get("applicationId"),
         uploadedFiles,
         apiKeyId: c.get("apiKeyId") ?? undefined,
+        traceparent: c.get("traceparent"),
       });
 
       if (!result.ok) {
@@ -513,6 +514,7 @@ export function createRunsRouter() {
         actor,
         body,
         apiKeyId: c.get("apiKeyId") ?? undefined,
+        traceparent: c.get("traceparent"),
       });
 
       c.status(202);

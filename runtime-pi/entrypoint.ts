@@ -87,6 +87,7 @@ const sink = new HttpSink({
   url: env.sink.url,
   finalizeUrl: env.sink.finalizeUrl,
   runSecret: env.sink.secret,
+  traceparent: env.traceparent,
 });
 
 // --- 0a. Tee sink + stdout bridge ---

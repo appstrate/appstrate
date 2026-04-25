@@ -53,6 +53,7 @@
     "./events": "./src/events/index.ts",
     "./sinks": "./src/sinks/index.ts",
     "./template": "./src/template/index.ts",
+    "./transport": "./src/transport/trace-context.ts",
     "./bundle": "./src/bundle/index.ts",
     "./runner": "./src/runner/index.ts",
     "./resolvers": "./src/resolvers/index.ts",

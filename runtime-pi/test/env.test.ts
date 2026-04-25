@@ -65,6 +65,19 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.heartbeatIntervalMs).toBe(10_000);
     expect(env.outputSchemaRaw).toBe('{"type":"object"}');
   });
+
+  it("forwards a TRACEPARENT env var through to env.traceparent", () => {
+    const env = parseRuntimeEnv({
+      ...VALID,
+      TRACEPARENT: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    });
+    expect(env.traceparent).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+  });
+
+  it("treats an empty TRACEPARENT as absent", () => {
+    const env = parseRuntimeEnv({ ...VALID, TRACEPARENT: "" });
+    expect(env.traceparent).toBeUndefined();
+  });
 });
 
 describe("parseRuntimeEnv — fail-fast errors", () => {

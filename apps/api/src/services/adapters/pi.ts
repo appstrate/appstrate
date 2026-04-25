@@ -126,6 +126,12 @@ export async function runPlatformContainer(
         finalizeUrl: sinkCredentials.finalizeUrl,
         secret: sinkCredentials.secret,
       },
+      // Forward the W3C trace from the spawning request — when set, the
+      // container's outbound HTTP traffic (events, finalize, sidecar
+      // proxy) becomes child spans of that trace. The runtime validates
+      // the wire format and falls back to a fresh trace on malformed
+      // values, so no defensive parsing is needed here.
+      traceparent: context.traceparent,
     });
 
     const filesToInject: Array<{ name: string; content: Buffer }> = [];

@@ -125,4 +125,18 @@ describe("buildRuntimePiEnv", () => {
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.NO_PROXY).toBeUndefined();
   });
+
+  it("forwards a W3C traceparent into TRACEPARENT when supplied", () => {
+    const env = buildRuntimePiEnv({
+      model,
+      agentPrompt: "p",
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    });
+    expect(env.TRACEPARENT).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+  });
+
+  it("does not emit TRACEPARENT when no parent trace is supplied", () => {
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+    expect(env.TRACEPARENT).toBeUndefined();
+  });
 });

@@ -72,6 +72,13 @@ export interface RunPipelineParams {
   uploadedFiles?: UploadedFile[];
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
+  /**
+   * W3C `traceparent` header value of the spawning request. Forwarded
+   * into the runtime so its outbound traffic becomes child spans of
+   * the platform's trace. Routes pull this from `c.get("traceparent")`;
+   * background runners (scheduler) leave it unset.
+   */
+  traceparent?: string;
 }
 
 /**
@@ -211,6 +218,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelId,
       proxyId,
       overrideVersionLabel,
+      traceparent: params.traceparent,
     }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {

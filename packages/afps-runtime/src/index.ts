@@ -147,3 +147,13 @@ export {
   type AfpsErrorCode,
   type ProblemDetails,
 } from "./errors.ts";
+
+// W3C Trace Context — distributed tracing header propagation.
+export {
+  formatTraceparent,
+  generateSpanId,
+  generateTraceId,
+  nextTraceContext,
+  parseTraceparent,
+  type TraceContext,
+} from "./transport/trace-context.ts";

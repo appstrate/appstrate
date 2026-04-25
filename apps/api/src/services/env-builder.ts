@@ -58,6 +58,13 @@ export async function buildRunContext(params: {
   modelId?: string | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
+  /**
+   * W3C `traceparent` of the spawning request — forwarded into the
+   * runtime so its outbound HTTP traffic becomes child spans of the
+   * platform's trace. Optional: callers from background workers
+   * (scheduler) leave it unset and the runtime mints a fresh trace.
+   */
+  traceparent?: string;
 }): Promise<{
   context: ExecutionContext;
   plan: AppstrateRunPlan;
@@ -157,6 +164,7 @@ export async function buildRunContext(params: {
     })),
     ...(previousState !== null ? { state: previousState } : {}),
     config,
+    ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
 
   const plan: AppstrateRunPlan = {

@@ -68,6 +68,14 @@ export interface RuntimePiEnvOptions {
     /** Ephemeral HMAC secret — ASCII base64url, never persisted on the host. */
     secret: string;
   };
+  /**
+   * W3C `traceparent` header (wire format) of the request that spawned
+   * the run. When set, every event/finalize POST emitted by the
+   * container becomes a child span of that trace, enabling end-to-end
+   * correlation across the platform → runner → sidecar boundary.
+   * Forwarded as `TRACEPARENT` env var, consumed by HttpSink at boot.
+   */
+  traceparent?: string;
 }
 
 /**
@@ -133,6 +141,10 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.APPSTRATE_SINK_URL = opts.sink.url;
     env.APPSTRATE_SINK_FINALIZE_URL = opts.sink.finalizeUrl;
     env.APPSTRATE_SINK_SECRET = opts.sink.secret;
+  }
+
+  if (opts.traceparent) {
+    env.TRACEPARENT = opts.traceparent;
   }
 
   return env;

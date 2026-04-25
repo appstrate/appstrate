@@ -50,6 +50,15 @@ export interface RuntimeEnv {
   heartbeatIntervalMs: number;
   /** Optional output JSON schema for constrained decoding (raw string — Pi SDK consumes it directly). */
   outputSchemaRaw?: string;
+  /**
+   * W3C `traceparent` value (header wire format). When the platform
+   * spawned the run inside an existing trace, this is forwarded so the
+   * container's outbound HTTP traffic — events, finalize, sidecar
+   * proxy — becomes child spans of that trace. Validated lightly: any
+   * non-empty string is accepted; HttpSink does the strict W3C parse
+   * and falls back to a fresh trace on malformed values.
+   */
+  traceparent?: string;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -271,5 +280,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     sidecarUrl: sidecarUrl || undefined,
     heartbeatIntervalMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
+    traceparent: source.TRACEPARENT || undefined,
   };
 }

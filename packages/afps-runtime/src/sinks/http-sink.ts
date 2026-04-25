@@ -7,6 +7,12 @@ import type { RunEvent } from "@afps-spec/types";
 import type { RunResult } from "../types/run-result.ts";
 import { buildCloudEventEnvelope } from "../events/cloudevents.ts";
 import { sign } from "../events/signing.ts";
+import {
+  formatTraceparent,
+  nextTraceContext,
+  parseTraceparent,
+  type TraceContext,
+} from "../transport/trace-context.ts";
 
 export interface HttpSinkOptions {
   /**
@@ -41,6 +47,18 @@ export interface HttpSinkOptions {
   maxBackoffMs?: number;
   /** Low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /**
+   * W3C Trace Context parent (header value). When provided, the sink
+   * inherits the trace-id + flags so the run becomes a child span of an
+   * existing distributed trace (e.g. the platform request that spawned
+   * the run). When absent, the sink generates a fresh trace-id at
+   * construction time and treats every event/finalize as a child span
+   * of that root.
+   *
+   * Each outbound HTTP call gets a freshly generated span-id — never
+   * reused across requests, per the W3C spec.
+   */
+  traceparent?: string;
 }
 
 /**
@@ -69,6 +87,7 @@ export class HttpSink implements EventSink {
   private readonly initialBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly traceParent: TraceContext | null;
   // Sequence numbers start at 1. The ingestion endpoint accepts an event
   // only when `envelope.sequence === run.lastEventSequence + 1`, and
   // `lastEventSequence` defaults to 0 on run creation — so the first
@@ -85,6 +104,12 @@ export class HttpSink implements EventSink {
     this.initialBackoffMs = opts.initialBackoffMs ?? 500;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
     this.fetchImpl = opts.fetch ?? fetch;
+    // Inherit the parent trace if a valid traceparent was supplied,
+    // otherwise root a fresh trace. nextTraceContext only generates a
+    // root context when `parent` is null/undefined; we capture the root
+    // here so every subsequent send shares the trace-id.
+    const parent = parseTraceparent(opts.traceparent);
+    this.traceParent = parent ?? nextTraceContext();
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -115,6 +140,10 @@ export class HttpSink implements EventSink {
       body,
       secret: this.runSecret,
     });
+    // Fresh span-id per outbound call. Trace-id + flags inherited from
+    // the constructor-time root so every event/finalize is a child span
+    // of the same trace.
+    const traceparent = formatTraceparent(nextTraceContext(this.traceParent));
 
     let attempt = 0;
     let lastError: unknown = undefined;
@@ -124,7 +153,11 @@ export class HttpSink implements EventSink {
       try {
         const res = await this.fetchImpl(url, {
           method: "POST",
-          headers: { ...headers, "Content-Type": "application/cloudevents+json" },
+          headers: {
+            ...headers,
+            "Content-Type": "application/cloudevents+json",
+            traceparent,
+          },
           body,
         });
 
