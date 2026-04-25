@@ -1,6 +1,6 @@
 # ADR-011 — Checkpoint + Memory Unification
 
-**Status**: Accepted (partial implementation — see "Scope of THIS PR")
+**Status**: Accepted (full implementation — phases 0-7 landed; legacy column drop deferred)
 **Date**: 2026-04-24
 
 ## Summary
@@ -20,7 +20,7 @@ These two shapes are arbitrary. A stack that serves one end-user per run
 
 - a user's preferences ("prefers CSV", "works at GMT+2") belong to that
   user, not leaking to the next end-user;
-- a tactical checkpoint (next pagination cursor) already *is* actor-scoped
+- a tactical checkpoint (next pagination cursor) already _is_ actor-scoped
   because it lives on `runs`.
 
 At the same time, an OSS single-tenant stack sometimes genuinely wants both
@@ -78,13 +78,13 @@ CREATE INDEX pkp_org ON package_persistence (org_id);
   applications per-end-user isolation by default while still letting the
   runtime ship universal checkpoints.
 - `listMemories(package, app, actor)` — union of shared + actor-specific,
-  sorted by `createdAt ASC`. The 100-per-actor cap is enforced *per scope*,
+  sorted by `createdAt ASC`. The 100-per-actor cap is enforced _per scope_,
   not globally, so a shared catalog + per-user notes can coexist.
 
 ## Write semantics
 
 - `upsertCheckpoint(package, app, actor, content, runId)` — `INSERT … ON
-  CONFLICT DO UPDATE` keyed on the unique index.
+CONFLICT DO UPDATE` keyed on the unique index.
 - `addMemory(package, app, actor, content, runId)` — bounded append.
 - `scope` on the runtime tool (`add_memory` / `set_checkpoint`): defaults to
   `actor` (safer for multi-tenant headless). Agents opt into `shared` explicitly.
@@ -97,8 +97,8 @@ The run-level actor already lives in `runs.dashboard_user_id` / `runs.end_user_i
 ```ts
 function actorFromRunContext(ctx: { userId?: string | null; endUserId?: string | null }): Actor {
   if (ctx.endUserId) return { type: "end_user", id: ctx.endUserId };
-  if (ctx.userId)   return { type: "member",   id: ctx.userId };
-  return { type: "shared" };  // scheduled runs, system runs, orphaned-actor runs
+  if (ctx.userId) return { type: "member", id: ctx.userId };
+  return { type: "shared" }; // scheduled runs, system runs, orphaned-actor runs
 }
 ```
 
@@ -110,35 +110,35 @@ for authenticated dashboard users; the storage column uses `user` for brevity.
 
 Backend (Node/Bun) files touched by the legacy primitives:
 
-| File                                                                 | What it does                           |
-| -------------------------------------------------------------------- | -------------------------------------- |
-| `packages/db/src/schema/runs.ts`                                     | Declares `runs.state`, `packageMemories` |
-| `apps/api/src/services/state/runs.ts`                                | `getLastRunState`, `updateRun({state})`|
-| `apps/api/src/services/state/package-memories.ts`                    | CRUD helpers                           |
-| `apps/api/src/services/env-builder.ts`                               | Reads both for prompt injection        |
-| `apps/api/src/services/run-event-ingestion.ts`                       | Writes both on finalize                |
-| `apps/api/src/routes/agents.ts`                                      | `GET/DELETE /memories` routes          |
-| `apps/api/src/routes/internal.ts`                                    | `run_history` tool exposing `state`    |
-| `apps/api/test/helpers/db.ts`                                        | Truncation list                        |
+| File                                              | What it does                             |
+| ------------------------------------------------- | ---------------------------------------- |
+| `packages/db/src/schema/runs.ts`                  | Declares `runs.state`, `packageMemories` |
+| `apps/api/src/services/state/runs.ts`             | `getLastRunState`, `updateRun({state})`  |
+| `apps/api/src/services/state/package-memories.ts` | CRUD helpers                             |
+| `apps/api/src/services/env-builder.ts`            | Reads both for prompt injection          |
+| `apps/api/src/services/run-event-ingestion.ts`    | Writes both on finalize                  |
+| `apps/api/src/routes/agents.ts`                   | `GET/DELETE /memories` routes            |
+| `apps/api/src/routes/internal.ts`                 | `run_history` tool exposing `state`      |
+| `apps/api/test/helpers/db.ts`                     | Truncation list                          |
 
 Runtime + tools:
 
-| File                                                                 | What it does                           |
-| -------------------------------------------------------------------- | -------------------------------------- |
-| `packages/afps-runtime/src/resolvers/platform-tools.ts`              | `memoryTool`, `stateTool` definitions  |
-| `packages/afps-runtime/src/types/canonical-events.ts`                | `memory.added`, `state.set` event types|
-| `packages/afps-runtime/src/bundle/platform-prompt.ts`                | Renders "## Previous State" / "## Memory" |
-| `packages/afps-runtime/src/runner/reducer.ts`                        | Folds both into `RunResult`            |
-| `scripts/system-packages/tool-set-state-1.0.0/`                      | AFPS package for `set_state` tool      |
-| `scripts/system-packages/tool-add-memory-1.0.0/`                     | AFPS package for `add_memory` tool     |
-| `runtime-pi/*`                                                       | Pi container orchestration + logs      |
+| File                                                    | What it does                              |
+| ------------------------------------------------------- | ----------------------------------------- |
+| `packages/afps-runtime/src/resolvers/platform-tools.ts` | `memoryTool`, `stateTool` definitions     |
+| `packages/afps-runtime/src/types/canonical-events.ts`   | `memory.added`, `state.set` event types   |
+| `packages/afps-runtime/src/bundle/platform-prompt.ts`   | Renders "## Previous State" / "## Memory" |
+| `packages/afps-runtime/src/runner/reducer.ts`           | Folds both into `RunResult`               |
+| `scripts/system-packages/tool-set-state-1.0.0/`         | AFPS package for `set_state` tool         |
+| `scripts/system-packages/tool-add-memory-1.0.0/`        | AFPS package for `add_memory` tool        |
+| `runtime-pi/*`                                          | Pi container orchestration + logs         |
 
 Frontend:
 
-| File                                                                 | What it does                           |
-| -------------------------------------------------------------------- | -------------------------------------- |
-| `apps/web/src/pages/run-detail.tsx`                                  | Renders run state                      |
-| `apps/web/src/locales/*/agents.json`                                 | French/English strings                 |
+| File                                 | What it does           |
+| ------------------------------------ | ---------------------- |
+| `apps/web/src/pages/run-detail.tsx`  | Renders run state      |
+| `apps/web/src/locales/*/agents.json` | French/English strings |
 
 ## Scope of THIS PR
 
@@ -148,18 +148,20 @@ Delivered in this PR:
 - [x] Phase 1 — DB schema + data migration (additive; legacy stores kept)
 - [x] Phase 2 — Backend service layer (unified reads/writes)
 - [x] Phase 3 — API routes (unified `/persistence` endpoint + `/memories` back-compat shim)
+- [x] Phase 4 — Rename `set_state` → `set_checkpoint` in AFPS runtime + conformance + runtime-pi + system-package tools. Canonical-event contract bump
+      (`state.set` → `checkpoint.set`) shipped with dual-event acceptance for
+      back-compat — runners speaking the legacy event still finalize correctly.
+- [x] Phase 5 — `run_history` field rename (`state` → `checkpoint`) with actor-scoped
+      isolation in the sidecar lookup.
+- [x] Phase 6 — Frontend UI rename ("State" → "Checkpoint", `exec.tabState` →
+      `exec.tabCheckpoint`, hash anchor `#state` → `#checkpoint`) plus a scope
+      filter (`All` / `Shared` / `Mine`) in the memory management tab. The web
+      app now reads from the unified `/persistence` endpoint and tags each row
+      with its actor scope.
 - [x] Phase 7 — Docs
 
-Deferred to follow-up PRs (scope too large for one safe landing):
+Deferred to follow-up PRs:
 
-- [ ] Phase 4 — Rename `set_state` → `set_checkpoint` in AFPS runtime + conformance
-      + runtime-pi + system-package tools. This is a canonical-event contract bump
-      (`state.set` → `checkpoint.set`) that cascades into every runner, conformance
-      suite, and shipped tool package. A separate PR lets us stage a minor version
-      of `@appstrate/afps-runtime` with both event names accepted.
-- [ ] Phase 5 — `run_history` field rename (`state` → `checkpoint`). Trivial once
-      Phase 4 lands.
-- [ ] Phase 6 — Frontend UI rename + scope filter in memory management.
 - [ ] Legacy drop — DROP `runs.state` column + `package_memories` table after
       1-2 weeks of double-write stability in production.
 

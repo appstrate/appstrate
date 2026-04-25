@@ -103,14 +103,14 @@ export function RunDetailPage() {
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
   const finalReport = reportContent || execResult?.report || null;
   const hasResult = hasOutput || !!finalReport;
-  const stateData = (run?.state as Record<string, unknown> | null) ?? null;
+  const checkpointData = (run?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
   // Default tab: "result" if results exist, otherwise "logs".
   // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "state", "info"] as const,
+    ["result", "logs", "checkpoint", "info"] as const,
     defaultTab,
   );
 
@@ -204,7 +204,7 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "info")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "checkpoint" | "info")}
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
@@ -216,7 +216,9 @@ export function RunDetailPage() {
                 </span>
               )}
             </TabsTrigger>
-            {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
+            {checkpointData && (
+              <TabsTrigger value="checkpoint">{t("exec.tabCheckpoint")}</TabsTrigger>
+            )}
             <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -264,7 +266,7 @@ export function RunDetailPage() {
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "state" && stateData && <JsonView data={stateData} />}
+      {activeTab === "checkpoint" && checkpointData && <JsonView data={checkpointData} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

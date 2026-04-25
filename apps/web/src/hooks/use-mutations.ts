@@ -282,16 +282,16 @@ export function useDeleteAgent() {
   });
 }
 
-// --- Memory mutations ---
+// --- Memory mutations (unified persistence — ADR-011) ---
 
 export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (memoryId: number) => {
-      return api(`/agents/${packageId}/memories/${memoryId}`, { method: "DELETE" });
+      return api(`/agents/${packageId}/persistence/memories/${memoryId}`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-memories"] });
+      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
     },
     onError: onMutationError,
   });
@@ -301,10 +301,13 @@ export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/agents/${packageId}/memories`, { method: "DELETE" });
+      return api<{ memoriesDeleted: number; checkpointDeleted: boolean }>(
+        `/agents/${packageId}/persistence?kind=memory`,
+        { method: "DELETE" },
+      );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agent-memories"] });
+      qc.invalidateQueries({ queryKey: ["agent-persistence"] });
     },
     onError: onMutationError,
   });

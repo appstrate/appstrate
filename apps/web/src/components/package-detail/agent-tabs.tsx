@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useAgentMemories } from "../../hooks/use-memories";
+import { useAgentMemories, type MemoryScopeFilter } from "../../hooks/use-memories";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
@@ -20,6 +20,7 @@ import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, BrainCircuit, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { formatDateField } from "../../lib/markdown";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 export function AgentRunsTab({
   packageId,
@@ -105,11 +106,25 @@ export function AgentConnectorsTab({
 
 export function AgentMemoriesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: memories } = useAgentMemories(packageId);
+  const [scopeFilter, setScopeFilter] = useState<MemoryScopeFilter>("all");
+  const { data: memories } = useAgentMemories(packageId, scopeFilter);
   const deleteMemory = useDeleteMemory(packageId);
 
   return (
     <>
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-muted-foreground text-xs">{t("detail.memoryScopeFilterLabel")}</span>
+        <Select value={scopeFilter} onValueChange={(v) => setScopeFilter(v as MemoryScopeFilter)}>
+          <SelectTrigger className="h-8 w-36 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("detail.memoryScopeAll")}</SelectItem>
+            <SelectItem value="shared">{t("detail.memoryScopeShared")}</SelectItem>
+            <SelectItem value="mine">{t("detail.memoryScopeMine")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       {!memories || memories.length === 0 ? (
         <EmptyState
           message={t("detail.emptyMemories")}
@@ -119,25 +134,37 @@ export function AgentMemoriesTab({ packageId }: { packageId: string }) {
         />
       ) : (
         <div className="space-y-1">
-          {memories.map((mem) => (
-            <div
-              key={mem.id}
-              className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
-            >
-              <span className="text-foreground flex-1 truncate text-sm">{mem.content}</span>
-              <span className="text-muted-foreground text-xs whitespace-nowrap">
-                {mem.createdAt ? formatDateField(mem.createdAt) : ""}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => deleteMemory.mutate(mem.id)}
-                disabled={deleteMemory.isPending}
+          {memories.map((mem) => {
+            const isShared = mem.actorType === "shared";
+            return (
+              <div
+                key={mem.id}
+                className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
               >
-                {t("btn.delete")}
-              </Button>
-            </div>
-          ))}
+                <span className="text-foreground flex-1 truncate text-sm">{mem.content}</span>
+                <span
+                  className={
+                    isShared
+                      ? "bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                      : "bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                  }
+                >
+                  {isShared ? t("detail.memoryScopeBadgeShared") : t("detail.memoryScopeBadgeMine")}
+                </span>
+                <span className="text-muted-foreground text-xs whitespace-nowrap">
+                  {mem.createdAt ? formatDateField(mem.createdAt) : ""}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => deleteMemory.mutate(mem.id)}
+                  disabled={deleteMemory.isPending}
+                >
+                  {t("btn.delete")}
+                </Button>
+              </div>
+            );
+          })}
         </div>
       )}
     </>

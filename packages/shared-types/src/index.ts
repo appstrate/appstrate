@@ -340,10 +340,16 @@ export interface VersionDetailResponse extends Omit<PackageVersionInfo, "created
 
 // --- Agent Memory Types ---
 
+export type PersistenceActorType = "user" | "end_user" | "shared";
+
 export interface AgentMemoryItem {
   id: number;
   content: string;
   runId: string | null;
+  /** Actor scope of this memory row. `shared` = visible to all actors. */
+  actorType?: PersistenceActorType;
+  /** Actor identifier. NULL when `actorType === "shared"`. */
+  actorId?: string | null;
   createdAt: string | null;
 }
 

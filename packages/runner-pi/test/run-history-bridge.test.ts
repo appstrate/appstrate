@@ -96,7 +96,9 @@ describe("buildRunHistoryExtensionFactory", () => {
     const result = await pi.tools[0]!.execute("call_abc", { limit: 1 }, undefined);
 
     expect(capturedFetches).toHaveLength(1);
-    expect(capturedFetches[0]!.url).toBe("http://sidecar:8080/run-history?limit=1&fields=state");
+    expect(capturedFetches[0]!.url).toBe(
+      "http://sidecar:8080/run-history?limit=1&fields=checkpoint",
+    );
     expect(events).toHaveLength(1);
     const event = events[0]!;
     expect(event.type).toBe("run_history.called");
