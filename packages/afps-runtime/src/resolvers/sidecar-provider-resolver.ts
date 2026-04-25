@@ -3,6 +3,7 @@
 
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
+  ABSOLUTE_MAX_RESPONSE_SIZE,
   makeProviderTool,
   readProviderMeta,
   resolveBodyStream,
@@ -35,6 +36,13 @@ export interface SidecarProviderResolverOptions {
  * Credentials never transit the runtime: the sidecar fetches them from
  * the platform API using the per-run token and substitutes them into
  * the outgoing request before forwarding to the upstream provider.
+ *
+ * Workspace-rooted file IO ({@link ProviderCallRequest.body.fromFile} /
+ * {@link ProviderCallRequest.responseMode.toFile}) is allowed: the
+ * runtime resolves the path safely under the run workspace and streams
+ * bytes through to / from the sidecar without UTF-8 decoding. The
+ * sidecar itself has no workspace access — it only sees the
+ * already-materialised request body and the upstream response bytes.
  */
 export class SidecarProviderResolver implements ProviderResolver {
   private readonly sidecarUrl: string;
@@ -59,8 +67,11 @@ export class SidecarProviderResolver implements ProviderResolver {
   }
 
   private buildCall(ref: ProviderRef, _meta: ProviderMeta): ProviderCallFn {
-    return async (req) => {
-      const bodyBytes = await resolveBodyStream(req.body);
+    return async (req, ctx) => {
+      const bodyBytes = await resolveBodyStream(req.body, {
+        allowFromFile: true,
+        workspace: ctx.workspace,
+      });
       // The sidecar owns credential injection server-side — it fetches
       // the full provider payload (credentials + header name + prefix +
       // field name) from the platform and writes the upstream auth
@@ -73,12 +84,30 @@ export class SidecarProviderResolver implements ProviderResolver {
         "X-Provider": ref.name,
         "X-Target": req.target,
       };
+      // Lift the sidecar's default 50KB response cap when the agent
+      // explicitly asks for a larger inline payload OR routes the
+      // response to a file. Without this header the sidecar truncates
+      // mid-flight and the resolver never sees the bytes that should
+      // have spilled to disk.
+      const maxInline = req.responseMode?.maxInlineBytes;
+      const wantsFile = typeof req.responseMode?.toFile === "string";
+      if (wantsFile || (typeof maxInline === "number" && maxInline > 0)) {
+        const cap = wantsFile
+          ? ABSOLUTE_MAX_RESPONSE_SIZE
+          : Math.min(maxInline ?? 0, ABSOLUTE_MAX_RESPONSE_SIZE);
+        headers["X-Max-Response-Size"] = String(cap);
+      }
       const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, {
         method: req.method,
         headers,
         body: bodyBytes,
+        signal: ctx.signal,
       });
-      return serializeFetchResponse(res);
+      return serializeFetchResponse(res, {
+        workspace: ctx.workspace,
+        toolCallId: ctx.toolCallId,
+        ...(req.responseMode ? { responseMode: req.responseMode } : {}),
+      });
     };
   }
 }

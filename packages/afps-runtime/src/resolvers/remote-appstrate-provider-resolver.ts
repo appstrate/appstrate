@@ -3,6 +3,7 @@
 
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
+  ABSOLUTE_MAX_RESPONSE_SIZE,
   makeProviderTool,
   readProviderMeta,
   resolveBodyStream,
@@ -89,8 +90,11 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   }
 
   private buildCall(ref: ProviderRef, _meta: ProviderMeta): ProviderCallFn {
-    return async (req) => {
-      const bodyBytes = await resolveBodyStream(req.body, { allowFromFile: true });
+    return async (req, ctx) => {
+      const bodyBytes = await resolveBodyStream(req.body, {
+        allowFromFile: true,
+        workspace: ctx.workspace,
+      });
       // The platform's `/api/credential-proxy/proxy` route owns upstream
       // credential injection server-side (mirror of the sidecar). The
       // agent only writes `X-Target` / `X-Provider` + the API-key
@@ -110,13 +114,26 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
         ...this.extraHeaders,
         ...(req.headers ?? {}),
       };
+      const maxInline = req.responseMode?.maxInlineBytes;
+      const wantsFile = typeof req.responseMode?.toFile === "string";
+      if (wantsFile || (typeof maxInline === "number" && maxInline > 0)) {
+        const cap = wantsFile
+          ? ABSOLUTE_MAX_RESPONSE_SIZE
+          : Math.min(maxInline ?? 0, ABSOLUTE_MAX_RESPONSE_SIZE);
+        headers["X-Max-Response-Size"] = String(cap);
+      }
 
       const res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, {
         method: req.method,
         headers,
         body: bodyBytes,
+        signal: ctx.signal,
       });
-      return serializeFetchResponse(res);
+      return serializeFetchResponse(res, {
+        workspace: ctx.workspace,
+        toolCallId: ctx.toolCallId,
+        ...(req.responseMode ? { responseMode: req.responseMode } : {}),
+      });
     };
   }
 }

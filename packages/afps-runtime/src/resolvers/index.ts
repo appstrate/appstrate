@@ -44,18 +44,26 @@ export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-a
 
 // Provider-resolver surface — tool factory + concrete impls.
 export {
+  ABSOLUTE_MAX_RESPONSE_SIZE,
+  defaultInlineLimit,
+  MAX_REQUEST_BODY_SIZE,
   makeProviderTool,
   matchesAuthorizedUriSpec,
   providerToolName,
   readProviderMeta,
   resolveBodyStream,
+  resolveSafePath,
   serializeFetchResponse,
   slugifyProviderId,
-  type ProviderMeta,
+  type MakeProviderToolOptions,
+  type ProviderCallContext,
+  type ProviderCallFn,
   type ProviderCallRequest,
   type ProviderCallResponse,
-  type ProviderCallFn,
-  type MakeProviderToolOptions,
+  type ProviderCallResponseBody,
+  type ProviderMeta,
+  type ResolveBodyStreamOptions,
+  type SerializeFetchResponseContext,
 } from "./provider-tool.ts";
 export {
   SidecarProviderResolver,

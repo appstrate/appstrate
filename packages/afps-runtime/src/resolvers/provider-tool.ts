@@ -15,6 +15,27 @@ import { resolvePackageRef } from "./bundle-adapter.ts";
 import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
 
 /**
+ * Default inline cap for response bodies that come back without an
+ * explicit `responseMode.maxInlineBytes`. Mirrors the sidecar default
+ * (`runtime-pi/sidecar/helpers.ts`) so the two layers stay in sync.
+ */
+export const defaultInlineLimit = 65_536;
+
+/**
+ * Hard upper bound on `responseMode.maxInlineBytes`. Mirrors
+ * `ABSOLUTE_MAX_RESPONSE_SIZE` in `runtime-pi/sidecar/helpers.ts`. Any
+ * agent-supplied value above this is silently capped.
+ */
+export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
+
+/**
+ * Hard upper bound on `{ fromFile }` request bodies. Mirrors
+ * `MAX_SUBSTITUTE_BODY_SIZE` on the sidecar — checked client-side so
+ * over-sized uploads fail with a typed error instead of a 413.
+ */
+export const MAX_REQUEST_BODY_SIZE = 5 * 1024 * 1024;
+
+/**
  * Runtime projection of the provider manifest — a flat view over the
  * subset of fields that `makeProviderTool` actually consumes. The
  * canonical wire shape nests these fields under `definition.*` per AFPS
@@ -72,20 +93,50 @@ export interface ProviderCallRequest {
   };
 }
 
+/**
+ * Discriminated union for response bodies surfaced to the LLM:
+ *   - `text`   — UTF-8 text payloads (JSON, XML, plain text…)
+ *   - `inline` — small binary payloads, base64-encoded
+ *   - `file`   — large or `responseMode.toFile`-routed bodies materialized on disk
+ *
+ * The encoding is explicit on `inline` (always `base64`) so consumers
+ * never have to guess. The legacy `{ inline; inlineEncoding } | { file }`
+ * shape was lossy for binary data — see issues #149 / #151.
+ */
+export type ProviderCallResponseBody =
+  | { kind: "text"; text: string }
+  | { kind: "inline"; data: string; encoding: "base64"; mimeType: string; size: number }
+  | { kind: "file"; path: string; size: number; mimeType: string; sha256: string };
+
 export interface ProviderCallResponse {
   status: number;
   headers: Record<string, string>;
-  body:
-    | { inline: unknown; inlineEncoding?: "utf8" | "base64" | "none" }
-    | { file: { path: string; size: number; contentType: string; sha256?: string } };
+  body: ProviderCallResponseBody;
+}
+
+/**
+ * Per-call execution context forwarded to the resolver from the Tool
+ * `execute()` wrapper. Carries the ambient run state the resolver needs
+ * to materialize file-backed bodies safely (workspace, toolCallId for
+ * deterministic auto-spill paths, abort signal).
+ */
+export interface ProviderCallContext {
+  workspace: string;
+  toolCallId: string;
+  signal: AbortSignal;
 }
 
 /**
  * Transport callback. Resolver implementations close over whatever
  * credential / transport state they need and hand this callback to
- * {@link makeProviderTool}.
+ * {@link makeProviderTool}. The tool wrapper passes the ambient
+ * {@link ProviderCallContext} alongside the request so the resolver can
+ * resolve workspace-relative paths and auto-spill large responses.
  */
-export type ProviderCallFn = (req: ProviderCallRequest) => Promise<ProviderCallResponse>;
+export type ProviderCallFn = (
+  req: ProviderCallRequest,
+  ctx: ProviderCallContext,
+) => Promise<ProviderCallResponse>;
 
 export interface MakeProviderToolOptions {
   /** Tool name override. Defaults to `<sluggedProviderName>_call`. */
@@ -111,8 +162,8 @@ export function makeProviderTool(
   const description =
     opts.description ??
     `Call the ${meta.name} provider. Supply method, target URL, optional headers/body, and responseMode. ` +
-      `Binary payloads SHOULD be passed via { fromFile } on request and { toFile } on response — ` +
-      `bytes embedded in tool arguments bloat the LLM context and are truncated.`;
+      `Pass binary uploads via { fromFile } and route binary downloads via responseMode.toFile — ` +
+      `inline bytes are decoded as text and bloat the LLM context.`;
 
   const parameters: JSONSchema = {
     type: "object",
@@ -138,6 +189,8 @@ export function makeProviderTool(
           },
           { type: "null" },
         ],
+        description:
+          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary uploads.",
       },
       responseMode: {
         type: "object",
@@ -145,9 +198,15 @@ export function makeProviderTool(
         properties: {
           toFile: {
             type: "string",
-            description: "Workspace-relative path to stream the body into",
+            description:
+              "Workspace-relative path to stream the response body into (use for binary downloads)",
           },
-          maxInlineBytes: { type: "integer", minimum: 0 },
+          maxInlineBytes: {
+            type: "integer",
+            minimum: 0,
+            maximum: ABSOLUTE_MAX_RESPONSE_SIZE,
+            description: `Inline size cap; defaults to ${defaultInlineLimit} bytes when absent. Larger responses auto-spill to a file.`,
+          },
         },
       },
     },
@@ -163,10 +222,16 @@ export function makeProviderTool(
       const req = args as ProviderCallRequest;
       enforceAuthorizedUris(meta, req.target);
 
+      const callCtx: ProviderCallContext = {
+        workspace: ctx.workspace,
+        toolCallId: ctx.toolCallId ?? `tc_${Math.random().toString(36).slice(2, 10)}`,
+        signal: ctx.signal,
+      };
+
       const started = Date.now();
       let response: ProviderCallResponse;
       try {
-        response = await call(req);
+        response = await call(req, callCtx);
       } catch (err) {
         if (emit) {
           ctx.emit({
@@ -237,16 +302,131 @@ export function providerToolName(providerId: string): string {
 }
 
 /**
+ * Resolve a workspace-relative path under {@link workspace}, refusing
+ * absolute paths, parent-traversal, and symlinks whose target escapes
+ * the workspace. Throws {@link ResolverError} with
+ * `RESOLVER_PATH_OUTSIDE_WORKSPACE` (or `RESOLVER_PATH_INVALID`) on
+ * violation.
+ *
+ * Used by both the request-body `{ fromFile }` resolver and the
+ * response-body `responseMode.toFile` writer.
+ */
+export async function resolveSafePath(workspace: string, relative: string): Promise<string> {
+  if (typeof relative !== "string" || relative.length === 0) {
+    throw new ResolverError(
+      "RESOLVER_PATH_INVALID",
+      `resolveSafePath: path must be a non-empty string`,
+      { workspace, relative },
+    );
+  }
+  const path = await import("node:path");
+  if (path.isAbsolute(relative)) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+      `resolveSafePath: absolute paths are not allowed (got ${JSON.stringify(relative)})`,
+      { workspace, relative },
+    );
+  }
+  const fs = await import("node:fs/promises");
+  // Canonicalize the workspace too — on macOS `/tmp` is a symlink to
+  // `/private/tmp`, so a lexical-only check would treat resolved paths
+  // (which come back through realpath) as outside the workspace.
+  let wsAbs: string;
+  try {
+    wsAbs = await fs.realpath(path.resolve(workspace));
+  } catch {
+    wsAbs = path.resolve(workspace);
+  }
+  const candidate = path.resolve(wsAbs, relative);
+  const wsWithSep = wsAbs.endsWith(path.sep) ? wsAbs : wsAbs + path.sep;
+  if (candidate !== wsAbs && !candidate.startsWith(wsWithSep)) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+      `resolveSafePath: ${JSON.stringify(relative)} resolves outside the workspace`,
+      { workspace, relative, resolved: candidate },
+    );
+  }
+  // If the candidate exists and is a symlink (or descends through one),
+  // realpath it and re-check. This guards against symlink escape after
+  // the lexical check.
+  try {
+    const real = await fs.realpath(candidate);
+    if (real !== wsAbs && !real.startsWith(wsWithSep)) {
+      throw new ResolverError(
+        "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+        `resolveSafePath: ${JSON.stringify(relative)} resolves to a symlink target outside the workspace`,
+        { workspace, relative, resolved: real },
+      );
+    }
+    return real;
+  } catch (err) {
+    if (err instanceof ResolverError) throw err;
+    // ENOENT is fine — caller may be writing a new file. Walk up the
+    // directory chain looking for the closest existing ancestor and
+    // realpath that, then verify the still-lexical descendant remains
+    // under the workspace.
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "ENOENT") {
+      let cursor = candidate;
+      let suffix = "";
+      while (true) {
+        const parent = path.dirname(cursor);
+        if (parent === cursor) break; // reached root
+        suffix = path.join(path.basename(cursor), suffix);
+        cursor = parent;
+        try {
+          const realParent = await fs.realpath(cursor);
+          if (realParent !== wsAbs && !realParent.startsWith(wsWithSep)) {
+            throw new ResolverError(
+              "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+              `resolveSafePath: ${JSON.stringify(relative)} resolves outside the workspace via ${realParent}`,
+              { workspace, relative, resolved: realParent },
+            );
+          }
+          return path.join(realParent, suffix);
+        } catch (innerErr) {
+          if (innerErr instanceof ResolverError) throw innerErr;
+          const ie = innerErr as NodeJS.ErrnoException;
+          if (ie.code === "ENOENT") continue; // walk further up
+          throw innerErr;
+        }
+      }
+      // Reached root without finding any existing ancestor — fall
+      // through to the lexical candidate (already validated).
+      return candidate;
+    }
+    throw err;
+  }
+}
+
+export interface ResolveBodyStreamOptions {
+  allowFromFile?: boolean;
+  transformString?: (input: string) => string;
+  /**
+   * Workspace root used to resolve `{ fromFile }` references. Required
+   * when `allowFromFile` is true — the resolver refuses references that
+   * resolve outside this directory.
+   */
+  workspace?: string;
+}
+
+/**
  * Materialise a request body into a `BodyInit`-compatible value.
  * Handles the three shapes accepted by {@link ProviderCallRequest.body}:
  * strings (optionally transformed — e.g. placeholder substitution by
  * the local resolver), raw bytes (pass-through), and file references
  * (only resolved when `allowFromFile` is true; sidecar-based transports
  * disallow them since the sidecar has no workspace access).
+ *
+ * `{ fromFile }` resolution is workspace-rooted via
+ * {@link resolveSafePath} and refuses absolute paths, parent-traversal,
+ * and symlinks whose target escapes the workspace. Pre-checks file size
+ * against {@link MAX_REQUEST_BODY_SIZE} so the runtime surfaces a typed
+ * error instead of letting the sidecar return 413.
  */
 export async function resolveBodyStream(
   body: string | Uint8Array | null | { fromFile: string } | undefined,
-  opts: { allowFromFile?: boolean; transformString?: (input: string) => string } = {},
+  opts: ResolveBodyStreamOptions = {},
 ): Promise<string | Uint8Array<ArrayBuffer> | undefined> {
   if (body === undefined || body === null) return undefined;
   if (typeof body === "string") {
@@ -260,8 +440,35 @@ export async function resolveBodyStream(
       { fromFile: body.fromFile },
     );
   }
+  if (!opts.workspace) {
+    throw new ResolverError(
+      "RESOLVER_MISSING_REQUIRED",
+      `resolveBodyStream: { fromFile } resolution requires a workspace; resolver did not pass one`,
+      { fromFile: body.fromFile },
+    );
+  }
   const fs = await import("node:fs/promises");
-  return toArrayBufferUint8(await fs.readFile(body.fromFile));
+  const safePath = await resolveSafePath(opts.workspace, body.fromFile);
+  // Refuse symlinks: lstat the path and bail if it's a symlink. The
+  // resolveSafePath realpath check already caught traversal-via-target,
+  // but the body of the file must still be a regular file we own, not
+  // a link the agent could swap mid-call.
+  const lst = await fs.lstat(safePath);
+  if (lst.isSymbolicLink()) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+      `resolveBodyStream: refusing to read symlink ${JSON.stringify(body.fromFile)}`,
+      { fromFile: body.fromFile, resolved: safePath },
+    );
+  }
+  if (lst.size > MAX_REQUEST_BODY_SIZE) {
+    throw new ResolverError(
+      "RESOLVER_BODY_TOO_LARGE",
+      `resolveBodyStream: ${JSON.stringify(body.fromFile)} is ${lst.size} bytes; max is ${MAX_REQUEST_BODY_SIZE}`,
+      { fromFile: body.fromFile, size: lst.size, max: MAX_REQUEST_BODY_SIZE },
+    );
+  }
+  return toArrayBufferUint8(await fs.readFile(safePath));
 }
 
 function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -278,22 +485,149 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Serialise a `fetch` response into the spec-shaped
- * {@link ProviderCallResponse} every resolver returns to the LLM. The
- * body is read once and inlined as UTF-8 — streaming to file is a
- * follow-up (`responseMode.toFile`, spec §16.2). Centralising lets us
- * add truncation, binary detection, and streaming in a single place.
+ * Whitelist of MIME types we are willing to decode as UTF-8 text. Every
+ * other Content-Type is treated as binary and base64-encoded — this is
+ * the bug fix at the heart of issues #149 / #151. `application/octet-stream`
+ * with a body that happens to be ASCII MUST come back as inline bytes,
+ * not text.
  */
-export async function serializeFetchResponse(res: Response): Promise<ProviderCallResponse> {
+function isTextLikeMimeType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("text/")) return true;
+  // Charset suffix is a strong signal regardless of base type.
+  if (/;\s*charset=/.test(ct)) return true;
+  // Structured-syntax suffixes for JSON/XML (RFC 6839) — `+json`, `+xml`.
+  // These must come before the general substring tests so e.g.
+  // `application/vnd.api+json` is treated as text.
+  if (/\+json(\s*;|$)/.test(ct)) return true;
+  if (/\+xml(\s*;|$)/.test(ct)) return true;
+  // Common base types.
+  if (ct.startsWith("application/json")) return true;
+  if (ct.startsWith("application/xml")) return true;
+  if (ct.startsWith("application/javascript")) return true;
+  if (ct.startsWith("application/ecmascript")) return true;
+  return false;
+}
+
+function parseMimeType(contentType: string | null | undefined): string {
+  if (!contentType) return "application/octet-stream";
+  const semi = contentType.indexOf(";");
+  return (
+    (semi >= 0 ? contentType.slice(0, semi) : contentType).trim() || "application/octet-stream"
+  );
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const crypto = await import("node:crypto");
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+function base64Encode(bytes: Uint8Array): string {
+  // Buffer is available in both Node and Bun.
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+}
+
+export interface SerializeFetchResponseContext {
+  workspace: string;
+  toolCallId: string;
+  responseMode?: { toFile?: string; maxInlineBytes?: number };
+}
+
+/**
+ * Serialise a `fetch` response into the spec-shaped
+ * {@link ProviderCallResponse} every resolver returns to the LLM.
+ *
+ * Read once via `arrayBuffer()` (NEVER `text()`) so binary bytes are
+ * preserved end-to-end — the regression fixed by issues #149 / #151 in
+ * the sidecar resurfaced when the runtime moved from `curl` to typed
+ * `<provider>_call` tools, because the client-side serializer still
+ * stringified bytes as UTF-8. Decoding now follows a strict whitelist
+ * (text/*, application/json, application/xml, +json/+xml suffixes,
+ * `; charset=...`); everything else round-trips as base64 (`inline`)
+ * or spills to a file (`file`).
+ */
+export async function serializeFetchResponse(
+  res: Response,
+  ctx: SerializeFetchResponseContext,
+): Promise<ProviderCallResponse> {
   const headers: Record<string, string> = {};
   res.headers.forEach((value, key) => {
     headers[key] = value;
   });
-  const text = await res.text();
+
+  const arrayBuffer = await res.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const size = bytes.byteLength;
+  const contentType = res.headers.get("content-type");
+  const mimeType = parseMimeType(contentType);
+
+  const requestedToFile = ctx.responseMode?.toFile;
+  const requestedInlineLimit = ctx.responseMode?.maxInlineBytes;
+  // Cap at the absolute maximum and fall back to the default when the
+  // agent did not specify a value. Both bounds mirror the sidecar's.
+  const effectiveInlineLimit =
+    requestedInlineLimit === undefined
+      ? defaultInlineLimit
+      : Math.min(Math.max(0, requestedInlineLimit), ABSOLUTE_MAX_RESPONSE_SIZE);
+
+  // 1. Caller asked for a file: write there, regardless of size or mime.
+  if (typeof requestedToFile === "string" && requestedToFile.length > 0) {
+    const safePath = await resolveSafePath(ctx.workspace, requestedToFile);
+    const path = await import("node:path");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(path.dirname(safePath), { recursive: true });
+    await fs.writeFile(safePath, bytes);
+    const sha256 = await sha256Hex(bytes);
+    return {
+      status: res.status,
+      headers,
+      body: { kind: "file", path: requestedToFile, size, mimeType, sha256 },
+    };
+  }
+
+  // 2. Auto-spill: response is larger than the effective inline cap.
+  if (size > effectiveInlineLimit) {
+    const relative = `responses/${ctx.toolCallId}.bin`;
+    const safePath = await resolveSafePath(ctx.workspace, relative);
+    const path = await import("node:path");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(path.dirname(safePath), { recursive: true });
+    await fs.writeFile(safePath, bytes);
+    const sha256 = await sha256Hex(bytes);
+    return {
+      status: res.status,
+      headers,
+      body: { kind: "file", path: relative, size, mimeType, sha256 },
+    };
+  }
+
+  // 3. Text-like Content-Type: decode UTF-8 with replacement characters
+  //    on invalid bytes (`fatal: false`) — we already know the upstream
+  //    declared text, so a stray byte should not crash the call.
+  if (isTextLikeMimeType(contentType)) {
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    return {
+      status: res.status,
+      headers,
+      body: { kind: "text", text },
+    };
+  }
+
+  // 4. Default: small binary payload — base64-encode inline. Even if
+  //    the bytes happen to be ASCII (e.g. `application/octet-stream`
+  //    carrying "hello"), the strict whitelist above keeps us in the
+  //    binary path so the LLM doesn't conflate the two.
   return {
     status: res.status,
     headers,
-    body: { inline: text, inlineEncoding: "utf8" },
+    body: {
+      kind: "inline",
+      data: base64Encode(bytes),
+      encoding: "base64",
+      mimeType,
+      size,
+    },
   };
 }
 

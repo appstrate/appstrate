@@ -196,10 +196,11 @@ describe("runtime-pi provider wiring (SidecarProviderResolver → runner-pi brid
 
     const parsed = JSON.parse(result.content[0]!.text) as {
       status: number;
-      body: { inline?: string };
+      body: { kind: string; text?: string };
     };
     expect(parsed.status).toBe(200);
-    expect(parsed.body.inline).toContain("messages");
+    expect(parsed.body.kind).toBe("text");
+    expect(parsed.body.text).toContain("messages");
 
     expect(sidecarLogs).toHaveLength(1);
     const hit = sidecarLogs[0]!;

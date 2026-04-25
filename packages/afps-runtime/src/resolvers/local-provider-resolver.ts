@@ -92,7 +92,7 @@ export class LocalProviderResolver implements ProviderResolver {
     meta: ProviderMeta,
     entry: LocalCredentialsFile["providers"][string],
   ): ProviderCallFn {
-    return async (req) => {
+    return async (req, ctx) => {
       const target = substitutePlaceholders(req.target, entry.fields);
       const headers = { ...(req.headers ?? {}) };
       for (const [key, value] of Object.entries(headers)) {
@@ -102,6 +102,7 @@ export class LocalProviderResolver implements ProviderResolver {
 
       const bodyBytes = await resolveBodyStream(req.body, {
         allowFromFile: true,
+        workspace: ctx.workspace,
         transformString: (input) => substitutePlaceholders(input, entry.fields),
       });
 
@@ -109,9 +110,14 @@ export class LocalProviderResolver implements ProviderResolver {
         method: req.method,
         headers,
         body: bodyBytes,
+        signal: ctx.signal,
       });
       void meta;
-      return serializeFetchResponse(res);
+      return serializeFetchResponse(res, {
+        workspace: ctx.workspace,
+        toolCallId: ctx.toolCallId,
+        ...(req.responseMode ? { responseMode: req.responseMode } : {}),
+      });
     };
   }
 }
