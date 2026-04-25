@@ -65,6 +65,10 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/memories",
   "DELETE /api/agents/{scope}/{name}/memories",
   "DELETE /api/agents/{scope}/{name}/memories/{memoryId}",
+  // Unified persistence (ADR-011) — checkpoints + memories
+  "GET /api/agents/{scope}/{name}/persistence",
+  "DELETE /api/agents/{scope}/{name}/persistence",
+  "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
   "PUT /api/agents/{scope}/{name}/skills",
   "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",

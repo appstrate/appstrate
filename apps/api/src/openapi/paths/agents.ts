@@ -320,6 +320,169 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/persistence": {
+    get: {
+      operationId: "listAgentPersistence",
+      tags: ["Agents"],
+      summary: "List unified agent persistence (checkpoint + memories)",
+      description:
+        "Returns the agent's checkpoint and memory list visible to the caller's actor scope. Admins may filter by `actorType` (`user` | `end_user` | `shared`) + `actorId` to inspect a specific scope. Members always see their own actor scope plus shared rows. See ADR-011.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "kind",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["checkpoint", "memory"] },
+          description: "Limit the response to one kind. Omitted → both.",
+        },
+        {
+          name: "actorType",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["user", "end_user", "shared"] },
+          description: "Admin-only scope override. Defaults to caller's actor scope.",
+        },
+        {
+          name: "actorId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Required when `actorType` is `user` or `end_user`.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Persistence rows",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  checkpoint: {
+                    description: "Latest checkpoint content (any JSON value), or null if absent.",
+                  },
+                  memories: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        content: {},
+                        runId: { type: ["string", "null"] },
+                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actorId: { type: ["string", "null"] },
+                        createdAt: { type: ["string", "null"], format: "date-time" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteAgentPersistence",
+      tags: ["Agents"],
+      summary: "Bulk-delete persistence rows for an agent",
+      description:
+        "Wipes memories (always) and optionally a checkpoint (when `actorType` + `actorId` resolve to a single scope). Admin-only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "kind",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["checkpoint", "memory"] },
+        },
+        {
+          name: "actorType",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["user", "end_user", "shared"] },
+        },
+        {
+          name: "actorId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Counts of deleted rows",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  memoriesDeleted: { type: "integer" },
+                  checkpointDeleted: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/agents/{scope}/{name}/persistence/memories/{id}": {
+    delete: {
+      operationId: "deleteAgentPersistenceMemory",
+      tags: ["Agents"],
+      summary: "Delete a single memory by id",
+      description: "Admin-only. The id must belong to the targeted agent in the current app.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        { name: "id", in: "path", required: true, schema: { type: "integer" } },
+      ],
+      responses: {
+        "200": {
+          description: "Memory deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { deleted: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/agents/{scope}/{name}/model": {
     get: {
       operationId: "getAgentModel",
