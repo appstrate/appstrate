@@ -3,8 +3,6 @@
 import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
-import { and, eq } from "drizzle-orm";
-import { userProviderConnections } from "@appstrate/db/schema";
 import {
   initiateOAuth,
   handleOAuthCallback,
@@ -69,6 +67,19 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     result.providerId,
   );
 
+  // Scope shortfall: provider granted fewer scopes than requested (RFC 6749 §3.3
+  // narrowing). Flag the connection in the same upsert so callers see the
+  // "needs reconnection" signal atomically — no readable window between INSERT
+  // and a follow-up UPDATE where the connection looks healthy.
+  const needsReconnection = result.scopeShortfall.length > 0;
+  if (needsReconnection) {
+    logger.warn("OAuth scope shortfall — flagging connection as needsReconnection", {
+      providerId: result.providerId,
+      profileId: result.profileId,
+      shortfall: result.scopeShortfall,
+    });
+  }
+
   await saveConnection(
     db,
     result.profileId,
@@ -82,30 +93,9 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
       providerCredentialId,
+      needsReconnection,
     },
   );
-
-  // Scope shortfall: provider granted fewer scopes than requested (RFC 6749 §3.3
-  // narrowing). Flag the connection so callers see a structured "needs reconnection"
-  // signal instead of silently working with reduced permissions.
-  if (result.scopeShortfall.length > 0) {
-    logger.warn("OAuth scope shortfall — flagging connection as needsReconnection", {
-      providerId: result.providerId,
-      profileId: result.profileId,
-      shortfall: result.scopeShortfall,
-    });
-    await db
-      .update(userProviderConnections)
-      .set({ needsReconnection: true, updatedAt: new Date() })
-      .where(
-        and(
-          eq(userProviderConnections.profileId, result.profileId),
-          eq(userProviderConnections.providerId, result.providerId),
-          eq(userProviderConnections.orgId, result.orgId),
-          eq(userProviderConnections.providerCredentialId, providerCredentialId),
-        ),
-      );
-  }
 
   // Scope creep: provider returned more scopes than requested. Some providers
   // (Slack, GitHub legacy) always return all owner scopes, so this is non-blocking.

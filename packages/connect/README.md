@@ -52,9 +52,11 @@ Stored credentials use AES-256-GCM with a versioned envelope:
 v1:<kid>:<base64(iv|authTag|ciphertext)>
 ```
 
-Legacy ("v0") blobs — raw `base64(iv|authTag|ciphertext)` with no header — remain
-decryptable indefinitely with the active key, so the format change rolls out
-non-breaking. New writes always emit v1.
+Legacy ("v0") blobs — raw `base64(iv|authTag|ciphertext)` with no header —
+carry no kid, so `decrypt()` tries every key in the keyring (active + retired)
+until AES-GCM tag verification succeeds. A wrong key cannot pass GCM
+verification by chance (~2^-128), so the multi-key probe is safe. New writes
+always emit v1.
 
 ### Online key rotation playbook
 
@@ -73,13 +75,16 @@ export CONNECTION_ENCRYPTION_KEY=$NEW_KEY
 export CONNECTION_ENCRYPTION_KEY_ID=k2
 
 # 3. Restart the platform. New writes emit `v1:k2:...`. Existing `v1:k1:...`
-#    blobs remain readable via the retired keyring; v0 blobs decrypt with the
-#    current active key.
+#    blobs remain readable via the retired keyring; v0 blobs decrypt by
+#    probing every key in the keyring (active + retired) until AES-GCM tag
+#    verification succeeds.
 
 # 4. Run a background re-encrypt sweep (read → decrypt → encrypt → write) to
 #    rewrite every `userProviderConnections.credentialsEncrypted` row. Idempotent.
+#    The sweep migrates v0 → v1 *and* re-keys v1:<old-kid> blobs to v1:<active-kid>.
 
-# 5. Once sweep is complete, drop the retired key:
+# 5. Only after the sweep confirms no blob still depends on the retired key,
+#    drop it:
 unset CONNECTION_ENCRYPTION_KEYS
 ```
 
@@ -88,6 +93,13 @@ Restrictions:
 - `CONNECTION_ENCRYPTION_KEY_ID` must match `^[A-Za-z0-9_-]{1,32}$`.
 - Retired keys must use a different kid than the active one (validated at boot).
 - Each retired key must be 32 bytes (256-bit) base64-encoded.
+
+**Step ordering invariant.** A key may be removed from
+`CONNECTION_ENCRYPTION_KEYS` (step 5) **only after** the sweep (step 4)
+confirms zero rows still encrypted under that key. Removing it sooner
+permanently corrupts every credential that still depends on it — the v0
+multi-key probe protects against silent breakage during the rotation window
+but not against a key being deleted outright.
 
 ## Dependencies
 
