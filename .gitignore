@@ -43,6 +43,7 @@ storage/
 docs/*
 !docs/adr/
 !docs/cli/
+!docs/migrations/
 flows/*
 
 claudedocs/

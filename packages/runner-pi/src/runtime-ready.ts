@@ -34,7 +34,26 @@ export interface RuntimeReadyPayload {
   extensions: number;
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
   bootDurationMs: number;
+  /**
+   * Runtime ↔ platform wire protocol version (Phase 6 §D6.1 of #276).
+   * MAJOR.MINOR — runners on `1.x` interoperate with platforms on
+   * `1.x`; runners on `2.0` advertise MCP-native tool surfaces and
+   * resource URIs. Platforms accept both for one minor cycle, then
+   * drop `1.x` per the §V6 18-month deprecation window. Old consumers
+   * that don't read the field are unaffected (additive on the event
+   * envelope).
+   */
+  runtimeProtocolVersion?: string;
 }
+
+/**
+ * Current runtime ↔ platform protocol version. Bumped to `2.0` in
+ * Phase 6 of #276 to mark the boundary at which MCP-native tool
+ * surfaces became the default and the `/llm/*`, `/run-history`,
+ * `/proxy?X-Stream-Response` legacy routes entered their sunset
+ * window.
+ */
+export const CURRENT_RUNTIME_PROTOCOL_VERSION = "2.0" as const;
 
 /**
  * Emit the "runtime ready" progress event. Awaits the sink's POST —
@@ -48,12 +67,17 @@ export async function emitRuntimeReady(
   payload: RuntimeReadyPayload,
   now: () => number = Date.now,
 ): Promise<void> {
+  const protocolVersion = payload.runtimeProtocolVersion ?? CURRENT_RUNTIME_PROTOCOL_VERSION;
   await sink.handle({
     type: "appstrate.progress",
     timestamp: now(),
     runId,
     message: `runtime ready in ${Math.round(payload.bootDurationMs)}ms`,
-    data: { bundleLoaded: payload.bundleLoaded, extensions: payload.extensions },
+    data: {
+      bundleLoaded: payload.bundleLoaded,
+      extensions: payload.extensions,
+      runtimeProtocolVersion: protocolVersion,
+    },
     level: "info",
   });
 }

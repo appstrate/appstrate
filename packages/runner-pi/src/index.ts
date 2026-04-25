@@ -33,7 +33,11 @@ export {
   type RuntimePiModelConfig,
 } from "./container-env.ts";
 
-export { emitRuntimeReady, type RuntimeReadyPayload } from "./runtime-ready.ts";
+export {
+  emitRuntimeReady,
+  CURRENT_RUNTIME_PROTOCOL_VERSION,
+  type RuntimeReadyPayload,
+} from "./runtime-ready.ts";
 
 export {
   startSinkHeartbeat,

@@ -265,6 +265,31 @@ describe("McpHost — dispose", () => {
   });
 });
 
+describe("McpHost — capability discovery (V7)", () => {
+  it("emits upstream_registered with serverInfo + capabilities on register", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const events: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => events.push(e) });
+      await host.register({ namespace: "fs", client: fs.client });
+
+      const reg = events.find(
+        (e) => (e.data as { event?: string }).event === "upstream_registered",
+      );
+      expect(reg).toBeDefined();
+      const data = reg!.data as {
+        event: string;
+        serverInfo: { name: string; version: string } | null;
+        capabilities: { tools?: unknown } | null;
+      };
+      expect(data.serverInfo).toBeDefined();
+      expect(data.capabilities?.tools).toBeDefined();
+    } finally {
+      await fs.pair.close();
+    }
+  });
+});
+
 describe("McpHost — emitLog (D4.5 transducer)", () => {
   it("forwards source/level/data via onLog", () => {
     const events: Array<{ source: string; level: string; data: unknown }> = [];

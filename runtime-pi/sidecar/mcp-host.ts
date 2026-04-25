@@ -95,6 +95,31 @@ export class McpHost {
       throw new Error(`McpHost: namespace '${upstream.namespace}' is empty after normalisation`);
     }
 
+    // Phase 6 §V7 — capture the upstream's MCP `initialize` snapshot so
+    // operator dashboards can audit which third-party server version
+    // is actually wired (versions on disk drift from versions on the
+    // wire), and so we can skip `tools/list` against a server that
+    // didn't advertise the `tools` capability — JSON-RPC error round-
+    // trips on every register would otherwise add a per-server failure
+    // mode.
+    const serverVersion = upstream.client.getServerVersion();
+    const capabilities = upstream.client.getServerCapabilities();
+    this.options.onLog?.({
+      source: `host:${upstream.namespace}`,
+      level: "info",
+      data: {
+        event: "upstream_registered",
+        serverInfo: serverVersion ?? null,
+        capabilities: capabilities ?? null,
+      },
+    });
+
+    if (capabilities && !capabilities.tools) {
+      // Server explicitly does NOT support tools — no point asking.
+      this.upstreams.set(upstream.namespace, upstream);
+      return;
+    }
+
     const { tools } = await upstream.client.listTools();
     for (const tool of tools) {
       // Phase 5 of #276 — strip hidden Unicode, cap field lengths,
