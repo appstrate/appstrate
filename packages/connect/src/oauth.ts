@@ -242,8 +242,35 @@ export async function handleOAuthCallback(
   if (!tokenResponse.ok) {
     const body = await tokenResponse.text();
     const classification = parseTokenErrorResponse(tokenResponse.status, body);
+    // Don't concatenate the raw IdP body into the error message — some
+    // IdPs echo the rejected `code` (or other request fields) back into
+    // 400 bodies, so a generic catcher logging `err.message` would
+    // surface them. Callers that need the body for diagnostics read it
+    // off the typed `body` field instead, where the connections route
+    // already sanitises it before user-facing surfaces.
+    const summary =
+      classification.error !== undefined
+        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
+        : `HTTP ${tokenResponse.status}`;
+    // The auth code is dead by the time the IdP rejects with `revoked`
+    // (codes are one-shot), so the PKCE state row will never be useful
+    // again. Delete it instead of letting it sit in Redis for the full
+    // 10-minute TTL — same hygiene as the success path. We do NOT
+    // delete on `transient` failures because some retry strategies want
+    // the row preserved so a re-exchange of the same code is possible
+    // (the IdP may temporarily 5xx). Errors during the delete are
+    // swallowed so the caller still sees the original classification —
+    // a stale state row is a quality-of-service issue, not a security
+    // one (the auth code is already dead).
+    if (classification.kind === "revoked") {
+      try {
+        await store.delete(state);
+      } catch {
+        /* swallowed: stale row reaped by TTL within 10 minutes */
+      }
+    }
     throw new OAuthCallbackError(
-      `Token exchange failed for '${stateRow.providerId}': ${tokenResponse.status} ${body}`,
+      `Token exchange failed for '${stateRow.providerId}': ${summary}`,
       classification.kind,
       stateRow.providerId,
       tokenResponse.status,

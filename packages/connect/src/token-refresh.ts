@@ -139,8 +139,16 @@ async function doRefresh(
   if (!response.ok) {
     const text = await response.text();
     const classification = parseTokenErrorResponse(response.status, text);
+    // Mirror OAuthCallbackError: the raw IdP body lives on the typed
+    // `body` field, the message carries only the classification summary
+    // so a generic catcher logging `err.message` cannot leak whatever
+    // the IdP echoed back (some servers reflect the rejected token).
+    const summary =
+      classification.error !== undefined
+        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
+        : `HTTP ${response.status}`;
     throw new RefreshError(
-      `Token refresh failed for '${providerId}': ${response.status} ${text}`,
+      `Token refresh failed for '${providerId}': ${summary}`,
       classification.kind,
       response.status,
       text,

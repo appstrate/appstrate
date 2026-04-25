@@ -429,6 +429,104 @@ describe("OAuth2 flows", () => {
       expect((caught as OAuthCallbackError).kind).toBe("transient");
     });
 
+    // Regression: an earlier version concatenated the raw IdP body into
+    // the error message — some IdPs echo the rejected `code` (or other
+    // request fields) back in 400 bodies, so a generic catcher logging
+    // `err.message` would surface them. The body now lives ONLY on the
+    // typed `body` field.
+    it("never leaks the raw IdP body into err.message; preserves it on err.body", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({
+        error: "invalid_grant",
+        error_description: "Authorization code expired",
+        // Some IdPs echo the rejected code or other sensitive request
+        // fields. Synthesise that here to assert it never reaches
+        // err.message.
+        echoed_code: "leaked-secret-AAA-BBB-CCC",
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      const cbErr = caught as OAuthCallbackError;
+
+      // Body is preserved verbatim on the typed field for diagnostics.
+      expect(cbErr.body).toContain("leaked-secret-AAA-BBB-CCC");
+
+      // Message must NOT contain anything the IdP echoed back. The
+      // summary is built from `oauthError` + `oauthErrorDescription`
+      // only, both of which the connection layer treats as
+      // already-classified strings.
+      expect(cbErr.message).not.toContain("leaked-secret-AAA-BBB-CCC");
+      expect(cbErr.message).toContain("invalid_grant");
+      expect(cbErr.message).toContain("Authorization code expired");
+    });
+
+    // Regression: PKCE state used to linger in Redis for the full
+    // 10-minute TTL on a `revoked` callback failure even though the
+    // auth code was already dead at the IdP. Hygiene: delete the row
+    // on revoked outcomes (we keep it on `transient` so retry of the
+    // same code stays possible for transient 5xx).
+    it("deletes the OAuth state row on a revoked callback failure", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({ error: "invalid_grant" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      // State row exists pre-callback.
+      const before = await oauthStateStore.get(state);
+      expect(before).not.toBeNull();
+
+      try {
+        await handleCallback("bad-code", state);
+      } catch {
+        /* expected revoked */
+      }
+
+      // State row reaped after a revoked outcome.
+      const after = await oauthStateStore.get(state);
+      expect(after).toBeNull();
+    });
+
+    it("preserves the OAuth state row on a transient callback failure", async () => {
+      mockServer.setTokenStatus(500);
+      mockServer.setTokenResponse({ error: "server_error" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      try {
+        await handleCallback("bad-code", state);
+      } catch {
+        /* expected transient */
+      }
+
+      // Row preserved so a retry of the same code (for genuine 5xx)
+      // remains possible within the TTL window.
+      const after = await oauthStateStore.get(state);
+      expect(after).not.toBeNull();
+    });
+
     it("throws when token response has no access_token", async () => {
       mockServer.setTokenResponse({ token_type: "Bearer" });
 

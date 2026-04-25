@@ -56,10 +56,27 @@ const envSchema = z
     // kid → base64-encoded 32-byte key. Exclude the active kid (validated at boot).
     // Empty map disables the legacy keyring; existing v0 blobs still decrypt with
     // the active key.
+    //
+    // Validated as `Record<string, string>` AT BOOT — a non-string value or
+    // JSON parse error fails fast with a clear Zod issue path, rather than
+    // surfacing inside `loadKeyring()` as a `Buffer.from(b64, "base64")`
+    // length mismatch hours later. The kid format itself is validated by
+    // `loadKeyring()` against the same `KID_PATTERN` used for envelopes.
     CONNECTION_ENCRYPTION_KEYS: z
       .string()
       .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, string>),
+      .transform((s, ctx) => {
+        try {
+          return JSON.parse(s) as unknown;
+        } catch {
+          ctx.addIssue({
+            code: "custom",
+            message: "CONNECTION_ENCRYPTION_KEYS must be valid JSON",
+          });
+          return z.NEVER;
+        }
+      })
+      .pipe(z.record(z.string(), z.string())),
     SYSTEM_PROXIES: z
       .string()
       .default("[]")
