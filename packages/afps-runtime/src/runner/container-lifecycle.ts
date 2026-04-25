@@ -12,13 +12,9 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import { RunCancelledError, RunTimeoutError, WorkloadExitError } from "../errors.ts";
 
-export class RunTimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RunTimeoutError";
-  }
-}
+export { RunTimeoutError };
 
 /**
  * Minimal structural contract any workload orchestrator must expose to be
@@ -95,7 +91,7 @@ export async function* runContainerLifecycle<Handle>(
     }
 
     if (signal?.aborted) {
-      throw new Error("Run cancelled");
+      throw new RunCancelledError("Run cancelled", { runId, adapterName });
     }
 
     const exitCode = await orchestrator.waitForExit(handle);
@@ -105,7 +101,7 @@ export async function* runContainerLifecycle<Handle>(
     }
 
     if (exitCode !== 0 && !hasOutput) {
-      throw new Error(lastError ?? `${adapterName} workload exited with code ${exitCode}`);
+      throw new WorkloadExitError(adapterName, exitCode, lastError);
     }
   } finally {
     clearTimeout(timeoutHandle);

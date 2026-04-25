@@ -130,3 +130,20 @@ export {
 export * from "./runner/index.ts";
 export * from "./conformance/index.ts";
 export * from "./resolvers/index.ts";
+
+// Unified error taxonomy + RFC 9457 problem+json helper.
+export {
+  AfpsRuntimeError,
+  RunCancelledError,
+  RunTimeoutError,
+  WorkloadExitError,
+  ProviderAuthorizationError,
+  ResolverError,
+  RunHistoryError,
+  CredentialResolutionError,
+  isAfpsError,
+  toProblem,
+  type AfpsError,
+  type AfpsErrorCode,
+  type ProblemDetails,
+} from "./errors.ts";

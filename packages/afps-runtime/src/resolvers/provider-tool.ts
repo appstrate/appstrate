@@ -12,6 +12,7 @@
 
 import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
+import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
 
 /**
  * Runtime projection of the provider manifest — a flat view over the
@@ -253,8 +254,10 @@ export async function resolveBodyStream(
   }
   if (body instanceof Uint8Array) return toArrayBufferUint8(body);
   if (!opts.allowFromFile) {
-    throw new Error(
+    throw new ResolverError(
+      "RESOLVER_BODY_REFERENCE_FORBIDDEN",
       `resolveBodyStream: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use a resolver with allowFromFile`,
+      { fromFile: body.fromFile },
     );
   }
   const fs = await import("node:fs/promises");
@@ -365,15 +368,21 @@ function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
   if (meta.allowAllUris) return;
   const patterns = meta.authorizedUris ?? [];
   if (patterns.length === 0) {
-    throw new Error(
+    throw new ProviderAuthorizationError(
+      "PROVIDER_AUTHORIZED_URIS_EMPTY",
       `Provider ${meta.name}: authorizedUris allowlist is empty; every target is forbidden. ` +
         `Declare authorizedUris in the provider manifest or set allowAllUris: true.`,
+      { provider: meta.name, target },
     );
   }
   for (const pattern of patterns) {
     if (matchesAuthorizedUriSpec(pattern, target)) return;
   }
-  throw new Error(`Provider ${meta.name}: target ${target} is not in authorizedUris allowlist`);
+  throw new ProviderAuthorizationError(
+    "PROVIDER_AUTHORIZED_URIS_MISMATCH",
+    `Provider ${meta.name}: target ${target} is not in authorizedUris allowlist`,
+    { provider: meta.name, target, allowlist: patterns },
+  );
 }
 
 /**
