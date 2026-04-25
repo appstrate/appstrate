@@ -35,13 +35,15 @@ CREATE TABLE IF NOT EXISTS "package_persistence" (
 --> statement-breakpoint
 
 -- Upsert target: at most one checkpoint per (package, app, actor).
--- NULLs in the unique index are treated as DISTINCT by Postgres by default,
--- so two shared checkpoints (actor_id NULL) for the same (package, app)
--- would otherwise BOTH be inserted. Use NULLS NOT DISTINCT so the unique
--- constraint still holds for the shared bucket.
+-- NULLs in the unique index are treated as DISTINCT by both Postgres and
+-- PGlite by default, so two shared checkpoints (actor_id NULL) for the
+-- same (package, app) would otherwise both be inserted. We can't use
+-- `NULLS NOT DISTINCT` (Postgres 15+ only — PGlite rejects it), so we
+-- coalesce `actor_id` to a sentinel string inside the index expression.
+-- This makes the shared bucket compare-equal to itself across both
+-- engines without changing the semantics of the constraint.
 CREATE UNIQUE INDEX IF NOT EXISTS "pkp_checkpoint_unique"
-  ON "package_persistence" ("package_id", "application_id", "actor_type", "actor_id")
-  NULLS NOT DISTINCT
+  ON "package_persistence" ("package_id", "application_id", "actor_type", (COALESCE("actor_id", '__shared__')))
   WHERE "kind" = 'checkpoint';
 --> statement-breakpoint
 
@@ -74,26 +76,44 @@ ON CONFLICT DO NOTHING;
 --> statement-breakpoint
 
 -- Back-fill the latest non-null `runs.state` per (package, app, actor) as
--- a checkpoint. `DISTINCT ON` is Postgres-specific and picks the row with
--- MAX(started_at) per group thanks to the ORDER BY tiebreak.
+-- a checkpoint. We use a `ROW_NUMBER()` CTE rather than the Postgres-only
+-- `DISTINCT ON` so the migration runs cleanly on PGlite (Tier 0) too.
+-- The PARTITION BY mirrors the per-actor key; ORDER BY started_at DESC
+-- picks the freshest row in each partition (rn = 1).
+WITH ranked AS (
+  SELECT
+    r.package_id,
+    r.application_id,
+    r.org_id,
+    r.dashboard_user_id,
+    r.end_user_id,
+    r.state,
+    r.id AS run_id,
+    r.started_at,
+    ROW_NUMBER() OVER (
+      PARTITION BY r.package_id, r.application_id, r.dashboard_user_id, r.end_user_id
+      ORDER BY r.started_at DESC
+    ) AS rn
+  FROM "runs" r
+  WHERE r.state IS NOT NULL
+)
 INSERT INTO "package_persistence"
   (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
-SELECT DISTINCT ON (r.package_id, r.application_id, r.dashboard_user_id, r.end_user_id)
-  r.package_id,
-  r.application_id,
-  r.org_id,
+SELECT
+  ranked.package_id,
+  ranked.application_id,
+  ranked.org_id,
   'checkpoint',
   CASE
-    WHEN r.end_user_id IS NOT NULL       THEN 'end_user'
-    WHEN r.dashboard_user_id IS NOT NULL THEN 'user'
+    WHEN ranked.end_user_id IS NOT NULL       THEN 'end_user'
+    WHEN ranked.dashboard_user_id IS NOT NULL THEN 'user'
     ELSE 'shared'
   END,
-  COALESCE(r.end_user_id, r.dashboard_user_id),
-  r.state,
-  r.id,
-  r.started_at,
-  r.started_at
-FROM "runs" r
-WHERE r.state IS NOT NULL
-ORDER BY r.package_id, r.application_id, r.dashboard_user_id, r.end_user_id, r.started_at DESC
+  COALESCE(ranked.end_user_id, ranked.dashboard_user_id),
+  ranked.state,
+  ranked.run_id,
+  ranked.started_at,
+  ranked.started_at
+FROM ranked
+WHERE ranked.rn = 1
 ON CONFLICT DO NOTHING;

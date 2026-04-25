@@ -259,11 +259,20 @@ export const packagePersistence = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    // Upsert target: at most one checkpoint per (package, app, actor). The
-    // coalesce turns NULL actor_id (shared) into a distinct key from any
-    // (user / end_user) row, so the three scopes genuinely coexist.
+    // Upsert target: at most one checkpoint per (package, app, actor).
+    // We index on `COALESCE(actor_id, '__shared__')` rather than the raw
+    // column so the shared bucket (NULL actor_id) compares-equal to
+    // itself: Postgres + PGlite both treat NULLs as DISTINCT by default,
+    // so without the coalesce two `shared` checkpoints for the same
+    // (package, app) would both be inserted. The coalesce works on both
+    // engines, unlike `NULLS NOT DISTINCT` which is Postgres 15+ only.
     uniqueIndex("pkp_checkpoint_unique")
-      .on(table.packageId, table.applicationId, table.actorType, table.actorId)
+      .on(
+        table.packageId,
+        table.applicationId,
+        table.actorType,
+        sql`(COALESCE(${table.actorId}, '__shared__'))`,
+      )
       .where(sql`kind = 'checkpoint'`),
     // Primary read path: getCheckpoint / listMemories.
     index("pkp_lookup").on(

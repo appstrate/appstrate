@@ -151,12 +151,15 @@ export async function getCheckpoint(
 
 /**
  * Overwrite the checkpoint for a given scope. Targets the partial unique
- * index `pkp_checkpoint_unique` (where kind='checkpoint'). The migration
- * uses NULLS NOT DISTINCT so the shared bucket also enforces single-row.
+ * index `pkp_checkpoint_unique` (WHERE kind='checkpoint') whose key is
+ * `(package_id, application_id, actor_type, COALESCE(actor_id, '__shared__'))`.
+ * The COALESCE replaces a Postgres-15-only `NULLS NOT DISTINCT` clause so
+ * the same migration runs cleanly on PGlite (Tier 0).
  *
  * We hand-roll the SQL because drizzle's `onConflictDoUpdate` does not
- * support specifying the predicate of a partial unique index; the
- * generated `ON CONFLICT (cols)` would otherwise not match our index.
+ * support specifying the predicate of a partial unique index, nor an
+ * expression-based conflict target. The `ON CONFLICT` columns/expression
+ * here MUST match the index definition byte-for-byte.
  */
 export async function upsertCheckpoint(
   packageId: string,
@@ -180,7 +183,7 @@ export async function upsertCheckpoint(
       (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
     VALUES
       (${packageId}, ${applicationId}, ${orgId}, 'checkpoint', ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
-    ON CONFLICT (package_id, application_id, actor_type, actor_id) WHERE kind = 'checkpoint'
+    ON CONFLICT (package_id, application_id, actor_type, (COALESCE(actor_id, '__shared__'))) WHERE kind = 'checkpoint'
     DO UPDATE SET
       content    = EXCLUDED.content,
       run_id     = EXCLUDED.run_id,
