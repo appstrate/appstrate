@@ -4,7 +4,7 @@
  * Captures the socket-level client IP from `getConnInfo(c)` and stores it
  * in the per-Request map exposed by `lib/client-ip.ts`. Without this
  * middleware, `getClientIpFromRequest` (used inside Better Auth plugin
- * endpoints which only see the bare `Request`) falls back to `"unknown"`
+ * endpoints which only see the bare `Request`) falls back to `null`
  * whenever `TRUST_PROXY=false` and no forwarded header is present — the
  * normal case for direct/local deployments.
  *
@@ -25,7 +25,7 @@ export function clientIp(): MiddlewareHandler {
       if (addr) setRequestClientIp(c.req.raw, addr);
     } catch {
       // No conn info available (e.g. test harness using `app.request()`).
-      // Leave the map untouched — downstream falls back to `"unknown"`.
+      // Leave the map untouched — downstream falls back to `null`.
     }
     await next();
   };

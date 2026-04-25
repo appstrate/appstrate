@@ -202,7 +202,9 @@ async function enforceRateLimit(
   request: Request | undefined,
 ): Promise<void> {
   const limiter = await getLimiter(category, points);
-  const ip = getClientIpFromRequest(request);
+  // Group IP-less calls into a single bucket so a flood of unauthenticated
+  // device-flow polls from a sourceless transport still hits the limit.
+  const ip = getClientIpFromRequest(request) ?? "unknown";
   try {
     await limiter.consume(`${category}:${ip}`);
   } catch (rej) {

@@ -61,14 +61,10 @@ export const oidcAuthStrategy: AuthStrategy = {
     // Non-CLI instance tokens (e.g. satellite admin app `/oauth2/token`)
     // simply have no `cli_family_id` claim and skip this check.
     if (claims.cliFamilyId) {
-      const resolvedIp = getClientIpFromRequest(request);
       const stillActive = await checkFamilyAndTouch({
         familyId: claims.cliFamilyId,
         userId: claims.authUserId,
-        // `getClientIpFromRequest` returns the literal `"unknown"` when
-        // no source provides an IP. Don't store that as the last-used IP
-        // — leave the column as-is.
-        ip: resolvedIp && resolvedIp !== "unknown" ? resolvedIp : null,
+        ip: getClientIpFromRequest(request),
       });
       if (!stillActive) {
         logger.info("OIDC strategy: CLI session revoked or unknown — rejecting token", {

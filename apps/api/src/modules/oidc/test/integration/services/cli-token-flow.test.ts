@@ -832,13 +832,13 @@ describe("device-session metadata (issue #251)", () => {
   });
 
   // `TRUST_PROXY` defaults to `false` in the test env, so
-  // `getClientIpFromRequest` returns the literal string `"unknown"`
-  // when reading from a test request — the cli-plugin layer normalizes
-  // that sentinel to `null` before persisting (so the dashboard renders
-  // an empty cell instead of the noise word). Tests that want a non-null
-  // `created_ip` must therefore push an explicit `X-Forwarded-For` header
-  // AND run with `TRUST_PROXY=1` so the resolver actually reads it.
-  // The current suite asserts on the null vs non-null distinction.
+  // `getClientIpFromRequest` returns `null` when reading from a test
+  // request that carries no socket address — the cli-plugin layer
+  // persists null directly so the dashboard renders an empty cell
+  // (instead of a noise word). Tests that want a non-null `created_ip`
+  // must therefore push an explicit `X-Forwarded-For` header AND run
+  // with `TRUST_PROXY=1` so the resolver actually reads it. The current
+  // suite asserts on the null vs non-null distinction.
 
   async function loginWithMetadata(headers: Record<string, string>): Promise<{
     refreshToken: string;

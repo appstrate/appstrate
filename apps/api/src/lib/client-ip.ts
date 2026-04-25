@@ -22,7 +22,7 @@ export function setRequestClientIp(request: Request, ip: string): void {
  * intermediate handler (e.g. the device-flow form-body transformer in
  * `auth-pipeline.ts`) replaces `c.req.raw` with a freshly constructed
  * `Request` — without this propagation, downstream lookups by Request
- * identity miss and fall back to `"unknown"`.
+ * identity miss and fall back to `null`.
  */
 export function propagateRequestClientIp(from: Request, to: Request): void {
   if (from === to) return;
@@ -100,13 +100,17 @@ export function getClientIp(c: Context): string {
  *      `TRUST_PROXY`.
  *   2. The per-Request IP map populated by `clientIpMiddleware` from
  *      `getConnInfo(c).remote.address`.
- *   3. `"unknown"` as last resort.
+ *   3. `null` when no source resolves an address. Callers that need a
+ *      stable bucket key for grouping (e.g. IP-keyed rate limiters)
+ *      substitute their own sentinel (`ip ?? "unknown"`); persistence
+ *      callers (audit, dashboard) store NULL instead so the UI can
+ *      render "—" without filtering a noise word.
  */
-export function getClientIpFromRequest(request: Request | undefined): string {
-  if (!request) return "unknown";
+export function getClientIpFromRequest(request: Request | undefined): string | null {
+  if (!request) return null;
   const fromHeaders = resolveFromHeaders(request.headers);
   if (fromHeaders) return fromHeaders;
   const fromStore = requestIpStore.get(request);
   if (fromStore) return fromStore;
-  return "unknown";
+  return null;
 }

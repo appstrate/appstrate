@@ -1003,7 +1003,7 @@ export const oidcPaths = {
       operationId: "listOrgCliSessions",
       summary: "List CLI sessions for org members (admin)",
       description:
-        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.",
+        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.\n\nCLI sessions are user-scoped, NOT application-scoped: a session is created by `appstrate login` against a user account, and is reusable across every application the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which application(s) that member operates in — an admin auditing one application surface still sees CLI sessions that the same human is using to drive a different application in the same org.",
       parameters: [
         {
           name: "orgId",

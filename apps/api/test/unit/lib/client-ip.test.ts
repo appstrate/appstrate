@@ -29,18 +29,18 @@ function requestWith(headers: Record<string, string>): Request {
 }
 
 describe("getClientIpFromRequest — TRUST_PROXY=false (default)", () => {
-  it("ignores X-Forwarded-For spoofing — returns 'unknown'", () => {
+  it("ignores X-Forwarded-For spoofing — returns null", () => {
     const req = requestWith({ "x-forwarded-for": "1.2.3.4" });
-    expect(getClientIpFromRequest(req)).toBe("unknown");
+    expect(getClientIpFromRequest(req)).toBeNull();
   });
 
   it("ignores X-Real-IP spoofing", () => {
     const req = requestWith({ "x-real-ip": "1.2.3.4" });
-    expect(getClientIpFromRequest(req)).toBe("unknown");
+    expect(getClientIpFromRequest(req)).toBeNull();
   });
 
-  it("returns 'unknown' when request is undefined", () => {
-    expect(getClientIpFromRequest(undefined)).toBe("unknown");
+  it("returns null when request is undefined", () => {
+    expect(getClientIpFromRequest(undefined)).toBeNull();
   });
 });
 

@@ -124,9 +124,10 @@ export interface TokenPair {
 /**
  * Device metadata captured at device-code exchange. Persisted on the head
  * of family for the listing/revocation UI (issue #251). All fields
- * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name` and
- * deployments with `TRUST_PROXY=false` (which yields `"unknown"` from
- * `getClientIpFromRequest`) will produce rows with partial metadata.
+ * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name`, and
+ * deployments where `getClientIpFromRequest` returns `null` (no
+ * forwarded header trusted, no socket address surfaced), will produce
+ * rows with partial metadata.
  */
 export interface DeviceMetadata {
   /** Optional user-supplied label (`X-Appstrate-Device-Name`). */
@@ -791,6 +792,10 @@ export async function revokeAllFamiliesForUser(userId: string): Promise<{ revoke
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: "user_revoked_all" })
     .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
+  // Drop device-name cache entries for the revoked families — same race
+  // window as `revokeFamily` (see comment there). Bulk path bypasses the
+  // single-family helper, so invalidate inline.
+  for (const { familyId } of heads) _runnerDeviceNameCache.delete(familyId);
   return { revokedCount: heads.length };
 }
 
@@ -1060,6 +1065,11 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: reason })
     .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.revokedAt)));
+  // Drop the device-name cache entry so a run created in the next 60 s
+  // doesn't stamp the dead session's label on `runs.runner_name`. The
+  // strategy already rejects bearers from a revoked family, but a request
+  // admitted just before the revocation can still reach run creation.
+  _runnerDeviceNameCache.delete(familyId);
 }
 
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
