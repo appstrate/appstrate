@@ -40,7 +40,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/",
-    "build": "bun build --target=bun --packages external --outdir=dist src/cli.ts",
+    "build": "bun scripts/build.ts",
     "prepack": "bun run build"
   },
   "dependencies": {
