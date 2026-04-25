@@ -86,18 +86,25 @@ export interface LogEntry {
 /**
  * Error envelope for a failed run.
  *
- * Aligned with the JSON-RPC 2.0 error object (RFC 8259-style — `code`, `message`,
- * `data` slot via `context`) so AFPS-runtime consumers can adopt MCP/JSON-RPC
- * tooling without a translation layer (#276 alignment). All fields beyond
- * `message` are optional and additive — runners that previously emitted
- * `{ message, stack? }` continue to round-trip through the type unchanged.
+ * Shape is **MCP-aligned / JSON-RPC-inspired** — `code` / `message` /
+ * supplementary data via `context` mirror the JSON-RPC 2.0 error object so
+ * AFPS-runtime consumers can adopt MCP/JSON-RPC tooling with minimal glue
+ * (#276 alignment). It is NOT a strict JSON-RPC error: `code` here is an
+ * optional string identifier (e.g. `"timeout"`, `"manifest_invalid"`),
+ * whereas JSON-RPC mandates a required integer code. Runtime callers that
+ * need wire-compatible JSON-RPC errors must map `code` themselves.
+ *
+ * All fields beyond `message` are optional and additive — runners that
+ * previously emitted `{ message, stack? }` continue to round-trip through
+ * the type unchanged.
  */
 export interface RunError {
   /**
    * Stable error code (e.g. `"timeout"`, `"manifest_invalid"`,
    * `"provider_unauthorized"`). Optional; absent for free-form runner errors.
    * Codes carry stronger semantics than message strings — sinks and webhooks
-   * SHOULD branch on `code`, not `message`.
+   * SHOULD branch on `code`, not `message`. Note this is a string identifier,
+   * not the integer required by strict JSON-RPC 2.0.
    */
   code?: string;
   /** Human-readable message. Required. */
@@ -109,8 +116,8 @@ export interface RunError {
   stack?: string;
   /**
    * Structured supplementary data — provider id, target URI, retry count,
-   * upstream status code, etc. Maps to JSON-RPC 2.0 `data`. Bounded — sinks
-   * may truncate large payloads to avoid amplifying retries.
+   * upstream status code, etc. Mirrors the JSON-RPC 2.0 `data` slot.
+   * Bounded — sinks may truncate large payloads to avoid amplifying retries.
    */
   context?: Record<string, unknown>;
   /** RFC 3339 ISO-8601 UTC timestamp when the error was observed. */

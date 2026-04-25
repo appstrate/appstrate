@@ -74,9 +74,9 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
     case "appstrate.error":
     case "appstrate.metric":
     case "run.started":
-    case "run.succeeded":
+    case "run.success":
     case "run.failed":
-    case "run.timedout":
+    case "run.timeout":
     case "run.cancelled":
       // Runner-internal lifecycle / canonical run events — do not
       // contribute to the aggregated result. Terminal status comes from

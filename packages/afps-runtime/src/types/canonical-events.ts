@@ -108,6 +108,12 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
  * proof-of-life. Useful for webhook subscribers and audit log sinks that
  * want a discrete "starting work" signal instead of inferring it from the
  * absence of terminal events.
+ *
+ * Vocabulary note: terminal variants are `run.success` / `run.timeout`
+ * (not `run.succeeded` / `run.timedout`) to align with `RunResult.status`,
+ * the `runs.status` enum, and the existing webhook event names — the
+ * reducer's terminal status comes from those columns, not a parallel set
+ * of -ed names.
  */
 export interface RunStartedEvent extends BaseEnvelope {
   type: "run.started";
@@ -122,9 +128,9 @@ interface BaseRunCompletedEvent extends BaseEnvelope {
   durationMs?: number;
 }
 
-/** `run.succeeded` — terminal: run completed with `status: "success"`. */
+/** `run.success` — terminal: run completed with `status: "success"`. */
 export interface RunSucceededEvent extends BaseRunCompletedEvent {
-  type: "run.succeeded";
+  type: "run.success";
 }
 
 /** `run.failed` — terminal: run completed with `status: "failed"`. */
@@ -134,9 +140,9 @@ export interface RunFailedEvent extends BaseRunCompletedEvent {
   error?: { code?: string; message: string };
 }
 
-/** `run.timedout` — terminal: run exceeded its timeout budget. */
+/** `run.timeout` — terminal: run exceeded its timeout budget. */
 export interface RunTimedOutEvent extends BaseRunCompletedEvent {
-  type: "run.timedout";
+  type: "run.timeout";
 }
 
 /** `run.cancelled` — terminal: run was cancelled by user or scheduler. */
@@ -173,9 +179,9 @@ export const CANONICAL_EVENT_TYPES = [
   "appstrate.error",
   "appstrate.metric",
   "run.started",
-  "run.succeeded",
+  "run.success",
   "run.failed",
-  "run.timedout",
+  "run.timeout",
   "run.cancelled",
 ] as const satisfies ReadonlyArray<CanonicalRunEvent["type"]>;
 
@@ -226,8 +232,8 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     case "run.started":
       // No required payload — proof-of-life envelope alone is enough.
       return true;
-    case "run.succeeded":
-    case "run.timedout":
+    case "run.success":
+    case "run.timeout":
     case "run.cancelled":
       return true;
     case "run.failed": {
@@ -235,7 +241,19 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       if (e.error === undefined) return true;
       if (e.error === null || typeof e.error !== "object" || Array.isArray(e.error)) return false;
       const err = e.error as Record<string, unknown>;
-      return typeof err.message === "string";
+      if (typeof err.message !== "string") return false;
+      // Optional structured fields — when present, MUST be the documented type.
+      // Tampered payloads (e.g. `code: 42`) get rejected so callers can fall
+      // back to the open-envelope branch instead of trusting an ill-formed event.
+      if (err.code !== undefined && typeof err.code !== "string") return false;
+      if (err.stack !== undefined && typeof err.stack !== "string") return false;
+      if (err.timestamp !== undefined && typeof err.timestamp !== "string") return false;
+      if (err.context !== undefined) {
+        if (err.context === null || typeof err.context !== "object" || Array.isArray(err.context)) {
+          return false;
+        }
+      }
+      return true;
     }
     default:
       return false;
