@@ -43,8 +43,16 @@
 
 import type { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { createMcpServer, type AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  createMcpServer,
+  ErrorCode,
+  McpError,
+  type AppstrateToolDefinition,
+  type ReadResourceResult,
+  type Resource,
+} from "@appstrate/mcp-transport";
 import { MAX_RESPONSE_SIZE, PROVIDER_ID_RE } from "./helpers.ts";
+import type { BlobStore } from "./blob-store.ts";
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
@@ -115,13 +123,33 @@ function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
 }
 
 /**
- * Build the `provider_call` and `run_history` MCP tool definitions backed
- * by the supplied Hono app. Tool handlers re-enter the app via
- * `app.request()` — same code path as an external HTTP caller, but
- * in-process (no socket, no JSON re-serialisation beyond what the route
- * itself does).
+ * Inline payload threshold for `provider_call`. Above this size the
+ * response is stored in the BlobStore and the tool returns a
+ * `resource_link` content block (Phase 3a of #276) — saves the agent
+ * from blowing its context window on a 5MB JSON dump. The agent reads
+ * via `client.readResource({ uri })` only if it actually needs the
+ * bytes.
+ *
+ * 32KB is generous for typical LLM-targeted text payloads (a verbose
+ * Gmail thread or a Notion page rarely exceeds that), and small enough
+ * that >100KB JSON dumps from heavy enterprise APIs spill to blob
+ * automatically.
  */
-function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
+const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
+
+/**
+ * Build the `provider_call`, `run_history`, and `llm_complete` MCP
+ * tool definitions backed by the supplied Hono app. Tool handlers
+ * re-enter the app via `app.request()` — same code path as an external
+ * HTTP caller, but in-process (no socket, no JSON re-serialisation
+ * beyond what the route itself does).
+ *
+ * Phase 3a: when a `provider_call` upstream response is binary or
+ * exceeds {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in
+ * the supplied {@link BlobStore} and the tool returns a `resource_link`
+ * block instead of an inline text body.
+ */
+function buildSidecarTools(app: Hono, blobStore?: BlobStore): AppstrateToolDefinition[] {
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
       name: "provider_call",
@@ -241,7 +269,10 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
       }
 
       const res = await app.request("/proxy", init);
-      return responseToToolResult(res);
+      return responseToToolResult(res, {
+        ...(blobStore ? { blobStore } : {}),
+        source: `provider:${args.providerId}`,
+      });
     },
   };
 
@@ -279,11 +310,153 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
       const res = await app.request(`/run-history${qs}`);
-      return responseToToolResult(res);
+      return responseToToolResult(res, { source: "run_history" });
     },
   };
 
-  return [providerCall, runHistory];
+  // Phase 3a — `llm_complete` MCP tool. Wraps the existing `/llm/*`
+  // route so the agent can request completions via `tools/call` instead
+  // of bespoke HTTP. Per V1 in claudedocs/MCP_MIGRATION_PLAN.md, we
+  // model LLM proxy as a *tool* rather than `sampling/createMessage` —
+  // sampling is server-initiated (wrong direction) and barely deployed
+  // by 2026-04 hosts. Synchronous in v1 (V12); status heartbeat is a
+  // future enhancement.
+  const llmComplete: AppstrateToolDefinition = {
+    descriptor: {
+      name: "llm_complete",
+      description:
+        "Issue a completion request to the platform-configured LLM. The sidecar substitutes " +
+        "the placeholder API key, forwards the request, and returns the upstream response body " +
+        "as text. Synchronous: the tool returns once the upstream response is fully received. " +
+        "For very long completions consider chunking the prompt instead.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "body"],
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Upstream path relative to the LLM base URL (e.g. `/v1/messages`, `/v1/chat/completions`). " +
+              "Must start with `/` and contain no path traversal sequences.",
+            pattern: "^/[A-Za-z0-9._/-]{1,256}$",
+          },
+          method: {
+            type: "string",
+            enum: ["POST", "PUT", "PATCH"],
+            description: "HTTP method. Defaults to POST.",
+          },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description:
+              "Additional headers to forward. Hop-by-hop headers are filtered server-side. " +
+              "Authorization headers using the placeholder are auto-substituted.",
+          },
+          body: {
+            type: "string",
+            description: "Request body — JSON-encoded string for typical LLM endpoints.",
+          },
+        },
+      },
+    },
+    handler: async (rawArgs) => {
+      const args = rawArgs as {
+        path: string;
+        method?: string;
+        headers?: Record<string, string>;
+        body: string;
+      };
+
+      // Defence in depth: even though the JSON Schema pattern restricts
+      // the path, we re-check here so any bypass route through the SDK
+      // (e.g. callers that disable schema validation) still fails safely.
+      if (!/^\/[A-Za-z0-9._/-]{1,256}$/.test(args.path) || args.path.includes("..")) {
+        return {
+          content: [{ type: "text", text: `llm_complete: invalid path '${args.path}'` }],
+          isError: true,
+        };
+      }
+
+      const init: RequestInit = {
+        method: args.method ?? "POST",
+        headers: { "Content-Type": "application/json", ...(args.headers ?? {}) },
+        body: args.body,
+      };
+
+      const res = await app.request(`/llm${args.path}`, init);
+      return responseToToolResult(res, {
+        ...(blobStore ? { blobStore } : {}),
+        source: "llm_complete",
+        // LLM responses are large but always text — never spill them to
+        // a blob unless they breach the absolute MAX_RESPONSE_SIZE
+        // truncation guard, which already kicks in upstream.
+        inlineThreshold: MAX_RESPONSE_SIZE,
+      });
+    },
+  };
+
+  return [providerCall, runHistory, llmComplete];
+}
+
+/**
+ * Build the resource provider for the supplied {@link BlobStore}.
+ *
+ * Two surfaces:
+ * - `list()` — returns an empty array. Per spec, ephemeral
+ *   `resource_link` blocks emitted from tools are NOT enumerated by
+ *   `resources/list`. This matches the MCP guidance for run-scoped
+ *   blob caches.
+ * - `read(uri)` — validates the URI is in the active run's namespace
+ *   and returns the bytes. Cross-run reads are silently rejected
+ *   (treated as not-found per defence-in-depth).
+ */
+function buildBlobResourceProvider(blobStore: BlobStore) {
+  return {
+    list: (): Resource[] => [],
+    read: (uri: string): ReadResourceResult => {
+      const record = blobStore.read(uri);
+      if (!record) {
+        // -32002 maps to InvalidParams in the SDK error code enum and
+        // is the closest match for "URI doesn't resolve" per spec.
+        throw new McpError(ErrorCode.InvalidParams, `Resource not found: ${uri}`);
+      }
+      const isText = record.mimeType.startsWith("text/") || record.mimeType.includes("json");
+      if (isText) {
+        return {
+          contents: [
+            {
+              uri: record.uri,
+              mimeType: record.mimeType,
+              text: new TextDecoder("utf-8", { fatal: false }).decode(record.bytes),
+            },
+          ],
+        };
+      }
+      // Binary — base64-encode per MCP spec (resources/read content
+      // block accepts either `text` or `blob`).
+      const base64 =
+        typeof Buffer !== "undefined"
+          ? Buffer.from(record.bytes).toString("base64")
+          : btoa(String.fromCharCode(...record.bytes));
+      return {
+        contents: [{ uri: record.uri, mimeType: record.mimeType, blob: base64 }],
+      };
+    },
+  };
+}
+
+interface ResponseToToolResultOptions {
+  /** Run-scoped blob store; required to spill non-text or oversized responses. */
+  blobStore?: BlobStore;
+  /** Source label propagated to the BlobStore record (for observability). */
+  source?: string;
+  /**
+   * Inline threshold override. Above this size, even text responses
+   * spill to the blob store so the agent context isn't poisoned by
+   * very large dumps. Defaults to {@link INLINE_RESPONSE_THRESHOLD}.
+   */
+  inlineThreshold?: number;
 }
 
 /**
@@ -293,43 +466,170 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
  * model still receives them as data and can react. The SDK reserves
  * thrown errors for protocol-level faults; per-tool 4xx/5xx are
  * domain-level signals.
+ *
+ * Phase 3a behaviour:
+ * - Text/JSON/XML under {@link INLINE_RESPONSE_THRESHOLD} → inline `text` block.
+ * - Text/JSON/XML over the threshold OR binary content → spilled to
+ *   the BlobStore, returned as a `resource_link` block. The agent
+ *   reads the bytes via `client.readResource({ uri })` only if needed.
+ * - No BlobStore configured → fall back to the Phase 1 behaviour
+ *   (binary rejected with a clear tool-level error).
  */
-async function responseToToolResult(res: Response): Promise<{
-  content: Array<{ type: "text"; text: string }>;
+async function responseToToolResult(
+  res: Response,
+  options: ResponseToToolResultOptions = {},
+): Promise<{
+  content: Array<
+    | { type: "text"; text: string }
+    | {
+        type: "resource_link";
+        uri: string;
+        name?: string;
+        mimeType?: string;
+      }
+  >;
   isError?: boolean;
 }> {
   const ct = res.headers.get("content-type") ?? "";
-  // We deliberately reject non-text responses on this path to keep the
-  // surface narrow until Phase 3 introduces MCP resources. Surfacing a
-  // PDF byte stream as a base64 text block would mislead the agent into
-  // thinking it received a usable text body.
-  if (!ct.startsWith("text/") && !ct.includes("json") && !ct.includes("xml")) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `provider_call: non-text response of type '${ct || "unknown"}' is not supported on this path; use the legacy /proxy route with X-Stream-Response for binary payloads (Phase 3 will introduce MCP resources).`,
-        },
-      ],
-      isError: true,
+  const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
+  const threshold = options.inlineThreshold ?? INLINE_RESPONSE_THRESHOLD;
+
+  if (!isText) {
+    if (!options.blobStore) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `provider_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
+              `this path without a configured blob store. Phase 3a links binary upstream responses ` +
+              `as MCP resources — verify the sidecar was started with a runId.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    // Spill to blob store and return a resource_link.
+    const bytes = await readBodyToBuffer(res, MAX_RESPONSE_SIZE);
+    if (bytes === "exceeded") {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `provider_call: response exceeds ${MAX_RESPONSE_SIZE} bytes — refused without truncation ` +
+              `(truncating an opaque binary blob is unsafe).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    let record;
+    try {
+      record = options.blobStore.put(bytes, {
+        mimeType: ct || "application/octet-stream",
+        ...(options.source !== undefined ? { source: options.source } : {}),
+      });
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `provider_call: blob store rejected upstream response — ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const link: {
+      type: "resource_link";
+      uri: string;
+      name?: string;
+      mimeType?: string;
+    } = {
+      type: "resource_link",
+      uri: record.uri,
+      mimeType: record.mimeType,
     };
+    if (options.source) link.name = options.source;
+    return res.ok ? { content: [link] } : { content: [link], isError: true };
   }
 
-  // Bound the in-process read. The legacy /proxy route already truncates
-  // its outbound response body to MAX_RESPONSE_SIZE before handing it to
-  // us, so this is a defence-in-depth guard against future routes
-  // re-entering via app.request() that don't apply the same cap. We
-  // stream into a buffer rather than calling `res.text()` directly so a
-  // hypothetical multi-GB response can never be fully materialised in
-  // memory before the limit is enforced.
+  // Text — bound the read. We stream into a buffer rather than calling
+  // res.text() directly so a hypothetical multi-GB response can never
+  // be fully materialised before the cap kicks in.
   const text = await readBodyBounded(res, MAX_RESPONSE_SIZE);
-  if (!res.ok) {
-    return {
-      content: [{ type: "text", text }],
-      isError: true,
+
+  // If the text body breaches the inline threshold AND we have a blob
+  // store, spill it. The agent gets a pointer instead of poisoning its
+  // context with a multi-megabyte dump.
+  if (options.blobStore && text.length > threshold) {
+    const bytes = new TextEncoder().encode(text);
+    let record;
+    try {
+      record = options.blobStore.put(bytes, {
+        mimeType: ct || "text/plain",
+        ...(options.source !== undefined ? { source: options.source } : {}),
+      });
+    } catch {
+      // Blob store full — fall back to inline truncation.
+      return res.ok
+        ? { content: [{ type: "text", text }] }
+        : { content: [{ type: "text", text }], isError: true };
+    }
+    const link: {
+      type: "resource_link";
+      uri: string;
+      name?: string;
+      mimeType?: string;
+    } = {
+      type: "resource_link",
+      uri: record.uri,
+      mimeType: record.mimeType,
     };
+    if (options.source) link.name = options.source;
+    return res.ok ? { content: [link] } : { content: [link], isError: true };
+  }
+
+  if (!res.ok) {
+    return { content: [{ type: "text", text }], isError: true };
   }
   return { content: [{ type: "text", text }] };
+}
+
+/**
+ * Read a Response body as raw bytes, refusing the read if `maxBytes`
+ * is breached. Returns `"exceeded"` on overflow — for binary spills we
+ * never want a partial body that the agent might mistake for the full
+ * content.
+ */
+async function readBodyToBuffer(res: Response, maxBytes: number): Promise<Uint8Array | "exceeded"> {
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      if (total + value.byteLength > maxBytes) {
+        await reader.cancel();
+        return "exceeded";
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.byteLength;
+  }
+  return merged;
 }
 
 /**
@@ -392,8 +692,14 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * per-request cost is negligible compared to the upstream HTTP hop the
  * tool then performs.
  */
-export function mountMcp(app: Hono): void {
-  const tools = buildSidecarTools(app);
+export interface MountMcpOptions {
+  /** Run-scoped blob store for `provider_call` / `llm_complete` resource spillover. */
+  blobStore?: BlobStore;
+}
+
+export function mountMcp(app: Hono, options: MountMcpOptions = {}): void {
+  const tools = buildSidecarTools(app, options.blobStore);
+  const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
 
   app.all("/mcp", async (c) => {
     // Body-size guard: the SDK transport calls `await req.json()`
@@ -446,10 +752,11 @@ export function mountMcp(app: Hono): void {
       });
     }
 
-    const server = createMcpServer(tools, {
-      name: "appstrate-sidecar",
-      version: "1",
-    });
+    const server = createMcpServer(
+      tools,
+      { name: "appstrate-sidecar", version: "1" },
+      resources ? { resources } : {},
+    );
     // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
     // disables session tracking. Combined with per-request construction,
     // there is no state to leak between agent invocations, no map to

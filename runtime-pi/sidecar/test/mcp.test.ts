@@ -95,13 +95,13 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises provider_call and run_history", async () => {
+  it("advertises provider_call, run_history, and llm_complete", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["provider_call", "run_history"]);
+    expect(names).toEqual(["llm_complete", "provider_call", "run_history"]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -209,9 +209,10 @@ describe("POST /mcp — tools/call provider_call", () => {
     expect(result.content[0]!.text).toContain("not authorized");
   });
 
-  it("returns isError: true for non-text upstream responses", async () => {
-    // Phase 1 narrows the MCP surface to text/JSON. Binary content goes
-    // through the legacy /proxy path until Phase 3 introduces resources.
+  it("spills non-text upstream responses to a resource_link (Phase 3a)", async () => {
+    // Phase 1 narrowed binary content to errors; Phase 3a stores them
+    // in a run-scoped blob cache and returns a `resource_link` that
+    // the agent can read on demand via `client.readResource({ uri })`.
     const fetchFn = mock(
       async () =>
         new Response(new Uint8Array([0xde, 0xad, 0xbe, 0xef]), {
@@ -230,9 +231,17 @@ describe("POST /mcp — tools/call provider_call", () => {
         },
       },
     });
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("non-text response");
+    const result = res.json.result as {
+      content: Array<{ type: string; uri?: string; mimeType?: string }>;
+      isError?: boolean;
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]!.type).toBe("resource_link");
+    expect(result.content[0]!.uri).toMatch(
+      /^appstrate:\/\/provider-response\/[A-Za-z0-9_-]+\/[A-Z0-9]{26}$/,
+    );
+    expect(result.content[0]!.mimeType).toBe("application/octet-stream");
   });
 });
 
@@ -274,13 +283,21 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     const first = await rpc(app, { method: "tools/list" });
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
-    expect(firstResult.tools.map((t) => t.name).sort()).toEqual(["provider_call", "run_history"]);
+    expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
+      "llm_complete",
+      "provider_call",
+      "run_history",
+    ]);
 
     const second = await rpc(app, { method: "tools/list" });
     expect(second.status).toBe(200);
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
-    expect(secondResult.tools.map((t) => t.name).sort()).toEqual(["provider_call", "run_history"]);
+    expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
+      "llm_complete",
+      "provider_call",
+      "run_history",
+    ]);
   });
 
   it("handles two consecutive tools/call invocations on the same app", async () => {

@@ -3,6 +3,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { mountMcp } from "./mcp.ts";
+import { BlobStore } from "./blob-store.ts";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
@@ -35,6 +36,14 @@ export interface AppDeps {
   isReady?: () => boolean; // default: () => true — controls /health
   configSecret?: string; // One-time config secret (from CONFIG_SECRET env var)
   preConfigured?: boolean; // true when credentials come via env vars (fresh sidecar)
+  /**
+   * Run identifier for the agent run this sidecar serves. Used to
+   * scope the MCP blob cache (Phase 3a of #276) — a single sidecar
+   * process serves a single run, so the run id can be set once at
+   * boot. Defaults to `"unknown"` for tests; production sets it via
+   * the platform on container create / `/configure`.
+   */
+  runId?: string;
 }
 
 const CREDENTIAL_PROXY_SKIP = new Set([
@@ -568,10 +577,14 @@ export function createApp(deps: AppDeps): Hono {
     return new Response(body, { status: targetRes.status, headers: responseHeaders });
   });
 
-  // MCP exposure (Phase 1 of #276). Mounts last so the tool handlers'
+  // MCP exposure (Phase 1+3a of #276). Mounts last so the tool handlers'
   // in-process app.request() calls hit the routes registered above.
   // `appstrate_*_call` aliases stay intact — this is purely additive.
-  mountMcp(app);
+  // Phase 3a passes a run-scoped BlobStore so `provider_call` and
+  // `llm_complete` can return `resource_link` blocks for binary /
+  // oversized responses.
+  const blobStore = new BlobStore(deps.runId ?? "unknown");
+  mountMcp(app, { blobStore });
 
   return app;
 }

@@ -35,11 +35,16 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
   McpError,
   ErrorCode,
   type CallToolResult,
   type Implementation,
+  type ListResourcesResult,
+  type ReadResourceResult,
+  type Resource,
   type ServerNotification,
   type ServerRequest,
   type Tool,
@@ -108,6 +113,32 @@ function validateDescriptor(descriptor: Tool): void {
 }
 
 /**
+ * Resource provider hooks (Phase 3a of #276). Pass `resources` to
+ * `createMcpServer` to expose `resources/list` and `resources/read`.
+ *
+ * - `list()` is called whenever the client invokes `resources/list`. It
+ *   returns the *currently* enumerable resources — the agent never
+ *   sees ephemeral `resource_link` blocks here per spec, so blob caches
+ *   typically return `[]` and rely on `resource_link` from tool results.
+ * - `read(uri, extra)` is called for `resources/read`. Return one or
+ *   more `contents` blocks. Throw an `McpError(ErrorCode.InvalidParams)`
+ *   for not-found (so the SDK serialises a clean -32602) — never
+ *   silently return empty.
+ */
+export interface AppstrateResourceProvider {
+  list?: (extra: AppstrateRequestExtra) => Promise<Resource[]> | Resource[];
+  read: (
+    uri: string,
+    extra: AppstrateRequestExtra,
+  ) => Promise<ReadResourceResult> | ReadResourceResult;
+}
+
+export interface CreateMcpServerOptions {
+  /** Resource provider — when omitted, no `resources/*` capability is advertised. */
+  resources?: AppstrateResourceProvider;
+}
+
+/**
  * Build an MCP `Server` that exposes the supplied tool definitions via
  * `tools/list` and `tools/call`. The server is *not* yet connected to a
  * transport — the caller decides whether to wire it through
@@ -119,6 +150,7 @@ function validateDescriptor(descriptor: Tool): void {
 export function createMcpServer(
   tools: ReadonlyArray<AppstrateToolDefinition>,
   serverInfo: Implementation = DEFAULT_SERVER_INFO,
+  options: CreateMcpServerOptions = {},
 ): Server {
   const registry = new Map<string, AppstrateToolDefinition>();
   for (const tool of tools) {
@@ -129,9 +161,12 @@ export function createMcpServer(
     registry.set(tool.descriptor.name, tool);
   }
 
-  const server = new Server(serverInfo, {
-    capabilities: { tools: { listChanged: false } },
-  });
+  const capabilities: Record<string, unknown> = { tools: { listChanged: false } };
+  if (options.resources) {
+    capabilities.resources = { listChanged: false, subscribe: false };
+  }
+
+  const server = new Server(serverInfo, { capabilities });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [...registry.values()].map((t) => t.descriptor),
@@ -148,6 +183,17 @@ export function createMcpServer(
     }
     return reg.handler(request.params.arguments ?? {}, extra);
   });
+
+  if (options.resources) {
+    const provider = options.resources;
+    server.setRequestHandler(ListResourcesRequestSchema, async (_req, extra) => {
+      const list = (await provider.list?.(extra)) ?? [];
+      return { resources: list } satisfies ListResourcesResult;
+    });
+    server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
+      return provider.read(req.params.uri, extra);
+    });
+  }
 
   return server;
 }
@@ -200,7 +246,13 @@ export async function createInProcessPair(
 // Re-export the SDK error primitives so callers don't need a second
 // dependency line just to inspect error codes thrown by the server.
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-export type { CallToolResult, Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
+export type {
+  CallToolResult,
+  Implementation,
+  ReadResourceResult,
+  Resource,
+  Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 
 // AFPS bridge — convert spec-shaped tools into MCP definitions without
 // rewriting them. Used by Phase 2 to mount existing AFPS tools through
