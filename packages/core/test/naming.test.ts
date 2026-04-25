@@ -7,6 +7,10 @@ import {
   parseScopedName,
   buildPackageId,
   isOwnedByOrg,
+  isValidToolNameForExisting,
+  isValidToolNameForNew,
+  normalizeToolName,
+  TOOL_NAME_MAX_LEN,
 } from "../src/naming.ts";
 
 describe("normalizeScope", () => {
@@ -108,5 +112,73 @@ describe("buildPackageId", () => {
 
   test('("@org", "a") → "@org/a"', () => {
     expect(buildPackageId("@org", "a")).toBe("@org/a");
+  });
+});
+
+describe("isValidToolNameForNew (Phase 4 / V13 strict predicate)", () => {
+  test("accepts canonical {namespace}__{tool} snake_case", () => {
+    expect(isValidToolNameForNew("fs__read_file")).toBe(true);
+    expect(isValidToolNameForNew("notion__search_pages")).toBe(true);
+    expect(isValidToolNameForNew("a__b")).toBe(true);
+  });
+
+  test("rejects names without the __ separator", () => {
+    expect(isValidToolNameForNew("read_file")).toBe(false);
+    expect(isValidToolNameForNew("fs_read_file")).toBe(false);
+  });
+
+  test("rejects mixed-case", () => {
+    expect(isValidToolNameForNew("FS__readFile")).toBe(false);
+    expect(isValidToolNameForNew("Fs__read_file")).toBe(false);
+  });
+
+  test("rejects hyphens (mixed separator hurts tokenisation per V3)", () => {
+    expect(isValidToolNameForNew("mcp-fs__read_file")).toBe(false);
+  });
+
+  test("rejects digit-leading names on either side", () => {
+    expect(isValidToolNameForNew("1fs__read_file")).toBe(false);
+    expect(isValidToolNameForNew("fs__1file")).toBe(false);
+  });
+
+  test("rejects names exceeding TOOL_NAME_MAX_LEN", () => {
+    const long = "a".repeat(60) + "__b";
+    expect(long.length).toBeGreaterThan(TOOL_NAME_MAX_LEN);
+    expect(isValidToolNameForNew(long)).toBe(false);
+  });
+
+  test("rejects empty / non-string input", () => {
+    expect(isValidToolNameForNew("")).toBe(false);
+    expect(isValidToolNameForNew(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("isValidToolNameForExisting (V13 lenient predicate)", () => {
+  test("currently mirrors the strict predicate (no legacy surface yet)", () => {
+    expect(isValidToolNameForExisting("fs__read_file")).toBe(true);
+    expect(isValidToolNameForExisting("READ__FILE")).toBe(false);
+  });
+});
+
+describe("normalizeToolName", () => {
+  test("returns valid names unchanged", () => {
+    expect(normalizeToolName("fs__read_file")).toBe("fs__read_file");
+  });
+
+  test("converts hyphens to underscores", () => {
+    expect(normalizeToolName("mcp-fs__read-file")).toBe("mcp_fs__read_file");
+  });
+
+  test("promotes the first single-underscore boundary when no __ exists", () => {
+    expect(normalizeToolName("fs_read_file")).toBe("fs__read_file");
+  });
+
+  test("lowercases mixed case", () => {
+    expect(normalizeToolName("FS__readFile")).toBe("fs__readfile");
+  });
+
+  test("caps to TOOL_NAME_MAX_LEN", () => {
+    const big = "a".repeat(80) + "__b";
+    expect(normalizeToolName(big).length).toBe(TOOL_NAME_MAX_LEN);
   });
 });

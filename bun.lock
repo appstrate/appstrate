@@ -344,6 +344,7 @@
       "name": "appstrate-pi-runtime",
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@mariozechner/pi-ai": "^0.67.2",

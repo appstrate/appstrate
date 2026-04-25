@@ -273,3 +273,13 @@ export {
   type AppstrateMcpClientOptions,
   type McpHttpClientOptions,
 } from "./client.ts";
+
+// Subprocess transport — Phase 4 of #276. Spawn a third-party MCP
+// server as a child process and speak newline-delimited JSON-RPC over
+// stdio. Compatible with the SDK's Transport interface so the same
+// `Client` works against http or subprocess servers without refactor.
+export {
+  SubprocessTransport,
+  SubprocessTransportError,
+  type SubprocessTransportOptions,
+} from "./transports/subprocess.ts";
