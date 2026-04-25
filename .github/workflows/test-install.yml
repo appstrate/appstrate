@@ -463,6 +463,82 @@ jobs:
           echo "::endgroup::"
           echo "✓ empty-manifest path OK"
 
+          # ── Scenario 8a: dual-install pre-check (issue #249) ─────────
+          # When `appstrate` already exists on PATH at a different path
+          # than $DEST, bootstrap MUST refuse non-interactively (CI=true).
+          # APPSTRATE_FORCE_DUAL=1 must override.
+          echo "::group::dual-install pre-check"
+          mkdir -p "$GITHUB_WORKSPACE/bin-existing"
+          # Plant a fake existing appstrate in a directory that will appear
+          # on PATH BEFORE the install destination, so command -v finds it.
+          cat > "$GITHUB_WORKSPACE/bin-existing/appstrate" <<'EXISTING'
+          #!/usr/bin/env bash
+          echo "EXISTING_APPSTRATE 0.9.0"
+          exit 0
+          EXISTING
+          chmod +x "$GITHUB_WORKSPACE/bin-existing/appstrate"
+
+          # 8a.1: CI=true + dual-install detected → must abort.
+          set +e
+          DUAL_CI_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-dual-ci" \
+            CI=true \
+            PATH="$GITHUB_WORKSPACE/bin-existing:$GITHUB_WORKSPACE/bin-dual-ci:$PATH" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$DUAL_CI_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap proceeded despite dual-install detection in CI"; exit 1
+          fi
+          echo "$DUAL_CI_OUT" | grep -q "Another \`appstrate\` is already on PATH" \
+            || { echo "::error::bootstrap did not emit the dual-install warning"; exit 1; }
+          echo "$DUAL_CI_OUT" | grep -q "CI detected" \
+            || { echo "::error::bootstrap did not emit the CI-non-interactive guard"; exit 1; }
+          echo "$DUAL_CI_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap exec'd the binary despite refusing dual-install"; exit 1; }
+          test ! -e "$GITHUB_WORKSPACE/bin-dual-ci/appstrate" \
+            || { echo "::error::bootstrap wrote the binary despite aborting"; exit 1; }
+          echo "✓ 8a.1 dual-install + CI → refused"
+
+          # 8a.2: CI=true + APPSTRATE_FORCE_DUAL=1 → must succeed.
+          set +e
+          DUAL_FORCE_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-dual-force" \
+            APPSTRATE_FORCE_DUAL=1 \
+            CI=true \
+            PATH="$GITHUB_WORKSPACE/bin-existing:$GITHUB_WORKSPACE/bin-dual-force:$PATH" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$DUAL_FORCE_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap failed with APPSTRATE_FORCE_DUAL=1"; exit 1; }
+          echo "$DUAL_FORCE_OUT" | grep -q "APPSTRATE_FORCE_DUAL=1 set" \
+            || { echo "::error::bootstrap did not emit the FORCE_DUAL acknowledgment"; exit 1; }
+          test -x "$GITHUB_WORKSPACE/bin-dual-force/appstrate" \
+            || { echo "::error::bootstrap did not write the binary under FORCE_DUAL"; exit 1; }
+          echo "✓ 8a.2 dual-install + APPSTRATE_FORCE_DUAL=1 → installed"
+
+          # 8a.3: existing == DEST (re-install over self) → silent no-op.
+          # We need a `command -v appstrate` that resolves to the same path
+          # bootstrap is about to write to. Stage by copying into the dest
+          # FIRST, then re-running bootstrap (which should not warn).
+          set +e
+          DUAL_SAME_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-dual-force" \
+            CI=true \
+            PATH="$GITHUB_WORKSPACE/bin-dual-force:$PATH" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$DUAL_SAME_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap failed on re-install over self"; exit 1; }
+          echo "$DUAL_SAME_OUT" | grep -q "Another \`appstrate\` is already on PATH" \
+            && { echo "::error::bootstrap nagged on re-install over self"; exit 1; }
+          echo "✓ 8a.3 re-install over self → no nag"
+
+          echo "::endgroup::"
+          echo "✓ dual-install pre-check path OK"
+
           # ── PATH-setup scenarios ────────────────────────────────────────
           # Following scenarios exercise the rootless install + shell-rc
           # modification introduced for issue #186. Trust chain is
