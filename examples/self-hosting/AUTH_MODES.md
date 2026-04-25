@@ -140,6 +140,14 @@ written into the generated `.env`.
 After install, sign up once with that email through the dashboard — the
 root org is auto-provisioned and you're owner. Done.
 
+> **How signup works in closed mode.** The signup link is hidden from
+> `/login` (no public discoverability) but `/register` itself stays
+> mounted. The bootstrap owner navigates to `/register` directly,
+> submits the form with the configured email, and the server-side gate
+> lets that specific email through. Any other email submitted on the
+> same form is rejected with a `signup_disabled` error surfaced inline.
+> Google/GitHub/SMTP also work and skip the form entirely if configured.
+
 ### Recipe 1 — public SaaS (default)
 
 Leave every `AUTH_*` flag unset. Anyone with the URL can sign up and gets

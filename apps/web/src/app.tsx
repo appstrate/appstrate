@@ -237,10 +237,17 @@ export function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/register"
-            element={features.signupDisabled ? <Navigate to="/login" replace /> : <RegisterPage />}
-          />
+          {/*
+           * `/register` stays mounted even when `signupDisabled` is true so
+           * the closed-mode bootstrap owner (and any
+           * `AUTH_PLATFORM_ADMIN_EMAILS` entry) can sign up via
+           * email/password without needing Google/GitHub/SMTP. The real
+           * barrier is server-side in `databaseHooks.user.create.before` —
+           * unauthorized signups receive a `signup_disabled` error that
+           * `RegisterPage` surfaces. The signup link is still hidden from
+           * `/login` to avoid public discoverability.
+           */}
+          <Route path="/register" element={<RegisterPage />} />
           {/*
            * Server-rendered flows outside the SPA (e.g. the device-flow
            * `/activate` page) redirect unauthenticated visitors here with
