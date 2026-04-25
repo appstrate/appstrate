@@ -251,6 +251,121 @@ describe("POST /mcp — protocol errors", () => {
   });
 });
 
+describe("POST /mcp — per-request transport (stateless mode)", () => {
+  // Regression: the SDK's WebStandardStreamableHTTPServerTransport
+  // throws "Stateless transport cannot be reused across requests" on
+  // the second invocation when constructed with
+  // `sessionIdGenerator: undefined`. A previous implementation built the
+  // transport once at mount time and shared it across requests, capping
+  // the agent at exactly one MCP call per sidecar lifetime. These two
+  // tests would have caught that bug — they exercise the simplest
+  // (`tools/list`) and the most common (`tools/call`) JSON-RPC
+  // exchanges back-to-back on the same Hono app.
+
+  it("handles two consecutive tools/list calls on the same app", async () => {
+    const app = createApp(makeDeps());
+
+    const first = await rpc(app, { method: "tools/list" });
+    expect(first.status).toBe(200);
+    const firstResult = first.json.result as { tools: Array<{ name: string }> };
+    expect(firstResult.tools.map((t) => t.name).sort()).toEqual(["provider_call", "run_history"]);
+
+    const second = await rpc(app, { method: "tools/list" });
+    expect(second.status).toBe(200);
+    expect(second.json.error).toBeUndefined();
+    const secondResult = second.json.result as { tools: Array<{ name: string }> };
+    expect(secondResult.tools.map((t) => t.name).sort()).toEqual(["provider_call", "run_history"]);
+  });
+
+  it("handles two consecutive tools/call invocations on the same app", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"id":"abc"}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+
+    const args = {
+      providerId: "test-provider",
+      target: "https://api.example.com/items",
+      method: "GET",
+    };
+
+    const first = await rpc(app, {
+      method: "tools/call",
+      params: { name: "provider_call", arguments: args },
+    });
+    expect(first.status).toBe(200);
+    const firstResult = first.json.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    expect(firstResult.isError).toBeUndefined();
+    expect(firstResult.content[0]!.text).toBe('{"id":"abc"}');
+
+    const second = await rpc(app, {
+      method: "tools/call",
+      params: { name: "provider_call", arguments: args },
+    });
+    expect(second.status).toBe(200);
+    expect(second.json.error).toBeUndefined();
+    const secondResult = second.json.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    expect(secondResult.isError).toBeUndefined();
+    expect(secondResult.content[0]!.text).toBe('{"id":"abc"}');
+
+    // Both invocations reached the upstream — proves the second MCP
+    // call did not fail at the transport layer before getting to /proxy.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("POST /mcp — provider_call body / method consistency", () => {
+  it("returns isError: true when body is supplied with GET", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/items",
+          method: "GET",
+          body: '{"x":1}',
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("'body' is not allowed");
+    expect(result.content[0]!.text).toContain("GET");
+  });
+
+  it("returns isError: true when body is supplied with HEAD", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/items",
+          method: "HEAD",
+          body: "anything",
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("HEAD");
+  });
+});
+
 describe("StreamableHTTPClientTransport interop (smoke test)", () => {
   it("`enableJsonResponse: true` is wired so SDK clients without SSE work", async () => {
     // Sanity check: the SDK ships a real StreamableHTTPClientTransport

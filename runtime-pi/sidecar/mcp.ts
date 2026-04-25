@@ -18,9 +18,16 @@
  *    Hono routes via in-process `app.request()`. Zero credential code
  *    duplication, zero refactor risk.
  *
- * 2. Stateless transport. We do not maintain an MCP session per client —
- *    each POST is independent. The sidecar runs inside a single agent
- *    container; there is no multi-client multiplexing to worry about.
+ * 2. Stateless transport, **per-request**. Each `/mcp` invocation builds
+ *    a fresh `Server` + `WebStandardStreamableHTTPServerTransport` pair,
+ *    serves the request, then tears them down. This is not a design
+ *    choice — the SDK throws "Stateless transport cannot be reused
+ *    across requests" the second time a single
+ *    `WebStandardStreamableHTTPServerTransport` constructed with
+ *    `sessionIdGenerator: undefined` handles a request. The cost is one
+ *    `new Server()` + `transport.connect()` per request, both of which
+ *    are pure-memory and synchronous in practice; the upside is that
+ *    the agent can issue any number of MCP calls per run lifecycle.
  *
  * 3. Binary responses (e.g. provider calls returning a PDF) flow through
  *    `/proxy` unchanged. Phase 3 of #276 will surface them as MCP
@@ -37,6 +44,16 @@
 import type { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer, type AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import { PROVIDER_ID_RE } from "./helpers.ts";
+
+/**
+ * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
+ * the source of truth used by the `/proxy` route to validate
+ * `X-Provider`. We strip the leading/trailing slashes and the regex
+ * flags so JSON Schema validators (AJV / the MCP SDK / inspectors) see
+ * a portable ECMA-compatible string. Anchors are preserved.
+ */
+const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
 
 /**
  * Build the `provider_call` and `run_history` MCP tool definitions backed
@@ -64,11 +81,14 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
           providerId: {
             type: "string",
             description:
-              "Provider identifier as declared in `dependencies.providers[].id` (e.g. `appstrate.gmail`).",
+              "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
             // Mirror the regex enforced by the /proxy route on X-Provider —
             // catching a malformed provider id at the MCP layer means the
             // failure surface is the agent loop, not a 400 deep in /proxy.
-            pattern: "^[A-Za-z0-9._@/-]{1,128}$",
+            // The pattern source lives in `./helpers.ts` (PROVIDER_ID_RE)
+            // and is shared between this MCP layer and the bespoke /proxy
+            // route, so improvements propagate to both.
+            pattern: PROVIDER_ID_PATTERN,
           },
           target: {
             type: "string",
@@ -114,6 +134,27 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
         substituteBody?: boolean;
       };
 
+      const method = args.method ?? "GET";
+
+      // Refuse `body` on GET/HEAD explicitly rather than silently
+      // dropping it. A model that supplies a body genuinely expects it
+      // to be sent — silent drop produces a confusing upstream behaviour
+      // (server returns "missing field X" while the agent thinks it
+      // sent X). Surface the contract violation as a clear tool-level
+      // error instead. JSON Schema can't express conditional `required`
+      // cleanly across all MCP clients, so we enforce it in the handler.
+      if (args.body !== undefined && (method === "GET" || method === "HEAD")) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `provider_call: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
       const headers: Record<string, string> = {
         ...(args.headers ?? {}),
         "X-Provider": args.providerId,
@@ -121,16 +162,8 @@ function buildSidecarTools(app: Hono): AppstrateToolDefinition[] {
       };
       if (args.substituteBody) headers["X-Substitute-Body"] = "1";
 
-      const init: RequestInit = {
-        method: args.method ?? "GET",
-        headers,
-      };
-      if (
-        args.body !== undefined &&
-        args.method &&
-        args.method !== "GET" &&
-        args.method !== "HEAD"
-      ) {
+      const init: RequestInit = { method, headers };
+      if (args.body !== undefined) {
         init.body = args.body;
       }
 
@@ -222,43 +255,49 @@ async function responseToToolResult(res: Response): Promise<{
 /**
  * Mount the MCP endpoint on the supplied Hono app.
  *
- * Stateless: every POST is a fresh JSON-RPC exchange. Sessions only
- * matter when the server initiates pushes (notifications, sampling
- * requests) — out of scope until Phase 3.
+ * Per-request transport (stateless mode requirement): the SDK's
+ * `WebStandardStreamableHTTPServerTransport` constructed with
+ * `sessionIdGenerator: undefined` records `_hasHandledRequest = true`
+ * after its first call and throws on the second — "Stateless transport
+ * cannot be reused across requests. Create a new transport per
+ * request." Reusing the same transport across `/mcp` calls would cap
+ * the agent at one MCP call per sidecar lifetime, which is unusable.
  *
- * Returns a teardown function for tests; production sidecars never tear
- * the endpoint down (the process exits with the agent run).
+ * The tool definitions are computed once (pure data — they reference
+ * `app.request()` lazily, not `app` state). The `Server` and
+ * `WebStandardStreamableHTTPServerTransport` are constructed fresh for
+ * each request. Construction is pure-memory and `server.connect()` on
+ * the web-standard transport is synchronous in practice, so the
+ * per-request cost is negligible compared to the upstream HTTP hop the
+ * tool then performs.
  */
-export function mountMcp(app: Hono): () => Promise<void> {
-  const server = createMcpServer(buildSidecarTools(app), {
-    name: "appstrate-sidecar",
-    version: "1",
-  });
-
-  // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
-  // disables session tracking. The transport handles each request
-  // independently — no state to leak between agent invocations, no map
-  // to bound.
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
-
-  // `connect()` is async only because some transports start an upstream
-  // process; in-memory + web-standard return immediately. We `void` the
-  // promise so the import-time mount is non-blocking, then attach the
-  // route — handleRequest() awaits internally on first POST so a slow
-  // connect() would only delay the first request, not crash the boot.
-  const ready = server.connect(transport);
+export function mountMcp(app: Hono): void {
+  const tools = buildSidecarTools(app);
 
   app.all("/mcp", async (c) => {
-    await ready;
-    return transport.handleRequest(c.req.raw);
+    const server = createMcpServer(tools, {
+      name: "appstrate-sidecar",
+      version: "1",
+    });
+    // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
+    // disables session tracking. Combined with per-request construction,
+    // there is no state to leak between agent invocations, no map to
+    // bound, and no SDK contract to violate.
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    try {
+      await server.connect(transport);
+      // `handleRequest` returns a `Promise<Response>` we hand straight
+      // back to Hono. Awaiting before returning ensures the `finally`
+      // teardown runs after the response has been fully composed (the
+      // SDK populates the response body synchronously into the Response
+      // object before resolving the promise).
+      return await transport.handleRequest(c.req.raw);
+    } finally {
+      await transport.close();
+      await server.close();
+    }
   });
-
-  return async () => {
-    await ready;
-    await transport.close();
-    await server.close();
-  };
 }
