@@ -62,8 +62,8 @@ async function rpc(
       // Hono's `app.request()` does not synthesise a Host header. Real
       // HTTP/1.1 clients (the agent container, mcp-inspector, the SDK
       // Client) always send one. We set it explicitly here so the
-      // sidecar's DNS-rebinding guard (allowedHosts: ["sidecar",
-      // "127.0.0.1", "localhost"]) accepts the test request.
+      // sidecar's DNS-rebinding guard (`ALLOWED_HOSTNAMES`) accepts
+      // the test request.
       Host: "localhost",
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
@@ -74,6 +74,73 @@ async function rpc(
   // configure JSON, so the body is a single JSON-RPC envelope.
   return { status: res.status, json: JSON.parse(text) };
 }
+
+describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
+  // The sidecar runs the host-header check itself (port-tolerant)
+  // because the SDK's built-in `allowedHosts` does an exact match
+  // including the port. The process orchestrator (used by
+  // `appstrate run` and tests) maps the sidecar to a *dynamic* port
+  // on `localhost`, so an exact-match list would reject every legit
+  // call.
+
+  function rawMcp(app: ReturnType<typeof createApp>, host: string | null) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    if (host !== null) headers.Host = host;
+    return app.request("/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+  }
+
+  it("accepts the docker bridge alias (sidecar:8080)", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "sidecar:8080");
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts localhost with a dynamic port (process orchestrator)", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "localhost:51123");
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts 127.0.0.1 with a dynamic port", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "127.0.0.1:62000");
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts portless hostnames (Hono test default)", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "localhost");
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects unknown hosts with 403 + JSON-RPC error envelope", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "evil.example.com:8080");
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as {
+      jsonrpc: string;
+      error: { code: number; message: string };
+    };
+    expect(body.jsonrpc).toBe("2.0");
+    expect(body.error.code).toBe(-32000);
+    expect(body.error.message).toContain("Invalid Host header");
+    expect(body.error.message).toContain("evil.example.com");
+  });
+
+  it("rejects a Host header that matches the suffix only (e.g. notlocalhost)", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "notlocalhost:8080");
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects a missing Host header", async () => {
+    // `app.request()` won't send a Host header unless we set one
+    // explicitly. The validator must fail closed in that case.
+    const res = await rawMcp(createApp(makeDeps()), null);
+    expect(res.status).toBe(403);
+  });
+});
 
 describe("POST /mcp — initialize", () => {
   it("returns server capabilities advertising tools support", async () => {

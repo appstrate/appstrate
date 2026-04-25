@@ -1,8 +1,8 @@
 # Sidecar — credential-isolating MCP server
 
-A small Hono server that runs in its own Docker container alongside every Appstrate agent run. The agent container talks to the sidecar over the run's private bridge network exclusively via the **Model Context Protocol** (Streamable HTTP, stateless). The sidecar holds the credentials, talks to upstream provider APIs, and returns responses to the agent as MCP `tools/call` results or `resource_link` blocks.
+A small Hono server that runs in its own Docker container alongside every Appstrate agent run. The agent container talks to the sidecar over the run's private bridge network. Agent tool calls flow exclusively over the **Model Context Protocol** (Streamable HTTP, stateless); the in-container Pi SDK additionally reaches the sidecar over plain HTTP for chat completions, where it streams the LLM provider's native protocol back unchanged. The sidecar holds the credentials, talks to upstream provider/LLM APIs, and returns responses to the agent as MCP `tools/call` results, `resource_link` blocks, or — for `/llm/*` — a transparent stream-through.
 
-The agent container has no platform credentials, no access to `host.docker.internal`, and no `SIDECAR_URL` env var after bootstrap. All sidecar-backed capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
+The agent container has no platform credentials, no access to `host.docker.internal`, and no `SIDECAR_URL` env var after bootstrap. All credential-bearing capabilities are exposed to the agent LLM as typed Pi tools — never as a bare URL.
 
 ## HTTP surface
 
@@ -10,17 +10,18 @@ The sidecar's external HTTP surface is intentionally small:
 
 - `GET /health` — Readiness probe. Returns 200 when ready, 503 (`{ status: "degraded" }`) otherwise.
 - `POST /configure` — One-time runtime configuration for pool-pre-warmed sidecars (`runToken`, `platformApiUrl`, `proxyUrl`, optional `llm`). Authenticated via `Bearer ${CONFIG_SECRET}` and locked after first use. Permanently locked when the sidecar was started fresh with `RUN_TOKEN` already in the environment.
-- `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. Authenticated via `Authorization: Bearer ${runToken}`.
+- `ALL /llm/*` — LLM reverse proxy consumed by the in-container Pi SDK as `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The sidecar substitutes the per-run placeholder embedded in SDK-generated headers for the real LLM API key, then streams the upstream response back zero-copy. SSRF-blocked against private/metadata addresses; bound by `LLM_PROXY_TIMEOUT_MS`.
+- `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. Authenticated via `Authorization: Bearer ${runToken}`. The Host header is validated against `{sidecar, 127.0.0.1, localhost}` regardless of port (DNS-rebinding defence).
 
 ## MCP tools
 
 The `/mcp` endpoint advertises three first-party tools, all backed by `executeProviderCall` and the platform's per-run-token internal endpoints:
 
-| Tool            | Purpose                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`. |
-| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                            |
-| `llm_complete`  | Platform-configured LLM passthrough — sidecar holds the LLM provider key.                        |
+| Tool            | Purpose                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                                          |
+| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                                                     |
+| `llm_complete`  | LLM-as-a-tool for sub-agent workflows. The agent's primary completions go over the HTTP `/llm/*` route consumed by the Pi SDK; `llm_complete` is for tool-call paths where the agent itself wants to invoke a completion. |
 
 Third-party MCP servers can be mounted alongside the first-party tools via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
 

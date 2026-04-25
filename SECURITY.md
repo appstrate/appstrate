@@ -153,7 +153,7 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to build the typed Pi tools (`<provider>_call`, `run_history`), and then `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated outbound traffic flows exclusively through the typed tools, which proxy to the sidecar internally.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`<provider>_call`, `run_history`), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` is `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
 
 **What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 

@@ -71,7 +71,6 @@ COPY runtime-pi/sidecar/server.ts           \
      runtime-pi/sidecar/mcp-host.ts         \
      runtime-pi/sidecar/blob-store.ts       \
      runtime-pi/sidecar/credential-proxy.ts \
-     runtime-pi/sidecar/deprecation.ts      \
      runtime-pi/sidecar/roots.ts            \
      runtime-pi/sidecar/
 

@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * After the MCP migration, the sidecar's HTTP surface is intentionally
- * narrow: `GET /health`, `POST /configure`, and `ALL /mcp` (mounted by
- * `mountMcp`, exercised by `mcp.test.ts`). The legacy `/proxy`,
- * `/run-history`, and `/llm/*` routes are gone — every credential-
- * isolation invariant they enforced lives in the credential-proxy core
- * (`credential-proxy.test.ts`) and the MCP tool handlers (`mcp.test.ts`).
+ * Coverage for the sidecar's first-party HTTP routes:
  *
- * This file covers the two remaining HTTP routes only.
+ *   - `GET  /health`     — readiness probe.
+ *   - `POST /configure`  — one-time runtime config injection.
+ *   - `ALL  /llm/*`      — placeholder-substituting LLM reverse proxy
+ *                          consumed by the in-container Pi SDK over HTTP.
+ *
+ * `/mcp` (mounted by `mountMcp`) is exercised in `mcp.test.ts`.
+ * Credential-proxy invariants (cred fetch, allowlist matching, 401
+ * retry) live in `credential-proxy.test.ts`.
  */
 
 import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
-import type { CredentialsResponse } from "../helpers.ts";
+import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -243,5 +245,196 @@ describe("POST /configure — llm field", () => {
       apiKey: "sk-oai",
       placeholder: "sk-placeholder",
     });
+  });
+});
+
+// --- ALL /llm/* — LLM reverse proxy ---
+//
+// The Pi SDK in the agent container makes HTTP calls to
+// `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The platform
+// wires `MODEL_BASE_URL = http://sidecar:8080/llm` (Docker mode) or
+// `http://localhost:<port>/llm` (process orchestrator). The sidecar
+// owns the real LLM API key and substitutes a per-run placeholder
+// embedded in the SDK-generated headers, then streams the upstream
+// response back to the agent.
+
+const LLM_CONFIG: LlmProxyConfig = {
+  baseUrl: "https://api.anthropic.com",
+  apiKey: "real-sk-ant-key",
+  placeholder: "sk-placeholder",
+};
+
+describe("ALL /llm/* — SSRF protection", () => {
+  it("returns 403 when baseUrl targets localhost", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "http://localhost:8000", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("blocked network range");
+  });
+
+  it("returns 403 when baseUrl targets cloud metadata", async () => {
+    const deps = makeDeps();
+    deps.config.llm = {
+      baseUrl: "http://169.254.169.254/metadata",
+      apiKey: "key",
+      placeholder: "ph",
+    };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when baseUrl targets private IP", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "http://10.0.0.1:8080", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("ALL /llm/* — basic routing", () => {
+  it("returns 503 when llm config not set", async () => {
+    const app = createApp(makeDeps());
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not configured");
+  });
+
+  it("forwards path and query string to baseUrl", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"id":"msg_1"}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages?stream=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"model":"claude-sonnet-4-5"}',
+    });
+    expect(res.status).toBe(200);
+    const url = (fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages?stream=true");
+  });
+
+  it("returns 502 with hostname hint when upstream fetch fails", async () => {
+    const fetchFn = mock(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("api.anthropic.com");
+  });
+
+  it("forwards upstream error status transparently", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"error":"rate_limited"}', {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(429);
+  });
+});
+
+describe("ALL /llm/* — placeholder replacement", () => {
+  it("replaces placeholder in x-api-key header", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": "sk-placeholder" },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
+  });
+
+  it("replaces placeholder embedded in Authorization Bearer header", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = {
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant-oat01-real-token",
+      placeholder: "sk-ant-oat01-placeholder",
+    };
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["authorization"]).toBe("Bearer sk-ant-oat01-real-token");
+  });
+
+  it("preserves headers that do not contain the placeholder", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": "sk-placeholder",
+        "Content-Type": "application/json",
+        "X-Custom": "untouched",
+      },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
+    expect(headers["content-type"]).toBe("application/json");
+    expect(headers["x-custom"]).toBe("untouched");
+  });
+});
+
+describe("ALL /llm/* — streaming", () => {
+  it("streams response body through without buffering", async () => {
+    const chunks = ['data: {"type":"content"}\n\n', "data: [DONE]\n\n"];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      },
+    });
+    const fetchFn = mock(
+      async () =>
+        new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const text = await res.text();
+    expect(text).toContain('data: {"type":"content"}');
+    expect(text).toContain("data: [DONE]");
   });
 });

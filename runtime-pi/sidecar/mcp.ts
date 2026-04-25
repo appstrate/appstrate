@@ -85,6 +85,47 @@ const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
 const MAX_MCP_REQUEST_BODY_SIZE = 256 * 1024;
 
 /**
+ * Hostnames the agent uses to reach the sidecar. The Docker bridge
+ * exposes the sidecar under the `sidecar` alias on port 8080; the
+ * process orchestrator (used by `appstrate run` and tests) exposes it
+ * under `localhost`/`127.0.0.1` on a *dynamic* port.
+ *
+ * The MCP SDK's built-in `allowedHosts` does an exact-match check
+ * including port, which fails the dynamic-port case (Host header
+ * `localhost:51123` is not in the list). We do the validation
+ * ourselves — splitting hostname from port — and disable the SDK's
+ * own host check via `enableDnsRebindingProtection: false`. The DNS-
+ * rebinding defence is preserved because every legitimate caller
+ * resolves to one of these hostnames; an attacker rebinding a public
+ * domain to 127.0.0.1 still hits a Host header that does not match.
+ */
+const ALLOWED_HOSTNAMES = new Set(["sidecar", "127.0.0.1", "localhost"]);
+
+function jsonRpcErrorResponse(status: number, code: number, message: string): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function validateMcpHostHeader(req: Request): Response | undefined {
+  const hostHeader = req.headers.get("host");
+  if (!hostHeader) {
+    return jsonRpcErrorResponse(403, -32000, "Invalid Host header: <missing>");
+  }
+  // Strip port: hostname is everything before the last `:` (handles
+  // IPv6 literals `[::1]:8080` too — split on `]:` for them, but the
+  // sidecar's allowlist contains no IPv6 literals so a simple last-`:`
+  // split is sufficient here).
+  const colonIdx = hostHeader.lastIndexOf(":");
+  const hostname = colonIdx >= 0 ? hostHeader.slice(0, colonIdx) : hostHeader;
+  if (!ALLOWED_HOSTNAMES.has(hostname)) {
+    return jsonRpcErrorResponse(403, -32000, `Invalid Host header: ${hostHeader}`);
+  }
+  return undefined;
+}
+
+/**
  * Headers an LLM caller may NOT inject via `provider_call.args.headers`.
  *
  * The MCP descriptor advertises that routing / sidecar-control headers
@@ -153,8 +194,8 @@ const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
  * `provider_call` calls {@link executeProviderCall} directly via
  * {@link MountMcpOptions.proxyDeps}; `run_history` and `llm_complete`
  * call `proxyDeps.fetchFn` against the configured platform / LLM
- * upstreams. Nothing routes through a Hono HTTP envelope — the sidecar
- * no longer exposes `/proxy`, `/run-history`, or `/llm/*`.
+ * upstreams. None of these tools round-trip through a Hono HTTP
+ * envelope.
  *
  * When a `provider_call` upstream response is binary or exceeds
  * {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in the
@@ -775,6 +816,13 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
 
   app.all("/mcp", async (c) => {
+    // Host header validation (DNS-rebinding defence). Done here, not by
+    // the SDK, so we accept dynamic-port Host values like
+    // `localhost:51123` (process-orchestrator mode) while still
+    // rejecting anything outside `ALLOWED_HOSTNAMES`.
+    const hostError = validateMcpHostHeader(c.req.raw);
+    if (hostError) return hostError;
+
     // Body-size guard: the SDK transport calls `await req.json()`
     // unconditionally on POST. We pre-read the body (bounded), then
     // hand a fresh Request to the transport. `Content-Length`, when
@@ -835,17 +883,13 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // there is no state to leak between agent invocations, no map to
     // bound, and no SDK contract to violate.
     //
-    // DNS-rebinding defence: the sidecar binds 0.0.0.0:8080 and lives
-    // on the per-run Docker bridge network. The trust boundary is the
-    // network, but a developer who exposes the port to their host can
-    // be reached by any JS in any browser tab via DNS rebinding. The
-    // SDK's optional Origin/Host check costs us nothing and pins the
-    // expected callers to the agent container alias and localhost.
+    // DNS-rebinding defence is enforced above by `validateMcpHostHeader`
+    // (port-tolerant, supports dynamic-port deployments). The SDK's own
+    // host/origin check is therefore disabled.
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
-      enableDnsRebindingProtection: true,
-      allowedHosts: ["sidecar", "127.0.0.1", "localhost"],
+      enableDnsRebindingProtection: false,
     });
     try {
       await server.connect(transport);

@@ -4,14 +4,14 @@ This document describes the MCP-native runtime (`runtimeProtocolVersion: "2.0"`)
 
 ## TL;DR
 
-- **Wire format:** Streamable HTTP MCP (`POST /mcp`) is the only application-protocol surface between the agent container and the sidecar.
+- **Wire format:** Streamable HTTP MCP (`POST /mcp`) is the agent-tool-call surface between the agent container and the sidecar. The Pi SDK additionally hits `/llm/*` over HTTP for chat completions — that route is a placeholder-substituting reverse proxy, not an MCP endpoint, and never exposes the LLM key to the agent.
 - **LLM-facing surface:** three canonical tools — `provider_call`, `run_history`, `llm_complete` — across every execution mode (Docker container, in-process subprocess, CLI).
 - **Capability prompt:** `## Connected Providers` documents `provider_call({ providerId, method, target, ... })` as the single entry point. Each connected provider contributes one `providerId` value to the tool's enum plus a doc reference.
 - **No runtime flags** — direct MCP is the only mode.
 
 ## Compatibility
 
-A pre-cutover 1.x runner against a 2.0 platform crashes at boot — the legacy `/proxy`, `/run-history`, and `/llm/*` routes return 404. Operators who pinned a 1.x runner image must either upgrade the runner or pin the platform to a pre-cutover commit. There is no soft-deprecation period.
+A pre-cutover 1.x runner against a 2.0 platform crashes at boot — the legacy `/proxy` and `/run-history` HTTP routes return 404, and the runner has no MCP client to fall back on. The `/llm/*` reverse proxy is preserved across versions because the Pi SDK consumes it directly over HTTP. Operators who pinned a 1.x runner image must either upgrade the runner or pin the platform to a pre-cutover commit. There is no soft-deprecation period.
 
 ## What 2.0 looks like on the wire
 
@@ -23,7 +23,7 @@ POST /mcp        # JSON-RPC 2.0, Streamable HTTP, stateless, per-request transpo
 
 - `provider_call({ providerId, method, target, headers?, body?, responseMode?, substituteBody? })` — credential-injecting proxy. `providerId` enum is the agent's declared providers. The sidecar's MCP handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts`.
 - `run_history({ limit?, fields? })` — past-run metadata via the platform's per-run-token internal endpoint.
-- `llm_complete(...)` — platform-configured LLM passthrough.
+- `llm_complete(...)` — LLM-as-a-tool path for sub-agent workflows (the agent's own primary completions go over the Pi SDK's HTTP `${MODEL_BASE_URL}/v1/chat/completions` call, which the sidecar serves via the `/llm/*` placeholder-substituting reverse proxy).
 
 Binary upstream responses surface as MCP `resource_link` blocks read back through `resources/read`.
 
