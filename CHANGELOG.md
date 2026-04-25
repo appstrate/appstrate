@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Self-hosting closed mode (#228)** — env-driven invitation-only deployments.
+  - `AUTH_DISABLE_SIGNUP=true` blocks new account creation; pending
+    invitations and platform admins still pass through (resolves the
+    Infisical-style "invitation breaks when signup is disabled" pitfall).
+  - `AUTH_DISABLE_ORG_CREATION=true` restricts `POST /api/orgs` to
+    platform admins; org-less users see a "Waiting for invitation" page.
+  - `AUTH_PLATFORM_ADMIN_EMAILS` declarative allowlist (no UI, no
+    migration, IaC-friendly).
+  - `AUTH_ALLOWED_SIGNUP_DOMAINS` email-domain allowlist with invitation
+    override for external contractors.
+  - `AUTH_BOOTSTRAP_OWNER_EMAIL` (+ `AUTH_BOOTSTRAP_ORG_NAME`) auto-creates
+    the root organization on first signup of the configured email.
+  - `bun apps/api/scripts/bootstrap-org.ts --owner=… --name=…` for explicit
+    ops bootstrap with idempotent JSON output.
+  - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)
 - Shared `tsconfig.base.json` with strict settings across all packages

@@ -48,6 +48,10 @@ export interface AppConfigFeatures {
   googleAuth: boolean;
   githubAuth: boolean;
   smtp: boolean;
+  /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
+  signupDisabled: boolean;
+  /** AUTH_DISABLE_ORG_CREATION — webapp routes org-less users to "waiting for invitation". */
+  orgCreationDisabled: boolean;
   [key: string]: boolean;
 }
 

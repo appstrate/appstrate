@@ -2,10 +2,11 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
 import { createLogger } from "@appstrate/core/logger";
 
@@ -15,6 +16,90 @@ import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
+import { evaluateSignupPolicy, isBootstrapOwner, normalizeEmail } from "./auth-policy.ts";
+import { toSlug } from "@appstrate/core/naming";
+import { organizationMembers } from "./schema/organizations.ts";
+
+/**
+ * True when a `pending` non-expired invitation exists for `email`. Used by
+ * the platform signup gate to let invited users complete signup even when
+ * `AUTH_DISABLE_SIGNUP=true`. The single SQL query keeps overhead
+ * negligible — the `idx_org_invitations_email` index covers it.
+ */
+async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  const [row] = await db
+    .select({ id: orgInvitations.id })
+    .from(orgInvitations)
+    .where(
+      and(
+        eq(orgInvitations.email, normalized),
+        eq(orgInvitations.status, "pending"),
+        gt(orgInvitations.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+/**
+ * Auto-create the bootstrap organization when the freshly-signed-up user
+ * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Idempotent on two axes:
+ *   1. If this user already owns at least one org → no-op.
+ *   2. If the configured slug is taken (race / re-run) → fall back to a
+ *      suffixed slug so the bootstrap never fails halfway through signup.
+ *
+ * Runs in the BA `after` hook, after the profile row is inserted. Safe to
+ * skip silently on error: the user is already created and can create an
+ * org manually if they have permission. Logs are loud so ops sees the
+ * outcome on first deploy.
+ */
+async function maybeBootstrapOrgForOwner(userId: string, email: string): Promise<void> {
+  if (!isBootstrapOwner(email)) return;
+  const env = getEnv();
+
+  // Idempotence: bail if this user already owns any organization.
+  const [existingOwnership] = await db
+    .select({ orgId: organizationMembers.orgId })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.role, "owner")))
+    .limit(1);
+  if (existingOwnership) return;
+
+  const orgName = env.AUTH_BOOTSTRAP_ORG_NAME;
+  const baseSlug = toSlug(orgName, 50) || "default";
+  // Suffix the slug if the base is taken (rare race: two boots, same env).
+  let slug = baseSlug;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const [collision] = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1);
+    if (!collision) break;
+    slug = `${baseSlug}-${attempt + 2}`;
+  }
+
+  const [org] = await db
+    .insert(organizations)
+    .values({ name: orgName, slug, createdBy: userId })
+    .returning({ id: organizations.id, slug: organizations.slug });
+  if (!org) {
+    logger.error("auth: bootstrap org insert returned no row", { userId, email });
+    return;
+  }
+  await db.insert(organizationMembers).values({
+    orgId: org.id,
+    userId,
+    role: "owner",
+  });
+  logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
+    userId,
+    email,
+    orgId: org.id,
+    slug: org.slug,
+  });
+}
 
 // Env is read lazily inside `buildAuth()` rather than at module load time so
 // that `_rebuildAuthForTesting()` can flip SMTP / social flags between tests
@@ -573,6 +658,27 @@ function buildAuth(
             // the OIDC `beforeSignup` guard. `context` is `null` when BA
             // creates users outside an HTTP request (seeds, admin scripts).
             const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+            // Platform-level signup gate (self-hosting lockdown). Runs FIRST
+            // so the cheapest, most specific decision wins before any module
+            // hook. Skipped when `AUTH_DISABLE_SIGNUP=false` (open mode) and
+            // no domain allowlist is configured — common case is a single
+            // env read with no DB query.
+            const envForGate = getEnv();
+            if (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length) {
+              const hasInvite =
+                envForGate.AUTH_DISABLE_SIGNUP && (await hasPendingInvitationByEmail(user.email));
+              const decision = evaluateSignupPolicy(user.email, hasInvite);
+              if (!decision.allowed) {
+                logger.info("auth: platform signup gate blocked signup", {
+                  email: user.email,
+                  reason: decision.reason,
+                });
+                throw new APIError("FORBIDDEN", {
+                  message: decision.reason,
+                  code: decision.reason,
+                });
+              }
+            }
             if (_beforeSignupHook) {
               await _beforeSignupHook(user.email, { headers });
             }
@@ -591,6 +697,19 @@ function buildAuth(
               displayName: user.name || user.email,
               language: "fr",
             });
+            // Self-hosting bootstrap path (issue #228) — auto-create the
+            // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
+            // BEFORE the module after-hook so cloud's free-tier hook etc.
+            // see a coherent state.
+            try {
+              await maybeBootstrapOrgForOwner(user.id, user.email);
+            } catch (err) {
+              logger.error("auth: bootstrap org creation failed", {
+                userId: user.id,
+                email: user.email,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
             if (_afterSignupHook) {
               const ctx = context as
                 | { headers?: Headers; request?: { headers?: Headers } }

@@ -8,6 +8,7 @@
     "./schema": "./src/schema/index.ts",
     "./client": "./src/client.ts",
     "./auth": "./src/auth.ts",
+    "./auth-policy": "./src/auth-policy.ts",
     "./storage": "./src/storage.ts",
     "./notify": "./src/notify.ts"
   },

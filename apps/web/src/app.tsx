@@ -25,6 +25,7 @@ import { OnboardingModelStep } from "./pages/onboarding/model-step";
 import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
+import { OnboardingWaitingStep } from "./pages/onboarding/waiting-step";
 import { OrgSettingsLayout } from "./pages/org-settings/layout";
 import { OrgSettingsGeneralPage } from "./pages/org-settings/general";
 import { OrgSettingsMembersPage } from "./pages/org-settings/members";
@@ -154,6 +155,7 @@ function AuthLoginReturnToBridge() {
 
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
+  const { features } = useAppConfig();
   const location = useLocation();
 
   if (
@@ -170,9 +172,15 @@ function OrgGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // No orgs at all -- redirect to onboarding
+  // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
+  // when org creation is locked down — issue #228 closed mode).
   if (orgs.length === 0) {
-    return <Navigate to="/onboarding/create" replace />;
+    return (
+      <Navigate
+        to={features.orgCreationDisabled ? "/onboarding/waiting" : "/onboarding/create"}
+        replace
+      />
+    );
   }
 
   // Orgs exist but none selected yet (auto-select happening)
@@ -229,7 +237,10 @@ export function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/register"
+            element={features.signupDisabled ? <Navigate to="/login" replace /> : <RegisterPage />}
+          />
           {/*
            * Server-rendered flows outside the SPA (e.g. the device-flow
            * `/activate` page) redirect unauthenticated visitors here with
@@ -312,6 +323,7 @@ export function App() {
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
+          <Route path="/onboarding/waiting" element={<OnboardingWaitingStep />} />
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
           <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
           <Route path="/onboarding/model" element={<OnboardingModelStep />} />

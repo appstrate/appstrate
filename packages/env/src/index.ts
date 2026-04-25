@@ -230,6 +230,75 @@ const envSchema = z
     SMTP_USER: z.string().optional(),
     SMTP_PASS: z.string().optional(),
     SMTP_FROM: z.string().optional(),
+
+    // Auth lockdown (self-hosting) — see examples/self-hosting/AUTH_MODES.md.
+    //
+    // Default behavior is "open mode": anyone who can reach the instance
+    // may sign up and create their own organization (good for SaaS / demo).
+    // Self-hosters who want "closed mode" (invitation-only) flip these on.
+    //
+    // AUTH_DISABLE_SIGNUP — when true, blocks brand-new account creation
+    // (email/password, magic-link, social OIDC). Three exceptions always pass:
+    //   1. Email matches a pending+non-expired invitation in `org_invitations`.
+    //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
+    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL (1st run only).
+    AUTH_DISABLE_SIGNUP: z
+      .string()
+      .default("false")
+      .refine((v) => v === "true" || v === "false", {
+        message: "AUTH_DISABLE_SIGNUP must be 'true' or 'false'",
+      })
+      .transform((v) => v === "true"),
+    // AUTH_DISABLE_ORG_CREATION — when true, only platform admins (see
+    // AUTH_PLATFORM_ADMIN_EMAILS) may call POST /api/orgs. Org-less users
+    // see a "waiting for invitation" page instead of /onboarding/create.
+    AUTH_DISABLE_ORG_CREATION: z
+      .string()
+      .default("false")
+      .refine((v) => v === "true" || v === "false", {
+        message: "AUTH_DISABLE_ORG_CREATION must be 'true' or 'false'",
+      })
+      .transform((v) => v === "true"),
+    // AUTH_ALLOWED_SIGNUP_DOMAINS — comma-separated email domain allowlist.
+    // When set, signups (outside the 3 exceptions above) are limited to
+    // emails whose domain matches one entry. Empty / unset = no domain
+    // restriction. Case-insensitive, no leading "@". Example:
+    //   AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io
+    AUTH_ALLOWED_SIGNUP_DOMAINS: z
+      .string()
+      .default("")
+      .transform((s) =>
+        s
+          .split(",")
+          .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+          .filter(Boolean),
+      ),
+    // AUTH_PLATFORM_ADMIN_EMAILS — comma-separated email allowlist of
+    // platform-level admins. Bypass AUTH_DISABLE_SIGNUP and may call
+    // POST /api/orgs even when AUTH_DISABLE_ORG_CREATION=true.
+    // Declarative on purpose: no UI, no migration, IaC-friendly. Comparison
+    // is case-insensitive against the user's normalized email.
+    AUTH_PLATFORM_ADMIN_EMAILS: z
+      .string()
+      .default("")
+      .transform((s) =>
+        s
+          .split(",")
+          .map((e) => e.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
+    // self-hosted instances in closed mode. When set, this email is allowed
+    // to sign up even with AUTH_DISABLE_SIGNUP=true, and an organization is
+    // auto-created with this user as owner on first signup. Idempotent: if
+    // the user already owns an org, the after-hook is a no-op.
+    AUTH_BOOTSTRAP_OWNER_EMAIL: z
+      .string()
+      .default("")
+      .transform((s) => s.trim().toLowerCase()),
+    // AUTH_BOOTSTRAP_ORG_NAME — display name of the bootstrap org. Defaults
+    // to "Default" when unset. Slug is derived from the name.
+    AUTH_BOOTSTRAP_ORG_NAME: z.string().default("Default"),
   })
   .refine((env) => !env.S3_BUCKET || env.S3_REGION, {
     message: "S3_REGION is required when S3_BUCKET is set",

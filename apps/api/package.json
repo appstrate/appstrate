@@ -11,7 +11,8 @@
     "test": "bun test test/unit/ && bun test test/integration/",
     "test:unit": "bun test test/unit/",
     "test:watch": "bun test --watch",
-    "test:integration": "bun test test/integration/"
+    "test:integration": "bun test test/integration/",
+    "admin:bootstrap-org": "bun scripts/bootstrap-org.ts"
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
