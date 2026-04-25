@@ -38,7 +38,6 @@ import {
   writeRunnerLedgerRow,
 } from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
-import { addPackageMemories } from "./state/package-memories.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertCheckpoint,
@@ -213,9 +212,9 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
  *      whether the run executed in-process or came from a remote runner.
  *   5. Fire the `afterRun` hook to collect module-provided metadata (billing,
  *      usage quotas, ...).
- *   6. CAS-update the run row (status, result, state, cost, metadata,
+ *   6. CAS-update the run row (status, result, cost, metadata,
  *      sink_closed_at). Idempotent: zero rows affected = already finalized.
- *   7. Persist memories + terminal log rows.
+ *   7. Persist memories + checkpoint into the unified store + terminal log rows.
  *   8. Emit `onRunStatusChange` (modules react asynchronously).
  *
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
@@ -327,14 +326,13 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
-  const stateToPersist = isPlainRecord(result.state) ? result.state : null;
+  const checkpointToPersist = isPlainRecord(result.checkpoint) ? result.checkpoint : null;
 
   const rowsAffected = await db
     .update(runs)
     .set({
       status,
       result: resultToPersist,
-      state: stateToPersist,
       error: errorMessage,
       completedAt: now,
       duration: resolvedDurationMs,
@@ -372,9 +370,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     );
   }
 
-  // Resolve the run's actor (for unified-persistence scope). The legacy
-  // package_memories table is app-wide so we don't need it for the legacy
-  // write below; the unified table is per-actor by default.
+  // Resolve the run's actor for the unified persistence scope.
   const [actorRow] = await db
     .select({
       dashboardUserId: runs.dashboardUserId,
@@ -389,17 +385,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   });
 
   if (result.memories?.length) {
-    // Legacy double-write: keep `package_memories` populated so the
-    // transition window is reversible. Future PR drops the legacy table.
-    // The legacy table is app-wide (no scope dimension), so we feed it
-    // every memory regardless of declared scope — matching pre-1.4
-    // behaviour where everything was effectively "shared".
-    //
-    // Best-effort + observable: legacy + unified writes run via
-    // `Promise.allSettled` so a transient failure on one side never
-    // blocks finalize, and any divergence is logged with enough context
-    // (runId, packageId, applicationId, side, error) to investigate
-    // during the transition window.
+    // Split memories by declared scope and write each non-empty bucket
+    // to the unified store. The store IS the store — exceptions
+    // propagate so finalize fails loudly on persistence faults.
     const sharedContent: string[] = [];
     const actorContent: string[] = [];
     for (const m of result.memories) {
@@ -407,85 +395,43 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       else actorContent.push(m.content);
     }
 
-    const [legacyResult, unifiedActorResult, unifiedSharedResult] = await Promise.allSettled([
-      // Legacy: app-wide bucket, all memories.
-      addPackageMemories(
-        run.packageId,
-        run.orgId,
-        run.applicationId,
-        result.memories.map((m) => m.content),
-        run.id,
-      ),
-      // Unified — actor scope (skipped if empty).
-      actorContent.length > 0
-        ? addUnifiedMemories(
-            run.packageId,
-            run.applicationId,
-            run.orgId,
-            persistenceScope,
-            actorContent,
-            run.id,
-          )
-        : Promise.resolve(0),
-      // Unified — shared scope (skipped if empty).
-      sharedContent.length > 0
-        ? addUnifiedMemories(
-            run.packageId,
-            run.applicationId,
-            run.orgId,
-            { type: "shared" },
-            sharedContent,
-            run.id,
-          )
-        : Promise.resolve(0),
-    ]);
-
-    logDoubleWriteDivergence({
-      surface: "memory",
-      runId: run.id,
-      packageId: run.packageId,
-      applicationId: run.applicationId,
-      legacy: legacyResult,
-      unified: [unifiedActorResult, unifiedSharedResult],
-    });
-  }
-
-  // Unified-persistence checkpoint write — same data the legacy
-  // `runs.state` UPDATE above persisted, but in the per-actor unified
-  // store. Skipped when the runner did not emit a checkpoint (matches
-  // the "no state.set event" semantics). Honors the AFPS 1.4 scope when
-  // the runtime stamped one onto `RunResult.checkpointScope`; falls back
-  // to the run's actor scope for legacy `state.set` events.
-  //
-  // The legacy `runs.state` write already happened in step 6 (the CAS
-  // UPDATE). If we got here, that side is committed. Any failure on the
-  // unified side is logged but does not abort finalize.
-  if (stateToPersist !== null) {
-    const checkpointScope =
-      result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
-    try {
-      await upsertCheckpoint(
+    if (actorContent.length > 0) {
+      await addUnifiedMemories(
         run.packageId,
         run.applicationId,
         run.orgId,
-        checkpointScope,
-        stateToPersist,
+        persistenceScope,
+        actorContent,
         run.id,
       );
-    } catch (err) {
-      // Legacy `runs.state` already persisted via the CAS; only the
-      // unified store diverged. Log with full context so the transition
-      // window stays observable.
-      logger.warn("checkpoint_persistence.double_write_divergence", {
-        surface: "checkpoint",
-        runId: run.id,
-        packageId: run.packageId,
-        applicationId: run.applicationId,
-        legacy: "fulfilled",
-        unified: "rejected",
-        unifiedError: err instanceof Error ? err.message : String(err),
-      });
     }
+    if (sharedContent.length > 0) {
+      await addUnifiedMemories(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        { type: "shared" },
+        sharedContent,
+        run.id,
+      );
+    }
+  }
+
+  // Unified-persistence checkpoint write — the single store for the
+  // carry-over checkpoint. Skipped when the runner did not emit one.
+  // Honors the AFPS 1.4 scope when the runtime stamped one onto
+  // `RunResult.checkpointScope`; falls back to the run's actor scope.
+  if (checkpointToPersist !== null) {
+    const checkpointScope =
+      result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
+    await upsertCheckpoint(
+      run.packageId,
+      run.applicationId,
+      run.orgId,
+      checkpointScope,
+      checkpointToPersist,
+      run.id,
+    );
   }
   if (status === "success" && resultToPersist) {
     await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
@@ -512,49 +458,6 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Observability hook for the legacy + unified double-write window.
- *
- * Logs a structured warning whenever the legacy outcome and the unified
- * outcome(s) diverge on the same finalize. Behaviour is best-effort —
- * the writes have already happened; this just records what diverged so
- * the transition window stays auditable until the legacy stores drop.
- *
- * For memories the unified side runs as up to two parallel inserts
- * (actor + shared). We consider unified "fulfilled" iff every concrete
- * write succeeded, "rejected" if any single one failed.
- */
-function logDoubleWriteDivergence(input: {
-  surface: "memory";
-  runId: string;
-  packageId: string;
-  applicationId: string;
-  legacy: PromiseSettledResult<unknown>;
-  unified: PromiseSettledResult<unknown>[];
-}): void {
-  const { surface, runId, packageId, applicationId, legacy, unified } = input;
-
-  const legacyOk = legacy.status === "fulfilled";
-  const unifiedOk = unified.every((r) => r.status === "fulfilled");
-  if (legacyOk && unifiedOk) return;
-
-  const legacyError = legacy.status === "rejected" ? String(legacy.reason) : undefined;
-  const unifiedErrors = unified
-    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-    .map((r) => String(r.reason));
-
-  logger.warn("checkpoint_persistence.double_write_divergence", {
-    surface,
-    runId,
-    packageId,
-    applicationId,
-    legacy: legacy.status,
-    unified: unifiedOk ? "fulfilled" : "rejected",
-    ...(legacyError ? { legacyError } : {}),
-    ...(unifiedErrors.length > 0 ? { unifiedError: unifiedErrors.join("; ") } : {}),
-  });
 }
 
 /**

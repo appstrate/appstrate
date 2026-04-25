@@ -4,15 +4,9 @@
 -- table with scope (user / end_user / shared) as a first-class dimension.
 -- See docs/adr/ADR-011-checkpoint-unification.md.
 --
--- This migration is ADDITIVE:
---
---   * creates `package_persistence` with its indexes + CHECK constraints,
---   * back-fills it with existing memories (→ scope=shared) and the most
---     recent non-null `runs.state` per actor (→ kind=checkpoint).
---
--- Legacy stores (`runs.state` column, `package_memories` table) are NOT
--- dropped here. The API double-writes during the transition window; the
--- follow-up migration drops them after stability is confirmed in prod.
+-- DDL only — no back-fill from legacy stores. Legacy `runs.state` and
+-- `package_memories` are removed in subsequent migrations; this file
+-- creates the unified table and its indexes.
 
 CREATE TABLE IF NOT EXISTS "package_persistence" (
   "id"              serial PRIMARY KEY,
@@ -53,67 +47,3 @@ CREATE INDEX IF NOT EXISTS "pkp_lookup"
 
 CREATE INDEX IF NOT EXISTS "pkp_org"
   ON "package_persistence" ("org_id");
---> statement-breakpoint
-
--- Back-fill existing memories as shared rows. Content becomes a JSONB
--- string; the service layer reads it via a typeof-string guard so legacy
--- content stays intact.
-INSERT INTO "package_persistence"
-  (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
-SELECT
-  pm.package_id,
-  pm.application_id,
-  pm.org_id,
-  'memory',
-  'shared',
-  NULL,
-  to_jsonb(pm.content),
-  pm.run_id,
-  pm.created_at,
-  pm.created_at
-FROM "package_memories" pm
-ON CONFLICT DO NOTHING;
---> statement-breakpoint
-
--- Back-fill the latest non-null `runs.state` per (package, app, actor) as
--- a checkpoint. We use a `ROW_NUMBER()` CTE rather than the Postgres-only
--- `DISTINCT ON` so the migration runs cleanly on PGlite (Tier 0) too.
--- The PARTITION BY mirrors the per-actor key; ORDER BY started_at DESC
--- picks the freshest row in each partition (rn = 1).
-WITH ranked AS (
-  SELECT
-    r.package_id,
-    r.application_id,
-    r.org_id,
-    r.dashboard_user_id,
-    r.end_user_id,
-    r.state,
-    r.id AS run_id,
-    r.started_at,
-    ROW_NUMBER() OVER (
-      PARTITION BY r.package_id, r.application_id, r.dashboard_user_id, r.end_user_id
-      ORDER BY r.started_at DESC
-    ) AS rn
-  FROM "runs" r
-  WHERE r.state IS NOT NULL
-)
-INSERT INTO "package_persistence"
-  (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
-SELECT
-  ranked.package_id,
-  ranked.application_id,
-  ranked.org_id,
-  'checkpoint',
-  CASE
-    WHEN ranked.end_user_id IS NOT NULL       THEN 'end_user'
-    WHEN ranked.dashboard_user_id IS NOT NULL THEN 'user'
-    ELSE 'shared'
-  END,
-  COALESCE(ranked.end_user_id, ranked.dashboard_user_id),
-  ranked.state,
-  ranked.run_id,
-  ranked.started_at,
-  ranked.started_at
-FROM ranked
-WHERE ranked.rn = 1
-ON CONFLICT DO NOTHING;
