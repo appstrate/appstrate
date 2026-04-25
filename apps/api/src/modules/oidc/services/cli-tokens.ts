@@ -873,6 +873,14 @@ export async function checkFamilyAndTouch(params: {
  * via the dashboard.
  */
 const RUNNER_DEVICE_NAME_CACHE_TTL_MS = 60 * 1000;
+/** Coarse upper bound on the cache. The 60 s TTL means dead keys naturally
+ *  expire on read, but `Map.delete` is never called on a TTL miss — so a
+ *  stream of distinct family ids would grow the Map unbounded between
+ *  reads of the same key. At ~10 k entries (~1 MB at typical key+name
+ *  sizes) we wholesale-clear and let the cache rebuild from cold. Cheaper
+ *  than maintaining LRU bookkeeping for a path whose miss is one indexed
+ *  query. */
+const RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES = 10_000;
 const _runnerDeviceNameCache = new Map<string, { name: string | null; expiresAt: number }>();
 
 export async function lookupCliDeviceName(familyId: string): Promise<string | null> {
@@ -886,6 +894,9 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
       .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
       .limit(1);
     const name = row?.deviceName ?? null;
+    if (_runnerDeviceNameCache.size >= RUNNER_DEVICE_NAME_CACHE_MAX_ENTRIES) {
+      _runnerDeviceNameCache.clear();
+    }
     _runnerDeviceNameCache.set(familyId, {
       name,
       expiresAt: now + RUNNER_DEVICE_NAME_CACHE_TTL_MS,

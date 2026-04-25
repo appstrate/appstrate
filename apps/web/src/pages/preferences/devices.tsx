@@ -3,73 +3,19 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Laptop, Terminal, Monitor } from "lucide-react";
+import { Laptop } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { CliSessionCard } from "../../components/cli-session-card";
 import { apiFetch } from "../../api";
-import { formatDateField } from "../../lib/markdown";
-
-interface CliSession {
-  familyId: string;
-  deviceName: string | null;
-  userAgent: string | null;
-  createdIp: string | null;
-  lastUsedIp: string | null;
-  lastUsedAt: string | null;
-  createdAt: string;
-  expiresAt: string;
-  current: boolean;
-}
+import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
 interface CliSessionsResponse {
-  sessions: CliSession[];
+  sessions: CliSessionDisplay[];
 }
 
 const SESSIONS_QUERY_KEY = ["cli-sessions"] as const;
-
-function categorizeUserAgent(ua: string | null): "cli" | "github-action" | "unknown" {
-  if (!ua) return "unknown";
-  const lower = ua.toLowerCase();
-  // Any GitHub Action invocation surfaces here when the action authenticates
-  // via the same `cli_refresh_tokens` family. We branch on the action's UA
-  // first because its identifier is a strict substring of the broader CLI
-  // category and would otherwise be swallowed.
-  if (lower.includes("github-action") || lower.includes("appstrate-action")) {
-    return "github-action";
-  }
-  if (lower.includes("appstrate-cli") || lower.includes("appstrate/")) {
-    return "cli";
-  }
-  return "unknown";
-}
-
-function deviceIcon(category: ReturnType<typeof categorizeUserAgent>) {
-  switch (category) {
-    case "cli":
-      return Terminal;
-    case "github-action":
-      return Monitor;
-    default:
-      return Laptop;
-  }
-}
-
-// Pre-fix rows persisted the literal `"unknown"` string when no IP was
-// available. Treat that as a falsy display value so the dashboard renders
-// nothing instead of the noise word — matches the post-fix NULL handling.
-function displayIp(ip: string | null): string | null {
-  if (!ip) return null;
-  return ip === "unknown" ? null : ip;
-}
-
-function deriveLabel(session: CliSession, t: (k: string) => string): string {
-  if (session.deviceName) return session.deviceName;
-  const category = categorizeUserAgent(session.userAgent);
-  if (category === "cli") return t("devices.fallbackCli");
-  if (category === "github-action") return t("devices.fallbackGithubAction");
-  return t("devices.fallbackUnknown");
-}
 
 export function PreferencesDevicesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -101,7 +47,7 @@ export function PreferencesDevicesPage() {
     },
   });
 
-  const [pendingRevoke, setPendingRevoke] = useState<CliSession | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<CliSessionDisplay | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -138,60 +84,14 @@ export function PreferencesDevicesPage() {
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {sessions.map((s) => {
-            const category = categorizeUserAgent(s.userAgent);
-            const Icon = deviceIcon(category);
-            return (
-              <div
-                key={s.familyId}
-                className="border-border bg-card flex items-start gap-4 rounded-lg border p-5"
-              >
-                <Icon className="text-muted-foreground mt-0.5 h-5 w-5 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{deriveLabel(s, t)}</span>
-                    {s.current && (
-                      <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-xs font-medium">
-                        {t("devices.thisDevice")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
-                    {s.userAgent && (
-                      <div className="truncate">
-                        <span className="font-medium">{t("devices.userAgentLabel")}:</span>{" "}
-                        <span className="font-mono">{s.userAgent}</span>
-                      </div>
-                    )}
-                    {displayIp(s.createdIp) && (
-                      <div>
-                        <span className="font-medium">{t("devices.createdIpLabel")}:</span>{" "}
-                        <span className="font-mono">{displayIp(s.createdIp)}</span>
-                      </div>
-                    )}
-                    <div>
-                      <span className="font-medium">{t("devices.createdAtLabel")}:</span>{" "}
-                      {formatDateField(s.createdAt)}
-                    </div>
-                    <div>
-                      <span className="font-medium">{t("devices.lastUsedLabel")}:</span>{" "}
-                      {s.lastUsedAt ? formatDateField(s.lastUsedAt) : t("devices.neverUsed")}
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPendingRevoke(s)}
-                  disabled={
-                    s.current || (revokeOne.isPending && revokeOne.variables === s.familyId)
-                  }
-                >
-                  {t("devices.revoke")}
-                </Button>
-              </div>
-            );
-          })}
+          {sessions.map((s) => (
+            <CliSessionCard
+              key={s.familyId}
+              session={s}
+              revokeDisabled={revokeOne.isPending && revokeOne.variables === s.familyId}
+              onRevoke={() => setPendingRevoke(s)}
+            />
+          ))}
         </div>
       )}
 
