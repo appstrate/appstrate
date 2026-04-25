@@ -105,10 +105,14 @@ describe("POST /mcp — llm_complete tool", () => {
     let observedBody: string | null = null;
     const fetchFn = mock(async (url: string, init: RequestInit) => {
       observedUrl = url;
-      observedAuth = (init.headers as Record<string, string>)?.["authorization"] ?? null;
-      // The body arrives as a ReadableStream when forwarded through
-      // Hono — read it explicitly so we can compare bytes.
-      if (init.body && typeof (init.body as ReadableStream).getReader === "function") {
+      // After the MCP migration the llm_complete tool calls fetch
+      // directly (no Hono round-trip), so caller-supplied header
+      // casing is preserved. Read with the same case the test sends.
+      const hdrs = init.headers as Record<string, string>;
+      observedAuth = hdrs?.["Authorization"] ?? hdrs?.["authorization"] ?? null;
+      if (typeof init.body === "string") {
+        observedBody = init.body;
+      } else if (init.body && typeof (init.body as ReadableStream).getReader === "function") {
         const reader = (init.body as ReadableStream<Uint8Array>).getReader();
         const chunks: Uint8Array[] = [];
         while (true) {
@@ -124,8 +128,6 @@ describe("POST /mcp — llm_complete tool", () => {
           off += c.byteLength;
         }
         observedBody = new TextDecoder().decode(merged);
-      } else if (typeof init.body === "string") {
-        observedBody = init.body;
       }
       return new Response('{"completion":"hi"}', {
         status: 200,

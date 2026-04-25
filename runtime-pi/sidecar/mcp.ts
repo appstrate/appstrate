@@ -2,23 +2,28 @@
 // Copyright 2026 Appstrate
 
 /**
- * MCP exposure of the sidecar's capabilities (Phase 1 of #276).
+ * MCP exposure of the sidecar's capabilities — the only agent-facing
+ * surface after the migration.
  *
- * The sidecar already exposes its capabilities as bespoke HTTP routes
- * (`/proxy`, `/run-history`, `/llm/*`). Phase 1 adds an additional `/mcp`
- * endpoint that surfaces those same capabilities through the standard
- * Model Context Protocol so an MCP-aware client (the agent in Phase 5,
- * external `mcp-inspector` for debugging today) can discover and invoke
- * them via `tools/list` + `tools/call`.
+ * The sidecar's HTTP endpoints are `/health` and `/configure`; everything
+ * the agent talks to (`provider_call`, `run_history`, `llm_complete`) is
+ * dispatched here as MCP tools.
  *
- * Key invariants preserved by this module:
+ * Key invariants:
  *
- * 1. Existing routes (`/proxy`, `/run-history`, `/llm/*`) are untouched —
- *    Phase 1 is explicitly additive. The MCP tools delegate to the same
- *    Hono routes via in-process `app.request()`. Zero credential code
- *    duplication, zero refactor risk.
+ * 1. `provider_call` calls {@link executeProviderCall} directly via
+ *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
+ *    same credential-isolation invariants (cred fetch, URL allowlist,
+ *    server-side header injection, 401-retry, cookie jar, persistent-
+ *    auth-failure reporting) are enforced inside the credential-proxy
+ *    core (`./credential-proxy.ts`) which is the SOLE place those
+ *    invariants live.
  *
- * 2. Stateless transport, **per-request**. Each `/mcp` invocation builds
+ * 2. `run_history` and `llm_complete` use `proxyDeps.fetchFn` to call
+ *    the platform / LLM upstreams directly (no Hono round-trip). Tests
+ *    inject a mock `fetchFn` via `AppDeps`.
+ *
+ * 3. Stateless transport, **per-request**. Each `/mcp` invocation builds
  *    a fresh `Server` + `WebStandardStreamableHTTPServerTransport` pair,
  *    serves the request, then tears them down. This is not a design
  *    choice — the SDK throws "Stateless transport cannot be reused
@@ -29,16 +34,15 @@
  *    are pure-memory and synchronous in practice; the upside is that
  *    the agent can issue any number of MCP calls per run lifecycle.
  *
- * 3. Binary responses (e.g. provider calls returning a PDF) flow through
- *    `/proxy` unchanged. Phase 3 of #276 will surface them as MCP
- *    `resources` — for now the MCP `provider_call` tool restricts itself
- *    to text/JSON responses and emits an explicit error otherwise. This
- *    keeps the wire payload manageable and the contract sharp.
+ * 4. Binary upstream responses spill to the run-scoped {@link BlobStore}
+ *    and are surfaced as MCP `resource_link` blocks (see
+ *    `responseToToolResult`). The agent reads bytes via
+ *    `client.readResource({ uri })` only when needed.
  *
  * The endpoint is mounted at `/mcp` because the spec recommends a single
  * URL for both client → server (POST) and server → client (GET stream).
  * We currently only handle POST + DELETE — GET (SSE replay) is out of
- * scope until Phase 3 introduces server-initiated notifications.
+ * scope until server-initiated notifications ship.
  */
 
 import type { Hono } from "hono";
@@ -51,16 +55,22 @@ import {
   type ReadResourceResult,
   type Resource,
 } from "@appstrate/mcp-transport";
-import { MAX_RESPONSE_SIZE, PROVIDER_ID_RE } from "./helpers.ts";
+import {
+  filterHeaders,
+  isBlockedUrl,
+  LLM_PROXY_TIMEOUT_MS,
+  MAX_RESPONSE_SIZE,
+  PROVIDER_ID_RE,
+} from "./helpers.ts";
 import type { BlobStore } from "./blob-store.ts";
 import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
- * the source of truth used by the `/proxy` route to validate
- * `X-Provider`. We strip the leading/trailing slashes and the regex
- * flags so JSON Schema validators (AJV / the MCP SDK / inspectors) see
- * a portable ECMA-compatible string. Anchors are preserved.
+ * the source of truth shared with `executeProviderCall`. We strip the
+ * leading/trailing slashes and the regex flags so JSON Schema
+ * validators (AJV / the MCP SDK / inspectors) see a portable
+ * ECMA-compatible string. Anchors are preserved.
  */
 const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
 
@@ -70,8 +80,7 @@ const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
  * calls `await req.json()` unconditionally, so without this guard a
  * misbehaving (or malicious) caller from inside the run network could
  * OOM the sidecar with a multi-GB envelope. 256 KB is generous for any
- * legitimate `tools/call` payload — the legacy `/proxy` route already
- * caps non-substitute bodies at the same 256 KB tier.
+ * legitimate `tools/call` payload.
  */
 const MAX_MCP_REQUEST_BODY_SIZE = 256 * 1024;
 
@@ -140,18 +149,21 @@ const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
 
 /**
  * Build the `provider_call`, `run_history`, and `llm_complete` MCP
- * tool definitions backed by the supplied Hono app. Tool handlers
- * re-enter the app via `app.request()` — same code path as an external
- * HTTP caller, but in-process (no socket, no JSON re-serialisation
- * beyond what the route itself does).
+ * tool definitions. All three tools are implemented in-process —
+ * `provider_call` calls {@link executeProviderCall} directly via
+ * {@link MountMcpOptions.proxyDeps}; `run_history` and `llm_complete`
+ * call `proxyDeps.fetchFn` against the configured platform / LLM
+ * upstreams. Nothing routes through a Hono HTTP envelope — the sidecar
+ * no longer exposes `/proxy`, `/run-history`, or `/llm/*`.
  *
  * Phase 3a: when a `provider_call` upstream response is binary or
  * exceeds {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
  * block instead of an inline text body.
  */
-function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDefinition[] {
+function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
   const { blobStore, proxyDeps } = options;
+  const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
       name: "provider_call",
@@ -159,9 +171,8 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
         "Make an authenticated request through the sidecar's credential-injecting proxy. " +
         "The sidecar resolves the named provider's credentials and forwards the request to " +
         "the supplied target URL. Use only with provider IDs declared in the agent bundle's " +
-        "`dependencies.providers[]`. Binary responses are not yet supported on this path — " +
-        "use the legacy `/proxy` endpoint with `X-Stream-Response: 1` for those (Phase 3 will " +
-        "add MCP `resources` for binary passthrough).",
+        "`dependencies.providers[]`. Binary upstream responses spill to MCP `resources` and " +
+        "are returned as a `resource_link`.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -171,12 +182,9 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
             type: "string",
             description:
               "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
-            // Mirror the regex enforced by the /proxy route on X-Provider —
-            // catching a malformed provider id at the MCP layer means the
-            // failure surface is the agent loop, not a 400 deep in /proxy.
-            // The pattern source lives in `./helpers.ts` (PROVIDER_ID_RE)
-            // and is shared between this MCP layer and the bespoke /proxy
-            // route, so improvements propagate to both.
+            // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
+            // shared with `executeProviderCall` so the same shape gates
+            // the MCP descriptor and the credential-proxy core.
             pattern: PROVIDER_ID_PATTERN,
           },
           target: {
@@ -194,15 +202,14 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
           headers: {
             type: "object",
             description:
-              "Additional headers to forward. Hop-by-hop headers and the routing " +
-              "headers (X-Provider, X-Target, …) are filtered server-side.",
+              "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
+              "headers (X-Provider, X-Target, X-Substitute-Body, …) are filtered " +
+              "server-side.",
             additionalProperties: { type: "string" },
           },
           body: {
             type: "string",
-            description:
-              "Request body. Use a JSON-encoded string for JSON endpoints. Binary uploads " +
-              "are not supported on this path — use the legacy `/proxy` route.",
+            description: "Request body. Use a JSON-encoded string for JSON endpoints.",
           },
           substituteBody: {
             type: "boolean",
@@ -259,60 +266,33 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
         };
       }
 
-      // When the credential-proxy core deps were wired into mountMcp
-      // (production path), call it directly with structured args —
-      // skips the X-Provider/X-Target/X-Substitute-Body header
-      // round-trip the legacy `/proxy` route would otherwise impose.
-      // The fallback path (legacy test fixtures that mount `/mcp`
-      // without proxyDeps) re-encodes the args into HTTP headers and
-      // dispatches through `/proxy` for behavioural parity.
-      if (proxyDeps) {
-        const buffered: ArrayBuffer | undefined =
-          args.body !== undefined ? new TextEncoder().encode(args.body).buffer : undefined;
-        const result = await executeProviderCall(
-          {
-            providerId: args.providerId,
-            targetUrl: args.target,
-            method,
-            callerHeaders,
-            body: buffered
-              ? {
-                  kind: "buffered",
-                  bytes: buffered,
-                  ...(args.substituteBody ? { text: args.body } : {}),
-                }
-              : { kind: "none" },
-            substituteBody: !!args.substituteBody,
-            proxyUrl: proxyDeps.config.proxyUrl,
-          },
-          proxyDeps,
-        );
-        if (!result.ok) {
-          return {
-            content: [{ type: "text", text: `provider_call: ${result.error}` }],
-            isError: true,
-          };
-        }
-        return responseToToolResult(result.response, {
-          ...(blobStore ? { blobStore } : {}),
-          source: `provider:${args.providerId}`,
-        });
+      const buffered: ArrayBuffer | undefined =
+        args.body !== undefined ? new TextEncoder().encode(args.body).buffer : undefined;
+      const result = await executeProviderCall(
+        {
+          providerId: args.providerId,
+          targetUrl: args.target,
+          method,
+          callerHeaders,
+          body: buffered
+            ? {
+                kind: "buffered",
+                bytes: buffered,
+                ...(args.substituteBody ? { text: args.body } : {}),
+              }
+            : { kind: "none" },
+          substituteBody: !!args.substituteBody,
+          proxyUrl: config.proxyUrl,
+        },
+        proxyDeps,
+      );
+      if (!result.ok) {
+        return {
+          content: [{ type: "text", text: `provider_call: ${result.error}` }],
+          isError: true,
+        };
       }
-
-      // Legacy fallback (no proxyDeps wired): reach the /proxy route
-      // via in-process app.request(). Kept so test fixtures that
-      // mount only the Hono app (without the executeProviderCall deps)
-      // still exercise a functioning provider_call surface.
-      const headers: Record<string, string> = {
-        ...callerHeaders,
-        "X-Provider": args.providerId,
-        "X-Target": args.target,
-      };
-      if (args.substituteBody) headers["X-Substitute-Body"] = "1";
-      const init: RequestInit = { method, headers };
-      if (args.body !== undefined) init.body = args.body;
-      const res = await app.request("/proxy", init);
-      return responseToToolResult(res, {
+      return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         source: `provider:${args.providerId}`,
       });
@@ -352,18 +332,31 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
       if (args.fields?.length) params.set("fields", args.fields.join(","));
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
-      const res = await app.request(`/run-history${qs}`);
+      const url = `${config.platformApiUrl}/internal/run-history${qs}`;
+      let res: Response;
+      try {
+        res = await fetchFn(url, {
+          headers: { Authorization: `Bearer ${config.runToken}` },
+        });
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+        const suffix = code ? `: ${code}` : "";
+        return {
+          content: [{ type: "text", text: `run_history: upstream fetch failed${suffix}` }],
+          isError: true,
+        };
+      }
       return responseToToolResult(res, { source: "run_history" });
     },
   };
 
-  // Phase 3a — `llm_complete` MCP tool. Wraps the existing `/llm/*`
-  // route so the agent can request completions via `tools/call` instead
-  // of bespoke HTTP. Per V1 in claudedocs/MCP_MIGRATION_PLAN.md, we
-  // model LLM proxy as a *tool* rather than `sampling/createMessage` —
-  // sampling is server-initiated (wrong direction) and barely deployed
-  // by 2026-04 hosts. Synchronous in v1 (V12); status heartbeat is a
-  // future enhancement.
+  // `llm_complete` MCP tool — wraps the platform-configured LLM upstream
+  // (anthropic/openai/google/…) with placeholder-key substitution and
+  // returns the response body as text. Modeled as a tool rather than
+  // MCP `sampling/createMessage` because sampling is server-initiated
+  // (wrong direction) and barely deployed by hosts. Synchronous:
+  // the tool returns once the upstream response is fully received.
   const llmComplete: AppstrateToolDefinition = {
     descriptor: {
       name: "llm_complete",
@@ -421,13 +414,52 @@ function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDe
         };
       }
 
-      const init: RequestInit = {
-        method: args.method ?? "POST",
-        headers: { "Content-Type": "application/json", ...(args.headers ?? {}) },
-        body: args.body,
-      };
+      if (!config.llm) {
+        return {
+          content: [{ type: "text", text: "llm_complete: LLM proxy not configured" }],
+          isError: true,
+        };
+      }
+      if (isBlockedUrl(config.llm.baseUrl)) {
+        return {
+          content: [
+            { type: "text", text: "llm_complete: LLM base URL targets a blocked network range" },
+          ],
+          isError: true,
+        };
+      }
 
-      const res = await app.request(`/llm${args.path}`, init);
+      // Build headers — the SDK pattern is to embed the placeholder in
+      // an Authorization (or vendor-specific) header; we substitute the
+      // real key into every header value that contains the placeholder.
+      const incomingHeaders = filterHeaders({
+        "Content-Type": "application/json",
+        ...(args.headers ?? {}),
+      });
+      const forwardedHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(incomingHeaders)) {
+        forwardedHeaders[key] = value.includes(config.llm.placeholder)
+          ? value.replace(config.llm.placeholder, config.llm.apiKey)
+          : value;
+      }
+
+      let res: Response;
+      try {
+        res = await fetchFn(`${config.llm.baseUrl}${args.path}`, {
+          method: args.method ?? "POST",
+          headers: forwardedHeaders,
+          body: args.body,
+          signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+        });
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+        const suffix = code ? `: ${code}` : "";
+        return {
+          content: [{ type: "text", text: `llm_complete: LLM request failed${suffix}` }],
+          isError: true,
+        };
+      }
       return responseToToolResult(res, {
         ...(blobStore ? { blobStore } : {}),
         source: "llm_complete",
@@ -503,20 +535,20 @@ interface ResponseToToolResultOptions {
 }
 
 /**
- * Convert a Hono in-process Response into an MCP CallToolResult.
+ * Convert an upstream `Response` into an MCP CallToolResult.
  *
  * Non-OK responses become tool-level errors (`isError: true`) — the
  * model still receives them as data and can react. The SDK reserves
  * thrown errors for protocol-level faults; per-tool 4xx/5xx are
  * domain-level signals.
  *
- * Phase 3a behaviour:
+ * Behaviour:
  * - Text/JSON/XML under {@link INLINE_RESPONSE_THRESHOLD} → inline `text` block.
  * - Text/JSON/XML over the threshold OR binary content → spilled to
  *   the BlobStore, returned as a `resource_link` block. The agent
  *   reads the bytes via `client.readResource({ uri })` only if needed.
- * - No BlobStore configured → fall back to the Phase 1 behaviour
- *   (binary rejected with a clear tool-level error).
+ * - No BlobStore configured → binary rejected with a clear tool-level
+ *   error (production always supplies a BlobStore via `mountMcp`).
  */
 async function responseToToolResult(
   res: Response,
@@ -545,8 +577,8 @@ async function responseToToolResult(
             type: "text",
             text:
               `provider_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
-              `this path without a configured blob store. Phase 3a links binary upstream responses ` +
-              `as MCP resources — verify the sidecar was started with a runId.`,
+              `this path without a configured blob store. Binary upstream responses are linked as ` +
+              `MCP resources — verify the sidecar was started with a runId.`,
           },
         ],
         isError: true,
@@ -729,18 +761,17 @@ export interface MountMcpOptions {
   /** Run-scoped blob store for `provider_call` / `llm_complete` resource spillover. */
   blobStore?: BlobStore;
   /**
-   * Credential-proxy core deps. When supplied, `provider_call` calls
-   * {@link executeProviderCall} directly with structured args instead
-   * of round-tripping through the legacy `/proxy` HTTP envelope.
-   * Optional only for backward compatibility with old test fixtures
-   * that mount `/mcp` without wiring the proxy core; production always
-   * supplies it.
+   * Credential-proxy core deps. `provider_call` calls
+   * {@link executeProviderCall} directly with structured args; `run_history`
+   * and `llm_complete` use `proxyDeps.fetchFn` + `proxyDeps.config` to
+   * reach the platform / LLM upstreams. Required: there is no longer a
+   * legacy HTTP-route fallback.
    */
-  proxyDeps?: ProviderCallDeps;
+  proxyDeps: ProviderCallDeps;
 }
 
-export function mountMcp(app: Hono, options: MountMcpOptions = {}): void {
-  const tools = buildSidecarTools(app, options);
+export function mountMcp(app: Hono, options: MountMcpOptions): void {
+  const tools = buildSidecarTools(options);
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
 
   app.all("/mcp", async (c) => {
