@@ -48,10 +48,12 @@ describe("deprecationHeaders()", () => {
 
   it("emits IMF-fixdate (UTC, RFC 9110 §5.6.7) format", () => {
     const h = deprecationHeaders("legacy-llm-routes");
+    const dep = h.Deprecation!;
+    const sun = h.Sunset!;
     // Round-trip through Date.parse — invalid input would yield NaN.
-    expect(Number.isNaN(Date.parse(h.Deprecation))).toBe(false);
-    expect(Number.isNaN(Date.parse(h.Sunset))).toBe(false);
-    expect(h.Deprecation.endsWith("GMT")).toBe(true);
+    expect(Number.isNaN(Date.parse(dep))).toBe(false);
+    expect(Number.isNaN(Date.parse(sun))).toBe(false);
+    expect(dep.endsWith("GMT")).toBe(true);
   });
 
   it("returns the same header set for both registered surfaces under V2", () => {

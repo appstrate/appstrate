@@ -484,7 +484,7 @@ async function responseToToolResult(
     | {
         type: "resource_link";
         uri: string;
-        name?: string;
+        name: string;
         mimeType?: string;
       }
   >;
@@ -541,17 +541,12 @@ async function responseToToolResult(
         isError: true,
       };
     }
-    const link: {
-      type: "resource_link";
-      uri: string;
-      name?: string;
-      mimeType?: string;
-    } = {
-      type: "resource_link",
+    const link = {
+      type: "resource_link" as const,
       uri: record.uri,
+      name: options.source ?? "blob",
       mimeType: record.mimeType,
     };
-    if (options.source) link.name = options.source;
     return res.ok ? { content: [link] } : { content: [link], isError: true };
   }
 
@@ -577,17 +572,12 @@ async function responseToToolResult(
         ? { content: [{ type: "text", text }] }
         : { content: [{ type: "text", text }], isError: true };
     }
-    const link: {
-      type: "resource_link";
-      uri: string;
-      name?: string;
-      mimeType?: string;
-    } = {
-      type: "resource_link",
+    const link = {
+      type: "resource_link" as const,
       uri: record.uri,
+      name: options.source ?? "blob",
       mimeType: record.mimeType,
     };
-    if (options.source) link.name = options.source;
     return res.ok ? { content: [link] } : { content: [link], isError: true };
   }
 
