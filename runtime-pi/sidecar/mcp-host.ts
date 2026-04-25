@@ -33,11 +33,12 @@
  */
 
 import { isValidToolNameForExisting } from "@appstrate/core/naming";
-import type {
-  AppstrateMcpClient,
-  AppstrateToolDefinition,
-  CallToolResult,
-  Tool,
+import {
+  sanitiseToolDescriptor,
+  type AppstrateMcpClient,
+  type AppstrateToolDefinition,
+  type CallToolResult,
+  type Tool,
 } from "@appstrate/mcp-transport";
 
 export interface McpHostUpstream {
@@ -96,14 +97,32 @@ export class McpHost {
 
     const { tools } = await upstream.client.listTools();
     for (const tool of tools) {
-      const sanitisedTool = sanitiseToolBody(tool.name);
-      const namespacedName = sanitisedTool ? `${normalisedNs}__${sanitisedTool}` : "";
+      // Phase 5 of #276 — strip hidden Unicode, cap field lengths,
+      // defeat tool poisoning before any third-party descriptor reaches
+      // the agent's LLM. A descriptor that exceeds the schema-size cap
+      // after sanitisation is dropped entirely; the host emits a log
+      // event so operators can audit the rejection.
+      const sanitised = sanitiseToolDescriptor(tool);
+      if (!sanitised) {
+        this.options.onLog?.({
+          source: `host:${upstream.namespace}`,
+          level: "warn",
+          data: {
+            event: "tool_rejected",
+            reason: "schema_too_large_after_sanitisation",
+            originalName: tool.name,
+          },
+        });
+        continue;
+      }
+      const sanitisedToolBody = sanitiseToolBody(sanitised.name);
+      const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
       const finalName = isValidToolNameForExisting(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
       this.toolToNamespace.set(finalName, upstream.namespace);
       this.originalToolNames.set(finalName, tool.name);
-      this.toolDescriptors.push({ ...tool, name: finalName });
+      this.toolDescriptors.push({ ...sanitised, name: finalName });
     }
 
     this.upstreams.set(upstream.namespace, upstream);

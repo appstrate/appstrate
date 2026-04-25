@@ -283,3 +283,14 @@ export {
   SubprocessTransportError,
   type SubprocessTransportOptions,
 } from "./transports/subprocess.ts";
+
+// Tool descriptor sanitisation — Phase 5 of #276. Strip hidden
+// Unicode, cap field lengths, defeat Full-Schema Poisoning before any
+// third-party tool descriptor reaches the agent's LLM.
+export {
+  sanitiseTextField,
+  sanitiseToolDescriptor,
+  MAX_TOOL_DESCRIPTION_BYTES,
+  MAX_PARAMETER_DESCRIPTION_BYTES,
+  MAX_SCHEMA_SERIALISED_BYTES,
+} from "./sanitize.ts";
