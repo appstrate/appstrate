@@ -528,7 +528,7 @@ describe("ALL /proxy — forwarding", () => {
   });
 
   it("truncates response over MAX_RESPONSE_SIZE", async () => {
-    const largeBody = "x".repeat(60_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -547,11 +547,11 @@ describe("ALL /proxy — forwarding", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const text = await res.text();
-    expect(text.length).toBe(50_000);
+    expect(text.length).toBe(256 * 1024);
   });
 
   it("X-Max-Response-Size increases the truncation limit", async () => {
-    const largeBody = "x".repeat(100_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default, < 400_000 cap
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -565,13 +565,13 @@ describe("ALL /proxy — forwarding", () => {
       headers: {
         "X-Provider": "gmail",
         "X-Target": "https://api.example.com/v1/large",
-        "X-Max-Response-Size": "200000",
+        "X-Max-Response-Size": "400000",
       },
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBeNull();
     const text = await res.text();
-    expect(text.length).toBe(100_000);
+    expect(text.length).toBe(300_000);
   });
 
   it("X-Max-Response-Size is capped at ABSOLUTE_MAX_RESPONSE_SIZE", async () => {
@@ -598,8 +598,34 @@ describe("ALL /proxy — forwarding", () => {
     expect(text.length).toBe(1_000_000);
   });
 
+  it("X-Max-Response-Size = ABSOLUTE_MAX_RESPONSE_SIZE returns 600 KB payload untruncated", async () => {
+    // Round-trip a 600 KB payload with the explicit cap exactly at the
+    // sidecar's absolute ceiling: under cap → full body, no X-Truncated.
+    const largeBody = "x".repeat(600_000);
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+        "X-Max-Response-Size": "1000000",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const text = await res.text();
+    expect(text.length).toBe(600_000);
+  });
+
   it("invalid X-Max-Response-Size falls back to default", async () => {
-    const largeBody = "x".repeat(60_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -619,7 +645,7 @@ describe("ALL /proxy — forwarding", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const text = await res.text();
-    expect(text.length).toBe(50_000);
+    expect(text.length).toBe(256 * 1024);
   });
 
   it("stores Set-Cookie headers in cookie jar", async () => {
@@ -1090,8 +1116,10 @@ describe("ALL /proxy — binary body integrity", () => {
   });
 
   it("does not corrupt binary response even when truncation is triggered", async () => {
-    // 60KB binary payload beyond MAX_RESPONSE_SIZE; first 50KB must survive byte-for-byte.
-    const total = 60_000;
+    // 300 KB binary payload beyond the 256 KB default; the first 256 KB
+    // must survive byte-for-byte.
+    const total = 300_000;
+    const cap = 256 * 1024;
     const payload = new Uint8Array(total);
     for (let i = 0; i < total; i++) {
       payload[i] = i % 256; // includes all byte values 0x00–0xff
@@ -1116,10 +1144,196 @@ describe("ALL /proxy — binary body integrity", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const received = new Uint8Array(await res.arrayBuffer());
-    expect(received.byteLength).toBe(50_000);
+    expect(received.byteLength).toBe(cap);
     expect(received[0]).toBe(0x00);
     expect(received[0xff]).toBe(0xff);
-    expect(received[49_999]).toBe(49_999 % 256);
+    expect(received[cap - 1]).toBe((cap - 1) % 256);
+  });
+});
+
+// --- binary roundtrip via /proxy ---
+//
+// End-to-end coverage of the `/proxy` byte path: the sidecar must
+// preserve request and response bytes byte-for-byte (no UTF-8 decode,
+// no `.text()` round-trip), respect the default 256 KB response cap,
+// and honour `X-Max-Response-Size` up to ABSOLUTE_MAX_RESPONSE_SIZE.
+// These tests pin the contract that the AFPS resolver in
+// `packages/afps-runtime/src/resolvers/provider-tool.ts` depends on
+// for binary upload/download (issues #149, #151, PR #260).
+
+/** Deterministic pseudo-random byte stream — mulberry32 seeded PRNG. */
+function makePseudoRandomBytes(size: number, seed = 0xc0_fe_ba_be): Uint8Array {
+  const buf = new Uint8Array(size);
+  let s = seed >>> 0;
+  for (let i = 0; i < size; i++) {
+    // mulberry32
+    s = (s + 0x6d_2b_79_f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    buf[i] = ((t ^ (t >>> 14)) >>> 0) & 0xff;
+  }
+  return buf;
+}
+
+function sha256Hex(bytes: Uint8Array | ArrayBuffer): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(bytes);
+  return hasher.digest("hex");
+}
+
+describe("binary roundtrip via /proxy", () => {
+  it("upload: request body reaches upstream byte-for-byte", async () => {
+    const payload = makePseudoRandomBytes(60_000, 0xa1_b2_c3_d4);
+    const expectedHash = sha256Hex(payload);
+
+    let capturedHash: string | null = null;
+    let capturedLength = 0;
+    const fetchFn = mock(async (_url: string, init: RequestInit) => {
+      const body = init.body;
+      // The proxy passes ArrayBuffer through buildBody() unchanged.
+      if (body instanceof ArrayBuffer) {
+        capturedLength = body.byteLength;
+        capturedHash = sha256Hex(body);
+      } else if (body instanceof Uint8Array) {
+        capturedLength = body.byteLength;
+        capturedHash = sha256Hex(body);
+      } else {
+        throw new Error(`unexpected body type: ${typeof body}`);
+      }
+      return new Response("ok", { status: 200, headers: { "Content-Type": "text/plain" } });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/upload",
+        "Content-Type": "application/octet-stream",
+      },
+      body: payload,
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedLength).toBe(payload.byteLength);
+    expect(capturedHash).toBe(expectedHash);
+  });
+
+  it("download: response body returned byte-for-byte under default cap", async () => {
+    const payload = makePseudoRandomBytes(60_000, 0xde_ad_be_ef);
+    const expectedHash = sha256Hex(payload);
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/download",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(payload.byteLength);
+    expect(sha256Hex(received)).toBe(expectedHash);
+  });
+
+  it("download: 400 KB upstream truncated to 256 KB default with X-Truncated", async () => {
+    const cap = 256 * 1024;
+    const payload = makePseudoRandomBytes(400_000, 0x12_34_56_78);
+    const expectedPrefixHash = sha256Hex(payload.subarray(0, cap));
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(cap);
+    expect(sha256Hex(received)).toBe(expectedPrefixHash);
+  });
+
+  it("download: X-Max-Response-Size=1_000_000 returns 600 KB untruncated", async () => {
+    const payload = makePseudoRandomBytes(600_000, 0x9a_bc_de_f0);
+    const expectedHash = sha256Hex(payload);
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/largebin",
+        "X-Max-Response-Size": "1000000",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(payload.byteLength);
+    expect(sha256Hex(received)).toBe(expectedHash);
+  });
+
+  it("download: X-Max-Response-Size=5_000_000 caps at 1 MB with truncation", async () => {
+    const absoluteCap = 1_000_000;
+    const payload = makePseudoRandomBytes(1_500_000, 0x55_aa_55_aa);
+    const expectedPrefixHash = sha256Hex(payload.subarray(0, absoluteCap));
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/huge",
+        "X-Max-Response-Size": "5000000",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(absoluteCap);
+    expect(sha256Hex(received)).toBe(expectedPrefixHash);
   });
 });
 

@@ -14,8 +14,15 @@ export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-export const MAX_RESPONSE_SIZE = 50_000;
-export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000; // 1MB
+// Default cap on upstream response bytes returned through `/proxy`. Set
+// generously enough that typical provider responses (Drive metadata
+// listings, Gmail thread snippets, paginated payloads) round-trip
+// untruncated. Agents that legitimately need to pull larger blobs opt
+// in via `responseMode.toFile` on the AFPS provider tool, which causes
+// the runtime to spill bytes to the workspace and request a higher
+// `X-Max-Response-Size` (capped at `ABSOLUTE_MAX_RESPONSE_SIZE`).
+export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
+export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000; // 1MB — hard cap, even when X-Max-Response-Size is larger
 export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
