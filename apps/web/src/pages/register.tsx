@@ -16,6 +16,7 @@ import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { Spinner } from "../components/spinner";
 import { useAppConfig } from "../hooks/use-app-config";
+import { deriveDisplayNameFromEmail } from "../lib/derive-display-name";
 
 export function RegisterPage() {
   const { t } = useTranslation(["settings"]);
@@ -56,7 +57,11 @@ export function RegisterPage() {
            * active step (currently `/onboarding/model` in OSS) — see
            * `create-step.tsx` "skip to next step" effect.
            */}
-          <RegisterForm fixedEmail={bootstrapOwnerEmail} redirectAfterSignup="/onboarding/create" />
+          <RegisterForm
+            fixedEmail={bootstrapOwnerEmail}
+            defaultDisplayName={deriveDisplayNameFromEmail(bootstrapOwnerEmail)}
+            redirectAfterSignup="/onboarding/create"
+          />
         </div>
       ) : (
         <RegisterForm />

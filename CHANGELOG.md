@@ -35,6 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     onboarding (`/onboarding/create` auto-skips since the org already
     exists, landing on the model-config step) so they can configure
     their first model, providers, and invite teammates.
+  - The display-name field is also pre-filled (still editable) by
+    deriving a sensible name from the locked email
+    (`john.doe@acme.com` → "John Doe"), so the operator only has to
+    type a password to complete signup.
   - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)

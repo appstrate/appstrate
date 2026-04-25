@@ -40,6 +40,13 @@ interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
    * step since the bootstrap after-hook already created the org).
    */
   redirectAfterSignup?: string;
+  /**
+   * Pre-fills the display-name field. The user can still edit it. Used
+   * by RegisterPage in the closed-mode bootstrap path to derive a
+   * sensible name from the locked email so the operator only has to
+   * type a password.
+   */
+  defaultDisplayName?: string;
 }
 
 export function RegisterForm({
@@ -51,6 +58,7 @@ export function RegisterForm({
   switchAuthSlot,
   socialCallbackURL,
   redirectAfterSignup = "/",
+  defaultDisplayName = "",
   ...props
 }: RegisterFormProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -66,7 +74,7 @@ export function RegisterForm({
     showError,
     formState: { errors, isSubmitting },
   } = useAppForm<RegisterFormData>({
-    defaultValues: { displayName: "", email: fixedEmail ?? "", password: "" },
+    defaultValues: { displayName: defaultDisplayName, email: fixedEmail ?? "", password: "" },
   });
 
   const onSubmit = async (data: RegisterFormData) => {
