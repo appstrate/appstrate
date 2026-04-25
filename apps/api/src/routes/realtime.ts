@@ -12,6 +12,7 @@ import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { validateApplicationInOrg } from "../middleware/app-context.ts";
+import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
@@ -130,14 +131,32 @@ function openRealtimeStream(
       wake?.();
     });
 
-    // Per-stream monotonic event id. Resumable from `Last-Event-ID` only
-    // within the same subscriber instance — events live in PG NOTIFY land,
-    // not in a replayable log, so reconnect resumes the live tail rather
-    // than replaying gaps. The id still lets browsers/EventSource clients
-    // correlate frames and avoid duplicate processing across reconnects.
+    // SSE event id, structured as `${subId}:${monotonic}` so it is
+    // **globally unique across reconnects** even though the server keeps
+    // no persisted log. Each new EventSource connection gets a fresh
+    // `subId` (UUID-suffixed at the route level), so a client doing
+    // `if (id === lastSeenId) skip` will never collide between streams.
+    //
+    // Resume semantics — what we DO and DO NOT do:
+    //   • DO: emit a stable, per-frame id so browsers' built-in
+    //     `Last-Event-ID` machinery can echo it on reconnect (browsers
+    //     send the header automatically; the value lands in `c.req`).
+    //   • DO: log the incoming `Last-Event-ID` for observability so a
+    //     future server-side replay layer has a cheap-to-flip switch.
+    //   • DO NOT: replay missed events. Realtime events live in PG
+    //     NOTIFY land with no persisted log — a reconnect lands on the
+    //     live tail, not on the gap. This is documented at the route
+    //     level so SDK consumers know not to rely on resume.
     // HTML SSE spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
+    const lastEventIdHeader = c.req.header("Last-Event-ID");
+    if (lastEventIdHeader !== undefined) {
+      logger.debug(
+        "SSE reconnect with Last-Event-ID — replay not implemented; resuming on live tail",
+        { subId, lastEventIdHeader, runId: filter.runId, packageId: filter.packageId },
+      );
+    }
     let nextEventId = 0;
-    const allocateId = (): string => String(++nextEventId);
+    const allocateId = (): string => `${subId}:${++nextEventId}`;
 
     // Immediate ping confirms the connection is alive.
     await stream.writeSSE({ event: "ping", data: "", id: allocateId() });

@@ -26,7 +26,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import type { TokenUsage } from "./run-result.ts";
+import type { RunError, TokenUsage } from "./run-result.ts";
 
 interface BaseEnvelope {
   timestamp: number;
@@ -136,8 +136,15 @@ export interface RunSucceededEvent extends BaseRunCompletedEvent {
 /** `run.failed` — terminal: run completed with `status: "failed"`. */
 export interface RunFailedEvent extends BaseRunCompletedEvent {
   type: "run.failed";
-  /** Optional structured error from `RunResult.error`. */
-  error?: { code?: string; message: string };
+  /**
+   * Optional structured error from `RunResult.error`. Full `RunError`
+   * shape (`code`, `message`, `stack`, `context`, `timestamp`) — the
+   * validator (`isCanonicalRunEvent`) accepts the same fields, so a
+   * runner can emit `error: result.error` directly without projection.
+   * Sinks consuming `RunFailedEvent.error` get the same surface as
+   * sinks consuming `RunResult.error`.
+   */
+  error?: RunError;
 }
 
 /** `run.timeout` — terminal: run exceeded its timeout budget. */

@@ -154,10 +154,18 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // #278 item F — standard `application/zip` so generic ZIP tooling and
     // browser download flows work without special-casing. The vendor MIME
     // type added no compatibility benefit and broke streaming clients that
-    // matched on MIME.
+    // matched on MIME. Filename uses `.afps-bundle.zip` so OS file managers
+    // (which dispatch by extension, not MIME) hand the download off to the
+    // system archive tool while preserving the AFPS bundle marker.
     expect(res.headers.get("Content-Type")).toBe("application/zip");
     expect(res.headers.get("Content-Disposition")).toContain("attachment");
-    expect(res.headers.get("Content-Disposition")).toContain("exportorg-agent-root.afps-bundle");
+    expect(res.headers.get("Content-Disposition")).toContain(
+      "exportorg-agent-root.afps-bundle.zip",
+    );
+    // MIME and filename extension must agree — a `.zip` filename with
+    // a non-zip MIME, or vice versa, breaks browser download UX on
+    // common OSes.
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.zip"/);
 
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(bytes.byteLength).toBeGreaterThan(0);

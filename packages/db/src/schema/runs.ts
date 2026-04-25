@@ -46,6 +46,17 @@ export const runs = pgTable(
     input: jsonb("input"),
     result: jsonb("result"),
     state: jsonb("state"),
+    // `error` stores the human-readable `RunError.message` only. The
+    // runtime `RunError` shape (`code`, `message`, `stack`, `context`,
+    // `timestamp`) IS round-tripped at the runtime/runner boundary —
+    // sinks observing run-event ingestion see the full structured
+    // payload — but only `message` is persisted on the row today. The
+    // structured fields are intentionally dropped at write time
+    // (`apps/api/src/services/run-event-ingestion.ts` extracts
+    // `result.error?.message`); widening this column to `jsonb` is
+    // tracked as a follow-up so the migration + OpenAPI bump + frontend
+    // reader update can land together. Until then, OpenAPI's
+    // `Run.error: string` reflects what the database actually exposes.
     error: text("error"),
     // Snake-case keys: matches the wire format produced by every runner
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from

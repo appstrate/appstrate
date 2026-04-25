@@ -311,7 +311,14 @@ export function createAgentsRouter() {
           // and broke streaming clients that match on MIME.
           "Content-Type": "application/zip",
           "Content-Length": String(bytes.byteLength),
-          "Content-Disposition": `attachment; filename="${safeName}.afps-bundle"`,
+          // Filename uses `.zip` so OS file managers (which dispatch by
+          // extension, not MIME) hand the file off to the system archive
+          // tool. The double extension `.afps-bundle.zip` keeps the AFPS
+          // bundle marker in the filename for users who care, while
+          // staying portable. RFC 6266 escaping: `safeName` is built
+          // from the scoped agent id which is `[a-z0-9-/_]` only, so
+          // no quoting hazard here.
+          "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
           "X-Bundle-Integrity": bundle.integrity,
         },
       });
