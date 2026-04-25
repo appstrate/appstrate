@@ -48,6 +48,8 @@ import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
+import { doctorCommand } from "./commands/doctor.ts";
+import { internalInfoCommand } from "./commands/internal.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -575,6 +577,23 @@ program
   });
 
 registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
+
+program
+  .command("doctor")
+  .description("Diagnose appstrate installations on $PATH (channels, versions, dual-install).")
+  .option("--json", "Emit machine-readable JSON instead of the framed report.")
+  .action(async (opts) => {
+    await doctorCommand({ json: opts.json === true });
+  });
+
+// Hidden command: machine-readable introspection for `doctor` to call across binaries.
+// Not visible in `--help`. Output contract: one line of JSON on stdout, see `commands/internal.ts`.
+program
+  .command("__install-source", { hidden: true })
+  .description("(internal) Print this binary's stamped install source as JSON.")
+  .action(() => {
+    internalInfoCommand();
+  });
 
 program
   .command("self-update")
