@@ -210,3 +210,14 @@ export {
   type AfpsContextProvider,
   type FromAfpsToolOptions,
 } from "./afps-adapter.ts";
+
+// MCP client factories — Phase 2 of #276. The agent connects to the
+// sidecar's `/mcp` over Streamable HTTP; the CLI uses the in-process
+// pair already exported above.
+export {
+  createMcpHttpClient,
+  wrapClient,
+  type AppstrateMcpClient,
+  type AppstrateMcpClientOptions,
+  type McpHttpClientOptions,
+} from "./client.ts";

@@ -48,9 +48,11 @@ import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
+import { buildMcpProviderFactories, buildMcpRunHistoryFactory } from "./extensions/mcp-bridge.ts";
 
 // Captured as early as possible so the "runtime ready in {N}ms" signal
 // reflects the full bootloader cost (bundle extract, providers wiring,
@@ -251,23 +253,57 @@ const sidecarUrl = env.sidecarUrl;
 let providerResolver: ProviderResolver = { resolve: async () => [] };
 const workspaceForProviders = WORKSPACE;
 
+// Phase 2 of #276 — MCP-backed wiring is opt-in via RUNTIME_MCP_CLIENT.
+// When the flag is set, both provider tools and run_history route
+// through the sidecar's `/mcp` endpoint instead of `/proxy` and
+// `/run-history`. Same LLM-facing surface (`<slug>_call`, `run_history`),
+// one wire format underneath. Default OFF until soak completes.
+let mcpClient: AppstrateMcpClient | null = null;
+
+if (sidecarUrl && env.runtimeMcpClient) {
+  try {
+    mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+      ...(env.runToken ? { bearerToken: env.runToken } : {}),
+      clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+    });
+  } catch (err) {
+    await emitError(
+      `Failed to connect MCP client to sidecar: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    mcpClient = null;
+  }
+}
+
 if (bundle && sidecarUrl) {
   try {
     providerResolver = new SidecarProviderResolver({ sidecarUrl });
-    const providerFactories = await buildProviderExtensionFactories({
-      bundle,
-      providerResolver,
-      runId: AGENT_RUN_ID,
-      workspace: workspaceForProviders,
-      emitProvider: (event) => {
-        // Route provider lifecycle events through the tee sink so the
-        // platform observes each call structurally AND the aggregate
-        // reducer sees every event. Fire-and-forget — HttpSink handles
-        // retries internally.
-        void teeSink.handle(event as RunEvent);
-      },
-    });
-    extensionFactories.push(...providerFactories);
+    if (mcpClient) {
+      const factories = await buildMcpProviderFactories({
+        bundle,
+        mcp: mcpClient,
+        runId: AGENT_RUN_ID,
+        workspace: workspaceForProviders,
+        emitProvider: (event) => {
+          void teeSink.handle(event as RunEvent);
+        },
+      });
+      extensionFactories.push(...factories);
+    } else {
+      const providerFactories = await buildProviderExtensionFactories({
+        bundle,
+        providerResolver,
+        runId: AGENT_RUN_ID,
+        workspace: workspaceForProviders,
+        emitProvider: (event) => {
+          // Route provider lifecycle events through the tee sink so the
+          // platform observes each call structurally AND the aggregate
+          // reducer sees every event. Fire-and-forget — HttpSink handles
+          // retries internally.
+          void teeSink.handle(event as RunEvent);
+        },
+      });
+      extensionFactories.push(...providerFactories);
+    }
   } catch (err) {
     await emitError(
       `Failed to wire provider tools: ${err instanceof Error ? err.message : String(err)}`,
@@ -284,16 +320,28 @@ if (bundle && sidecarUrl) {
 
 if (sidecarUrl) {
   try {
-    extensionFactories.push(
-      buildRunHistoryExtensionFactory({
-        sidecarUrl,
-        runId: AGENT_RUN_ID,
-        workspace: WORKSPACE,
-        emit: (event) => {
-          void teeSink.handle(event as RunEvent);
-        },
-      }),
-    );
+    if (mcpClient) {
+      extensionFactories.push(
+        buildMcpRunHistoryFactory({
+          mcp: mcpClient,
+          runId: AGENT_RUN_ID,
+          emit: (event) => {
+            void teeSink.handle(event as RunEvent);
+          },
+        }),
+      );
+    } else {
+      extensionFactories.push(
+        buildRunHistoryExtensionFactory({
+          sidecarUrl,
+          runId: AGENT_RUN_ID,
+          workspace: WORKSPACE,
+          emit: (event) => {
+            void teeSink.handle(event as RunEvent);
+          },
+        }),
+      );
+    }
   } catch (err) {
     await emitError(
       `Failed to wire run_history tool: ${err instanceof Error ? err.message : String(err)}`,
@@ -463,9 +511,11 @@ try {
     eventSink: teeSink,
   });
   heartbeat.stop();
+  if (mcpClient) await mcpClient.close().catch(() => {});
   process.exit(0);
 } catch (err) {
   heartbeat.stop();
+  if (mcpClient) await mcpClient.close().catch(() => {});
   const message = err instanceof Error ? err.message : String(err);
   await emitError(message);
   try {
