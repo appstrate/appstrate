@@ -173,5 +173,26 @@ describe("Platform signup gate — issue #228", () => {
       const res = await attemptSignup("contractor@external.io");
       expect(res.status).toBe(200);
     });
+
+    it("invitation override beats the domain allowlist when signup stays open", async () => {
+      // Multi-tenant SaaS recipe: signup is OPEN but restricted to one
+      // domain. An invited contractor from outside the domain must still be
+      // able to complete signup — otherwise sharing an org with an external
+      // collaborator silently breaks (Infisical-style breakage).
+      setAuthEnv({ AUTH_DISABLE_SIGNUP: undefined, AUTH_ALLOWED_SIGNUP_DOMAINS: undefined });
+      const ctx = await createTestContext({ orgSlug: "hostorg-open-domain" });
+      await seedInvitation({
+        orgId: ctx.orgId,
+        email: "contractor-open@external.io",
+        invitedBy: ctx.user.id,
+      });
+      setAuthEnv({
+        AUTH_DISABLE_SIGNUP: undefined,
+        AUTH_ALLOWED_SIGNUP_DOMAINS: "acme.com",
+      });
+
+      const res = await attemptSignup("contractor-open@external.io");
+      expect(res.status).toBe(200);
+    });
   });
 });

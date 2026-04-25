@@ -71,7 +71,17 @@ export type SignupPolicyDecision =
  * the invitation is the caller's responsibility; this function only does
  * the policy combination.
  *
- * Order matters and is documented in docs/self-hosting/auth-modes.md.
+ * Order matters and is documented in examples/self-hosting/AUTH_MODES.md:
+ *
+ *   1. bootstrap owner          — operator never locks themselves out
+ *   2. platform admin allowlist — operator never locks themselves out
+ *   3. pending invitation       — overrides closed mode AND domain allowlist
+ *      so an invited contractor from outside the allowed domains can still
+ *      complete signup (Infisical-style breakage avoidance)
+ *   4. closed mode              — reject (domain mismatch wins as the more
+ *      specific reason when both apply)
+ *   5. open mode + domain allowlist → reject if domain not listed
+ *   6. otherwise → allow
  */
 export function evaluateSignupPolicy(
   email: string,
@@ -79,24 +89,19 @@ export function evaluateSignupPolicy(
 ): SignupPolicyDecision {
   const env = getEnv();
 
-  // 1. Signup not locked down → enforce only the domain allowlist.
-  if (!env.AUTH_DISABLE_SIGNUP) {
-    if (!isAllowedSignupDomain(email)) {
-      return { allowed: false, reason: "signup_domain_not_allowed" };
-    }
-    return { allowed: true, reason: "domain_ok" };
-  }
-
-  // 2. Signup locked down — allow the 3 exceptions, in priority order.
   if (isBootstrapOwner(email)) return { allowed: true, reason: "bootstrap" };
   if (isPlatformAdmin(email)) return { allowed: true, reason: "platform_admin" };
   if (hasPendingInvitation) return { allowed: true, reason: "invitation" };
 
-  // 3. Locked down + no exception → reject. Domain allowlist still applies
-  // before the closed-mode rejection so the caller sees the most specific
-  // reason when both fail.
+  if (env.AUTH_DISABLE_SIGNUP) {
+    if (!isAllowedSignupDomain(email)) {
+      return { allowed: false, reason: "signup_domain_not_allowed" };
+    }
+    return { allowed: false, reason: "signup_disabled" };
+  }
+
   if (!isAllowedSignupDomain(email)) {
     return { allowed: false, reason: "signup_domain_not_allowed" };
   }
-  return { allowed: false, reason: "signup_disabled" };
+  return { allowed: true, reason: "domain_ok" };
 }

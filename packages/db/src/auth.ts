@@ -17,8 +17,7 @@ import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
 import { evaluateSignupPolicy, isBootstrapOwner, normalizeEmail } from "./auth-policy.ts";
-import { toSlug } from "@appstrate/core/naming";
-import { organizationMembers } from "./schema/organizations.ts";
+import { createBootstrapOrg } from "./bootstrap-org.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -44,61 +43,33 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 
 /**
  * Auto-create the bootstrap organization when the freshly-signed-up user
- * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Idempotent on two axes:
- *   1. If this user already owns at least one org → no-op.
- *   2. If the configured slug is taken (race / re-run) → fall back to a
- *      suffixed slug so the bootstrap never fails halfway through signup.
+ * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Delegates the idempotent create-or-noop
+ * to `createBootstrapOrg`, which is shared with `apps/api/scripts/bootstrap-org.ts`.
  *
- * Runs in the BA `after` hook, after the profile row is inserted. Safe to
- * skip silently on error: the user is already created and can create an
- * org manually if they have permission. Logs are loud so ops sees the
- * outcome on first deploy.
+ * Runs in the BA `after` hook, after the profile row is inserted. Errors are
+ * swallowed (logged): the user is already created and can be recovered via
+ * the explicit `bootstrap-org.ts` script if the auto-path fails transiently.
  */
 async function maybeBootstrapOrgForOwner(userId: string, email: string): Promise<void> {
   if (!isBootstrapOwner(email)) return;
   const env = getEnv();
-
-  // Idempotence: bail if this user already owns any organization.
-  const [existingOwnership] = await db
-    .select({ orgId: organizationMembers.orgId })
-    .from(organizationMembers)
-    .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.role, "owner")))
-    .limit(1);
-  if (existingOwnership) return;
-
-  const orgName = env.AUTH_BOOTSTRAP_ORG_NAME;
-  const baseSlug = toSlug(orgName, 50) || "default";
-  // Suffix the slug if the base is taken (rare race: two boots, same env).
-  let slug = baseSlug;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const [collision] = await db
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(eq(organizations.slug, slug))
-      .limit(1);
-    if (!collision) break;
-    slug = `${baseSlug}-${attempt + 2}`;
+  try {
+    const result = await createBootstrapOrg(userId, env.AUTH_BOOTSTRAP_ORG_NAME);
+    if (result.created) {
+      logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
+        userId,
+        email,
+        orgId: result.orgId,
+        slug: result.slug,
+      });
+    }
+  } catch (err) {
+    logger.error("auth: bootstrap org creation failed", {
+      userId,
+      email,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-
-  const [org] = await db
-    .insert(organizations)
-    .values({ name: orgName, slug, createdBy: userId })
-    .returning({ id: organizations.id, slug: organizations.slug });
-  if (!org) {
-    logger.error("auth: bootstrap org insert returned no row", { userId, email });
-    return;
-  }
-  await db.insert(organizationMembers).values({
-    orgId: org.id,
-    userId,
-    role: "owner",
-  });
-  logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
-    userId,
-    email,
-    orgId: org.id,
-    slug: org.slug,
-  });
 }
 
 // Env is read lazily inside `buildAuth()` rather than at module load time so
@@ -660,13 +631,17 @@ function buildAuth(
             const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
             // Platform-level signup gate (self-hosting lockdown). Runs FIRST
             // so the cheapest, most specific decision wins before any module
-            // hook. Skipped when `AUTH_DISABLE_SIGNUP=false` (open mode) and
-            // no domain allowlist is configured — common case is a single
-            // env read with no DB query.
+            // hook. Skipped entirely when neither restriction is configured
+            // (open mode = single env read, no policy eval, no DB query).
+            //
+            // The invitation lookup is always performed when at least one
+            // restriction is active, because a pending invitation overrides
+            // BOTH closed mode and the domain allowlist. The lookup is
+            // index-covered (`idx_org_invitations_email`) — negligible cost
+            // for the only path where a restriction applies.
             const envForGate = getEnv();
             if (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length) {
-              const hasInvite =
-                envForGate.AUTH_DISABLE_SIGNUP && (await hasPendingInvitationByEmail(user.email));
+              const hasInvite = await hasPendingInvitationByEmail(user.email);
               const decision = evaluateSignupPolicy(user.email, hasInvite);
               if (!decision.allowed) {
                 logger.info("auth: platform signup gate blocked signup", {

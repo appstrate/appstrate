@@ -129,6 +129,23 @@ describe("evaluateSignupPolicy — open mode", () => {
     const decision = evaluateSignupPolicy("user@acme.com", false);
     expect(decision).toEqual({ allowed: true, reason: "domain_ok" });
   });
+
+  it("invitation overrides the domain allowlist in open mode (invited contractor)", () => {
+    // Multi-tenant SaaS recipe: signup is open but restricted to a domain.
+    // An invited external contractor must still be able to complete signup.
+    process.env.AUTH_ALLOWED_SIGNUP_DOMAINS = "acme.com";
+    _resetCacheForTesting();
+    const decision = evaluateSignupPolicy("contractor@external.io", true);
+    expect(decision).toEqual({ allowed: true, reason: "invitation" });
+  });
+
+  it("platform admin overrides the domain allowlist in open mode", () => {
+    process.env.AUTH_ALLOWED_SIGNUP_DOMAINS = "acme.com";
+    process.env.AUTH_PLATFORM_ADMIN_EMAILS = "ops@external.io";
+    _resetCacheForTesting();
+    const decision = evaluateSignupPolicy("ops@external.io", false);
+    expect(decision).toEqual({ allowed: true, reason: "platform_admin" });
+  });
 });
 
 describe("evaluateSignupPolicy — closed mode", () => {
