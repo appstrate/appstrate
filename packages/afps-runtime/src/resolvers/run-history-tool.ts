@@ -28,12 +28,7 @@ import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
 // Wire shapes
 // ─────────────────────────────────────────────
 
-/**
- * AFPS 1.4 field names. `state` (the legacy AFPS ≤ 1.3 alias for
- * `checkpoint`) is NOT part of the canonical type — the runtime emits
- * `checkpoint`, the platform's `/internal/run-history` endpoint accepts
- * both alongside the new name for one release of dual-event compat.
- */
+/** Wire-format field names accepted by `/internal/run-history`. */
 export type RunHistoryField = "checkpoint" | "result";
 
 export interface RunHistoryRequest {
@@ -76,11 +71,7 @@ const MAX_LIMIT = 50;
 const DEFAULT_FIELDS: readonly RunHistoryField[] = ["checkpoint"];
 const VALID_FIELDS: readonly RunHistoryField[] = ["checkpoint", "result"];
 
-/**
- * Wire-level field vocabulary the platform's `/internal/run-history`
- * endpoint accepts. The legacy `state` alias is no longer accepted
- * (ADR-011 final cut — runners ≥ AFPS 1.4 only).
- */
+/** Wire-level field vocabulary the platform's `/internal/run-history` endpoint accepts. */
 const WIRE_FIELDS: readonly string[] = ["checkpoint", "result"];
 
 export interface MakeRunHistoryToolOptions {

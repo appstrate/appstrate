@@ -159,23 +159,19 @@ Delivered in this PR:
       app now reads from the unified `/persistence` endpoint and tags each row
       with its actor scope.
 - [x] Phase 7 — Docs
+- [x] Phase 8 — Final cut: drop `package_memories` table, rename
+      `runs.state` → `runs.checkpoint`, drop `set_state` tool +
+      `state.set` event, drop `memories:*` RBAC + `/memories` routes.
+      No production data existed during the transition, so the
+      planned double-write window was collapsed into a single PR.
 
-Deferred to follow-up PRs:
+## Single-store strategy
 
-- [ ] Legacy drop — DROP `runs.state` column + `package_memories` table after
-      1-2 weeks of double-write stability in production.
-
-## Double-write strategy
-
-For the transition window the API writes to **both** stores on finalize:
-
-1. `runs.state` + `package_memories` (legacy) — untouched behaviour for back-compat.
-2. `package_persistence` (new) — the same data, in the unified shape.
-
-Reads are migrated in one step inside `env-builder.ts` (single call site):
-the new `getCheckpoint` / `listMemories` services are the sole readers, and
-they query the unified table. The legacy stores become strictly write-only
-until the follow-up drop PR.
+Finalize writes to `package_persistence` only — the unified store is the
+sole system of record for both checkpoints and memories. `runs.checkpoint`
+remains as a per-run snapshot of what the runner emitted (read by
+`getRecentRuns` to feed the sidecar `run_history` tool); the unified store
+keeps only the latest checkpoint per actor.
 
 ## Open questions
 

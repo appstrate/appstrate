@@ -339,6 +339,12 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       cost: cost.total > 0 ? cost.total : null,
       sinkClosedAt: now,
       notifiedAt: now,
+      // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
+      // sidecar `run_history` tool. The unified `package_persistence`
+      // store only keeps the latest checkpoint per actor (last-write-wins
+      // on the unique index); `runs.checkpoint` preserves the per-run
+      // history so agents can inspect what each prior run emitted.
+      ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
       // When the runner ships authoritative usage in the finalize body
       // we persist it here so `runs.tokenUsage` reflects reality even if
       // the side-channel `appstrate.metric` event was dropped (network

@@ -24,11 +24,7 @@ export type LogLevel = "info" | "warn" | "error";
  */
 export interface RunResult {
   memories: Memory[];
-  /**
-   * Aggregated checkpoint payload — the last `checkpoint.set` value. Single
-   * source of truth for the carry-over snapshot; the legacy `state` alias
-   * was dropped at the AFPS 1.4 final cut (ADR-011).
-   */
+  /** Aggregated checkpoint payload — the last `checkpoint.set` value. */
   checkpoint: unknown | null;
   /**
    * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no

@@ -20,18 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform prompt section renamed `## Previous State` → `## Checkpoint`
   and now documents the scope default (`"actor"`) for both tools.
 
-### Compat — dual-event acceptance for `state.set` ↔ `checkpoint.set`
+### Removed — `set_state` tool + `state.set` event (BREAKING)
 
-- The reducer + canonical-event narrower still accept the legacy
-  `state.set` event so already-published agents emitting the AFPS ≤ 1.3
-  event keep working. Both fold into `RunResult.state` with
-  last-write-wins semantics.
-- `PLATFORM_TOOLS` keeps the legacy `set_state` entry alongside the new
-  `set_checkpoint`. Bundles depending on `@appstrate/set-state@1.0.0`
-  resolve unchanged.
-- `stateTool` is marked `@deprecated` and emits the legacy `state.set`
-  event for end-to-end back-compat. Removal is gated on the floor of
-  supported AFPS bundles ≥ 1.4.
+- `stateTool` / `set_state` removed from `PLATFORM_TOOLS`. Agents that
+  emitted `state.set` must rebuild against `set_checkpoint`.
+- `StateSetEvent` removed from the canonical-event union; the reducer +
+  narrower no longer fold it. `RunResult.state` renamed to
+  `RunResult.checkpoint`.
+- Bundles depending on `@appstrate/set-state@1.0.0` no longer resolve;
+  depend on `@appstrate/set-checkpoint@2.0.0` instead.
 
 ### Removed — `afps run` and `afps test` subcommands (BREAKING)
 

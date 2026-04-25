@@ -314,10 +314,7 @@ export async function getRecentRuns(
     eq(runs.status, "success"),
   ];
   // Actor isolation is mandatory — never leak cross-actor checkpoints.
-  // Scheduled / system runs (`actor === null`) explicitly read the
-  // shared bucket only (legacy table semantics: they had no actor
-  // column at all, which the same `null` branch in `actorFilter`
-  // matched).
+  // Scheduled / system runs (`actor === null`) read the shared bucket only.
   if (actor) {
     conditions.push(
       actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),

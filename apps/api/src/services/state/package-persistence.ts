@@ -19,8 +19,7 @@ import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 
-// Per-entry char cap and per-scope row cap. Single source of truth now that
-// the legacy `package_memories` service is gone.
+// Per-entry char cap and per-scope row cap.
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 
@@ -71,16 +70,6 @@ function storageActor(scope: PersistenceScope): {
   if (scope.type === "shared") return { actorType: "shared", actorId: null };
   if (scope.type === "end_user") return { actorType: "end_user", actorId: scope.id };
   return { actorType: "user", actorId: scope.id };
-}
-
-/** Storage-shape → service-shape `Actor`-compatible scope for outbound types. */
-function fromStorageActor(
-  actorType: "user" | "end_user" | "shared",
-  actorId: string | null,
-): PersistenceScope {
-  if (actorType === "shared") return { type: "shared" };
-  if (actorType === "end_user") return { type: "end_user", id: actorId! };
-  return { type: "member", id: actorId! };
 }
 
 /**
@@ -228,7 +217,7 @@ export async function deleteCheckpoint(
 /**
  * Read the memory list visible to a scope — union of shared rows + rows
  * scoped to this exact actor, sorted createdAt ASC for prompt stability
- * (oldest first mirrors the legacy `package_memories` ordering).
+ * (oldest first).
  */
 export async function listMemories(
   packageId: string,
@@ -278,11 +267,6 @@ export async function listMemories(
  * Append memories for a scope, bounded at {@link MAX_MEMORIES_PER_SCOPE}
  * per `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
  * characters per entry. Returns the count actually inserted.
- *
- * String contents are stored as JSONB strings to match the legacy
- * `package_memories.content` text column; structured contents pass through
- * as objects/arrays. The `env-builder` reads via a typeof-string guard so
- * legacy and new shapes both render correctly.
  */
 export async function addMemories(
   packageId: string,
@@ -377,6 +361,3 @@ export async function deleteAllMemories(
     .returning({ id: packagePersistence.id });
   return deleted.length;
 }
-
-// Re-export for legacy compat-shim consumers during the transition window.
-export { fromStorageActor };
