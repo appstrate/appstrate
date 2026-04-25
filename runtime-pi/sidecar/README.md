@@ -24,11 +24,25 @@ The only path that decodes the request body to UTF-8 is the optional `X-Substitu
 | ---------------------------- | ------ | --------------------- | ---------------------------------------------------------------- |
 | `MAX_RESPONSE_SIZE`          | 256 KB | `X-Max-Response-Size` | Default cap on upstream response bytes returned to the agent.    |
 | `ABSOLUTE_MAX_RESPONSE_SIZE` | 1 MB   | (hard cap)            | Ceiling on `X-Max-Response-Size` regardless of header value.     |
-| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | —                     | Maximum request body size accepted by `/proxy` (413 above).      |
+| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | —                     | Maximum buffered request body size accepted by `/proxy`.         |
+| `STREAMING_THRESHOLD`        | 1 MB   | (auto)                | Above this `Content-Length` `/proxy` switches to streaming mode. |
+| `MAX_STREAMED_BODY_SIZE`     | 100 MB | (hard cap)            | Ceiling on streamed request and response bodies.                 |
 | `OUTBOUND_TIMEOUT_MS`        | 30 s   | —                     | Upstream `/proxy` request timeout.                               |
 | `LLM_PROXY_TIMEOUT_MS`       | 5 min  | —                     | `/llm/*` request timeout (long enough for streamed completions). |
 
-When the upstream response exceeds the effective cap, the sidecar returns the prefix and sets `X-Truncated: true`. Agents that legitimately need larger payloads should opt in via `responseMode.toFile` on the AFPS provider tool — the runtime resolver then sends a higher `X-Max-Response-Size` (capped at 1 MB) and spills the bytes to the workspace instead of inlining them into the model context.
+When the upstream response exceeds the effective cap, the sidecar returns the prefix and sets `X-Truncated: true`. Agents that legitimately need larger payloads should opt in via `responseMode.toFile` on the AFPS provider tool — the runtime resolver then sets `X-Stream-Response: 1` and the sidecar pipes upstream bytes through without truncation.
+
+## Streaming pass-through (PR-4)
+
+`/proxy` supports two opt-in streaming paths to keep memory bounded on large binary uploads (Drive resumable uploads ≥ 8 MiB) and downloads (Drive media exports, build artifacts):
+
+- **Request side** — When the incoming `Content-Length` exceeds `STREAMING_THRESHOLD` (1 MB) AND `X-Substitute-Body` is unset, the sidecar pipes the body directly to upstream with `duplex: "half"`. No buffering. Upper-bounded at `MAX_STREAMED_BODY_SIZE` (100 MB) — over-sized uploads return 413 before the upstream socket opens.
+
+- **Response side** — When the caller sets `X-Stream-Response: 1`, the sidecar returns a zero-copy `Response` wrapping `targetRes.body`. No buffering, no truncation. The sidecar enforces `MAX_STREAMED_BODY_SIZE` up front via the upstream `Content-Length` header when present; chunked / unknown-size responses fall back on the 30 s outbound timeout.
+
+- **401 in streaming-request mode** — The request body has already been consumed by the first upstream call and cannot be replayed. The sidecar still refreshes the credentials (so the _next_ idempotent retry succeeds) and surfaces the 401 with `X-Auth-Refreshed: true`. The AFPS resolver (`{ fromFile }` is reproducible) interprets this header as "transient, retry me" and re-calls. The transparent retry is preserved on the buffered path (Content-Length below `STREAMING_THRESHOLD`), so non-streaming flows are unaffected.
+
+Streaming is opt-in by request shape — agents that don't need it (the common case) keep the existing buffered semantics with the existing 256 KB / 1 MB / 5 MB caps.
 
 ## The `body.fromFile` contract
 
