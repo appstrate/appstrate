@@ -32,6 +32,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -39,6 +40,8 @@ import {
   ErrorCode,
   type CallToolResult,
   type Implementation,
+  type ServerNotification,
+  type ServerRequest,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
@@ -46,13 +49,19 @@ import {
  * Handler for a single Appstrate tool. Receives validated arguments (the
  * SDK does not validate input against `inputSchema` automatically — the
  * caller must `.parse()` inside the handler if it needs strict checking)
- * and returns the SDK's `CallToolResult`.
+ * and the SDK's `RequestHandlerExtra` (carries the per-request
+ * `AbortSignal`, `requestId`, `_meta`, and auth info) so handlers that
+ * care about cancellation or correlation can opt in.
  *
  * Thrown errors become JSON-RPC `InternalError` responses; tool-level
  * errors that the model should still see should be returned as
  * `{ content: [...], isError: true }` instead of being thrown.
  */
-export type AppstrateToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
+export type AppstrateRequestExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+export type AppstrateToolHandler = (
+  args: Record<string, unknown>,
+  extra: AppstrateRequestExtra,
+) => Promise<CallToolResult>;
 
 /**
  * Tool registration shape — pairs the wire-format `Tool` descriptor with
@@ -102,7 +111,7 @@ export function createMcpServer(
     tools: [...registry.values()].map((t) => t.descriptor),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const reg = registry.get(request.params.name);
     if (!reg) {
       // MethodNotFound is the closest standard code for "this method
@@ -111,7 +120,7 @@ export function createMcpServer(
       // (the SDK does not reserve a separate code).
       throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${request.params.name}`);
     }
-    return reg.handler(request.params.arguments ?? {});
+    return reg.handler(request.params.arguments ?? {}, extra);
   });
 
   return server;
@@ -166,3 +175,12 @@ export async function createInProcessPair(
 // dependency line just to inspect error codes thrown by the server.
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export type { CallToolResult, Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
+
+// AFPS bridge — convert spec-shaped tools into MCP definitions without
+// rewriting them. Used by Phase 2 to mount existing AFPS tools through
+// the MCP wire format.
+export {
+  fromAfpsTool,
+  type AfpsContextProvider,
+  type FromAfpsToolOptions,
+} from "./afps-adapter.ts";
