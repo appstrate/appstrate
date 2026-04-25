@@ -7,6 +7,6 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
-    "hono": "^4.12.14"
+    "hono": "^4.12.15"
   }
 }
