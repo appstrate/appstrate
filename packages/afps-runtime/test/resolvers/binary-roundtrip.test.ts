@@ -448,9 +448,9 @@ describe("provider-tool binary round-trip", () => {
     });
 
     it("auto-spills payloads larger than the inline cap to responses/<toolCallId>.bin", async () => {
-      const blob = deterministicBytes(60 * 1024, 0xc0ffee); // 60KB > 64KB? actually 60*1024 = 61440 < 65536. Use 70KB to exceed default.
-      // Use 70KB to definitively exceed defaultInlineLimit (65_536).
-      const big = deterministicBytes(70 * 1024, 0xc0ffee);
+      const blob = deterministicBytes(60 * 1024, 0xc0ffee); // kept for sha fixture symmetry — not used in assertions.
+      // Use 300KB to definitively exceed defaultInlineLimit (256 KB = 256*1024).
+      const big = deterministicBytes(300 * 1024, 0xc0ffee);
       const expectedSha = sha256(big);
 
       const { execute } = buildSidecarResolver(
@@ -667,7 +667,7 @@ describe("provider-tool binary round-trip", () => {
     });
 
     it("auto-spills oversize binary responses to a workspace file", async () => {
-      const big = randomBytes(80 * 1024); // 80KB > 64KB default
+      const big = randomBytes(300 * 1024); // 300KB > 256KB default
       const expectedSha = sha256(new Uint8Array(big));
       const { execute } = buildLocalResolver(
         async () =>

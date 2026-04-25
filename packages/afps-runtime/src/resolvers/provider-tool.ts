@@ -16,10 +16,11 @@ import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
- * explicit `responseMode.maxInlineBytes`. Mirrors the sidecar default
- * (`runtime-pi/sidecar/helpers.ts`) so the two layers stay in sync.
+ * explicit `responseMode.maxInlineBytes`. Mirrors `MAX_RESPONSE_SIZE`
+ * in `runtime-pi/sidecar/helpers.ts` (256 KB) so the two layers stay
+ * in sync — both truncate at the same boundary.
  */
-export const defaultInlineLimit = 65_536;
+export const defaultInlineLimit = 256 * 1024;
 
 /**
  * Hard upper bound on `responseMode.maxInlineBytes`. Mirrors
@@ -95,10 +96,30 @@ export interface ProviderCallRequest {
   target: string;
   headers?: Record<string, string>;
   /**
-   * Request body. Either raw bytes / string (forwarded verbatim) or a
-   * file reference that the transport resolves before dispatch.
+   * Request body. Either raw bytes / string (forwarded verbatim), a
+   * file reference that the transport resolves before dispatch, or a
+   * base64-encoded inline binary payload (for computed/in-memory bytes
+   * up to {@link MAX_REQUEST_BODY_SIZE}).
    */
-  body?: string | Uint8Array | null | { fromFile: string };
+  body?:
+    | string
+    | Uint8Array
+    | null
+    | { fromFile: string }
+    | { fromBytes: string; encoding: "base64" }
+    | {
+        multipart: Array<
+          | { name: string; value: string }
+          | { name: string; fromFile: string; filename?: string; contentType?: string }
+          | {
+              name: string;
+              fromBytes: string;
+              encoding: "base64";
+              filename?: string;
+              contentType?: string;
+            }
+        >;
+      };
   /**
    * How the response should be surfaced back to the LLM. Defaults to
    * inline (bytes up to `maxInlineBytes`, file reference above).
@@ -118,10 +139,24 @@ export interface ProviderCallRequest {
  * The encoding is explicit on `inline` (always `base64`) so consumers
  * never have to guess. The legacy `{ inline; inlineEncoding } | { file }`
  * shape was lossy for binary data — see issues #149 / #151.
+ *
+ * `truncated` signals that the sidecar capped the upstream response at
+ * `MAX_RESPONSE_SIZE` (or the agent-requested `maxInlineBytes`). When
+ * `truncated` is `true`, `truncatedSize` carries the byte length of the
+ * truncated payload so the LLM can report partial data faithfully. The
+ * `file` variant is never truncated — bytes are always streamed in full.
  */
 export type ProviderCallResponseBody =
-  | { kind: "text"; text: string }
-  | { kind: "inline"; data: string; encoding: "base64"; mimeType: string; size: number }
+  | { kind: "text"; text: string; truncated: boolean; truncatedSize?: number }
+  | {
+      kind: "inline";
+      data: string;
+      encoding: "base64";
+      mimeType: string;
+      size: number;
+      truncated: boolean;
+      truncatedSize?: number;
+    }
   | { kind: "file"; path: string; size: number; mimeType: string; sha256: string };
 
 export interface ProviderCallResponse {
@@ -153,6 +188,57 @@ export type ProviderCallFn = (
   req: ProviderCallRequest,
   ctx: ProviderCallContext,
 ) => Promise<ProviderCallResponse>;
+
+/**
+ * Apply transport control headers to an outgoing provider call.
+ *
+ * Shared by both {@link SidecarProviderResolver} and
+ * {@link RemoteAppstrateProviderResolver} so the two transports stay in
+ * lockstep — any change to the streaming protocol only needs to land here.
+ *
+ * Rules applied (mirrors the sidecar server contract):
+ *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
+ *    `X-Max-Response-Size` is omitted — it is redundant when streaming.
+ *  - `isStreamingBody` → `X-Stream-Request: 1` + explicit `Content-Length`
+ *    (so the server can enforce the 100 MB cap up-front before reading the body).
+ *  - Otherwise → `X-Max-Response-Size: <cap>` when the agent requested a
+ *    larger inline payload (lifts the server's default cap).
+ *
+ * Mutates `headers` in place and returns it for convenience.
+ */
+export function applyTransportHeaders(
+  headers: Record<string, string>,
+  opts: {
+    wantsFile: boolean;
+    isStreamingBody: boolean;
+    bodySize?: number;
+    maxInlineBytes?: number;
+  },
+): Record<string, string> {
+  if (opts.wantsFile) {
+    headers["X-Stream-Response"] = "1";
+    // X-Max-Response-Size is not needed on the streaming-response path —
+    // the server enforces MAX_STREAMED_BODY_SIZE via a transform stream.
+    delete headers["X-Max-Response-Size"];
+  } else {
+    const maxInline = opts.maxInlineBytes;
+    if (typeof maxInline === "number" && maxInline > 0) {
+      const cap = Math.min(maxInline, ABSOLUTE_MAX_RESPONSE_SIZE);
+      headers["X-Max-Response-Size"] = String(cap);
+    }
+  }
+  if (opts.isStreamingBody) {
+    headers["X-Stream-Request"] = "1";
+    if (
+      opts.bodySize !== undefined &&
+      !("content-length" in headers) &&
+      !("Content-Length" in headers)
+    ) {
+      headers["Content-Length"] = String(opts.bodySize);
+    }
+  }
+  return headers;
+}
 
 export interface MakeProviderToolOptions {
   /** Tool name override. Defaults to `<sluggedProviderName>_call`. */
@@ -203,10 +289,69 @@ export function makeProviderTool(
             additionalProperties: false,
             properties: { fromFile: { type: "string" } },
           },
+          {
+            type: "object",
+            required: ["fromBytes", "encoding"],
+            additionalProperties: false,
+            properties: {
+              fromBytes: {
+                type: "string",
+                description: "Base64-encoded body bytes (for inline binary uploads up to 5 MB)",
+              },
+              encoding: { type: "string", enum: ["base64"] },
+            },
+          },
+          {
+            type: "object",
+            required: ["multipart"],
+            additionalProperties: false,
+            properties: {
+              multipart: {
+                type: "array",
+                minItems: 1,
+                items: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["name", "value"],
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: "string" },
+                        value: { type: "string" },
+                      },
+                    },
+                    {
+                      type: "object",
+                      required: ["name", "fromFile"],
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: "string" },
+                        fromFile: { type: "string" },
+                        filename: { type: "string" },
+                        contentType: { type: "string" },
+                      },
+                    },
+                    {
+                      type: "object",
+                      required: ["name", "fromBytes", "encoding"],
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: "string" },
+                        fromBytes: { type: "string" },
+                        encoding: { type: "string", enum: ["base64"] },
+                        filename: { type: "string" },
+                        contentType: { type: "string" },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
           { type: "null" },
         ],
         description:
-          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary uploads.",
+          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, { fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB, or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
       },
       responseMode: {
         type: "object",
@@ -415,6 +560,35 @@ export async function resolveSafePath(workspace: string, relative: string): Prom
   }
 }
 
+/**
+ * Resolve and stat a workspace-relative path in a single step, refusing
+ * symlinks at the final path (in addition to the traversal check
+ * performed by {@link resolveSafePath}).
+ *
+ * Using a single helper eliminates the TOCTOU window that would exist if
+ * callers independently called `resolveSafePath` then `lstat` — the stat
+ * here is of the same resolved path returned by the function.
+ *
+ * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` when
+ * the path is a symlink or escapes the workspace.
+ */
+export async function resolveSafeFile(
+  workspace: string,
+  rel: string,
+): Promise<{ absPath: string; stat: import("node:fs").Stats }> {
+  const absPath = await resolveSafePath(workspace, rel);
+  const fs = await import("node:fs/promises");
+  const stat = await fs.lstat(absPath);
+  if (stat.isSymbolicLink()) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+      `Refusing to follow symlink: ${rel}`,
+      { workspace, rel, resolved: absPath },
+    );
+  }
+  return { absPath, stat };
+}
+
 export interface ResolveBodyStreamOptions {
   allowFromFile?: boolean;
   transformString?: (input: string) => string;
@@ -447,7 +621,7 @@ export interface ResolveBodyStreamOptions {
  *    Content-Length explicitly (some upstreams require it).
  */
 export type ResolvedRequestBody =
-  | { kind: "bytes"; bytes: string | Uint8Array<ArrayBuffer> | undefined }
+  | { kind: "bytes"; bytes: string | Uint8Array<ArrayBuffer> | undefined; contentType?: string }
   | { kind: "stream"; stream: ReadableStream<Uint8Array>; size: number };
 
 /**
@@ -464,8 +638,89 @@ export type ResolvedRequestBody =
  * against {@link MAX_REQUEST_BODY_SIZE} so the runtime surfaces a typed
  * error instead of letting the sidecar return 413.
  */
+
+/**
+ * Build a multipart/form-data body from a mixed array of text fields,
+ * workspace file references, and inline base64 bytes. Returns the
+ * serialised bytes together with the correct `Content-Type` header value
+ * (including the boundary) so callers can forward it verbatim to the
+ * upstream.
+ *
+ * The total unencoded size of all parts is checked against
+ * {@link MAX_REQUEST_BODY_SIZE} (5 MB). Attempting to exceed this limit
+ * throws {@link ResolverError} `RESOLVER_BODY_TOO_LARGE`. For larger
+ * uploads agents must use a single `{ fromFile }` body instead.
+ *
+ * Path safety (no traversal, no symlinks) is delegated to
+ * {@link resolveSafeFile} — the same rules as for `{ fromFile }` bodies.
+ */
+async function buildMultipartBytes(
+  parts: NonNullable<Extract<ProviderCallRequest["body"], { multipart: unknown }>["multipart"]>,
+  workspace: string,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string }> {
+  const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+  const fd = new FormData();
+  let totalSize = 0;
+
+  for (const part of parts) {
+    if ("value" in part) {
+      // Plain text field.
+      fd.append(part.name, part.value);
+      totalSize += part.value.length;
+    } else if ("fromFile" in part) {
+      // Workspace file reference.
+      const { absPath, stat } = await resolveSafeFile(workspace, part.fromFile);
+      if (stat.isDirectory()) {
+        throw new ResolverError(
+          "RESOLVER_BODY_INVALID",
+          `multipart file is a directory: ${part.fromFile}`,
+        );
+      }
+      totalSize += stat.size;
+      if (totalSize > MAX_REQUEST_BODY_SIZE) {
+        throw new ResolverError(
+          "RESOLVER_BODY_TOO_LARGE",
+          `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+          { max: MAX_REQUEST_BODY_SIZE },
+        );
+      }
+      const fileBytes = await fs.readFile(absPath);
+      const blob = new Blob([fileBytes], {
+        type: part.contentType ?? "application/octet-stream",
+      });
+      fd.append(part.name, blob, part.filename ?? path.basename(part.fromFile));
+    } else {
+      // Inline base64 bytes.
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(part.fromBytes)) {
+        throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in multipart fromBytes");
+      }
+      const decoded = Uint8Array.from(Buffer.from(part.fromBytes, "base64"));
+      totalSize += decoded.byteLength;
+      if (totalSize > MAX_REQUEST_BODY_SIZE) {
+        throw new ResolverError(
+          "RESOLVER_BODY_TOO_LARGE",
+          `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+          { max: MAX_REQUEST_BODY_SIZE },
+        );
+      }
+      const blob = new Blob([decoded], {
+        type: part.contentType ?? "application/octet-stream",
+      });
+      fd.append(part.name, blob, part.filename);
+    }
+  }
+
+  // Serialize FormData to bytes. The Response constructor computes the
+  // multipart boundary and writes the correct Content-Type header.
+  const tempResp = new Response(fd);
+  const contentType = tempResp.headers.get("content-type")!;
+  const arrayBuffer = await tempResp.arrayBuffer();
+  return { bytes: toArrayBufferUint8(new Uint8Array(arrayBuffer)), contentType };
+}
+
 export async function resolveBodyStream(
-  body: string | Uint8Array | null | { fromFile: string } | undefined,
+  body: ProviderCallRequest["body"],
   opts: ResolveBodyStreamOptions = {},
 ): Promise<string | Uint8Array<ArrayBuffer> | undefined> {
   if (body === undefined || body === null) return undefined;
@@ -473,6 +728,47 @@ export async function resolveBodyStream(
     return opts.transformString ? opts.transformString(body) : body;
   }
   if (body instanceof Uint8Array) return toArrayBufferUint8(body);
+  if (typeof body === "object" && body !== null && "multipart" in body) {
+    if (!opts.allowFromFile) {
+      throw new ResolverError(
+        "RESOLVER_BODY_REFERENCE_FORBIDDEN",
+        `resolveBodyStream: { multipart } body requires workspace access for file parts; pass allowFromFile`,
+      );
+    }
+    if (!opts.workspace) {
+      throw new ResolverError(
+        "RESOLVER_MISSING_REQUIRED",
+        `resolveBodyStream: { multipart } resolution requires a workspace`,
+      );
+    }
+    const { bytes } = await buildMultipartBytes(body.multipart, opts.workspace);
+    return bytes;
+  }
+  if (typeof body === "object" && body !== null && "fromBytes" in body) {
+    if (body.encoding !== "base64") {
+      throw new ResolverError(
+        "RESOLVER_BODY_INVALID",
+        `Unsupported fromBytes encoding: ${body.encoding}`,
+      );
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.fromBytes)) {
+      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
+    }
+    let decoded: Uint8Array;
+    try {
+      decoded = Uint8Array.from(Buffer.from(body.fromBytes, "base64"));
+    } catch {
+      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
+    }
+    if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
+      throw new ResolverError(
+        "RESOLVER_BODY_TOO_LARGE",
+        `fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+        { size: decoded.byteLength, max: MAX_REQUEST_BODY_SIZE },
+      );
+    }
+    return toArrayBufferUint8(decoded);
+  }
   if (!opts.allowFromFile) {
     throw new ResolverError(
       "RESOLVER_BODY_REFERENCE_FORBIDDEN",
@@ -488,19 +784,7 @@ export async function resolveBodyStream(
     );
   }
   const fs = await import("node:fs/promises");
-  const safePath = await resolveSafePath(opts.workspace, body.fromFile);
-  // Refuse symlinks: lstat the path and bail if it's a symlink. The
-  // resolveSafePath realpath check already caught traversal-via-target,
-  // but the body of the file must still be a regular file we own, not
-  // a link the agent could swap mid-call.
-  const lst = await fs.lstat(safePath);
-  if (lst.isSymbolicLink()) {
-    throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `resolveBodyStream: refusing to read symlink ${JSON.stringify(body.fromFile)}`,
-      { fromFile: body.fromFile, resolved: safePath },
-    );
-  }
+  const { absPath: safePath, stat: lst } = await resolveSafeFile(opts.workspace, body.fromFile);
   if (lst.size > MAX_REQUEST_BODY_SIZE) {
     throw new ResolverError(
       "RESOLVER_BODY_TOO_LARGE",
@@ -530,7 +814,7 @@ export async function resolveBodyStream(
  * pipeline.
  */
 export async function resolveBodyForFetch(
-  body: string | Uint8Array | null | { fromFile: string } | undefined,
+  body: ProviderCallRequest["body"],
   opts: ResolveBodyStreamOptions = {},
 ): Promise<ResolvedRequestBody> {
   if (body === undefined || body === null) {
@@ -544,6 +828,47 @@ export async function resolveBodyForFetch(
   }
   if (body instanceof Uint8Array) {
     return { kind: "bytes", bytes: toArrayBufferUint8(body) };
+  }
+  if (typeof body === "object" && body !== null && "multipart" in body) {
+    if (!opts.allowFromFile) {
+      throw new ResolverError(
+        "RESOLVER_BODY_REFERENCE_FORBIDDEN",
+        `resolveBodyForFetch: { multipart } body requires workspace access for file parts; pass allowFromFile`,
+      );
+    }
+    if (!opts.workspace) {
+      throw new ResolverError(
+        "RESOLVER_MISSING_REQUIRED",
+        `resolveBodyForFetch: { multipart } resolution requires a workspace`,
+      );
+    }
+    const { bytes, contentType } = await buildMultipartBytes(body.multipart, opts.workspace);
+    return { kind: "bytes", bytes, contentType } as ResolvedRequestBody;
+  }
+  if (typeof body === "object" && body !== null && "fromBytes" in body) {
+    if (body.encoding !== "base64") {
+      throw new ResolverError(
+        "RESOLVER_BODY_INVALID",
+        `Unsupported fromBytes encoding: ${body.encoding}`,
+      );
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.fromBytes)) {
+      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
+    }
+    let decoded: Uint8Array;
+    try {
+      decoded = Uint8Array.from(Buffer.from(body.fromBytes, "base64"));
+    } catch {
+      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
+    }
+    if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
+      throw new ResolverError(
+        "RESOLVER_BODY_TOO_LARGE",
+        `fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+        { size: decoded.byteLength, max: MAX_REQUEST_BODY_SIZE },
+      );
+    }
+    return { kind: "bytes", bytes: toArrayBufferUint8(decoded) };
   }
   if (!opts.allowFromFile) {
     throw new ResolverError(
@@ -560,15 +885,7 @@ export async function resolveBodyForFetch(
     );
   }
   const fs = await import("node:fs/promises");
-  const safePath = await resolveSafePath(opts.workspace, body.fromFile);
-  const lst = await fs.lstat(safePath);
-  if (lst.isSymbolicLink()) {
-    throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `resolveBodyForFetch: refusing to read symlink ${JSON.stringify(body.fromFile)}`,
-      { fromFile: body.fromFile, resolved: safePath },
-    );
-  }
+  const { absPath: safePath, stat: lst } = await resolveSafeFile(opts.workspace, body.fromFile);
   // Streaming path: file size > threshold AND caller opted in. Hard
   // cap at MAX_STREAMED_BODY_SIZE — beyond that the upload is refused
   // before any bytes hit the wire.
@@ -676,6 +993,10 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * against an upstream that ignores Content-Length and dribbles bytes
  * forever.
  *
+ * Respects an optional `AbortSignal` — if the signal fires mid-stream,
+ * the reader is cancelled, the partial file is removed, and the
+ * signal's reason is rethrown.
+ *
  * Aborts cleanly on writer error: cancels the source, closes the file
  * handle, and rethrows so callers see the same error path as the
  * buffered writeFile.
@@ -683,19 +1004,58 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 async function writeStreamToFile(
   source: ReadableStream<Uint8Array>,
   absPath: string,
+  options: { signal?: AbortSignal; maxBytes?: number } = {},
 ): Promise<{ size: number; sha256: string }> {
   const path = await import("node:path");
   const fs = await import("node:fs/promises");
   const crypto = await import("node:crypto");
   await fs.mkdir(path.dirname(absPath), { recursive: true });
 
+  const { signal } = options;
+
   const hasher = crypto.createHash("sha256");
   const handle = await fs.open(absPath, "w");
   let size = 0;
   const reader = source.getReader();
+
+  // Check abort before we start — fast-path for pre-aborted signals.
+  if (signal?.aborted) {
+    reader.cancel(signal.reason).catch(() => {});
+    try {
+      await handle.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await fs.unlink(absPath);
+    } catch {
+      /* ignore */
+    }
+    throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
+  }
+
+  // Build an abort promise that rejects when the signal fires. This lets
+  // us race each `reader.read()` against the abort so a hanging upstream
+  // doesn't block the event loop indefinitely.
+  let rejectOnAbort: ((reason: unknown) => void) | undefined;
+  const abortPromise: Promise<never> | null = signal
+    ? new Promise<never>((_resolve, reject) => {
+        rejectOnAbort = reject;
+        signal.addEventListener(
+          "abort",
+          () => reject(signal.reason instanceof Error ? signal.reason : new Error("aborted")),
+          { once: true },
+        );
+      })
+    : null;
+
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const readPromise = reader.read();
+      const raceResult = abortPromise
+        ? await Promise.race([readPromise, abortPromise])
+        : await readPromise;
+      const { value, done } = raceResult;
       if (done) break;
       if (!value) continue;
       size += value.byteLength;
@@ -715,6 +1075,8 @@ async function writeStreamToFile(
     }
     return { size, sha256: hasher.digest("hex") };
   } catch (err) {
+    // Cancel the reader so the upstream stream is closed cleanly.
+    reader.cancel(err).catch(() => {});
     // Best-effort cleanup: drop the partial file so the agent doesn't
     // pick up half-written bytes on the next call. Swallow cleanup
     // errors so the original cause surfaces.
@@ -730,6 +1092,14 @@ async function writeStreamToFile(
     }
     throw err;
   } finally {
+    // Silence the unhandled rejection on abortPromise if we resolved via
+    // normal completion (the abort never fired).
+    if (abortPromise && rejectOnAbort) {
+      // Remove the listener by resolving the outer promise chain — we
+      // accomplish this by attaching a no-op catch so Node/Bun doesn't
+      // surface an unhandled rejection if the signal fires after we return.
+      abortPromise.catch(() => {});
+    }
     try {
       await handle.close();
     } catch {
@@ -759,6 +1129,12 @@ export interface SerializeFetchResponseContext {
    * without truncation; otherwise the buffered/truncated path applies.
    */
   streaming?: boolean;
+  /**
+   * Optional abort signal forwarded from the caller's {@link ProviderCallContext}.
+   * When the signal fires mid-stream, `writeStreamToFile` cancels the
+   * stream reader and removes any partial file written so far.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -800,7 +1176,7 @@ export async function serializeFetchResponse(
     res.body
   ) {
     const safePath = await resolveSafePath(ctx.workspace, requestedToFileEarly);
-    const written = await writeStreamToFile(res.body, safePath);
+    const written = await writeStreamToFile(res.body, safePath, { signal: ctx.signal });
     return {
       status: res.status,
       headers,
@@ -810,6 +1186,7 @@ export async function serializeFetchResponse(
         size: written.size,
         mimeType: mimeTypeEarly,
         sha256: written.sha256,
+        // file variant: bytes are always streamed in full — never truncated
       },
     };
   }
@@ -819,6 +1196,16 @@ export async function serializeFetchResponse(
   const size = bytes.byteLength;
   const contentType = res.headers.get("content-type");
   const mimeType = parseMimeType(contentType);
+
+  // Read truncation metadata forwarded by the sidecar. X-Truncated is
+  // set when the upstream response was sliced at MAX_RESPONSE_SIZE (or
+  // the caller-requested X-Max-Response-Size). X-Truncated-Size carries
+  // the byte length of the truncated payload (the slice that was kept).
+  const truncatedHeader = res.headers.get("x-truncated");
+  const truncated = truncatedHeader?.toLowerCase() === "true";
+  const truncatedSizeRaw = res.headers.get("x-truncated-size");
+  const truncatedSize =
+    truncated && truncatedSizeRaw !== null ? parseInt(truncatedSizeRaw, 10) : undefined;
 
   const requestedToFile = ctx.responseMode?.toFile;
   const requestedInlineLimit = ctx.responseMode?.maxInlineBytes;
@@ -868,7 +1255,12 @@ export async function serializeFetchResponse(
     return {
       status: res.status,
       headers,
-      body: { kind: "text", text },
+      body: {
+        kind: "text",
+        text,
+        truncated,
+        ...(truncatedSize !== undefined && { truncatedSize }),
+      },
     };
   }
 
@@ -885,6 +1277,8 @@ export async function serializeFetchResponse(
       encoding: "base64",
       mimeType,
       size,
+      truncated,
+      ...(truncatedSize !== undefined && { truncatedSize }),
     },
   };
 }

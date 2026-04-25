@@ -315,9 +315,22 @@ export function createApp(deps: AppDeps): Hono {
     //    `{ fromFile }` resolution is reproducible.
     const method = c.req.method;
     const hasBody = method !== "GET" && method !== "HEAD";
-    const declaredContentLength = parseInt(c.req.header("content-length") || "0", 10);
+    // -1 signals "no Content-Length declared" (chunked / unknown size).
+    // We treat unknown-length chunked bodies as streaming-eligible so
+    // Transfer-Encoding: chunked uploads do not get buffered unnecessarily.
+    // We only engage the streaming path for unknown-length when the request
+    // also carries Transfer-Encoding: chunked — otherwise a plain body
+    // without Content-Length (e.g. from tests / simple clients) still
+    // goes through the buffered path.
+    const declaredContentLength = parseInt(c.req.header("content-length") || "-1", 10);
+    const isChunkedTransfer = (c.req.header("transfer-encoding") ?? "")
+      .toLowerCase()
+      .includes("chunked");
+    const hasUnknownLength = declaredContentLength < 0 && isChunkedTransfer;
     const useStreamingRequest =
-      hasBody && !substituteBody && declaredContentLength > STREAMING_THRESHOLD;
+      hasBody &&
+      !substituteBody &&
+      (declaredContentLength > STREAMING_THRESHOLD || hasUnknownLength);
 
     let rawBodyBytes: ArrayBuffer | undefined;
     let rawBodyText: string | undefined; // lazily decoded only when substituteBody is set
@@ -540,7 +553,10 @@ export function createApp(deps: AppDeps): Hono {
     const body = truncated ? responseBytes.slice(0, maxSize) : responseBytes;
 
     const responseHeaders: Record<string, string> = { "Content-Type": contentType };
-    if (truncated) responseHeaders["X-Truncated"] = "true";
+    if (truncated) {
+      responseHeaders["X-Truncated"] = "true";
+      responseHeaders["X-Truncated-Size"] = String(body.byteLength);
+    }
     if (authRefreshed) responseHeaders["X-Auth-Refreshed"] = "true";
 
     return new Response(body, { status: targetRes.status, headers: responseHeaders });

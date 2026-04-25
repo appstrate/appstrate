@@ -3,12 +3,13 @@
 
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
-  ABSOLUTE_MAX_RESPONSE_SIZE,
   makeProviderTool,
   readProviderMeta,
   resolveBodyForFetch,
   serializeFetchResponse,
+  applyTransportHeaders,
   type ProviderCallFn,
+  type ProviderCallRequest,
   type ProviderMeta,
 } from "./provider-tool.ts";
 
@@ -44,6 +45,23 @@ export interface SidecarProviderResolverOptions {
  * sidecar itself has no workspace access — it only sees the
  * already-materialised request body and the upstream response bytes.
  */
+/**
+ * Returns true when the body can be re-resolved from scratch for a retry.
+ * `ReadableStream` bodies are not reproducible — the caller has already
+ * consumed the stream conceptually. All other variants can be re-passed
+ * to `resolveBodyForFetch` to produce fresh bytes/stream.
+ */
+function isReproducibleBody(body: ProviderCallRequest["body"]): boolean {
+  if (body == null || typeof body === "string") return true;
+  if (body instanceof Uint8Array) return true; // caller still holds the reference
+  if (
+    typeof body === "object" &&
+    ("fromFile" in body || "fromBytes" in body || "multipart" in body)
+  )
+    return true;
+  return false; // ReadableStream or other non-serialisable value
+}
+
 export class SidecarProviderResolver implements ProviderResolver {
   private readonly sidecarUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -92,26 +110,26 @@ export class SidecarProviderResolver implements ProviderResolver {
         "X-Provider": ref.name,
         "X-Target": req.target,
       };
-      // Routing the response to a file? Opt the sidecar into the
-      // zero-copy streaming response path (X-Stream-Response: 1) so
-      // it pipes upstream bytes through without buffering or
-      // truncation. The runtime then writes them to disk
-      // incrementally via writeStreamToFile, which is bounded by
-      // MAX_STREAMED_BODY_SIZE on this side.
       const wantsFile = typeof req.responseMode?.toFile === "string";
-      if (wantsFile) {
-        headers["X-Stream-Response"] = "1";
-      } else {
-        // Inline-only path: lift the sidecar's default cap when the
-        // agent explicitly asks for a larger inline payload. Without
-        // this the sidecar truncates at MAX_RESPONSE_SIZE and the
-        // resolver never sees the bytes that should have spilled.
-        const maxInline = req.responseMode?.maxInlineBytes;
-        if (typeof maxInline === "number" && maxInline > 0) {
-          const cap = Math.min(maxInline, ABSOLUTE_MAX_RESPONSE_SIZE);
-          headers["X-Max-Response-Size"] = String(cap);
-        }
+      const isStreamingBody = resolved.kind === "stream";
+
+      // Apply transport headers (streaming + response mode hints).
+      // Uses the shared helper so both resolvers stay in lockstep.
+      applyTransportHeaders(headers, {
+        wantsFile,
+        isStreamingBody,
+        bodySize: isStreamingBody ? resolved.size : undefined,
+        maxInlineBytes: req.responseMode?.maxInlineBytes,
+      });
+
+      // For multipart bodies, forward the Content-Type (including boundary)
+      // computed during serialization. Bun/fetch would normally compute it
+      // from a FormData body, but we serialize to bytes upfront so we must
+      // set it explicitly.
+      if (resolved.kind === "bytes" && resolved.contentType) {
+        headers["Content-Type"] = resolved.contentType;
       }
+
       // Streaming uploads need duplex: "half" — required by the
       // fetch spec when the body is a ReadableStream.
       const init: RequestInit & Record<string, unknown> = {
@@ -119,23 +137,46 @@ export class SidecarProviderResolver implements ProviderResolver {
         headers,
         signal: ctx.signal,
       };
-      if (resolved.kind === "stream") {
+      if (isStreamingBody) {
         init.body = resolved.stream;
         init.duplex = "half";
-        // Some upstreams require an explicit Content-Length on
-        // streaming uploads. We set it on the sidecar request — the
-        // sidecar already forwards request headers, including this
-        // one, so the upstream sees a properly framed body.
-        if (!("content-length" in headers) && !("Content-Length" in headers)) {
-          headers["Content-Length"] = String(resolved.size);
-        }
       } else {
         init.body = resolved.bytes;
       }
-      const res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, init);
+      let res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, init);
+
+      // When the sidecar refreshed credentials server-side on a streaming
+      // 401 it cannot replay the body — it sets X-Auth-Refreshed: true and
+      // returns the 401 as-is. If our body is reproducible we retry once
+      // with a fresh resolution so the next request carries the new token.
+      if (
+        res.status === 401 &&
+        res.headers.get("x-auth-refreshed") === "true" &&
+        isReproducibleBody(req.body)
+      ) {
+        const retryResolved = await resolveBodyForFetch(req.body, {
+          allowFromFile: true,
+          allowStreaming: true,
+          workspace: ctx.workspace,
+        });
+        const retryInit: RequestInit & Record<string, unknown> = {
+          method: req.method,
+          headers,
+          signal: ctx.signal,
+        };
+        if (retryResolved.kind === "stream") {
+          retryInit.body = retryResolved.stream;
+          retryInit.duplex = "half";
+        } else {
+          retryInit.body = retryResolved.bytes;
+        }
+        res = await this.fetchImpl(`${this.sidecarUrl}/proxy`, retryInit);
+      }
+
       return serializeFetchResponse(res, {
         workspace: ctx.workspace,
         toolCallId: ctx.toolCallId,
+        signal: ctx.signal,
         ...(req.responseMode ? { responseMode: req.responseMode } : {}),
         ...(wantsFile ? { streaming: true } : {}),
       });

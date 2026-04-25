@@ -83,7 +83,7 @@ describe("makeProviderTool", () => {
     const tool = makeProviderTool(meta, async () => ({
       status: 200,
       headers: {},
-      body: { kind: "text", text: "" },
+      body: { kind: "text", text: "", truncated: false },
     }));
     expect(tool.name).toBe("afps_gmail_call");
     expect(tool.description).toContain("@afps/gmail");
@@ -100,7 +100,7 @@ describe("makeProviderTool", () => {
     const tool = makeProviderTool(meta, async () => ({
       status: 200,
       headers: {},
-      body: { kind: "text", text: "" },
+      body: { kind: "text", text: "", truncated: false },
     }));
     const { ctx } = makeCtx();
     await expect(
@@ -113,7 +113,7 @@ describe("makeProviderTool", () => {
     const tool = makeProviderTool(meta, async () => ({
       status: 201,
       headers: {},
-      body: { kind: "text", text: "created" },
+      body: { kind: "text", text: "created", truncated: false },
     }));
     const { ctx, events } = makeCtx();
     await tool.execute({ method: "POST", target: "https://api.acme.com/x" }, ctx);
@@ -128,7 +128,7 @@ describe("makeProviderTool", () => {
     const tool = makeProviderTool(meta, async () => ({
       status: 404,
       headers: {},
-      body: { kind: "text", text: "nope" },
+      body: { kind: "text", text: "nope", truncated: false },
     }));
     const { ctx } = makeCtx();
     const result = await tool.execute({ method: "GET", target: "https://api.acme.com/x" }, ctx);

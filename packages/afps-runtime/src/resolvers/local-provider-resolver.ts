@@ -5,7 +5,7 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
-  resolveBodyStream,
+  resolveBodyForFetch,
   serializeFetchResponse,
   type ProviderCallFn,
   type ProviderMeta,
@@ -100,16 +100,23 @@ export class LocalProviderResolver implements ProviderResolver {
       }
       applyCredentialInjection(headers, entry);
 
-      const bodyBytes = await resolveBodyStream(req.body, {
+      const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
         workspace: ctx.workspace,
         transformString: (input) => substitutePlaceholders(input, entry.fields),
       });
 
+      // For multipart bodies, forward the Content-Type (including boundary)
+      // computed during serialization. Bun/fetch computes it from a FormData
+      // body, but we serialize to bytes upfront so we must set it explicitly.
+      if (resolvedBody.kind === "bytes" && resolvedBody.contentType) {
+        headers["Content-Type"] = resolvedBody.contentType;
+      }
+
       const res = await this.fetchImpl(target, {
         method: req.method,
         headers,
-        body: bodyBytes,
+        body: resolvedBody.kind === "bytes" ? resolvedBody.bytes : resolvedBody.stream,
         signal: ctx.signal,
       });
       void meta;
