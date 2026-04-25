@@ -528,7 +528,7 @@ describe("ALL /proxy — forwarding", () => {
   });
 
   it("truncates response over MAX_RESPONSE_SIZE", async () => {
-    const largeBody = "x".repeat(60_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -547,11 +547,11 @@ describe("ALL /proxy — forwarding", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const text = await res.text();
-    expect(text.length).toBe(50_000);
+    expect(text.length).toBe(256 * 1024);
   });
 
   it("X-Max-Response-Size increases the truncation limit", async () => {
-    const largeBody = "x".repeat(100_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default, < 400_000 cap
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -565,13 +565,13 @@ describe("ALL /proxy — forwarding", () => {
       headers: {
         "X-Provider": "gmail",
         "X-Target": "https://api.example.com/v1/large",
-        "X-Max-Response-Size": "200000",
+        "X-Max-Response-Size": "400000",
       },
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBeNull();
     const text = await res.text();
-    expect(text.length).toBe(100_000);
+    expect(text.length).toBe(300_000);
   });
 
   it("X-Max-Response-Size is capped at ABSOLUTE_MAX_RESPONSE_SIZE", async () => {
@@ -598,8 +598,34 @@ describe("ALL /proxy — forwarding", () => {
     expect(text.length).toBe(1_000_000);
   });
 
+  it("X-Max-Response-Size = ABSOLUTE_MAX_RESPONSE_SIZE returns 600 KB payload untruncated", async () => {
+    // Round-trip a 600 KB payload with the explicit cap exactly at the
+    // sidecar's absolute ceiling: under cap → full body, no X-Truncated.
+    const largeBody = "x".repeat(600_000);
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+        "X-Max-Response-Size": "1000000",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const text = await res.text();
+    expect(text.length).toBe(600_000);
+  });
+
   it("invalid X-Max-Response-Size falls back to default", async () => {
-    const largeBody = "x".repeat(60_000);
+    const largeBody = "x".repeat(300_000); // > 256 KB default
     const fetchFn = mock(
       async () =>
         new Response(largeBody, {
@@ -619,7 +645,7 @@ describe("ALL /proxy — forwarding", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const text = await res.text();
-    expect(text.length).toBe(50_000);
+    expect(text.length).toBe(256 * 1024);
   });
 
   it("stores Set-Cookie headers in cookie jar", async () => {
@@ -1090,8 +1116,10 @@ describe("ALL /proxy — binary body integrity", () => {
   });
 
   it("does not corrupt binary response even when truncation is triggered", async () => {
-    // 60KB binary payload beyond MAX_RESPONSE_SIZE; first 50KB must survive byte-for-byte.
-    const total = 60_000;
+    // 300 KB binary payload beyond the 256 KB default; the first 256 KB
+    // must survive byte-for-byte.
+    const total = 300_000;
+    const cap = 256 * 1024;
     const payload = new Uint8Array(total);
     for (let i = 0; i < total; i++) {
       payload[i] = i % 256; // includes all byte values 0x00–0xff
@@ -1116,10 +1144,10 @@ describe("ALL /proxy — binary body integrity", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Truncated")).toBe("true");
     const received = new Uint8Array(await res.arrayBuffer());
-    expect(received.byteLength).toBe(50_000);
+    expect(received.byteLength).toBe(cap);
     expect(received[0]).toBe(0x00);
     expect(received[0xff]).toBe(0xff);
-    expect(received[49_999]).toBe(49_999 % 256);
+    expect(received[cap - 1]).toBe((cap - 1) % 256);
   });
 });
 
