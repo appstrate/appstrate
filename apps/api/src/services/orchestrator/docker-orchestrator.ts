@@ -196,4 +196,18 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
     return docker.stopContainersByRun(runId, timeoutSeconds);
   }
+
+  /**
+   * Resolve the base URL the agent container uses to reach the platform API.
+   * Identical logic to {@link createSidecar} — prefer the platform's own
+   * Docker network (keeps traffic on the bridge), fall back to
+   * `PLATFORM_API_URL` env, finally to `host.docker.internal` for local dev.
+   */
+  async resolvePlatformApiUrl(): Promise<string> {
+    const env = getEnv();
+    const platformNetwork = await docker.detectPlatformNetwork();
+    if (platformNetwork) return `http://${platformNetwork.hostname}:${env.PORT}`;
+    if (env.PLATFORM_API_URL) return env.PLATFORM_API_URL;
+    return `http://host.docker.internal:${env.PORT}`;
+  }
 }

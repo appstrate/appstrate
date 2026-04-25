@@ -22,3 +22,10 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
 
 export const packageTypeEnum = pgEnum("package_type", ["agent", "skill", "tool", "provider"]);
 export const packageSourceEnum = pgEnum("package_source", ["local", "system"]);
+
+/**
+ * Source discriminator for `llm_usage` rows. Each source has its own
+ * dedup key: `proxy` rows dedup on `request_id`, `runner` rows dedup on
+ * `(run_id, sequence)`.
+ */
+export const llmUsageSourceEnum = pgEnum("llm_usage_source", ["proxy", "runner"]);

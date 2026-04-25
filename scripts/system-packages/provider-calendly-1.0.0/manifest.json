@@ -21,16 +21,19 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.calendly.com/*"],
+    "authorizedUris": ["https://api.calendly.com/**"],
     "availableScopes": []
   },
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Create a Calendly OAuth application", "url": "https://developer.calendly.com/create-a-developer-account" },
+      {
+        "label": "Create a Calendly OAuth application",
+        "url": "https://developer.calendly.com/create-a-developer-account"
+      },
       { "label": "Configure the redirect URI" },
       { "label": "Copy your Client ID and Client Secret" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

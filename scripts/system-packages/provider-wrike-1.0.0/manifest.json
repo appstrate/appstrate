@@ -21,7 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://www.wrike.com/api/*", "https://*.wrike.com/api/*"],
+    "authorizedUris": ["https://www.wrike.com/api/**", "https://*.wrike.com/api/**"],
     "availableScopes": [
       { "value": "Default", "label": "Standard access to tasks, folders, projects" },
       { "value": "wsReadOnly", "label": "Read-only access to workspace" },
@@ -45,5 +45,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

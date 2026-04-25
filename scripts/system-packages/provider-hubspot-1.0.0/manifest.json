@@ -21,7 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.hubapi.com/*"],
+    "authorizedUris": ["https://api.hubapi.com/**"],
     "availableScopes": [
       {
         "value": "crm.objects.contacts.read",
@@ -68,5 +68,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

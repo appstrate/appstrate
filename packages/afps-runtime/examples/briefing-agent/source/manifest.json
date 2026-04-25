@@ -1,0 +1,9 @@
+{
+  "name": "@examples/daily-briefing",
+  "version": "1.0.0",
+  "type": "agent",
+  "schemaVersion": "1.1",
+  "displayName": "Daily Briefing",
+  "author": "AFPS Examples",
+  "description": "Produces a structured briefing on a given topic. Uses prior memories as context and emits a JSON-shaped deliverable plus a human-readable report."
+}

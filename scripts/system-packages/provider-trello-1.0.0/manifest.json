@@ -20,7 +20,7 @@
         "expiration": "never"
       }
     },
-    "authorizedUris": ["https://api.trello.com/*"]
+    "authorizedUris": ["https://api.trello.com/**"]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
@@ -37,5 +37,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

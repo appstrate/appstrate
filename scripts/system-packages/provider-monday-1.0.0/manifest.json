@@ -20,7 +20,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.monday.com/*"],
+    "authorizedUris": ["https://api.monday.com/**"],
     "availableScopes": [
       { "value": "me:read", "label": "Read authenticated user info" },
       { "value": "boards:read", "label": "Read boards" },
@@ -49,5 +49,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

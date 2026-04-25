@@ -66,24 +66,6 @@ export async function postInstallPackage(params: {
   }
   const version: string = rawVersion;
 
-  /** Create a version snapshot (non-fatal on error). Deps handled by createVersionAndUpload. */
-  async function createVersion(versionManifest: Record<string, unknown>): Promise<void> {
-    try {
-      await createVersionAndUpload({
-        packageId,
-        version,
-        createdBy: userId,
-        zipBuffer,
-        manifest: versionManifest,
-      });
-    } catch (err) {
-      logger.error("Failed to create package version", {
-        packageId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
   if (packageType === "skill" || packageType === "tool") {
     const cfg = packageType === "skill" ? SKILL_CONFIG : TOOL_CONFIG;
     const item: CreateItemInput = { id: packageId, content, createdBy: userId };
@@ -99,5 +81,18 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles("agents", orgId, packageId, files);
   }
 
-  await createVersion(manifest);
+  try {
+    await createVersionAndUpload({
+      packageId,
+      version,
+      createdBy: userId,
+      zipBuffer,
+      manifest,
+    });
+  } catch (err) {
+    logger.error("Failed to create package version", {
+      packageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

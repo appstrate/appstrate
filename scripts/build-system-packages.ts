@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { validateManifest, validateToolSource } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
@@ -63,13 +64,7 @@ async function main() {
       }
     }
 
-    if (checkOnly) {
-      console.log(`  ${dirName} [${type}] ✓`);
-      count++;
-      continue;
-    }
-
-    // Collect all files
+    // Collect all files — needed for bundling (tools) and zipping (all types)
     const files = await readdir(dirPath);
     const zipEntries: Record<string, Uint8Array> = {};
     for (const file of files) {
@@ -79,18 +74,39 @@ async function main() {
       zipEntries[file] = new Uint8Array(await readFile(filePath));
     }
 
-    // Delete old archives for this package
-    const baseName = dirName.replace(/-\d+\.\d+\.\d+$/, "");
-    for (const f of existingAfps) {
-      if (f.endsWith(".afps") && f.startsWith(`${baseName}-`)) {
-        await unlink(join(OUTPUT_DIR, f));
-        console.log(`  Deleted old: ${f}`);
-      }
+    // Tool-specific: rebundle via the same helper used by the API
+    // publish path so system packages ship the identical §3.4 archive
+    // layout (self-contained `tool.js` + rewritten entrypoint). Run
+    // this even in --check mode so CI catches tools that won't bundle.
+    let zipBytes: Uint8Array;
+    if (type === "tool") {
+      const toolId = (manifest as Record<string, unknown>).name as string;
+      const built = await buildPublishedToolArchive({
+        files: zipEntries,
+        manifest: manifest as Record<string, unknown>,
+        toolId,
+      });
+      zipBytes = built.archive;
+    } else {
+      zipBytes = zipArtifact(zipEntries);
+    }
+
+    if (checkOnly) {
+      console.log(`  ${dirName} [${type}] ✓`);
+      count++;
+      continue;
+    }
+
+    // Delete the existing archive for this exact version, if any. Other
+    // versions of the same package live in sibling source dirs and must
+    // be preserved.
+    const zipName = `${dirName}.afps`;
+    if (existingAfps.includes(zipName)) {
+      await unlink(join(OUTPUT_DIR, zipName));
+      console.log(`  Deleted old: ${zipName}`);
     }
 
     // Build archive
-    const zipName = `${dirName}.afps`;
-    const zipBytes = zipArtifact(zipEntries);
     const integrity = computeIntegrity(zipBytes);
 
     await writeFile(join(OUTPUT_DIR, zipName), zipBytes);

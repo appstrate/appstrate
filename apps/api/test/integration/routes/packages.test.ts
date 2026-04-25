@@ -442,6 +442,53 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // POST /api/packages/tools — auto-creates a bundled initial version
+  // ═══════════════════════════════════════════════
+
+  describe("POST /api/packages/tools — initial version bundling", () => {
+    it("bundles the source into tool.js and rewrites manifest.entrypoint", async () => {
+      const { downloadVersionZip } = await import("../../../src/services/package-storage.ts");
+      const { parsePackageZip } = await import("@appstrate/core/zip");
+
+      const toolId = "@pkgorg/bundled-tool";
+      const res = await app.request("/api/packages/tools", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: toolId,
+            version: "1.0.0",
+            type: "tool",
+            schemaVersion: "1.0",
+            displayName: "Bundled Tool",
+            description: "Bundling test",
+            entrypoint: "tool.ts",
+            tool: {
+              name: "bundled",
+              description: "t",
+              inputSchema: { type: "object", properties: {} },
+            },
+          },
+          content: "# TOOL\nsome docs",
+          sourceCode:
+            "export default () => ({ name: 'bundled', description: 'b', execute: async () => ({ content: [{ type: 'text', text: 'ok' }] }) });\n",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+
+      const zip = await downloadVersionZip(toolId, "1.0.0");
+      expect(zip).not.toBeNull();
+
+      const parsed = parsePackageZip(new Uint8Array(zip!));
+      expect(parsed.type).toBe("tool");
+      expect((parsed.manifest as Record<string, unknown>).entrypoint).toBe("tool.js");
+      expect(parsed.files["tool.js"]).toBeDefined();
+      expect(parsed.files["tool.ts"]).toBeDefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // PUT /api/packages/agents/:scope/:name — update agent (admin only)
   // ═══════════════════════════════════════════════
 

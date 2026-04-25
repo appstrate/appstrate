@@ -70,7 +70,7 @@ export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/models — list all models (system + DB)
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
     return c.json({ models });

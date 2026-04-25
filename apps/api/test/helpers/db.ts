@@ -24,6 +24,8 @@ export type { Db };
  */
 const CORE_TABLES = [
   // Leaf tables (no dependents)
+  "llm_usage",
+  "credential_proxy_usage",
   "run_logs",
   "package_memories",
   "package_version_dependencies",

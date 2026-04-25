@@ -1,0 +1,12 @@
+{
+  "memories": [
+    {
+      "content": "AFPS is an open spec.",
+      "createdAt": 1700000000
+    },
+    {
+      "content": "Runtimes implement the conformance adapter.",
+      "createdAt": 1700000100
+    }
+  ]
+}

@@ -25,6 +25,7 @@ export function RunRow({
   const isUnread = run.notifiedAt != null && run.readAt == null;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
   const isInline = run.packageEphemeral === true;
+  const isRemote = run.runOrigin === "remote";
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -50,6 +51,14 @@ export function RunRow({
       {isInline && (
         <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
           {t("runs.inlineBadge")}
+        </span>
+      )}
+      {isRemote && (
+        <span
+          className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+          title={t("runs.remoteBadgeTitle")}
+        >
+          {t("runs.remoteBadge")}
         </span>
       )}
 

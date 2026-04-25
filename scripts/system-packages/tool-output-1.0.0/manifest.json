@@ -5,8 +5,8 @@
   "type": "tool",
   "displayName": "Output",
   "description": "Return data as the run result.",
-  "schemaVersion": "1.0",
-  "entrypoint": "output.ts",
+  "schemaVersion": "1.1",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "output",
     "description": "MANDATORY — call at least once. Returns data as a JSON object, deep-merged into the final output.",

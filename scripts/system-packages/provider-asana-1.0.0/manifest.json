@@ -21,7 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://app.asana.com/api/*"],
+    "authorizedUris": ["https://app.asana.com/api/**"],
     "availableScopes": [
       { "value": "default", "label": "Full access to all resources" },
       { "value": "openid", "label": "OpenID Connect identity" },
@@ -44,5 +44,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

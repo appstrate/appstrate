@@ -58,5 +58,13 @@ export const openApiInfo = {
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Provider Keys", description: "Organization provider keys and credentials" },
     { name: "Uploads", description: "Direct-upload protocol for agent input files" },
+    {
+      name: "Credential Proxy",
+      description: "Server-side credential injection for external runners (CLI, GitHub Action)",
+    },
+    {
+      name: "LLM Proxy",
+      description: "Server-side LLM model injection — OpenAI + Anthropic protocol families",
+    },
   ],
 } as const;

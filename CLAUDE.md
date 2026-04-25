@@ -60,7 +60,7 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (191 endpoints)
+│   │   └── paths/            # One file per route domain (249 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -148,7 +148,8 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |            │  - ExtraHosts → host.docker.internal        │
      |            ├─────────────────────────────────────────────┤
      |            │  Agent Container (Pi Coding Agent, Bun)     │
-     |            │  - AGENT_PROMPT, LLM_*, SIDECAR_URL          │
+     |            │  - AGENT_PROMPT, LLM_*                      │
+     |            │  - SIDECAR_URL deleted after bootstrap      │
      |            │  - NO RUN_TOKEN, NO PLATFORM_API_URL        │
      |            │  - NO ExtraHosts (cannot reach host)        │
      |            │  - Files injected before start (parallel)   │
@@ -240,7 +241,11 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → app context middleware (`X-App-Id` → verify app belongs to org, required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles; realtime handles app-scoping internally via query param) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. All module-owned features default to `false` and are enabled by their respective modules via `features` property. `googleAuth`, `githubAuth`, and `smtp` flags are derived from env var presence (opt-in).
 - **External modules**: Loaded via the module system by appending npm specifiers to `MODULES` (default: `oidc,webhooks` — the built-in OSS modules). All declared modules are required — if declared but not installed, the platform crashes at boot.
-- **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run. Cost chain: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
+- **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run, computed by summing the `llm_usage` ledger via `computeRunCost(runId)` — the **single read path** for aggregate run cost. Two ingestion paths feed the ledger, both terminating at the same canonical sum:
+  - **Platform-side (Pi container runs)**: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
+  - **Server-side (LLM Proxy for remote runs)**: `/api/llm-proxy/*` resolves the model preset, forwards to OpenAI/Anthropic, and inserts one `llm_usage` row per call with `source="proxy"` and `cost_usd = Σ(tokens × ResolvedModel.cost / 1e6)` (input/output/cache_read/cache_write). Pricing comes from `ModelDefinition.cost`, identical to the platform-side chain.
+  - **Runner-side reconciliation**: `POST /api/runs/{runId}/events/finalize` reads `result.cost` from the runner (CLI/GitHub Action). If the runner's process emitted no proxy rows of its own, `run-event-ingestion.ts` synthesises a single `llm_usage` row with `source="runner"` carrying the runner-reported total, then runs `computeRunCost(runId)` to set `runs.cost`. If proxy rows already exist for that run, the runner-source synthesis is skipped to avoid double-counting.
+  - **Audit-only**: `credential_proxy_usage` rows have `cost_usd = 0` and are intentionally NOT summed into `runs.cost` — they exist for per-call audit only.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (set by `requireAppContext()` from `X-App-Id` header, or from API key's `applicationId`), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
 - **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireAgent(param)` → loads agent + sets `c.set("agent")`, 404 if missing; `requireMutableAgent()` → also checks not system package + no running runs. **App context** (`middleware/app-context.ts`): `requireAppContext()` → validates `X-App-Id` header (session auth) or uses API key's `applicationId`, verifies app belongs to org, sets `c.set("applicationId")`. Required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles.
 - **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns IETF `RateLimit` structured header (`limit=N, remaining=M, reset=S`) + `RateLimit-Policy` + `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
@@ -271,13 +276,16 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 
 - **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `runToken`, `platformApiUrl`, `proxyUrl`), then connects it to the run network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
-- Agent calls `$SIDECAR_URL/proxy` with `X-Provider`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
+- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool — the agent LLM never sees the sidecar URL.
+  - `dependencies.providers[]` → `<provider>_call` tool (slug + `_call`, e.g. `@appstrate/gmail` → `appstrate_gmail_call`) produced by `SidecarProviderResolver` via `buildProviderExtensionFactories` (wired in runtime-pi/entrypoint.ts Phase C). The LLM supplies `{ method, target, headers?, body?, responseMode? }`; the tool enforces `authorizedUris` client-side and proxies through `/proxy` with `X-Provider`/`X-Target` headers.
+  - Run history → `run_history` tool produced by `makeRunHistoryTool` + `createSidecarRunHistoryCall` via `buildRunHistoryExtensionFactory` (runtime-pi/entrypoint.ts Phase D). The LLM supplies `{ limit?, fields? }`; the tool dispatches to the sidecar's `/run-history` endpoint.
+  - **Zero-knowledge enforcement**: after Phase C + D complete, `runtime-pi/entrypoint.ts` runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence (Phase 2e). The legacy `curl $SIDECAR_URL/…` bash pattern is fully retired — no prompt path documents it anymore.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
-- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Run History API) + appends raw `prompt.md`. No Handlebars.
+- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Memory) + appends raw `prompt.md`. No Handlebars. Run history is NOT rendered as a prompt section — it is exposed via the `run_history` tool whose description self-documents the capability.
 - **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-run, AJV validates the merged result. On mismatch, a warning is logged but the run still succeeds.
-- **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via `$SIDECAR_URL/run-history`.
+- **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via the runtime-wired `run_history` tool (agents never see the sidecar URL).
 
 ## Testing
 
@@ -461,14 +469,14 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 191 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 249 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `app-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`, `oauth-clients` (OIDC module).
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `app-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`, `credential-proxy`, `llm-proxy`, `oauth-clients` (OIDC module).
 
 ## Database
 

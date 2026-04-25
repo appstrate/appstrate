@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+/**
+ * Public surface for `@appstrate/afps-runtime/bundle`.
+ *
+ * The multi-package {@link Bundle} contract (spec §4) is the single
+ * runtime representation. Every ingestion path — in-memory construction,
+ * `.afps-bundle` archive, `.afps` single-package archive via the
+ * catalog builders — produces a `Bundle`.
+ *
+ * Consumers read via `Bundle.packages.get(identity)` + `BundlePackage.files`.
+ * There is no flat path-keyed projection, no adapter, no dual surface.
+ */
+
+// ─── Core types + errors ────────────────────────────────────────────
+export {
+  BUNDLE_FORMAT_VERSION,
+  parsePackageIdentity,
+  formatPackageIdentity,
+  type Bundle,
+  type BundleFormatVersion,
+  type BundleMetadata,
+  type BundlePackage,
+  type PackageCatalog,
+  type PackageIdentity,
+  type ParsedPackageIdentity,
+  type ResolvedPackage,
+  type AfpsManifest,
+} from "./types.ts";
+export { BundleError, type BundleErrorCode } from "./errors.ts";
+export { DEFAULT_BUNDLE_LIMITS, resolveBundleLimits, type BundleLimits } from "./limits.ts";
+export { canonicalJsonStringify } from "./canonical-json.ts";
+
+// ─── Integrity primitives (RECORD + bundle.json merkle) ─────────────
+export {
+  bundleIntegrity,
+  computeRecordEntries,
+  integrityEqual,
+  parseRecord,
+  recordFileHash,
+  recordIntegrity,
+  serializeRecord,
+  type RecordEntry,
+} from "./integrity.ts";
+// Byte-level SRI over a whole archive (used by platform storage layer
+// to detect at-rest corruption — orthogonal to the Merkle integrity
+// that ships inside Bundle.integrity).
+export { computeIntegrity, type IntegrityCheckResult } from "./hash.ts";
+
+// ─── Read / write / build ───────────────────────────────────────────
+export { readBundleFromBuffer, readBundleFromFile, type ReadBundleOptions } from "./read.ts";
+export { writeBundleToBuffer, writeBundleToFile } from "./write.ts";
+export {
+  buildBundleFromAfps,
+  buildBundleFromCatalog,
+  extractRootFromAfps,
+  type BuildBundleOptions,
+} from "./build.ts";
+export {
+  InMemoryPackageCatalog,
+  composeCatalogs,
+  emptyPackageCatalog,
+  type InMemoryCatalogOptions,
+} from "./catalog.ts";
+
+// ─── Validation ─────────────────────────────────────────────────────
+export {
+  validateBundle,
+  type BundleValidationIssue,
+  type BundleValidationResult,
+  type ValidateBundleOptions,
+} from "./validate-bundle.ts";
+export {
+  resolveToolEntrypoint,
+  AfpsEntrypointError,
+  type AfpsEntrypointErrorCode,
+  type ResolvedToolEntrypoint,
+} from "./tool-entrypoint.ts";
+
+// ─── Prompt rendering ───────────────────────────────────────────────
+export {
+  renderPrompt,
+  buildPromptView,
+  type PromptView,
+  type PromptViewProvider,
+  type PromptViewUpload,
+  type RenderPromptOptions,
+} from "./prompt-renderer.ts";
+export {
+  renderPlatformPrompt,
+  type PlatformPromptOptions,
+  type PlatformPromptProvider,
+  type PlatformPromptTool,
+  type PlatformPromptSchema,
+} from "./platform-prompt.ts";
+export {
+  buildPlatformPromptInputs,
+  type BuildPlatformPromptInputsOverrides,
+} from "./platform-prompt-inputs.ts";
+
+// ─── Signature policy ───────────────────────────────────────────────
+export {
+  verifyBundleWithPolicy,
+  BundleSignaturePolicyError,
+  type SignaturePolicy,
+  type SignaturePolicyReason,
+  type VerifyBundlePolicyOptions,
+  type VerifyBundlePolicyOutcome,
+} from "./signature-policy.ts";
+
+// ─── Signing / trust root ───────────────────────────────────────────
+export {
+  canonicalBundleDigest,
+  signBundle,
+  signChildKey,
+  verifyBundleSignature,
+  verifySigstoreSignature,
+  readBundleSignature,
+  generateKeyPair,
+  keyIdFromPublicKey,
+  type BundleSignature,
+  type TrustChainEntry,
+  type TrustedKey,
+  type TrustRoot,
+  type KeyPair,
+  type SignBundleOptions,
+  type SignChildKeyOptions,
+  type VerifySignatureResult,
+  type VerifySignatureFailureReason,
+} from "./signing.ts";

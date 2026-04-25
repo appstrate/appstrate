@@ -1,9 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Pi-container platform runner — spawns the sidecar + agent workloads for a
+ * single run, waits for the agent container to exit, and reports the terminal
+ * lifecycle state back to the caller.
+ *
+ * No event iteration. No stdout parsing. The agent container uses
+ * {@link HttpSink} (wired via `APPSTRATE_SINK_URL` + `APPSTRATE_SINK_SECRET`)
+ * to POST every {@link RunEvent} + its terminal {@link RunResult} directly
+ * to the platform's signed-event API. The platform's event-ingestion
+ * pipeline is the single persistence path for every run — platform or
+ * remote — and the server-side `executeAgentInBackground` is reduced to
+ * container lifecycle management.
+ *
+ * On graceful completion the container itself calls `sink.finalize(result)`
+ * and the server's `finalizeRun()` closes the sink idempotently. If
+ * the container crashes or times out without calling finalize, the caller
+ * synthesises a terminal result from {@link PlatformContainerResult} and
+ * re-enters `finalizeRun()` — the CAS on `sink_closed_at IS NULL`
+ * guarantees exactly-once closure even when container-side and
+ * server-side finalize race.
+ */
+
 import { logger } from "../../lib/logger.ts";
-import type { RunAdapter, RunMessage, PromptContext, UploadedFile } from "./types.ts";
-import { buildEnrichedPrompt } from "./prompt-builder.ts";
-import { runContainerLifecycle } from "./container-lifecycle.ts";
+import type { AppstrateRunPlan } from "./types.ts";
+import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
+import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
@@ -11,165 +33,243 @@ import {
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
 
-export class PiAdapter implements RunAdapter {
-  private readonly _orchestrator?: ContainerOrchestrator;
+/** Terminal state reported back to the caller once the container has exited. */
+export interface PlatformContainerResult {
+  /** Exit code reported by the orchestrator (0 = clean, non-zero = crash). */
+  exitCode: number;
+  /** Whether the agent container was stopped because the run timed out. */
+  timedOut: boolean;
+  /** Whether the run was cancelled by the caller's `AbortSignal`. */
+  cancelled: boolean;
+}
 
-  constructor(orchestrator?: ContainerOrchestrator) {
-    this._orchestrator = orchestrator;
-  }
+export interface RunPlatformContainerInput {
+  runId: string;
+  context: ExecutionContext;
+  plan: AppstrateRunPlan;
+  /** Sink credentials minted by the caller (`createRun`). Required. */
+  sinkCredentials: SinkCredentials;
+  /** Cancellation token — aborted = the run was cancelled by user. */
+  signal?: AbortSignal;
+  /** Injectable orchestrator — production defaults to the global singleton. */
+  orchestrator?: ContainerOrchestrator;
+}
 
-  async *execute(
-    runId: string,
-    ctx: PromptContext,
-    timeout: number,
-    agentPackage?: Buffer,
-    signal?: AbortSignal,
-    inputFiles?: UploadedFile[],
-  ): AsyncGenerator<RunMessage> {
-    const prompt = buildEnrichedPrompt(ctx);
+/**
+ * Start the Pi agent + sidecar for a platform-origin run, wait until the
+ * agent container exits, and report the lifecycle outcome. The returned
+ * {@link PlatformContainerResult} is consumed by the caller to synthesise
+ * a terminal {@link finalizeRun} call when the container didn't
+ * finalise itself.
+ *
+ * Never throws on container-side failures — the lifecycle outcome is
+ * encoded in the returned shape. Only unexpected orchestrator errors
+ * (e.g. Docker unreachable) propagate as exceptions.
+ */
+export async function runPlatformContainer(
+  input: RunPlatformContainerInput,
+): Promise<PlatformContainerResult> {
+  const { runId, context, plan, sinkCredentials, signal } = input;
+  const orch = input.orchestrator ?? getOrchestrator();
 
-    const llmConfig = ctx.llmConfig;
-    const modelId = llmConfig.modelId;
+  const prompt = buildPlatformSystemPrompt(context, plan);
+  const { llmConfig } = plan;
+  const modelId = llmConfig.modelId;
 
-    const orchestrator = this._orchestrator ?? getOrchestrator();
-    let boundary: IsolationBoundary | undefined;
-    let sidecarHandle: WorkloadHandle | undefined;
+  let boundary: IsolationBoundary | undefined;
+  let sidecarHandle: WorkloadHandle | undefined;
+  let agentHandle: WorkloadHandle | undefined;
 
-    try {
-      // Phase 1: Create isolation boundary
-      boundary = await orchestrator.createIsolationBoundary(runId);
+  try {
+    boundary = await orch.createIsolationBoundary(runId);
 
-      // Resolve LLM config for sidecar proxy
-      const llmApiKey = llmConfig.apiKey;
-      const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
+    const llmApiKey = llmConfig.apiKey;
+    const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
 
-      // Sidecar config (platform network resolution handled by orchestrator)
-      const sidecarConfig = {
-        runToken: ctx.runApi?.token ?? "",
-        platformApiUrl: ctx.runApi?.url ?? "",
-        proxyUrl: ctx.proxyUrl ?? undefined,
-        llm: llmApiKey
-          ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
-          : undefined,
-      };
+    const sidecarConfig = {
+      runToken: plan.runApi?.token ?? "",
+      platformApiUrl: plan.runApi?.url ?? "",
+      proxyUrl: plan.proxyUrl ?? undefined,
+      llm: llmApiKey
+        ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
+        : undefined,
+    };
 
-      // Build agent env — NO RUN_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
-      const containerEnv: Record<string, string> = {
-        AGENT_PROMPT: prompt,
-        MODEL_API: llmConfig.api,
-        MODEL_ID: modelId,
-        SIDECAR_URL: "http://sidecar:8080",
-      };
+    const hasOutputSchema =
+      plan.schemas.output?.properties && Object.keys(plan.schemas.output.properties).length > 0;
+    const containerEnv = buildRuntimePiEnv({
+      model: {
+        api: llmConfig.api,
+        modelId,
+        baseUrl: llmConfig.baseUrl,
+        apiKey: llmApiKey,
+        apiKeyPlaceholder: llmPlaceholder,
+        input: llmConfig.input,
+        contextWindow: llmConfig.contextWindow,
+        maxTokens: llmConfig.maxTokens,
+        reasoning: llmConfig.reasoning,
+        cost: llmConfig.cost,
+      },
+      agentPrompt: prompt,
+      runId,
+      sidecarProxyLlmUrl: llmApiKey ? "http://sidecar:8080/llm" : undefined,
+      connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
+      outputSchema: hasOutputSchema ? plan.schemas.output : undefined,
+      forwardProxyUrl: "http://sidecar:8081",
+      sink: {
+        url: sinkCredentials.url,
+        finalizeUrl: sinkCredentials.finalizeUrl,
+        secret: sinkCredentials.secret,
+      },
+      // Forward the W3C trace from the spawning request — when set, the
+      // container's outbound HTTP traffic (events, finalize, sidecar
+      // proxy) becomes child spans of that trace. The runtime validates
+      // the wire format and falls back to a fresh trace on malformed
+      // values, so no defensive parsing is needed here.
+      traceparent: context.traceparent,
+    });
 
-      const connectedProviderIds = ctx.providers.filter((s) => ctx.tokens[s.id]).map((s) => s.id);
-      if (connectedProviderIds.length > 0) {
-        containerEnv.CONNECTED_PROVIDERS = connectedProviderIds.join(",");
-      }
-
-      // Route LLM calls through sidecar proxy (agent never sees real API keys)
-      if (llmApiKey) {
-        containerEnv.MODEL_BASE_URL = "http://sidecar:8080/llm";
-        containerEnv.MODEL_API_KEY = llmPlaceholder;
-      }
-
-      // Model capabilities (conditional — only set if defined)
-      if (llmConfig.input) containerEnv.MODEL_INPUT = JSON.stringify(llmConfig.input);
-      if (llmConfig.contextWindow != null)
-        containerEnv.MODEL_CONTEXT_WINDOW = String(llmConfig.contextWindow);
-      if (llmConfig.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
-      if (llmConfig.reasoning != null)
-        containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
-      if (llmConfig.cost) {
-        containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
-      }
-
-      // Output schema injection (optional — enables constrained decoding when present)
-      const hasOutputSchema =
-        ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
-
-      if (hasOutputSchema) {
-        containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
-      }
-
-      // All outbound HTTP traffic routed through sidecar forward proxy.
-      // The run network is internal (no NAT) — clients that ignore
-      // HTTP_PROXY simply get connection failures, which is the desired behavior.
-      containerEnv.HTTP_PROXY = "http://sidecar:8081";
-      containerEnv.HTTPS_PROXY = "http://sidecar:8081";
-      containerEnv.http_proxy = "http://sidecar:8081";
-      containerEnv.https_proxy = "http://sidecar:8081";
-      containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
-      containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
-
-      // Prepare files for batch injection into agent
-      const filesToInject: Array<{ name: string; content: Buffer }> = [];
-      if (agentPackage) {
-        filesToInject.push({ name: "agent-package.afps", content: agentPackage });
-      }
-      if (inputFiles) {
-        for (const f of inputFiles) {
-          filesToInject.push({
-            name: `documents/${sanitizeStorageKey(f.name)}`,
-            content: f.buffer,
-          });
-        }
-      }
-
-      // Ensure runtime images are present (may have been pruned since boot)
-      await orchestrator.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
-
-      // Phase 2: Setup sidecar + create agent (parallel)
-      const [sidecar, agent] = await Promise.all([
-        orchestrator.createSidecar(runId, boundary, sidecarConfig),
-        orchestrator.createWorkload(
-          {
-            runId,
-            role: "agent",
-            image: getEnv().PI_IMAGE,
-            env: containerEnv,
-            resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
-            files:
-              filesToInject.length > 0
-                ? { items: filesToInject, targetDir: "/workspace" }
-                : undefined,
-          },
-          boundary,
-        ),
-      ]);
-      sidecarHandle = sidecar;
-
-      // Phase 3: Run agent container lifecycle (start + stream + wait + cleanup)
-      yield* runContainerLifecycle({
-        orchestrator,
-        handle: agent,
-        adapterName: "pi",
-        runId,
-        timeout,
-        extraData: { api: llmConfig.api, model: modelId },
-        signal,
-        stopOnTimeout: [sidecarHandle],
-        processLogs: processPiLogs,
-      });
-    } finally {
-      // Cleanup sidecar first, then boundary (network requires all containers disconnected)
-      if (sidecarHandle) {
-        await orchestrator.removeWorkload(sidecarHandle).catch((err) => {
-          logger.error("Failed to remove sidecar", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      }
-      if (boundary) {
-        await orchestrator.removeIsolationBoundary(boundary).catch((err) => {
-          logger.error("Failed to remove network", {
-            error: err instanceof Error ? err.message : String(err),
-          });
+    const filesToInject: Array<{ name: string; content: Buffer }> = [];
+    if (plan.agentPackage) {
+      filesToInject.push({ name: "agent-package.afps", content: plan.agentPackage });
+    }
+    if (plan.inputFiles) {
+      for (const f of plan.inputFiles) {
+        filesToInject.push({
+          name: `documents/${sanitizeStorageKey(f.name)}`,
+          content: f.buffer,
         });
       }
     }
+
+    await orch.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
+
+    // Sidecar + agent setup in parallel (identical to the legacy path —
+    // the only behavioural change is WHERE the agent's events end up).
+    const [sidecar, agent] = await Promise.all([
+      orch.createSidecar(runId, boundary, sidecarConfig),
+      orch.createWorkload(
+        {
+          runId,
+          role: "agent",
+          image: getEnv().PI_IMAGE,
+          env: containerEnv,
+          resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+          files:
+            filesToInject.length > 0
+              ? { items: filesToInject, targetDir: "/workspace" }
+              : undefined,
+        },
+        boundary,
+      ),
+    ]);
+    sidecarHandle = sidecar;
+    agentHandle = agent;
+
+    return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
+  } finally {
+    // Cleanup order: sidecar → agent → network boundary.
+    // Removing the network boundary before its members are gone is an
+    // error on Docker's side, so the finally chain must be strict.
+    if (sidecarHandle) {
+      await orch.removeWorkload(sidecarHandle).catch((err) => {
+        logger.error("Failed to remove sidecar", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+    if (agentHandle) {
+      await orch.removeWorkload(agentHandle).catch((err) => {
+        logger.error("Failed to remove agent workload", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+    if (boundary) {
+      await orch.removeIsolationBoundary(boundary).catch((err) => {
+        logger.error("Failed to remove isolation boundary", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  }
+}
+
+/**
+ * Drive the agent container lifecycle: start, enforce timeout, propagate
+ * cancellation, wait for exit. Sidecar is stopped alongside the agent on
+ * any terminal condition so neither lingers after the run has ended.
+ */
+async function waitForWorkload(
+  orch: ContainerOrchestrator,
+  agent: WorkloadHandle,
+  sidecar: WorkloadHandle,
+  timeoutSeconds: number,
+  signal: AbortSignal | undefined,
+): Promise<PlatformContainerResult> {
+  await orch.startWorkload(agent);
+
+  // Ring-buffer the agent's stdout+stderr so a non-zero exit can be
+  // diagnosed. The sink protocol normally carries structured events, but
+  // early-boot failures (missing module, malformed env) happen before the
+  // sink is wired — those only land on the container's log stream.
+  const logBuffer: string[] = [];
+  const MAX_LOG_LINES = 200;
+  const logAbort = new AbortController();
+  const logStream = (async () => {
+    try {
+      for await (const line of orch.streamLogs(agent, logAbort.signal)) {
+        logBuffer.push(line);
+        if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
+      }
+    } catch {
+      // Log streaming is best-effort — swallow errors.
+    }
+  })();
+
+  let timedOut = false;
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    orch.stopWorkload(agent).catch(() => {});
+    orch.stopWorkload(sidecar).catch(() => {});
+  }, timeoutSeconds * 1000);
+
+  const onAbort = () => {
+    orch.stopWorkload(agent).catch(() => {});
+    orch.stopWorkload(sidecar).catch(() => {});
+  };
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    const exitCode = await orch.waitForExit(agent);
+    if (exitCode !== 0 && !timedOut && !signal?.aborted) {
+      logAbort.abort();
+      await logStream;
+      logger.error("Agent container exited non-zero", {
+        exitCode,
+        logs: logBuffer.slice(-50).join("\n"),
+      });
+    }
+    return {
+      exitCode,
+      timedOut,
+      cancelled: signal?.aborted ?? false,
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+    if (signal) signal.removeEventListener("abort", onAbort);
+    logAbort.abort();
   }
 }
 
@@ -188,138 +288,5 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
-async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<RunMessage> {
-  let textBuffer = "";
-  let inCodeBlock = false;
-
-  const emitBuffer = (): RunMessage | null => {
-    const text = textBuffer.trim();
-    textBuffer = "";
-    return text.length > 0 ? { type: "progress", message: text } : null;
-  };
-
-  for await (const line of logs) {
-    const msg = parsePiStreamLine(line);
-    if (!msg) continue;
-
-    if (msg.type === "progress" && !msg.data && !msg.level) {
-      textBuffer += msg.message ?? "";
-
-      if (inCodeBlock) {
-        const closeIdx = textBuffer.indexOf("```");
-        if (closeIdx !== -1) {
-          inCodeBlock = false;
-          textBuffer = textBuffer.substring(closeIdx + 3);
-        } else {
-          textBuffer = "";
-        }
-        continue;
-      }
-
-      const fenceIdx = textBuffer.indexOf("```");
-      if (fenceIdx !== -1) {
-        const before = textBuffer.substring(0, fenceIdx);
-        textBuffer = before;
-        const flushed = emitBuffer();
-        if (flushed) yield flushed;
-        inCodeBlock = true;
-        textBuffer = "";
-        continue;
-      }
-
-      if (textBuffer.length >= 300 && !textBuffer.endsWith("`") && !textBuffer.endsWith("``")) {
-        const flushed = emitBuffer();
-        if (flushed) yield flushed;
-      }
-      continue;
-    }
-
-    const flushed = emitBuffer();
-    if (flushed) yield flushed;
-
-    yield msg;
-  }
-
-  const remaining = emitBuffer();
-  if (remaining) yield remaining;
-}
-
-/** @internal Exported for testing */
-export { processPiLogs as _processPiLogsForTesting };
-
 /** @internal Exported for testing */
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
-
-/** @internal Exported for testing */
-export function parsePiStreamLine(line: string): RunMessage | null {
-  try {
-    const obj = JSON.parse(line);
-
-    switch (obj.type) {
-      case "text_delta":
-        return { type: "progress", message: obj.text || "" };
-
-      case "assistant_message":
-        return null;
-
-      case "output":
-        return { type: "output", data: obj.data };
-
-      case "report":
-        return { type: "report", content: obj.content || "" };
-
-      case "set_state":
-        return { type: "set_state", data: obj.state };
-
-      case "add_memory":
-        return { type: "add_memory", content: obj.content || "" };
-
-      case "tool_start":
-        return {
-          type: "progress",
-          message: `Tool: ${obj.name || "unknown"}`,
-          data: { tool: obj.name, args: obj.args },
-        };
-
-      case "tool_end":
-        return null;
-
-      case "usage": {
-        const t = obj.tokens || {};
-        return {
-          type: "usage",
-          usage: {
-            input_tokens: t.input ?? 0,
-            output_tokens: t.output ?? 0,
-            cache_creation_input_tokens: t.cacheWrite ?? 0,
-            cache_read_input_tokens: t.cacheRead ?? 0,
-          },
-          cost: typeof obj.cost === "number" ? obj.cost : undefined,
-        };
-      }
-
-      case "agent_end":
-        return null;
-
-      case "error":
-        return { type: "error", message: obj.message || "unknown error" };
-
-      case "log": {
-        const validLevels = ["debug", "info", "warn", "error"];
-        return {
-          type: "progress",
-          message: obj.message || "",
-          data: obj.data ?? undefined,
-          level: validLevels.includes(obj.level) ? obj.level : "info",
-        };
-      }
-
-      default:
-        return null;
-    }
-  } catch {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) return null;
-    return { type: "progress", message: `[container] ${trimmed}` };
-  }
-}

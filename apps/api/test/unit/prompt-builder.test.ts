@@ -1,8 +1,145 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
-import type { PromptContext } from "../../src/services/adapters/types.ts";
+import { buildPlatformSystemPrompt } from "../../src/services/adapters/prompt-builder.ts";
+import type {
+  AppstrateRunPlan,
+  FileReference,
+  ProviderSummary,
+  ToolMeta,
+} from "../../src/services/adapters/types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
+
+function makeTestBundle(opts: {
+  rawPrompt?: string;
+  schemaVersion?: string;
+  schemas?: AppstrateRunPlan["schemas"];
+  timeout?: number;
+  tools?: ToolMeta[];
+  skills?: ToolMeta[];
+  toolDocs?: Array<{ id: string; content: string }>;
+}): Bundle {
+  const rootManifest: Record<string, unknown> = {
+    name: "@test/agent",
+    version: "1.0.0",
+    type: "agent",
+    ...(opts.schemaVersion ? { schemaVersion: opts.schemaVersion } : {}),
+    ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
+    ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
+    ...(opts.schemas?.config ? { config: { schema: opts.schemas.config } } : {}),
+    ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
+  };
+  const rootFiles = new Map<string, Uint8Array>();
+  rootFiles.set("manifest.json", new TextEncoder().encode(JSON.stringify(rootManifest)));
+  rootFiles.set("prompt.md", new TextEncoder().encode(opts.rawPrompt ?? ""));
+  const rootIdentity: PackageIdentity = "@test/agent@1.0.0";
+  const packages = new Map<PackageIdentity, BundlePackage>();
+  packages.set(rootIdentity, {
+    identity: rootIdentity,
+    manifest: rootManifest,
+    files: rootFiles,
+    integrity: "sha256-stub",
+  });
+
+  const docsById = new Map((opts.toolDocs ?? []).map((d) => [d.id, d.content]));
+  for (const t of opts.tools ?? []) {
+    const identity = `${t.id}@1.0.0` as PackageIdentity;
+    const manifest = { name: t.name, type: "tool", description: t.description };
+    const files = new Map<string, Uint8Array>();
+    files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+    const doc = docsById.get(t.id);
+    if (doc) files.set("TOOL.md", new TextEncoder().encode(doc));
+    packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
+  }
+  for (const s of opts.skills ?? []) {
+    const identity = `${s.id}@1.0.0` as PackageIdentity;
+    const manifest = { name: s.name, type: "skill", description: s.description };
+    const files = new Map<string, Uint8Array>();
+    files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+    packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
+  }
+
+  return {
+    bundleFormatVersion: "1.0",
+    root: rootIdentity,
+    packages,
+    integrity: "sha256-stub",
+  };
+}
+
+/**
+ * Test-local shape that mirrors the legacy `PromptContext` — tests keep
+ * a flat override surface while the production signature is
+ * `buildEnrichedPrompt(context, plan)`. The shim below splits it.
+ */
+interface PromptContext {
+  rawPrompt: string;
+  schemaVersion?: string;
+  runId?: string;
+  tokens: Record<string, string>;
+  config: Record<string, unknown>;
+  previousState: Record<string, unknown> | null;
+  runApi?: { url: string; token: string };
+  input: Record<string, unknown>;
+  files?: FileReference[];
+  schemas: AppstrateRunPlan["schemas"];
+  providers: ProviderSummary[];
+  memories?: Array<{ id: number; content: string; createdAt: string | null }>;
+  llmModel: string;
+  llmConfig: AppstrateRunPlan["llmConfig"];
+  proxyUrl?: string | null;
+  timeout?: number;
+  availableTools?: ToolMeta[];
+  availableSkills?: ToolMeta[];
+  toolDocs?: Array<{ id: string; content: string }>;
+}
+
+function splitLegacy(ctx: PromptContext): {
+  context: ExecutionContext;
+  plan: AppstrateRunPlan;
+} {
+  const context: ExecutionContext = {
+    runId: ctx.runId ?? "test_run",
+    input: ctx.input,
+    memories: (ctx.memories ?? []).map((m) => ({
+      content: m.content,
+      createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
+    })),
+    ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
+    config: ctx.config,
+  };
+  const bundle = makeTestBundle({
+    rawPrompt: ctx.rawPrompt,
+    ...(ctx.schemaVersion !== undefined ? { schemaVersion: ctx.schemaVersion } : {}),
+    schemas: ctx.schemas,
+    ...(ctx.timeout !== undefined ? { timeout: ctx.timeout } : {}),
+    ...(ctx.availableTools ? { tools: ctx.availableTools } : {}),
+    ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
+    ...(ctx.toolDocs ? { toolDocs: ctx.toolDocs } : {}),
+  });
+  const plan: AppstrateRunPlan = {
+    bundle,
+    rawPrompt: ctx.rawPrompt,
+    schemas: ctx.schemas,
+    llmConfig: ctx.llmConfig,
+    ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),
+    proxyUrl: ctx.proxyUrl,
+    timeout: ctx.timeout ?? 0,
+    tokens: ctx.tokens,
+    providers: ctx.providers,
+    availableTools: ctx.availableTools ?? [],
+    availableSkills: ctx.availableSkills ?? [],
+    toolDocs: ctx.toolDocs ?? [],
+    files: ctx.files,
+  };
+  return { context, plan };
+}
+
+function buildEnrichedPrompt(ctx: PromptContext): string {
+  const { context, plan } = splitLegacy(ctx);
+  return buildPlatformSystemPrompt(context, plan);
+}
 
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   return {
@@ -274,22 +411,29 @@ describe("buildEnrichedPrompt — memories", () => {
   });
 });
 
-// ─── Run history API ────────────────────────────────────────
+// ─── Run history (zero-knowledge invariant) ────────────────
 
-describe("buildEnrichedPrompt — run history", () => {
-  it("includes run history API when runApi provided", () => {
+describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt", () => {
+  // Historical runs used to be documented in a `## Run History` section
+  // whose curl snippet exposed `$SIDECAR_URL`. That surface was migrated
+  // to a typed `run_history` tool wired by the runtime (runtime-pi
+  // Phase D); the prompt MUST NEVER mention the sidecar, regardless of
+  // whether `runApi` credentials are present.
+
+  it("does not render a Run History section when runApi is present", () => {
     const ctx = baseContext({
       runApi: { url: "http://platform:3000", token: "exec_token_123" },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Run History");
-    expect(prompt).toContain("$SIDECAR_URL/run-history");
+    expect(prompt).not.toContain("## Run History");
+    expect(prompt).not.toContain("$SIDECAR_URL");
   });
 
-  it("omits run history when no runApi", () => {
+  it("does not render a Run History section when runApi is absent", () => {
     const ctx = baseContext({ runApi: undefined });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
+    expect(prompt).not.toContain("$SIDECAR_URL");
   });
 });
 
@@ -359,7 +503,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).not.toContain("Documentation:");
   });
 
-  it("includes authenticated provider API section when connected", () => {
+  it("advertises a `<slug>_call` tool per connected provider (no curl / no $SIDECAR_URL)", () => {
     const ctx = baseContext({
       tokens: { "@test/gmail": "access_token_123" },
       providers: [
@@ -375,14 +519,17 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Authenticated Provider API");
-    expect(prompt).toContain("$SIDECAR_URL/proxy");
-    expect(prompt).toContain("X-Provider");
-    expect(prompt).toContain("X-Target");
+    expect(prompt).toContain("## Connected Providers");
+    // Tool name matches the slug produced by makeProviderTool.
+    expect(prompt).toContain("test_gmail_call");
     expect(prompt).toContain("Gmail");
     expect(prompt).toContain("@test/gmail");
-    // Auth line must show the correct credential placeholder
-    expect(prompt).toContain("Authorization: Bearer {{access_token}}");
+    // No more legacy curl / sidecar boilerplate inside the provider section.
+    expect(prompt).not.toContain("## Authenticated Provider API");
+    expect(prompt).not.toContain("$SIDECAR_URL/proxy");
+    expect(prompt).not.toContain("X-Provider");
+    expect(prompt).not.toContain("X-Target");
+    expect(prompt).not.toContain("{{access_token}}");
   });
 
   it("omits provider section when no connected providers", () => {
@@ -399,6 +546,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Connected Providers");
     expect(prompt).not.toContain("## Authenticated Provider API");
   });
 
@@ -441,9 +589,13 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).toContain("all public URLs");
   });
 
-  it("shows correct auth placeholder for api_key providers", () => {
+  it("does not leak credential placeholders — the provider tool injects them server-side", () => {
+    // Previously the prompt enumerated `{{access_token}}` / `{{api_key}}`
+    // so the agent could substitute them in a curl header. With the
+    // `<provider>_call` tool, credential injection is entirely server-side
+    // and placeholders MUST not appear in the prompt.
     const ctx = baseContext({
-      tokens: { "@test/stripe": "tok" },
+      tokens: { "@test/stripe": "tok", "@test/custom": "tok" },
       providers: [
         {
           id: "@test/stripe",
@@ -453,17 +605,6 @@ describe("buildEnrichedPrompt — provider documentation", () => {
           credentialHeaderPrefix: "Bearer ",
           authorizedUris: ["https://api.stripe.com/*"],
         },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Authorization: Bearer {{api_key}}");
-  });
-
-  it("shows credential variables for credentialSchema providers", () => {
-    const ctx = baseContext({
-      tokens: { "@test/custom": "tok" },
-      providers: [
         {
           id: "@test/custom",
           displayName: "Custom Service",
@@ -480,99 +621,16 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("{{api_key}}");
-    expect(prompt).toContain("{{secret}}");
-    expect(prompt).toContain("API Key");
-    expect(prompt).toContain("Secret Token");
-  });
-
-  it("emits the Auth line alongside extra vars for api_key providers with a credentialSchema", () => {
-    // Regression: previously the `if (credentialSchema)` branch omitted the
-    // Auth line entirely for api_key providers that declared a schema (which
-    // the provider editor does by default), leaving the agent without any
-    // header/prefix hint.
-    const ctx = baseContext({
-      tokens: { "@test/fathom": "tok" },
-      providers: [
-        {
-          id: "@test/fathom",
-          displayName: "Fathom",
-          authMode: "api_key",
-          credentialFieldName: "api_key",
-          credentialHeaderName: "X-Api-Key",
-          credentialHeaderPrefix: "",
-          credentialSchema: {
-            properties: { api_key: { description: "API key" } },
-          },
-          authorizedUris: ["https://api.fathom.ai/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("X-Api-Key: {{api_key}}");
-    // The primary var does NOT appear in `Other credential vars` (deduplicated)
-    expect(prompt).not.toContain("Other credential vars");
-  });
-
-  it("emits the Auth line for custom providers with an explicit credentialFieldName", () => {
-    // `custom` authMode has no default primary field, but the Auth header is
-    // still meaningful when the manifest explicitly declares one. Extra schema
-    // vars are listed separately for the agent to reference.
-    const ctx = baseContext({
-      tokens: { "@test/multi": "tok" },
-      providers: [
-        {
-          id: "@test/multi",
-          displayName: "Multi-Cred",
-          authMode: "custom",
-          credentialFieldName: "token",
-          credentialHeaderName: "X-Foo",
-          credentialHeaderPrefix: "Bearer ",
-          credentialSchema: {
-            properties: {
-              token: { description: "Primary bearer token" },
-              region: { description: "Region code" },
-            },
-          },
-          authorizedUris: ["https://api.multi.example/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("X-Foo: Bearer {{token}}");
-    expect(prompt).toContain("Other credential vars");
-    expect(prompt).toContain("{{region}}");
-    expect(prompt).toContain("Region code");
-  });
-
-  it("lists all schema vars (no Auth line) for custom providers with no credentialFieldName", () => {
-    // Fallback branch: custom provider with a schema but no primary field —
-    // the agent sees every declared variable, no Auth hint.
-    const ctx = baseContext({
-      tokens: { "@test/bare": "tok" },
-      providers: [
-        {
-          id: "@test/bare",
-          displayName: "Bare Custom",
-          authMode: "custom",
-          credentialSchema: {
-            properties: {
-              user: { description: "Username" },
-              pass: { description: "Password" },
-            },
-          },
-          authorizedUris: ["https://api.bare.example/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
+    // Tool names appear…
+    expect(prompt).toContain("test_stripe_call");
+    expect(prompt).toContain("test_custom_call");
+    // …but credential placeholders / header hints do NOT.
+    expect(prompt).not.toContain("{{api_key}}");
+    expect(prompt).not.toContain("{{secret}}");
+    expect(prompt).not.toContain("Authorization: Bearer");
     expect(prompt).not.toContain("Auth:");
-    expect(prompt).toContain("Credentials:");
-    expect(prompt).toContain("{{user}}");
-    expect(prompt).toContain("{{pass}}");
+    expect(prompt).not.toContain("Credentials:");
+    expect(prompt).not.toContain("Other credential vars");
   });
 });
 
@@ -642,5 +700,99 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     const ctx = baseContext({ availableSkills: [] });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
+  });
+});
+
+// ─── schemaVersion template rendering ──────────────────────
+
+describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
+  it("does NOT interpolate {{…}} in legacy schemaVersion 1.0 (verbatim append)", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.0",
+      runId: "run_abc",
+      input: { topic: "physics" },
+      rawPrompt: "Topic is {{input.topic}}, run {{runId}}.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Topic is {{input.topic}}, run {{runId}}.");
+    expect(prompt).not.toContain("Topic is physics");
+  });
+
+  it("does NOT interpolate when schemaVersion is undefined (defaults to legacy)", () => {
+    const ctx = baseContext({
+      schemaVersion: undefined,
+      runId: "r",
+      input: { x: "y" },
+      rawPrompt: "raw {{input.x}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("raw {{input.x}}");
+  });
+
+  it("renders {{runId}} and {{input.*}} on schemaVersion 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      runId: "run_abc",
+      input: { topic: "quantum" },
+      rawPrompt: "Investigate {{input.topic}} for {{runId}}.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Investigate quantum for run_abc.");
+    expect(prompt).not.toContain("{{");
+  });
+
+  it("renders memory sections on schemaVersion 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      memories: [
+        { id: 1, content: "alpha", createdAt: "2026-01-01T00:00:00Z" },
+        { id: 2, content: "beta", createdAt: null },
+      ],
+      rawPrompt: "Past:\n{{#memories}}- {{content}}\n{{/memories}}End.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Past:\n- alpha\n- beta\nEnd.");
+  });
+
+  it("inverted section renders when memories are empty on 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      memories: [],
+      rawPrompt: "{{^memories}}No prior memories.{{/memories}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("No prior memories.");
+  });
+
+  it("renders higher minor (1.2) and future majors (2.0) through the template path", () => {
+    const tpl = "Hello {{input.who}}";
+    const forVersion = (v: string): string =>
+      buildEnrichedPrompt(
+        baseContext({ schemaVersion: v, input: { who: "World" }, rawPrompt: tpl }),
+      );
+    expect(forVersion("1.2")).toContain("Hello World");
+    expect(forVersion("2.0")).toContain("Hello World");
+  });
+
+  it("treats a malformed schemaVersion as legacy (verbatim)", () => {
+    const ctx = baseContext({
+      schemaVersion: "not-a-version",
+      input: { x: 1 },
+      rawPrompt: "{{input.x}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("{{input.x}}");
+  });
+
+  it("preserves the enrichment sections when schemaVersion is 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      input: { task: "hello" },
+      rawPrompt: "Run: {{input.task}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("## System");
+    expect(prompt).toContain("Appstrate platform");
+    expect(prompt).toMatch(/Run: hello$/);
   });
 });

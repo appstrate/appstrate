@@ -44,7 +44,9 @@ import {
   appCurrentCommand,
   appCreateCommand,
 } from "./commands/app.ts";
+import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
+import { runCommand } from "./commands/run.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -330,6 +332,28 @@ appGroup
     });
   });
 
+// ─── `appstrate models …` — discover model presets on the instance ────
+
+const modelsGroup = program
+  .command("models")
+  .description("Discover model presets exposed by the pinned Appstrate instance");
+
+modelsGroup
+  .command("list")
+  .description(
+    "List model presets. Use `--proxy-only` to filter to presets wired on /api/llm-proxy/*.",
+  )
+  .option("--json", "Emit machine-readable JSON")
+  .option("--proxy-only", "Only show presets that /api/llm-proxy/* can route")
+  .action(async (opts: { json?: boolean; proxyOnly?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await modelsListCommand({
+      profile: globalOpts.profile,
+      json: opts.json,
+      proxyOnly: opts.proxyOnly,
+    });
+  });
+
 program
   .command("api <target> [extra]")
   .description(
@@ -550,5 +574,93 @@ program
   });
 
 registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
+
+program
+  .command("run")
+  .description("Execute an AFPS bundle locally via PiRunner (CLI mode — no platform preamble)")
+  .argument("<bundle>", "Path to the bundle — .afps (single-package) or .afps-bundle (with deps)")
+  .option(
+    "--providers <mode>",
+    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",
+  )
+  .option("--creds-file <path>", "JSON credentials file for --providers=local")
+  .option("--api-key <key>", "Appstrate API key (ask_...) for --providers=remote")
+  .option("--input <json>", "Input JSON object passed to the agent")
+  .option("--input-file <path>", "Read input JSON from file")
+  .option("--config <json>", "Config JSON object passed to the agent")
+  .option(
+    "--snapshot <path>",
+    "JSON file { memories?, history?, state? } seeded onto the ExecutionContext before the run",
+  )
+  .option(
+    "--model-source <mode>",
+    "Where the model comes from: env (default, user LLM credentials) or preset (pinned instance routes via /api/llm-proxy/*)",
+  )
+  .option("--model <id>", "Model ID (env mode) or preset id (preset mode); defaults apply")
+  .option("--model-api <api>", "Model API (env mode only; default: anthropic-messages)")
+  .option(
+    "--llm-api-key <key>",
+    "LLM API key (env mode; default: from env — ANTHROPIC_API_KEY etc.)",
+  )
+  .option("--run-id <id>", "Explicit run id (default: generated)")
+  .option("--output <path>", "Write the final RunResult JSON to this path")
+  .option("--json", "Emit canonical RunEvents as JSONL on stdout")
+  .option(
+    "--report <mode>",
+    "Stream events to the Appstrate instance: auto (default — on when a profile is present), true (force on), false (off)",
+  )
+  .option(
+    "--report-fallback <mode>",
+    "Behavior when `POST /api/runs/remote` fails: abort (default) or console (console-only fallback)",
+  )
+  .option(
+    "--sink-ttl <seconds>",
+    "Requested sink lifetime in seconds (server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS)",
+  )
+  .action(async (bundle: string, opts) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await runCommand({
+      profile: globalOpts.profile,
+      bundle,
+      providers: typeof opts.providers === "string" ? opts.providers : undefined,
+      credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
+      apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
+      input: typeof opts.input === "string" ? opts.input : undefined,
+      inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
+      config: typeof opts.config === "string" ? opts.config : undefined,
+      snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
+      model: typeof opts.model === "string" ? opts.model : undefined,
+      modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
+      modelSource: typeof opts.modelSource === "string" ? opts.modelSource : undefined,
+      llmApiKey: typeof opts.llmApiKey === "string" ? opts.llmApiKey : undefined,
+      runId: typeof opts.runId === "string" ? opts.runId : undefined,
+      output: typeof opts.output === "string" ? opts.output : undefined,
+      json: opts.json === true,
+      report: parseReportMode(opts.report),
+      reportFallback: parseReportFallback(opts.reportFallback),
+      sinkTtl: parseSinkTtl(opts.sinkTtl),
+    });
+  });
+
+function parseReportMode(raw: unknown): "auto" | "true" | "false" | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw === "auto" || raw === "true" || raw === "false") return raw;
+  throw new Error(`Invalid --report value "${raw}" (expected: auto | true | false)`);
+}
+
+function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw === "abort" || raw === "console") return raw;
+  throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
+}
+
+function parseSinkTtl(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid --sink-ttl "${raw}" (expected a positive integer number of seconds)`);
+  }
+  return n;
+}
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

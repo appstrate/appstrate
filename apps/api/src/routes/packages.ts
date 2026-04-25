@@ -5,12 +5,14 @@ import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
+import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
+import { handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
@@ -36,7 +38,7 @@ import {
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
 import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
-import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
+import { SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
@@ -248,7 +250,9 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  Builds the ZIP from normalizedFiles + manifest.json, then uploads. */
+ *  For tools, the source is bundled into a self-contained `tool.js` via
+ *  {@link buildPublishedToolArchive} so the published archive complies
+ *  with AFPS §3.4. Other types are zipped as-is. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -264,16 +268,29 @@ async function createVersionSafe(params: {
     return;
   }
   try {
-    const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
-    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
-    const zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    let zipBuffer: Buffer;
+    let manifestToStore = params.manifest;
+
+    if (params.manifest.type === "tool") {
+      const built = await buildPublishedToolArchive({
+        files: params.normalizedFiles,
+        manifest: params.manifest,
+        toolId: params.packageId,
+      });
+      zipBuffer = Buffer.from(built.archive);
+      manifestToStore = built.manifest;
+    } else {
+      const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
+      zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    }
 
     await createVersionAndUpload({
       packageId: params.packageId,
       version,
       createdBy: params.userId,
       zipBuffer,
-      manifest: params.manifest,
+      manifest: manifestToStore,
     });
   } catch (error) {
     logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
@@ -337,7 +354,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     responseKey: "tool",
     validateSource: validateToolSource,
     storageFileName: () => "TOOL.md",
-    sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    sourceFileName: () => "tool.ts",
     jsonBodyCreate: true,
   },
   agent: {
@@ -1417,6 +1434,33 @@ export function createPackagesRouter() {
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);
   }
+
+  // POST /api/packages/import-bundle — import a multi-package .afps-bundle
+  // (or a raw .afps, promoted to a bundle-of-one via the catalog).
+  router.post("/import-bundle", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      throw invalidRequest("Request must be multipart/form-data with a file field", "file");
+    }
+    const file = formData.get("file") ?? formData.get("bundle");
+    if (!file || !(file instanceof File)) {
+      throw invalidRequest("File is required", "file");
+    }
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
+      throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
+    const userId = c.get("user").id;
+
+    const result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    return c.json(result, 201);
+  });
 
   // POST /api/packages/import — import any package type from ZIP
   router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {

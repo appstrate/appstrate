@@ -46,7 +46,6 @@ import {
   getModuleRoleScopes,
   getModuleApiKeyScopes,
 } from "@appstrate/core/permissions";
-import { logger } from "./logger.ts";
 
 // ---------------------------------------------------------------------------
 // Resource & Action types — sourced from @appstrate/core/permissions
@@ -149,6 +148,10 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "end-users:read",
   "end-users:write",
   "end-users:delete",
+  // Credential proxy (BYOI — see API_KEY_ALLOWED_SCOPES note below)
+  "credential-proxy:call",
+  // LLM proxy (remote-backed CLI execution — see API_KEY_ALLOWED_SCOPES note below)
+  "llm-proxy:call",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -233,13 +236,11 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
  * Core permissions that can be granted to API keys. Session-only
  * operations (org management, personal profiles, etc.) are excluded.
  *
- * Internal source of truth. Inside apps/api, always read this value —
- * the public re-export `API_KEY_ALLOWED_SCOPES` wraps it in a logging
- * proxy that emits a one-shot deprecation warning on first access, so
- * reading the private const avoids a spurious warning during every boot
- * of the platform itself.
+ * Module-contributed API-key scopes (webhooks, oauth-clients, billing, …)
+ * are merged in at runtime — callers that need the full set should use
+ * {@link getApiKeyAllowedScopes} instead of reading this constant directly.
  */
-const API_KEY_ALLOWED_SCOPES_CORE: ReadonlySet<Permission> = new Set<Permission>([
+export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   // Agents
   "agents:read",
   "agents:write",
@@ -284,27 +285,17 @@ const API_KEY_ALLOWED_SCOPES_CORE: ReadonlySet<Permission> = new Set<Permission>
   "end-users:read",
   "end-users:write",
   "end-users:delete",
+  // Credential proxy — BYOI ("Bring Your Own Instance") for remote
+  // AFPS runs. High-value scope: one compromised API key can reach every
+  // provider in the application. NOT granted by default; callers must
+  // explicitly add it when minting the key.
+  "credential-proxy:call",
+  // LLM proxy — server-side LLM model injection for remote-backed
+  // `appstrate run` and headless CI (GitHub Action). Scopes metered
+  // per-call in `llm_usage` (source='proxy'). NOT granted by default;
+  // callers must explicitly add it when minting the key.
+  "llm-proxy:call",
 ]);
-
-/**
- * Public (deprecated) export of the core API-key allowlist.
- *
- * @deprecated Use `getApiKeyAllowedScopes()` instead — it returns the
- * merged view (core + module contributions opted in via
- * `apiKeyGrantable: true`). Reading this constant returns only the core
- * half and will silently diverge from reality whenever a module
- * contributes API-key-grantable scopes.
- *
- * Kept as a backwards-compat alias; the Proxy wrapper below emits a
- * one-shot `logger.warn` the first time any external reader touches it,
- * so operators see an actionable migration signal without log spam.
- * Internal callers read `API_KEY_ALLOWED_SCOPES_CORE` directly.
- */
-export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = wrapDeprecatedSet(
-  API_KEY_ALLOWED_SCOPES_CORE,
-  "API_KEY_ALLOWED_SCOPES",
-  "getApiKeyAllowedScopes()",
-);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -313,39 +304,8 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = wrapDeprecatedSet
 /** Merged view of API-key-grantable permissions (core + modules opted in). */
 export function getApiKeyAllowedScopes(): ReadonlySet<string> {
   const moduleAllowed = getModuleApiKeyScopes();
-  if (moduleAllowed.size === 0) return API_KEY_ALLOWED_SCOPES_CORE;
-  return new Set<string>([...API_KEY_ALLOWED_SCOPES_CORE, ...moduleAllowed]);
-}
-
-/**
- * Wrap a ReadonlySet in a Proxy that logs a one-shot deprecation warning
- * the first time any property is accessed (`.has`, `.size`, iteration,
- * etc.). Method lookups are rebound to the original target so `has(x)`
- * continues to work through the Proxy; the warning fires exactly once
- * per process.
- */
-function wrapDeprecatedSet<T>(
-  target: ReadonlySet<T>,
-  name: string,
-  replacement: string,
-): ReadonlySet<T> {
-  let warned = false;
-  const warn = () => {
-    if (warned) return;
-    warned = true;
-    logger.warn(`${name} is deprecated; read ${replacement} to include module-contributed scopes.`);
-  };
-  return new Proxy(target, {
-    get(t, prop, receiver) {
-      warn();
-      const value = Reflect.get(t, prop, receiver);
-      return typeof value === "function" ? value.bind(t) : value;
-    },
-    has(t, prop) {
-      warn();
-      return Reflect.has(t, prop);
-    },
-  }) as ReadonlySet<T>;
+  if (moduleAllowed.size === 0) return API_KEY_ALLOWED_SCOPES;
+  return new Set<string>([...API_KEY_ALLOWED_SCOPES, ...moduleAllowed]);
 }
 
 /**

@@ -25,7 +25,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://www.loom.com/*", "https://developer.loom.com/*"]
+    "authorizedUris": ["https://www.loom.com/**", "https://developer.loom.com/**"]
   },
   "setupGuide": {
     "steps": [
@@ -34,5 +34,5 @@
       { "label": "Copy your API credentials" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

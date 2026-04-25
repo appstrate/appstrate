@@ -1,0 +1,21 @@
+name: "Appstrate CodeQL config"
+
+# Test fixtures often contain URL-shaped strings that CodeQL's taint
+# tracking misidentifies as regex patterns or unsafe-spawn arguments.
+# Exclude test trees from scanning so CI only surfaces real findings.
+paths-ignore:
+  - "**/test/**"
+  - "**/tests/**"
+  - "**/__tests__/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+
+query-filters:
+  # apps/cli/src/lib/install/os.ts:runCommand intentionally forwards
+  # caller-supplied command names to child_process.spawn (no shell,
+  # arguments passed as an array). process.env is deliberately NOT
+  # wired into spawnOpts.env to cut this exact dataflow — see the
+  # inline comment at apps/cli/src/lib/install/os.ts:50-58.
+  - exclude:
+      id: js/shell-command-injection-from-environment

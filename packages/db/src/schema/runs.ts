@@ -10,11 +10,12 @@ import {
   serial,
   uuid,
   index,
+  uniqueIndex,
   doublePrecision,
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { runStatusEnum } from "./enums.ts";
+import { runStatusEnum, llmUsageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations } from "./organizations.ts";
@@ -46,12 +47,18 @@ export const runs = pgTable(
     result: jsonb("result"),
     state: jsonb("state"),
     error: text("error"),
+    // Snake-case keys: matches the wire format produced by every runner
+    // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
+    // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
+    // `apps/api/src/services/adapters/types.ts`, and the frontend reader
+    // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
+    // migration and a coordinated wire-schema bump — the JSONB payloads
+    // already in production use snake_case.
     tokenUsage: jsonb("token_usage").$type<{
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheReadInputTokens?: number;
-      cacheCreationInputTokens?: number;
-      totalTokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
     }>(),
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
@@ -84,6 +91,36 @@ export const runs = pgTable(
     // without relying on `packages.manifest.name`.
     agentScope: text("agent_scope"),
     agentName: text("agent_name"),
+    // Unified runner protocol (AFPS runtime event ingestion). Every run — platform
+    // container or remote CLI — posts events to POST /api/runs/:id/events over
+    // HMAC-signed HTTP. The runs row is the per-run credential store and the
+    // sink lifecycle tracker.
+    //
+    // `run_origin` distinguishes WHO controls the process (we do vs customer
+    // does), not which protocol is used — the protocol is the same.
+    runOrigin: text("run_origin").notNull().default("platform").$type<"platform" | "remote">(),
+    // AES-256-GCM ciphertext of the 32-byte run secret (via @appstrate/connect
+    // encryption). Returned once in the run-creation response, then lives
+    // encrypted at rest for the event-ingestion middleware to decrypt and
+    // verify HMAC signatures against.
+    sinkSecretEncrypted: text("sink_secret_encrypted"),
+    // Hard cap after which /events rejects. Also the "sink is active" signal.
+    sinkExpiresAt: timestamp("sink_expires_at"),
+    // Set on finalize (terminal event, /finalize POST, explicit revocation).
+    // Presence means the sink is closed; subsequent events reject with 410.
+    sinkClosedAt: timestamp("sink_closed_at"),
+    // Highest successfully persisted sequence number; drives the ordering
+    // buffer fast-path (CAS update on sequence = last_event_sequence + 1).
+    lastEventSequence: integer("last_event_sequence").notNull().default(0),
+    // Liveness marker — bumped on every event POST and every /sink/extend.
+    // The stall watchdog sweeps open-sink rows whose `last_heartbeat_at`
+    // slipped past the threshold and routes them through `finalizeRun` as
+    // `failed` (same convergence point as natural termination and
+    // container-exit synthesis — identical for platform + remote runners).
+    lastHeartbeatAt: timestamp("last_heartbeat_at").defaultNow().notNull(),
+    // CLI-provided execution environment metadata (os, cli version, git sha,
+    // ...). Capped at 16 KiB by the route Zod schema.
+    contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),
@@ -99,9 +136,26 @@ export const runs = pgTable(
       table.notifiedAt,
       table.readAt,
     ),
+    // Reaper scans only active sinks — cheap partial index.
+    index("idx_runs_sink_expires_at")
+      .on(table.sinkExpiresAt)
+      .where(sql`${table.sinkExpiresAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL`),
+    // Stall-watchdog sweep: scans only open-sink rows ordered by
+    // liveness, so the range scan is bounded by the stall threshold.
+    index("idx_runs_stall_sweep")
+      .on(table.lastHeartbeatAt)
+      .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
     check(
       "runs_at_most_one_actor",
       sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
+    check("runs_run_origin_valid", sql`run_origin IN ('platform', 'remote')`),
+    // Invariant: an open sink row (has an expires_at) must have a secret to
+    // verify against. Enforced for every origin so platform and remote share
+    // the same ingestion code path without any conditional branches.
+    check(
+      "runs_open_sink_has_secret",
+      sql`sink_expires_at IS NULL OR sink_secret_encrypted IS NOT NULL`,
     ),
   ],
 );
@@ -153,6 +207,153 @@ export const packageMemories = pgTable(
     index("idx_package_memories_package_app").on(table.packageId, table.applicationId),
     index("idx_package_memories_org_id").on(table.orgId),
     index("idx_package_memories_app_id").on(table.applicationId),
+  ],
+);
+
+/**
+ * Unified LLM cost ledger — one row per attributable upstream LLM call,
+ * regardless of how it reached the provider. The `source` discriminator
+ * separates two emitters:
+ *
+ *   - `proxy`  : `/api/llm-proxy/*` routes (remote/CLI runners). The
+ *                route mints a `request_id` per upstream call — replays
+ *                dedup on `request_id`.
+ *   - `runner` : `appstrate.metric` events POSTed by an in-run sink (Pi
+ *                platform container, in-process PiRunner, …). These
+ *                events carry the run's monotonic `sequence`; dedup on
+ *                `(run_id, source, sequence)`.
+ *
+ * `runs.cost` is the cached SUM of this table for that run, written once
+ * at `finalizeRun`. Never write to `runs.cost` from anywhere else — this
+ * table is the single source of truth for run cost. (`credential_proxy_usage`
+ * is an audit log, not a cost ledger — see its header comment.)
+ *
+ * A call is attributable to exactly one principal: either an API key
+ * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`
+ * constraint enforces the XOR so accounting never double-counts.
+ */
+export const llmUsage = pgTable(
+  "llm_usage",
+  {
+    id: serial("id").primaryKey(),
+    source: llmUsageSourceEnum("source").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    runId: text("run_id").references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    // Preset id the caller asked for (what the CLI / client picked from
+    // the model catalog). Kept alongside `realModel` for audit. Required
+    // for proxy rows, optional for runner rows (the runner may not know
+    // the preset id; `runs.model_label` is the canonical display name).
+    model: text("model"),
+    // Upstream model id the proxy actually forwarded — resolved from the
+    // preset via `loadModel()`. Optional on runner rows.
+    realModel: text("real_model"),
+    // Protocol family: "openai-completions", "anthropic-messages", …
+    // Optional on runner rows.
+    api: text("api"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    durationMs: integer("duration_ms"),
+    // Proxy dedup key — one per upstream call minted by the proxy route.
+    // `null` on runner-source rows (they dedup on sequence instead).
+    requestId: text("request_id"),
+    // Runner dedup key — monotonic per-run event sequence from the AFPS
+    // sink protocol. `null` on proxy-source rows.
+    sequence: integer("sequence"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_llm_usage_org_id").on(table.orgId),
+    index("idx_llm_usage_api_key_id").on(table.apiKeyId),
+    index("idx_llm_usage_user_id").on(table.userId),
+    index("idx_llm_usage_run_id").on(table.runId),
+    index("idx_llm_usage_org_created").on(table.orgId, table.createdAt),
+    // Proxy-source dedup: request_id is unique across all proxy rows.
+    // Runner-source rows leave request_id NULL and dedup via sequence.
+    uniqueIndex("uq_llm_usage_proxy_request_id")
+      .on(table.requestId)
+      .where(sql`source = 'proxy' AND request_id IS NOT NULL`),
+    // Runner-source dedup: (run_id, sequence) is unique for runner rows.
+    // Proxy-source rows leave sequence NULL.
+    uniqueIndex("uq_llm_usage_runner_run_sequence")
+      .on(table.runId, table.sequence)
+      .where(sql`source = 'runner' AND run_id IS NOT NULL AND sequence IS NOT NULL`),
+    // INSERT invariant: exactly one principal. After FK cleanup (api_key /
+    // user deleted) both may become NULL — the row survives for audit /
+    // billing retention, so we don't enforce "exactly one" forever.
+    check("llm_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
+    // Source-consistency invariants.
+    check("llm_usage_proxy_has_request_id", sql`source <> 'proxy' OR request_id IS NOT NULL`),
+    check(
+      "llm_usage_runner_has_sequence",
+      sql`source <> 'runner' OR (run_id IS NOT NULL AND sequence IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Per-call audit log of the `/api/credential-proxy/*` routes — one row per
+ * upstream provider call proxied server-side for a remote runner. Records
+ * provider id, target host, HTTP status, and duration for observability /
+ * abuse-detection / per-org telemetry.
+ *
+ * `cost_usd` is 0 today and excluded from `computeRunCost` — see
+ * `apps/api/src/services/credential-proxy-usage.ts` header. When a metered
+ * credential provider ships, route its cost rows through `llm_usage` with a
+ * new `source` enum value rather than resurrecting a SUM here, so the
+ * single-ledger invariant for `runs.cost` is preserved.
+ *
+ * `request_id` is the dedup key: the credential-proxy route derives one per
+ * upstream request; replays of the same request are no-ops via the UNIQUE
+ * constraint. Prevents double-counting when a CLI retries.
+ */
+export const credentialProxyUsage = pgTable(
+  "credential_proxy_usage",
+  {
+    id: serial("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    runId: text("run_id").references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    // Provider id the call hit (e.g. "gmail", "clickup"). Matches the
+    // credential-proxy route path parameter.
+    providerId: text("provider_id").notNull(),
+    // Upstream host for audit (no path/query — avoid logging secrets).
+    targetHost: text("target_host"),
+    httpStatus: integer("http_status"),
+    durationMs: integer("duration_ms"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    requestId: text("request_id").notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_credential_proxy_usage_org_id").on(table.orgId),
+    index("idx_credential_proxy_usage_run_id").on(table.runId),
+    index("idx_credential_proxy_usage_org_created").on(table.orgId, table.createdAt),
+    check("credential_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
   ],
 );
 

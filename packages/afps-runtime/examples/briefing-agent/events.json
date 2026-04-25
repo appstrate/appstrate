@@ -1,0 +1,55 @@
+[
+  {
+    "type": "log.written",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "level": "info",
+    "message": "Pulling sources for topic"
+  },
+  {
+    "type": "log.written",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "level": "info",
+    "message": "Cross-referencing with 2 prior memories"
+  },
+  {
+    "type": "memory.added",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "content": "Client prefers bullet-point summaries over prose."
+  },
+  {
+    "type": "state.set",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "state": { "lastBriefing": "2026-04-20", "sourceCount": 5 }
+  },
+  {
+    "type": "output.emitted",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "data": {
+      "topic": "AI agents in finance",
+      "keyFindings": [
+        "Risk teams are treating agent rollouts as a model-risk problem.",
+        "EU AI Act provisions for high-risk use cases take effect 2026-08-02."
+      ],
+      "confidence": "medium"
+    }
+  },
+  {
+    "type": "output.emitted",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "data": {
+      "recommendation": "Schedule a joint session with Compliance before the August 2 deadline."
+    }
+  },
+  {
+    "type": "report.appended",
+    "timestamp": 0,
+    "runId": "brief_001",
+    "content": "Briefing complete. 2 findings surfaced; 1 recommendation issued. Confidence is medium pending confirmation from Compliance."
+  }
+]

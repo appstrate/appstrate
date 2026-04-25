@@ -49,3 +49,24 @@ export function buildPackageId(scope: string, name: string): string {
   const s = stripScope(scope);
   return `@${s}/${name}`;
 }
+
+/**
+ * Convert an arbitrary human string into a URL-safe slug.
+ * Lower-cases, strips diacritics, collapses non-[a-z0-9] runs into `-`
+ * and trims leading/trailing dashes. Optional `maxLen` caps the result
+ * (caller-side truncation of names like org slugs).
+ *
+ * Not the same as `SLUG_REGEX` — this accepts any input and produces a
+ * valid slug; `SLUG_REGEX` validates that an already-formed string is
+ * one. Callers that need validation should compose: `toSlug(x)` then
+ * `SLUG_REGEX.test(result)`.
+ */
+export function toSlug(value: string, maxLen?: number): string {
+  const out = value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
+}

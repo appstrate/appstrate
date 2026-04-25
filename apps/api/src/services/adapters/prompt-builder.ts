@@ -1,311 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PromptContext } from "./types.ts";
-import {
-  getCredentialFieldName,
-  getDefaultAuthorizedUris,
-  type ProviderDefinition,
-} from "@appstrate/connect";
-import { isFileField } from "@appstrate/core/form";
+/**
+ * Appstrate platform system prompt — thin shim over the runtime's
+ * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
+ * every section (System / Environment / Tools / Skills / Providers /
+ * Input / Documents / Config / State / Memory / Output Format) happens
+ * in the runtime from the parsed Bundle; this function only adds the
+ * overrides that are platform-specific:
+ *
+ *   - `platformName`: `"Appstrate"`
+ *   - `uploads`: DB-stored files with platform-sanitised paths
+ *   - `providers`: filtered to those with wired credentials
+ *     (`plan.tokens[p.id]`) and enriched with authorized URIs via
+ *     `@appstrate/connect`. Replaces the bundle-derived provider list
+ *     via `providersReplace: true` so disconnected providers never
+ *     reach the LLM prompt.
+ *
+ * Every other field flows straight from the bundle — the same code
+ * path used by the `appstrate run` CLI. Divergence between platform
+ * and CLI is now strictly the three overrides above.
+ *
+ * Run history is NOT rendered in the prompt: the runtime wires a
+ * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
+ * description self-documents the capability — the agent never sees the
+ * sidecar URL.
+ */
+
+import type { AppstrateRunPlan } from "./types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
+import type { PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
+export function buildPlatformSystemPrompt(
+  context: ExecutionContext,
+  plan: AppstrateRunPlan,
+): string {
+  // Project ProviderSummary → PlatformPromptProvider explicitly: drop the
+  // platform-internal credential bag (credentialSchema / credentialFieldName /
+  // credentialHeaderName / credentialHeaderPrefix / categories) so it never
+  // reaches the prompt-rendering pipeline.
+  const connectedProviders: PlatformPromptProvider[] = plan.providers
+    .filter((p) => plan.tokens[p.id])
+    .map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      authMode: p.authMode,
+      ...(p.authorizedUris?.length ? { authorizedUris: p.authorizedUris } : {}),
+      allowAllUris: p.allowAllUris ?? false,
+      ...(p.docsUrl !== undefined ? { docsUrl: p.docsUrl } : {}),
+      ...(p.hasProviderDoc !== undefined ? { hasProviderDoc: p.hasProviderDoc } : {}),
+    }));
 
-export function buildEnrichedPrompt(ctx: PromptContext): string {
-  const sections: string[] = [];
-  const connectedProviders = ctx.providers.filter((p) => ctx.tokens[p.id]);
+  const uploads = plan.files?.map((f) => ({
+    name: f.name,
+    path: `./documents/${sanitizeStorageKey(f.name)}`,
+    size: f.size,
+    ...(f.type ? { type: f.type } : {}),
+  }));
 
-  // --- System identity & environment ---
-  sections.push("## System\n");
-  sections.push("You are an AI agent running on the Appstrate platform.");
-  sections.push("You execute a specific task inside an isolated, ephemeral container.\n");
-
-  sections.push("### Environment");
-  sections.push(
-    "- **Ephemeral container**: This container is destroyed when your run ends. " +
-      "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
-      "Do NOT rely on the filesystem for persistence.",
-  );
-  sections.push(
-    "- **Network access**: Outbound HTTP/HTTPS is available. " +
-      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-      "Only authenticated requests to connected providers require the sidecar credential proxy " +
-      "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
-  );
-  if (ctx.timeout) {
-    sections.push(
-      `- **Timeout**: You have ${ctx.timeout} seconds to complete this task. ` +
-        "Work efficiently and output your result promptly.",
-    );
-  }
-  sections.push(
-    "- **Workspace**: Your current working directory is the agent workspace. " +
-      "Uploaded documents are available under `./documents/` (relative to cwd). " +
-      "You may use the filesystem for temporary processing during this run only.\n",
-  );
-
-  // Available tools
-  if (ctx.availableTools && ctx.availableTools.length > 0) {
-    sections.push("### Tools");
-    sections.push(
-      "You have access to the following tools (in addition to standard coding capabilities):\n",
-    );
-    for (const tool of ctx.availableTools) {
-      const desc = tool.description ? `: ${tool.description}` : "";
-      sections.push(`- **${tool.name || tool.id}**${desc}`);
-    }
-    sections.push("");
-  }
-
-  // Tool documentation (from TOOL.md files)
-  if (ctx.toolDocs && ctx.toolDocs.length > 0) {
-    for (const doc of ctx.toolDocs) {
-      sections.push(doc.content);
-      sections.push("");
-    }
-  }
-
-  // Available skills
-  if (ctx.availableSkills && ctx.availableSkills.length > 0) {
-    sections.push("### Skills");
-    sections.push(
-      "The following skill references are available in your workspace at `.pi/skills/`:\n",
-    );
-    for (const skill of ctx.availableSkills) {
-      const desc = skill.description ? `: ${skill.description}` : "";
-      sections.push(`- **${skill.name || skill.id}**${desc}`);
-    }
-    sections.push("");
-  }
-
-  // --- Authenticated provider API access ---
-  if (connectedProviders.length > 0) {
-    sections.push("## Authenticated Provider API\n");
-    sections.push(
-      "The sidecar credential proxy at `$SIDECAR_URL/proxy` injects the user's credentials into requests " +
-        "to connected provider APIs. You never see or handle raw tokens.\n",
-    );
-    sections.push(
-      "**Use this proxy ONLY for requests to connected providers listed below.** " +
-        "For public endpoints (no authentication required), call them directly with `curl` or `fetch` — " +
-        "do not route them through the sidecar.\n",
-    );
-    sections.push("Required headers:");
-    sections.push("- `X-Provider`: the provider ID (see list below)");
-    sections.push("- `X-Target`: the target URL (must match the provider's authorized URLs)");
-    sections.push("- All other headers and the body are forwarded as-is to the target");
-    sections.push(
-      "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials at request time",
-    );
-    sections.push(
-      "- Add `X-Substitute-Body: true` if the request body also contains `{{variable}}` placeholders\n",
-    );
-    sections.push("Example:");
-    sections.push("```bash");
-    sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
-    sections.push(`  -H "X-Provider: <provider_id>" \\`);
-    sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
-    sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
-    sections.push("```\n");
-    sections.push(
-      "The proxy returns the upstream response as-is (status code, body, Content-Type). " +
-        "If the response was truncated (>50 KB), the `X-Truncated: true` header is present — " +
-        "paginate or narrow your query, or send `X-Max-Response-Size: <bytes>` (up to 1 MB) to raise the limit.\n",
-    );
-    sections.push(
-      "Requests to the proxy timeout after 30 seconds. " +
-        "For slow endpoints, paginate or request smaller payloads.\n",
-    );
-    sections.push(
-      "If the proxy itself encounters an error (invalid provider, unauthorized URL, missing credentials), " +
-        'it returns a JSON `{ "error": "..." }` body with a 4xx/5xx status — ' +
-        "read the error message to diagnose the issue instead of retrying blindly.\n",
-    );
-    sections.push(
-      "The proxy maintains a cookie jar per provider — `Set-Cookie` headers from upstream responses " +
-        "are stored automatically and sent on subsequent requests. " +
-        "You do not need to manage cookies yourself.\n",
-    );
-
-    sections.push("### Connected Providers\n");
-
-    for (const provider of connectedProviders) {
-      const displayName = provider.displayName ?? provider.id;
-      const authorizedUris = getDefaultAuthorizedUris(provider as ProviderDefinition);
-      const allowAllUris = provider.allowAllUris ?? false;
-
-      sections.push(`- **${displayName}** (provider ID: \`${provider.id}\`)`);
-
-      const props =
-        (provider.credentialSchema?.properties as
-          | Record<string, { description?: string }>
-          | undefined) ?? {};
-      const varEntries = Object.entries(props);
-
-      // OAuth2/oauth1/api_key/basic all have a well-defined primary field
-      // (resolved by getCredentialFieldName). `custom` providers with no
-      // explicit fieldName don't — fall back to listing all schema variables.
-      const resolvedFieldName =
-        provider.credentialFieldName ??
-        (provider.authMode !== "custom"
-          ? getCredentialFieldName(provider as ProviderDefinition)
-          : undefined);
-
-      if (resolvedFieldName) {
-        const headerName = provider.credentialHeaderName ?? "Authorization";
-        const headerPrefix = provider.credentialHeaderPrefix ?? "Bearer ";
-        sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${resolvedFieldName}}}\``);
-
-        const extraVars = varEntries
-          .filter(([name]) => name !== resolvedFieldName)
-          .map(([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`);
-        if (extraVars.length > 0) {
-          sections.push(`  Other credential vars: ${extraVars.join(", ")}`);
-        }
-      } else if (varEntries.length > 0) {
-        // Custom provider with no primary field — list all declared credentials.
-        const varDescriptions = varEntries.map(
-          ([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`,
-        );
-        sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
-      }
-
-      if (provider.hasProviderDoc) {
-        sections.push(`  API docs: \`.pi/providers/${provider.id}/PROVIDER.md\``);
-      } else if (provider.docsUrl) {
-        sections.push(`  Documentation: ${provider.docsUrl}`);
-      }
-
-      if (allowAllUris) {
-        sections.push(`  Authorized URLs: all public URLs`);
-      } else if (authorizedUris && authorizedUris.length > 0) {
-        sections.push(`  Authorized URLs: ${authorizedUris.join(", ")}`);
-      }
-    }
-    sections.push("");
-  }
-
-  // --- User input ---
-  const inputProps = ctx.schemas.input?.properties;
-  const inputRequired = ctx.schemas.input?.required ?? [];
-  const nonFileInputEntries = Object.entries(ctx.input).filter(([key]) => {
-    const prop = inputProps?.[key];
-    return prop ? !isFileField(prop) : true;
+  const inputs = buildPlatformPromptInputs(plan.bundle, context, {
+    platformName: "Appstrate",
+    timeoutSeconds: plan.timeout,
+    providers: connectedProviders,
+    providersReplace: true,
+    ...(uploads ? { uploads } : {}),
   });
 
-  if (nonFileInputEntries.length > 0 || (inputProps && Object.keys(inputProps).length > 0)) {
-    sections.push("## User Input\n");
-    if (inputProps) {
-      for (const [key, prop] of Object.entries(inputProps)) {
-        if (isFileField(prop)) continue;
-        const req = inputRequired.includes(key) ? "required" : "optional";
-        const value = ctx.input[key];
-        const valueStr = value !== undefined ? ` — \`${value}\`` : "";
-        sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
-      }
-    } else {
-      for (const [key, value] of nonFileInputEntries) {
-        sections.push(`- **${key}**: ${value}`);
-      }
-    }
-    sections.push("");
-  }
-
-  // --- Uploaded documents ---
-  if (ctx.files && ctx.files.length > 0) {
-    sections.push("## Documents\n");
-    sections.push(
-      "The following documents have been uploaded and are available on the local filesystem:\n",
-    );
-    for (const file of ctx.files) {
-      const safeName = sanitizeStorageKey(file.name);
-      sections.push(
-        `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`./documents/${safeName}\``,
-      );
-    }
-    sections.push(
-      "\nRead the documents directly from the filesystem (paths are relative to cwd).\n",
-    );
-  }
-
-  // --- Configuration ---
-  const configProps = ctx.schemas.config?.properties;
-  const configRequired = ctx.schemas.config?.required ?? [];
-  const configEntries = Object.entries(ctx.config);
-
-  if (configEntries.length > 0 || (configProps && Object.keys(configProps).length > 0)) {
-    sections.push("## Configuration\n");
-    if (configProps) {
-      for (const [key, prop] of Object.entries(configProps)) {
-        const req = configRequired.includes(key) ? "required" : "optional";
-        const value = ctx.config[key];
-        const valueStr = value !== undefined ? ` — \`${value}\`` : "";
-        sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
-      }
-    } else {
-      for (const [key, value] of configEntries) {
-        sections.push(`- **${key}**: ${value}`);
-      }
-    }
-    sections.push("");
-  }
-
-  // --- Previous state ---
-  if (ctx.previousState) {
-    sections.push("## Previous State\n");
-    sections.push(
-      "This agent supports stateful operation across runs. " +
-        "Your most recent run left the following state:\n",
-    );
-    sections.push("```json");
-    sections.push(JSON.stringify(ctx.previousState, null, 2));
-    sections.push("```\n");
-    sections.push(
-      "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
-        "To update the state for the next run, use the `set_state` tool.\n",
-    );
-  }
-
-  // --- Memory ---
-  if (ctx.memories && ctx.memories.length > 0) {
-    sections.push("## Memory\n");
-    sections.push(
-      "This agent has accumulated the following memories from previous runs. " +
-        "These are shared across all users running this agent:\n",
-    );
-    for (const mem of ctx.memories) {
-      const date = mem.createdAt ? ` (${mem.createdAt})` : "";
-      sections.push(`- ${mem.content}${date}`);
-    }
-    sections.push(
-      "\nTo add new memories, use the `add_memory` tool. " +
-        "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
-        "Use `set_state` for structured data needed for the next run.\n",
-    );
-  }
-
-  // --- Run History API ---
-  if (ctx.runApi) {
-    sections.push("## Run History\n");
-    sections.push(
-      "You can access data from previous runs beyond just the latest state. " +
-        "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",
-    );
-    sections.push("```bash");
-    sections.push('curl -s "$SIDECAR_URL/run-history?limit=10&fields=state"');
-    sections.push("```\n");
-    sections.push("Query parameters:");
-    sections.push("- `limit` (1-50, default 10): Number of past runs to return");
-    sections.push(
-      "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
-    );
-    sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
-  }
-
-  // Append raw prompt at the end, without any interpolation
-  return sections.join("\n") + "\n---\n\n" + ctx.rawPrompt;
+  return renderPlatformPrompt(inputs);
 }

@@ -40,5 +40,5 @@
       { "label": "Test the connection by sending a test payload" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

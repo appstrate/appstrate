@@ -5,8 +5,8 @@
   "type": "tool",
   "displayName": "Set State",
   "description": "Persist state for the next run.",
-  "schemaVersion": "1.0",
-  "entrypoint": "set-state.ts",
+  "schemaVersion": "1.1",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "set_state",
     "description": "Persist a JSON object for the next run. Only the last call is kept.",

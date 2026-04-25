@@ -33,7 +33,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": ["https://*.teamwork.com/*"]
+    "authorizedUris": ["https://*.teamwork.com/**"]
   },
   "setupGuide": {
     "steps": [
@@ -49,5 +49,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

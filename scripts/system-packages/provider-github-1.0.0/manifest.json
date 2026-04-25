@@ -20,7 +20,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.github.com/*"],
+    "authorizedUris": ["https://api.github.com/**"],
     "availableScopes": [
       {
         "value": "repo",
@@ -67,5 +67,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

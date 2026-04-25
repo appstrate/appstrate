@@ -146,3 +146,15 @@ export const rateLimitByIp = createRateLimitMiddleware({
   extractKey: (c) => `ip:${c.req.method}:${c.req.path}:${getClientIp(c)}`,
   emitHeaders: true,
 });
+
+/**
+ * Per-run rate limiter for the unified-runner event ingestion routes
+ * (`POST /api/runs/:runId/events` + `/finalize`). The runId path param IS
+ * the identity — a misbehaving sink cannot evade the limit by rotating
+ * API keys, and a single run's traffic cannot affect another run's budget.
+ */
+export const rateLimitByRunId = createRateLimitMiddleware({
+  category: "run-event",
+  extractKey: (c) => `run-event:${c.req.param("runId") ?? "unknown"}`,
+  emitHeaders: false,
+});

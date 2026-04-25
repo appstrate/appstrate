@@ -22,9 +22,9 @@
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
     "authorizedUris": [
-      "https://*.salesforce.com/*",
-      "https://*.force.com/*",
-      "https://*.my.salesforce.com/*"
+      "https://*.salesforce.com/**",
+      "https://*.force.com/**",
+      "https://*.my.salesforce.com/**"
     ],
     "availableScopes": [
       { "value": "api", "label": "Access REST API" },
@@ -54,5 +54,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

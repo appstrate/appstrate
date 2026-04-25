@@ -14,11 +14,7 @@
       "authorizationUrl": "https://www.dropbox.com/oauth2/authorize",
       "tokenUrl": "https://api.dropboxapi.com/oauth2/token",
       "refreshUrl": "https://api.dropboxapi.com/oauth2/token",
-      "defaultScopes": [
-        "account_info.read",
-        "files.metadata.read",
-        "files.content.read"
-      ],
+      "defaultScopes": ["account_info.read", "files.metadata.read", "files.content.read"],
       "scopeSeparator": " ",
       "pkceEnabled": true,
       "tokenAuthMethod": "client_secret_post",
@@ -28,7 +24,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.dropboxapi.com/*", "https://content.dropboxapi.com/*"],
+    "authorizedUris": ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
     "availableScopes": [
       { "value": "account_info.read", "label": "Read account info" },
       { "value": "files.metadata.read", "label": "Read file and folder metadata" },
@@ -49,5 +45,5 @@
       { "label": "Copy your App Key (Client ID) and App Secret (Client Secret)" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

@@ -118,6 +118,30 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return socket;
   }
 
+  // The platform API is a trusted destination: the agent can only send
+  // HMAC-signed messages there (the run secret is scoped to a single run).
+  // In local dev the platform URL resolves to `host.docker.internal`, which
+  // is in the SSRF blocklist — exempt that specific host so sink/finalize
+  // traffic can reach the platform. Other internal hosts remain blocked.
+  //
+  // `config` is mutated at runtime via POST /configure (pool sidecars start
+  // with a placeholder URL and receive the real one on acquisition), so
+  // recompute the allowed platform host on every request.
+  function getPlatformHost(): string | null {
+    try {
+      return new URL(config.platformApiUrl).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+
+  function isAllowedHost(hostname: string): boolean {
+    const h = hostname.toLowerCase();
+    const platformHost = getPlatformHost();
+    if (platformHost && h === platformHost) return true;
+    return !isBlockedHostFn(h);
+  }
+
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
     // Regular HTTP requests (non-CONNECT) — forward through upstream or direct
     const targetUrl = req.url;
@@ -138,8 +162,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       return;
     }
 
-    // SSRF protection — block requests to internal/private networks
-    if (isBlockedHostFn(parsed.hostname)) {
+    // SSRF protection — block requests to internal/private networks,
+    // except the trusted platform API (handles local-dev host.docker.internal).
+    if (!isAllowedHost(parsed.hostname)) {
       res.writeHead(403);
       res.end("Blocked: internal network");
       return;
@@ -229,8 +254,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       return;
     }
 
-    // SSRF protection — block CONNECT tunnels to internal/private networks
-    if (isBlockedHostFn(host)) {
+    // SSRF protection — block CONNECT tunnels to internal/private networks,
+    // except the trusted platform API (handles local-dev host.docker.internal).
+    if (!isAllowedHost(host)) {
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.destroy();
       return;

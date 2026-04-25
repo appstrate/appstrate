@@ -5,13 +5,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./proxy-primitives": "./src/proxy-primitives.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/"
   },
   "dependencies": {
+    "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",

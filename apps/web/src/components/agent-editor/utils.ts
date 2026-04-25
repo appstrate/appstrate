@@ -23,7 +23,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
@@ -54,7 +54,7 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -67,7 +67,7 @@ export function defaultSkillManifest(
 export function defaultToolManifest(orgSlug?: string, userEmail?: string): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.tool,
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     type: "tool",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -89,7 +89,7 @@ export function defaultProviderManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.provider,
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     type: "provider",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",

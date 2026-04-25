@@ -221,7 +221,10 @@ export function RunDetailPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
-          {isRunning && (
+          {/* Cancel hidden for remote-origin runs — the process runs on the
+              caller's host and the platform cannot signal it. A soft-cancel
+              (server flag + CLI poll) is tracked as a follow-up. */}
+          {isRunning && enrichedRun.runOrigin !== "remote" && (
             <Button
               variant="destructive"
               onClick={() => cancelRun.mutate(runId!)}

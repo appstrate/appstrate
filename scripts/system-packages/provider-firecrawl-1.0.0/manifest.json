@@ -6,11 +6,7 @@
   "displayName": "Firecrawl",
   "description": "Web scraping and crawling API — extract clean data from any website",
   "iconUrl": "https://avatars.githubusercontent.com/u/135057108",
-  "categories": [
-    "web-scraping",
-    "data-extraction",
-    "ai"
-  ],
+  "categories": ["web-scraping", "data-extraction", "ai"],
   "docsUrl": "https://docs.firecrawl.dev",
   "definition": {
     "authMode": "api_key",
@@ -23,17 +19,13 @@
             "description": "Firecrawl API key (starts with fc-)"
           }
         },
-        "required": [
-          "api_key"
-        ]
+        "required": ["api_key"]
       },
       "fieldName": "api_key"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.firecrawl.dev/*"
-    ]
+    "authorizedUris": ["https://api.firecrawl.dev/**"]
   },
   "setupGuide": {
     "steps": [
@@ -50,5 +42,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

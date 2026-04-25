@@ -26,12 +26,12 @@
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Zoho-oauthtoken",
     "authorizedUris": [
-      "https://www.zohoapis.com/*",
-      "https://www.zohoapis.eu/*",
-      "https://www.zohoapis.in/*",
-      "https://www.zohoapis.com.au/*",
-      "https://www.zohoapis.jp/*",
-      "https://www.zohoapis.com.cn/*"
+      "https://www.zohoapis.com/**",
+      "https://www.zohoapis.eu/**",
+      "https://www.zohoapis.in/**",
+      "https://www.zohoapis.com.au/**",
+      "https://www.zohoapis.jp/**",
+      "https://www.zohoapis.com.cn/**"
     ],
     "availableScopes": [
       { "value": "ZohoCRM.modules.READ", "label": "Read CRM module data" },
@@ -63,5 +63,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

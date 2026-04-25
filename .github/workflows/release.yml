@@ -44,10 +44,10 @@ jobs:
             context: .
             dockerfile: Dockerfile
           - name: appstrate-pi
-            context: ./runtime-pi
+            context: .
             dockerfile: ./runtime-pi/Dockerfile
           - name: appstrate-sidecar
-            context: ./runtime-pi/sidecar
+            context: .
             dockerfile: ./runtime-pi/sidecar/Dockerfile
 
     steps:

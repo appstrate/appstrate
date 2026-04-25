@@ -5,8 +5,8 @@
   "type": "tool",
   "displayName": "Add Memory",
   "description": "Save a discovery or learning as a long-term memory.",
-  "schemaVersion": "1.0",
-  "entrypoint": "add-memory.ts",
+  "schemaVersion": "1.1",
+  "entrypoint": "tool.ts",
   "tool": {
     "name": "add_memory",
     "description": "Save a discovery or learning as a long-term memory. Memories persist across all runs and are shared across all users of this agent.",

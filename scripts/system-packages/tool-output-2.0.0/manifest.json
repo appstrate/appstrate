@@ -1,0 +1,24 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/output",
+  "version": "2.0.0",
+  "type": "tool",
+  "displayName": "Output",
+  "description": "Return data as the run result.",
+  "schemaVersion": "1.1",
+  "entrypoint": "tool.ts",
+  "tool": {
+    "name": "output",
+    "description": "MANDATORY — call exactly once with the complete output object. Calling again replaces the previous output. Validated against the agent's output schema if defined.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "description": "JSON object to return as the run output"
+        }
+      },
+      "required": ["data"]
+    }
+  }
+}

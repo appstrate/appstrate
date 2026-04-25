@@ -30,7 +30,7 @@
     "credentialHeaderName": "Api-Token",
     "credentialHeaderPrefix": "",
     "allowAllUris": true,
-    "authorizedUris": ["https://*.api-us1.com/*"]
+    "authorizedUris": ["https://*.api-us1.com/**"]
   },
   "setupGuide": {
     "steps": [
@@ -42,5 +42,5 @@
       { "label": "Enter your account name (subdomain) and API key" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

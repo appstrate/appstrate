@@ -146,15 +146,16 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │ - NO RUN_TOKEN        │ ← no host access ║
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
-    ║  │ - SIDECAR_URL only    │                  ║
+    ║  │ - NO SIDECAR_URL      │ ← deleted from   ║
+    ║  │                       │   env after boot ║
     ║  │ - Runs LLM agent code │                  ║
     ║  └───────────────────────┘                  ║
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container, via `http://sidecar:8080`. Nothing else.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to build the typed Pi tools (`<provider>_call`, `run_history`), and then `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated outbound traffic flows exclusively through the typed tools, which proxy to the sidecar internally.
 
-**What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens.
+**What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 
 ---
 
@@ -191,31 +192,36 @@ Credentials are **never** passed to the agent container — not as environment v
 
 ### How the agent makes authenticated API calls
 
-The agent sends a regular HTTP request to the sidecar with two routing headers:
+Every sidecar-backed capability is registered as a **typed Pi tool** at container boot (`runtime-pi/entrypoint.ts`). The agent calls the tool with structured arguments; the tool proxies to the sidecar internally. The agent has no bash-level visibility into the sidecar URL — it is deleted from `process.env` after bootstrap.
 
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: gmail" \
-  -H "X-Target: https://gmail.googleapis.com/gmail/v1/users/me/messages" \
-  -H "Authorization: Bearer {{token}}"
+```ts
+// What the agent actually calls (not curl, not bash)
+appstrate_gmail_call({
+  method: "GET",
+  target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+});
+
+run_history({ limit: 5, fields: ["state"] });
 ```
 
-The sidecar:
+Internally, the `<provider>_call` tool POSTs to the sidecar's `/proxy` endpoint with `X-Provider` / `X-Target` routing headers (`run_history` hits `/run-history`). The sidecar:
 
 1. **Fetches credentials** from the platform API (`GET /internal/credentials/gmail`) using its `RUN_TOKEN`
-2. **Substitutes** `{{token}}` with the real OAuth access token in headers and URL
+2. **Substitutes** `{{token}}` placeholders with the real OAuth access token in headers and URL
 3. **Validates** the resolved URL against `authorizedUris` (see [Layer 3](#layer-3--url-authorization))
 4. **Forwards** the request to the target API with real credentials
 5. **Returns** only the response body (status + text) — no credentials in the response
 
 ### What the agent sees vs. what is transmitted
 
-| Component   | Agent sees                                | Wire (to target API)                   |
-| ----------- | ----------------------------------------- | -------------------------------------- |
-| URL         | `https://gmail.googleapis.com/...`        | `https://gmail.googleapis.com/...`     |
-| Auth header | `Bearer {{token}}`                        | `Bearer ya29.a0AfH6SM...` (real token) |
-| Response    | Raw upstream body (status code forwarded) | —                                      |
-| Credentials | Never                                     | Substituted by sidecar                 |
+| Component   | Agent sees                                 | Wire (to target API)                   |
+| ----------- | ------------------------------------------ | -------------------------------------- |
+| Tool call   | `appstrate_gmail_call({ method, target })` | `POST http://sidecar:8080/proxy`       |
+| URL         | `https://gmail.googleapis.com/...`         | `https://gmail.googleapis.com/...`     |
+| Auth header | (not supplied — injected server-side)      | `Bearer ya29.a0AfH6SM...` (real token) |
+| Response    | Raw upstream body (status code forwarded)  | —                                      |
+| Credentials | Never                                      | Substituted by sidecar                 |
+| Sidecar URL | Never (deleted from env after bootstrap)   | —                                      |
 
 ### Credential access is scoped and audited
 

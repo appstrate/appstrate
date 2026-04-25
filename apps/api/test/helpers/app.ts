@@ -39,6 +39,7 @@ import { notFound } from "../../src/lib/errors.ts";
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
 import { createRunsRouter } from "../../src/routes/runs.ts";
+import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
@@ -54,6 +55,8 @@ import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
+import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
+import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
@@ -197,6 +200,10 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
+  // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
+  // more-specific `/runs/:runId/events` path wins — mirrors the
+  // production wiring in `apps/api/src/index.ts`.
+  app.route("/api", createRunsEventsRouter());
   app.route("/api", runsRouter);
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
@@ -220,6 +227,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/connections", createConnectionsRouter());
+  app.route("/api/credential-proxy", createCredentialProxyRouter());
+  app.route("/api/llm-proxy", createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());

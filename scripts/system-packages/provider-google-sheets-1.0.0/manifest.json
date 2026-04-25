@@ -25,7 +25,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://sheets.googleapis.com/*"],
+    "authorizedUris": ["https://sheets.googleapis.com/**"],
     "availableScopes": [
       {
         "value": "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -58,5 +58,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

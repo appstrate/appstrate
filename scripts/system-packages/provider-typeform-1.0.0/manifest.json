@@ -14,19 +14,14 @@
       "authorizationUrl": "https://api.typeform.com/oauth/authorize",
       "tokenUrl": "https://api.typeform.com/oauth/token",
       "refreshUrl": "https://api.typeform.com/oauth/token",
-      "defaultScopes": [
-        "accounts:read",
-        "forms:read",
-        "responses:read",
-        "offline"
-      ],
+      "defaultScopes": ["accounts:read", "forms:read", "responses:read", "offline"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.typeform.com/*"],
+    "authorizedUris": ["https://api.typeform.com/**"],
     "availableScopes": [
       { "value": "accounts:read", "label": "Read account info" },
       { "value": "forms:read", "label": "Read forms" },
@@ -43,10 +38,13 @@
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Create a Typeform OAuth application", "url": "https://admin.typeform.com/account#/section/tokens" },
+      {
+        "label": "Create a Typeform OAuth application",
+        "url": "https://admin.typeform.com/account#/section/tokens"
+      },
       { "label": "Configure the redirect URI and scopes" },
       { "label": "Copy your Client ID and Client Secret" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

@@ -8,9 +8,7 @@
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
-![Agents](.github/assets/screenshot-agents.png)
-
-![Run Result](.github/assets/screenshot-run.png)
+![Appstrate](.github/assets/screenshot.png)
 
 ## Concepts
 
@@ -48,7 +46,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 191 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 249 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
@@ -170,7 +168,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (191 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (249 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireAgent)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
@@ -197,7 +195,7 @@ appstrate/
 
 ## API Overview
 
-The API is organized into 25 route domains with 191 documented endpoints:
+The API is organized into 28 route domains with 249 documented endpoints:
 
 | Domain                  | Description                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -226,6 +224,9 @@ The API is organized into 25 route domains with 191 documented endpoints:
 | **App Profiles**        | Application-scoped connection profile management                                                        |
 | **End-Users**           | External end-user management for headless API                                                           |
 | **Webhooks**            | Run event webhooks with HMAC signing                                                                    |
+| **Credential Proxy**    | Server-side credential injection for external runners (CLI, GitHub Action)                              |
+| **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                  |
+| **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                             |
 
 ### API Documentation
 

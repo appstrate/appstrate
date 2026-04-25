@@ -309,6 +309,133 @@ describe("CONNECT tunneling", () => {
   });
 });
 
+// --- Platform host exemption ---
+
+describe("platform host exemption", () => {
+  it("HTTP: allows requests to the configured platform host even if it would otherwise be blocked", async () => {
+    const echo = await startEchoServer();
+    // Pretend 127.0.0.1 is the platform — real isBlockedHost would block it,
+    // but the exemption rule should let it through.
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/sink/events`);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.url).toBe("/sink/events");
+  });
+
+  it("HTTP: still blocks other internal hosts when a platform host is configured", async () => {
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://host.docker.internal:3000",
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, "http://169.254.169.254/latest/meta-data/");
+    expect(res.status).toBe(403);
+  });
+
+  it("HTTP: hostname comparison is case-insensitive", async () => {
+    const echo = await startEchoServer();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      // Block any host containing uppercase to prove the exemption matches before blocking
+      isBlockedHostFn: () => true,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
+    expect(res.status).toBe(200);
+  });
+
+  it("HTTP: re-reads platformApiUrl on every request (pool reconfiguration)", async () => {
+    const echo = await startEchoServer();
+    const config = {
+      platformApiUrl: "http://placeholder:1",
+      runToken: "tok",
+      proxyUrl: "",
+    };
+    const proxy = makeProxy({ config, isBlockedHostFn: undefined });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    // Initially 127.0.0.1 is blocked because platformApiUrl points elsewhere
+    const blocked = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/before`);
+    expect(blocked.status).toBe(403);
+
+    // Mutate config (simulating POST /configure on a pooled sidecar)
+    config.platformApiUrl = `http://127.0.0.1:${echo.port}`;
+
+    const allowed = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/after`);
+    expect(allowed.status).toBe(200);
+  });
+
+  it("HTTP: tolerates an invalid platformApiUrl without crashing (falls back to blocklist only)", async () => {
+    const proxy = makeProxy({
+      config: { platformApiUrl: "::not a url::", runToken: "tok", proxyUrl: "" },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, "http://127.0.0.1:9999/x");
+    expect(res.status).toBe(403);
+  });
+
+  it("CONNECT: allows tunnels to the configured platform host", async () => {
+    const echo = await startEchoServer();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.statusLine).toContain("Connection Established");
+  });
+
+  it("CONNECT: still blocks other internal hosts when a platform host is configured", async () => {
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://host.docker.internal:3000",
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, "169.254.169.254:80");
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 // --- Lifecycle ---
 
 describe("lifecycle", () => {

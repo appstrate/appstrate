@@ -113,6 +113,18 @@ interface CreateRunParams {
   agentName?: string | null;
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;
+  /**
+   * Which runner drives this run. Platform-origin runs execute in a
+   * server-managed Docker container; remote-origin runs execute on the
+   * caller's host. Both speak the same HMAC-signed event protocol.
+   */
+  runOrigin?: "platform" | "remote";
+  /** AES-256-GCM ciphertext of the per-run sink secret (via `@appstrate/connect`). */
+  sinkSecretEncrypted?: string;
+  /** Hard expiry beyond which `/events` rejects. Required when a sink is open. */
+  sinkExpiresAt?: Date;
+  /** Runner-provided execution environment metadata (os, cli version, git sha, ...). */
+  contextSnapshot?: Record<string, unknown>;
 }
 
 export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
@@ -143,6 +155,12 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
     config: params.config ?? null,
+    runOrigin: params.runOrigin ?? "platform",
+    ...(params.sinkSecretEncrypted !== undefined
+      ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
+      : {}),
+    ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
+    ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
   });
 }
 
@@ -197,8 +215,9 @@ export async function updateRun(
     duration?: number;
     tokenUsage?: Record<string, unknown>;
     notifiedAt?: string;
-    cost?: number | null;
     metadata?: Record<string, unknown>;
+    /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
+    sinkClosedAt?: string;
   },
 ): Promise<void> {
   const set: Record<string, unknown> = {};
@@ -211,8 +230,8 @@ export async function updateRun(
   if (updates.state !== undefined) set.state = updates.state;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
-  if (updates.cost !== undefined) set.cost = updates.cost;
   if (updates.metadata !== undefined) set.metadata = updates.metadata;
+  if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
   try {
     await db

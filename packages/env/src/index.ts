@@ -77,6 +77,48 @@ const envSchema = z
       .default("{}")
       .transform((s) => JSON.parse(s) as Record<string, unknown>),
 
+    // Unified runner protocol — governs the event-ingestion surface shared
+    // by platform containers and remote CLIs. See
+    // docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md.
+    //
+    // Default sink TTL when the caller does not request one (remote CLI) or
+    // cannot (platform container boot env). 2h is comfortably above the
+    // platform timeout ceiling.
+    REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS: z.coerce.number().int().positive().default(7200),
+    // Hard ceiling — any caller-requested TTL is clamped to this.
+    REMOTE_RUN_SINK_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+    // Per-run event-route rate limit. Parsed at route-build time, changes
+    // require a reboot. Empty object means defaults apply.
+    REMOTE_RUN_EVENT_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    // Redis dedup window for webhook-id replay detection. MUST exceed the
+    // Standard Webhooks timestamp tolerance (5 min) so a replayed event
+    // cannot slip through after its cache entry expires.
+    REMOTE_RUN_REPLAY_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),
+    // Out-of-order event buffer flush window. Events with non-contiguous
+    // sequence numbers wait up to this long for the gap to fill; terminal
+    // events (run.completed/failed/timeout/cancelled) flush immediately
+    // regardless of gaps.
+    REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
+
+    // Runner liveness — the stall watchdog and the runner-side keep-alive
+    // form a single unified detection path across every runner topology
+    // (platform container, remote CLI, GitHub Action, …). See
+    // apps/api/src/services/run-watchdog.ts.
+    //
+    // Runner emits an implicit heartbeat on every event POST plus an
+    // explicit /sink/extend on idle; the watchdog sweeps any open-sink
+    // row whose last heartbeat slipped past STALL_THRESHOLD.
+    //
+    // Ratio rule-of-thumb: stall_threshold ≥ 3 × heartbeat_interval
+    // (industry consensus: Temporal, Sidekiq, BullMQ, AWS Builders'
+    // Library) so a single dropped ping never trips the watchdog.
+    RUN_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+    RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(120),
+    RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+
     // Modules (comma-separated specifiers).
     // Default loads built-in OSS modules (oidc, webhooks).
     // Append external specifiers (npm package names) to extend.
@@ -131,6 +173,22 @@ const envSchema = z
     // Legal URLs (optional — displayed in footer when set)
     LEGAL_TERMS_URL: z.string().optional(),
     LEGAL_PRIVACY_URL: z.string().optional(),
+
+    // AFPS bundle signing
+    //
+    // AFPS_TRUST_ROOT: JSON array of trusted publishers:
+    //   [{ "keyId": "...", "publicKey": "<base64>", "comment": "..." }]
+    // Bundles signed by a key not in this list (directly or via chain) are
+    // rejected when AFPS_SIGNATURE_POLICY=required.
+    AFPS_TRUST_ROOT: z
+      .string()
+      .default("[]")
+      .transform((s) => JSON.parse(s) as unknown[]),
+    // AFPS_SIGNATURE_POLICY — how to treat bundle signatures at load:
+    //   - "off"      (default) — no verification, unsigned bundles accepted
+    //   - "warn"     — verify if signed; log warnings on unsigned/invalid
+    //   - "required" — reject unsigned and invalid bundles (load fails)
+    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("off"),
 
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),

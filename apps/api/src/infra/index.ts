@@ -9,9 +9,11 @@ import { hasRedis } from "./mode.ts";
 import type { PubSub } from "./pubsub/interface.ts";
 import type { KeyValueCache } from "./cache/interface.ts";
 import type { RateLimiterFactory } from "./rate-limit/interface.ts";
+import type { EventBuffer } from "./event-buffer/interface.ts";
 import { LocalPubSub } from "./pubsub/local-pubsub.ts";
 import { LocalCache } from "./cache/local-cache.ts";
 import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
+import { LocalEventBuffer } from "./event-buffer/local-event-buffer.ts";
 import { logger } from "../lib/logger.ts";
 
 // Re-exports for convenience
@@ -19,6 +21,7 @@ export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
 export type { PubSub } from "./pubsub/interface.ts";
 export type { KeyValueCache, CacheSetOptions } from "./cache/interface.ts";
 export type { RateLimiterFactory } from "./rate-limit/interface.ts";
+export type { EventBuffer, BufferedEvent } from "./event-buffer/interface.ts";
 
 // ---------------------------------------------------------------------------
 // Singletons — Redis implementations are loaded lazily via dynamic import()
@@ -30,6 +33,7 @@ export type { RateLimiterFactory } from "./rate-limit/interface.ts";
 let pubsubPromise: Promise<PubSub> | null = null;
 let cachePromise: Promise<KeyValueCache> | null = null;
 let rateLimiterPromise: Promise<RateLimiterFactory> | null = null;
+let eventBufferPromise: Promise<EventBuffer> | null = null;
 
 export function getPubSub(): Promise<PubSub> {
   if (!pubsubPromise) {
@@ -70,17 +74,31 @@ export function getRateLimiterFactory(): Promise<RateLimiterFactory> {
   return rateLimiterPromise;
 }
 
+export function getEventBuffer(): Promise<EventBuffer> {
+  if (!eventBufferPromise) {
+    eventBufferPromise = (async () => {
+      if (hasRedis()) {
+        const { RedisEventBuffer } = await import("./event-buffer/redis-event-buffer.ts");
+        return new RedisEventBuffer();
+      }
+      return new LocalEventBuffer();
+    })();
+  }
+  return eventBufferPromise;
+}
+
 /** Shutdown all infrastructure adapters. */
 export async function shutdownInfra(): Promise<void> {
   // Resolve all pending singletons before tearing down.
   // RateLimiterFactory has no shutdown — its Redis connection is shared and closed by closeRedis().
-  const [ps, ch] = await Promise.all([pubsubPromise, cachePromise]);
+  const [ps, ch, eb] = await Promise.all([pubsubPromise, cachePromise, eventBufferPromise]);
   // Ensure rate limiter promise is settled (no dangling async) before nullifying
   await rateLimiterPromise;
-  await Promise.all([ps?.shutdown(), ch?.shutdown()]);
+  await Promise.all([ps?.shutdown(), ch?.shutdown(), eb?.shutdown()]);
   pubsubPromise = null;
   cachePromise = null;
   rateLimiterPromise = null;
+  eventBufferPromise = null;
 }
 
 /** Log which infrastructure backends are active. */

@@ -135,8 +135,10 @@ export async function triggerInlineRun(params: {
   actor: Actor | null;
   body: InlineRunBody;
   apiKeyId?: string;
+  /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
+  traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
-  const { orgId, applicationId, actor, body, apiKeyId } = params;
+  const { orgId, applicationId, actor, body, apiKeyId, traceparent } = params;
 
   // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
   const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
@@ -172,6 +174,7 @@ export async function triggerInlineRun(params: {
       proxyId: proxyIdOverride,
       applicationId,
       apiKeyId,
+      traceparent,
     });
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);

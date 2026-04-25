@@ -90,5 +90,23 @@ export type AppEnv = {
      * when hitting platform routes.
      */
     sessionRealm?: string;
+    /**
+     * Populated by `verifyRunSignature` on HMAC-authenticated event routes
+     * (POST /api/runs/:runId/events and /finalize). Routes read this
+     * instead of `user`/`orgId` — the principal is the run itself.
+     */
+    run?: import("./run-sink.ts").RunSinkContext;
+    /** Request-specific webhook-id header (Standard Webhooks msg id) used for replay dedup. */
+    webhookId?: string;
+    /**
+     * W3C Trace Context — populated by `requestId()` middleware from the
+     * inbound `traceparent` header. Validated and normalised: malformed
+     * headers are dropped (the middleware leaves the field undefined).
+     * Routes that emit structured logs include this in the binding so
+     * runs can be correlated end-to-end across services.
+     */
+    traceparent?: string;
+    /** Trace-id portion of {@link traceparent}, exposed for cheap log binding. */
+    traceId?: string;
   };
 };

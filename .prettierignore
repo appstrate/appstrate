@@ -6,3 +6,9 @@ packages/core/schema/
 
 # Bun config files — toml, no prettier parser
 **/bunfig.toml
+
+# AFPS example prompt sources — Mustache whitespace is semantic inside
+# sections; prettier's markdown reformat injects blank lines that leak
+# into rendered output.
+packages/afps-runtime/examples/**/source/*.md
+packages/afps-runtime/fixtures/

@@ -54,3 +54,22 @@ export {
   listProviderCredentialIds,
   listConfiguredProviderIds,
 } from "./credentials.ts";
+export type { ProxyCredentialsPayload } from "./credentials.ts";
+
+// Credential-proxy primitives (shared between the /api/credential-proxy/proxy
+// route and the in-container sidecar to prevent silent drift).
+export {
+  substituteVars,
+  findUnresolvedPlaceholders,
+  matchesAuthorizedUriSpec,
+  HOP_BY_HOP_HEADERS,
+  filterHeaders,
+  buildInjectedCredentialHeader,
+  applyInjectedCredentialHeader,
+  applyInjectedCredentialHeaderToHeaders,
+  normalizeAuthScheme,
+  normalizeAuthSchemeOnHeaders,
+} from "./proxy-primitives.ts";
+// `ProxyCredentialsPayload` is re-exported from `./credentials.ts` above —
+// it physically lives in `proxy-primitives.ts` so the sidecar can consume
+// it without pulling @appstrate/db. Single type, shared by both paths.

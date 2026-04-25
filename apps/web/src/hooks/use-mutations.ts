@@ -169,6 +169,16 @@ export function useImportPackage() {
     mutationFn: async ({ file, force }: { file: File; force?: boolean }) => {
       const fd = new FormData();
       fd.append("file", file);
+      // Multi-package bundles route to a different endpoint; the
+      // single-package import endpoint can't decode them. Detect by
+      // extension so users can drag both kinds into the same modal.
+      if (file.name.toLowerCase().endsWith(".afps-bundle")) {
+        const res = await uploadFormData<{
+          rootPackageId: string;
+          rootVersion: string;
+        }>("/packages/import-bundle", fd);
+        return { packageId: res.rootPackageId, type: "agent" as const };
+      }
       const qs = force ? "?force=true" : "";
       return uploadFormData<{ packageId: string; type: string }>(`/packages/import${qs}`, fd);
     },

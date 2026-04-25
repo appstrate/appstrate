@@ -27,6 +27,10 @@ Use a **separate sidecar container** that runs alongside each agent container on
 
 The agent container has no `RUN_TOKEN`, no `PLATFORM_API_URL`, and no `ExtraHosts` entry -- it cannot reach the host machine or the platform API directly. All external communication goes through the sidecar.
 
+**Agent-facing surface — AFPS `<provider>_call` tools (2026-04).** The agent no longer invokes the sidecar via `bash`/`curl`. At run start the runtime reads `dependencies.providers[]` from the bundle manifest and registers one typed tool per entry (`@appstrate/gmail` → `appstrate_gmail_call`, etc.) via `SidecarProviderResolver` from `@appstrate/afps-runtime/resolvers` and `buildProviderExtensionFactories` from `@appstrate/runner-pi`. The tool takes `{ method, target, headers?, body?, responseMode? }`, enforces `authorizedUris` client-side before dispatch, POSTs to `${SIDECAR_URL}/proxy` with the expected `X-Provider`/`X-Target` headers, and returns the upstream `{ status, headers, body }` as a single JSON text payload. Non-2xx upstream responses surface `isError: true` to the LLM. The sidecar HTTP contract is unchanged — this is a client-surface migration that unifies the container runtime and the `appstrate run` CLI (both now use the same bridge) and keeps the prompt ~2 KB shorter per run by dropping the former "Authenticated Provider API" curl tutorial.
+
+**Run history tool + env hardening (2026-04).** The last sidecar surface exposed directly to the agent — the `## Run History` prompt section documenting `curl "$SIDECAR_URL/run-history?…"` — has been replaced with a typed `run_history` tool. The runtime builds it via `makeRunHistoryTool` + `createSidecarRunHistoryCall` in `@appstrate/afps-runtime/resolvers` and registers it through `buildRunHistoryExtensionFactory` from `@appstrate/runner-pi` (runtime-pi/entrypoint.ts Phase D). Agents call `run_history({ limit?, fields? })`, the tool dispatches through the sidecar's `/run-history` endpoint (unchanged contract), and the response flows back as `{ runs: [...] }` with the same shape the endpoint has always served. Every call emits a `run_history.called` structured event carrying `limit`, `fields`, `status`, `durationMs`, and `count` — parity with `provider.called`. Immediately after Phase D wires the tool, Phase 2e executes `delete process.env.SIDECAR_URL`, so the Pi bash extension cannot leak the sidecar URL via `echo $SIDECAR_URL`. Net effect: "agent never sees the sidecar" becomes an enforced runtime invariant rather than a documentation convention, and the prompt is ~200 bytes shorter per run.
+
 A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid cold-start latency. Pool size is configurable via `SIDECAR_POOL_SIZE` (default: 2). Pooled sidecars are configured at acquisition time via `POST /configure`.
 
 ## Consequences
@@ -39,6 +43,7 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 - Sidecar pool eliminates container startup latency for most runs
 - Response pass-through preserves upstream HTTP status codes and content types
 - Large responses are truncated (>50KB) with `X-Truncated: true` header to protect agent context windows
+- Typed `<provider>_call` tool surface gives structured observability (`provider.called` events carry `providerId`, `method`, `target`, `status`, `durationMs`) instead of opaque bash calls, and shortens the system prompt by eliminating per-provider curl examples
 
 **Negative:**
 

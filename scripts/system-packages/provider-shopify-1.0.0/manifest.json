@@ -29,7 +29,7 @@
     },
     "credentialHeaderName": "X-Shopify-Access-Token",
     "credentialHeaderPrefix": "",
-    "authorizedUris": ["https://*.myshopify.com/*"]
+    "authorizedUris": ["https://*.myshopify.com/**"]
   },
   "setupGuide": {
     "steps": [
@@ -41,5 +41,5 @@
       { "label": "Install the app and copy the Admin API access token" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

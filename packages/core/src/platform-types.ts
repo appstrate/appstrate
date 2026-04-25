@@ -252,6 +252,16 @@ export interface ContainerOrchestrator {
 
   /** Stop ALL workloads for a run by ID. For cancel. */
   stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult>;
+
+  /**
+   * Base URL the agent workload should use to reach the platform API.
+   * Docker: Docker-network hostname (when platform is containerized) or
+   * `host.docker.internal` (local dev). Process: `http://localhost:{PORT}`.
+   *
+   * Consumed by the unified-runner protocol — the container reads
+   * `APPSTRATE_SINK_URL` composed from this base + `/api/runs/:id/events`.
+   */
+  resolvePlatformApiUrl(): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------

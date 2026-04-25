@@ -1,0 +1,94 @@
+{
+  "name": "@appstrate/afps-runtime",
+  "version": "0.0.0",
+  "description": "Portable, open-source runtime for executing AFPS agent bundles. Powers Appstrate and any compatible machine.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.9"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "author": "Appstrate <hello@appstrate.dev>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate.git",
+    "directory": "packages/afps-runtime"
+  },
+  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/afps-runtime",
+  "bugs": {
+    "url": "https://github.com/appstrate/appstrate/issues"
+  },
+  "keywords": [
+    "afps",
+    "appstrate",
+    "agent",
+    "ai",
+    "runtime",
+    "pi",
+    "coding-agent",
+    "autonomous-agents"
+  ],
+  "bin": {
+    "afps": "./bin/afps.ts"
+  },
+  "files": [
+    "src",
+    "bin",
+    "fixtures",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli/index.ts",
+    "./errors": "./src/errors.ts",
+    "./interfaces": "./src/interfaces/index.ts",
+    "./types": "./src/types/index.ts",
+    "./events": "./src/events/index.ts",
+    "./sinks": "./src/sinks/index.ts",
+    "./template": "./src/template/index.ts",
+    "./transport": "./src/transport/trace-context.ts",
+    "./bundle": "./src/bundle/index.ts",
+    "./runner": "./src/runner/index.ts",
+    "./resolvers": "./src/resolvers/index.ts",
+    "./conformance": "./src/conformance/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit",
+    "test": "bun test",
+    "fixtures:build": "bun run scripts/build-fixtures.ts"
+  },
+  "dependencies": {
+    "@afps-spec/schema": "^1.3.1",
+    "@afps-spec/types": "^1.0.0",
+    "fflate": "^0.8.2",
+    "mustache": "^4.2.0",
+    "semver": "^7.7.1",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@mariozechner/pi-ai": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.6",
+    "@types/semver": "^7.7.1",
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
+  }
+}

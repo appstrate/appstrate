@@ -20,15 +20,18 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://*.api.mailchimp.com/*", "https://login.mailchimp.com/*"],
+    "authorizedUris": ["https://*.api.mailchimp.com/**", "https://login.mailchimp.com/**"],
     "availableScopes": []
   },
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Register an OAuth app in Mailchimp", "url": "https://admin.mailchimp.com/account/oauth2/" },
+      {
+        "label": "Register an OAuth app in Mailchimp",
+        "url": "https://admin.mailchimp.com/account/oauth2/"
+      },
       { "label": "Copy your Client ID and Client Secret" }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

@@ -28,22 +28,43 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://forms.googleapis.com/*"],
+    "authorizedUris": ["https://forms.googleapis.com/**"],
     "availableScopes": [
-      { "value": "https://www.googleapis.com/auth/forms.body.readonly", "label": "Read form structure" },
-      { "value": "https://www.googleapis.com/auth/forms.body", "label": "Read and edit form structure" },
-      { "value": "https://www.googleapis.com/auth/forms.responses.readonly", "label": "Read form responses" },
-      { "value": "https://www.googleapis.com/auth/drive.readonly", "label": "Read Google Drive (list forms)" },
+      {
+        "value": "https://www.googleapis.com/auth/forms.body.readonly",
+        "label": "Read form structure"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/forms.body",
+        "label": "Read and edit form structure"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/forms.responses.readonly",
+        "label": "Read form responses"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.readonly",
+        "label": "Read Google Drive (list forms)"
+      },
       { "value": "https://www.googleapis.com/auth/drive", "label": "Full Google Drive access" }
     ]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Enable the Google Forms API", "url": "https://console.cloud.google.com/apis/library/forms.googleapis.com" },
-      { "label": "Configure the OAuth consent screen", "url": "https://console.cloud.google.com/apis/credentials/consent" },
-      { "label": "Create OAuth credentials", "url": "https://console.cloud.google.com/apis/credentials" }
+      {
+        "label": "Enable the Google Forms API",
+        "url": "https://console.cloud.google.com/apis/library/forms.googleapis.com"
+      },
+      {
+        "label": "Configure the OAuth consent screen",
+        "url": "https://console.cloud.google.com/apis/credentials/consent"
+      },
+      {
+        "label": "Create OAuth credentials",
+        "url": "https://console.cloud.google.com/apis/credentials"
+      }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }

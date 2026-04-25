@@ -99,7 +99,7 @@ export async function seedRun(overrides: RunInsert): Promise<InferSelectModel<ty
   const [run] = await db
     .insert(runs)
     .values({
-      id: `exec_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      id: `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       status: "pending",
       ...overrides,
     })

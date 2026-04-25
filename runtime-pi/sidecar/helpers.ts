@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pure functions and constants extracted from server.ts for testability.
+/**
+ * Sidecar-local constants + thin re-exports over `@appstrate/connect`
+ * shared credential-proxy primitives. The shared module is the single
+ * source of truth so any improvement (placeholder semantics, URL
+ * allowlist matching, hop-by-hop header list) propagates to both the
+ * public `/api/credential-proxy/proxy` route and this in-container
+ * sidecar automatically.
+ */
 
 export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 
@@ -15,58 +22,34 @@ export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
 
 export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
-export interface CredentialsResponse {
-  credentials: Record<string, string>;
-  authorizedUris: string[] | null;
-  allowAllUris: boolean;
-}
+// The credentials payload the sidecar receives over HTTP is
+// wire-identical to what the platform's `/api/credential-proxy/proxy`
+// route resolves from the DB — both are `ProxyCredentialsPayload`. The
+// local alias preserves the sidecar's historical vocabulary (this is
+// the HTTP response body from `/internal/providers/credentials`).
+export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/connect/proxy-primitives";
 
-export function substituteVars(text: string, credentials: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? _match);
-}
+// Import from the dedicated subpath so the compiled sidecar binary does
+// NOT pull `@appstrate/connect`'s credentials module (which transitively
+// depends on @appstrate/db — unwanted in a credential-isolating proxy).
+export {
+  substituteVars,
+  findUnresolvedPlaceholders,
+  HOP_BY_HOP_HEADERS,
+  filterHeaders,
+  buildInjectedCredentialHeader,
+  applyInjectedCredentialHeader,
+  normalizeAuthScheme,
+} from "@appstrate/connect/proxy-primitives";
 
-export function findUnresolvedPlaceholders(text: string): string[] {
-  const matches = [...text.matchAll(/\{\{(\w+)\}\}/g)];
-  return matches.map((m) => m[1]!);
-}
+import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
 
-/** RFC 7230 §6.1 hop-by-hop headers — must not be forwarded by proxies. */
-export const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-connection",
-  "transfer-encoding",
-  "te",
-  "trailer",
-  "upgrade",
-  "proxy-authorization",
-]);
-
-/** Strip host, content-length, and hop-by-hop headers. Optionally skip additional header names (lowercase). */
-export function filterHeaders(
-  headers: Record<string, string>,
-  extraSkip?: Set<string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    const lower = key.toLowerCase();
-    if (
-      lower === "host" ||
-      lower === "content-length" ||
-      HOP_BY_HOP_HEADERS.has(lower) ||
-      extraSkip?.has(lower)
-    )
-      continue;
-    out[key] = value;
-  }
-  return out;
-}
-
+/**
+ * Check a target URL against a list of `authorizedUris` patterns using
+ * the AFPS 1.3 spec semantics (`*` matches a single path segment, `**`
+ * matches any substring). Thin wrapper preserving the sidecar's
+ * historical `(url, patterns[])` shape.
+ */
 export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    if (pattern.endsWith("*")) {
-      return url.startsWith(pattern.slice(0, -1));
-    }
-    return url === pattern;
-  });
+  return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
 }

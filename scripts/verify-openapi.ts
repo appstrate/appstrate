@@ -69,6 +69,7 @@ const expectedEndpoints = [
   "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
+  "GET /api/agents/{scope}/{name}/bundle",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",
@@ -283,10 +284,16 @@ const expectedEndpoints = [
   "GET /api/runs",
   "POST /api/runs/inline",
   "POST /api/runs/inline/validate",
+  "POST /api/runs/remote",
+  "POST /api/runs/{runId}/events",
+  "POST /api/runs/{runId}/events/finalize",
+  "POST /api/runs/{runId}/events/heartbeat",
+  "PATCH /api/runs/{runId}/sink/extend",
 
   // Packages
   "POST /api/packages/import",
   "POST /api/packages/import-github",
+  "POST /api/packages/import-bundle",
   "GET /api/packages/{scope}/{name}/{version}/download",
   "POST /api/packages/{scope}/{name}/fork",
 
@@ -323,6 +330,13 @@ const expectedEndpoints = [
   // Uploads
   "POST /api/uploads",
   "PUT /api/uploads/_content",
+
+  // Credential proxy (AFPS 1.3 BYOI)
+  "POST /api/credential-proxy/proxy",
+
+  // LLM proxy (Remote CLI execution — Phase 3)
+  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
+  "POST /api/llm-proxy/anthropic-messages/v1/messages",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

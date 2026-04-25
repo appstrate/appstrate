@@ -20,7 +20,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.clickup.com/*"]
+    "authorizedUris": ["https://api.clickup.com/**"]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
@@ -34,5 +34,5 @@
       }
     ]
   },
-  "schemaVersion": "1.0"
+  "schemaVersion": "1.1"
 }
