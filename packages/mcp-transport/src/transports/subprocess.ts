@@ -2,32 +2,32 @@
 
 /**
  * SubprocessTransport — spawn a third-party MCP server as a child process
- * and speak newline-delimited JSON-RPC over its stdio (Phase 4 of #276).
+ * and speak newline-delimited JSON-RPC over its stdio.
  *
  * Why a hand-rolled transport rather than the SDK's `StdioClientTransport`:
- *   - We need explicit control over stderr capture (Phase 4 §D4.5
- *     transducer routes it as `log.written` CloudEvents).
- *   - We harden against the 9 documented MCP CVEs catalogued in the
- *     migration plan: per-line size cap, per-line rate cap, strict UTF-8,
- *     environment scrubbing, abort-on-cancel, output-rate limits.
- *   - We control spawn options (cgroup-friendly resource limits,
- *     env allowlist, ulimits) without monkey-patching the SDK.
+ *   - We need explicit control over stderr capture (the transducer
+ *     routes it as `log.written` CloudEvents).
+ *   - We harden against the documented MCP CVEs: per-line size cap,
+ *     per-line rate cap, strict UTF-8, environment scrubbing, abort-on-
+ *     cancel, output-rate limits.
+ *   - We control spawn options (cgroup-friendly resource limits, env
+ *     allowlist, ulimits) without monkey-patching the SDK.
  *
- * Spec compliance: this transport implements the SDK's
- * {@link Transport} interface verbatim — it can be passed to
- * `client.connect(transport)` exactly like `StdioClientTransport`.
+ * Spec compliance: this transport implements the SDK's {@link Transport}
+ * interface verbatim — it can be passed to `client.connect(transport)`
+ * exactly like `StdioClientTransport`.
  *
  * What it does NOT do (deferred to deployment-side hardening):
  *   - cgroup attachment (Linux-only, requires the runtime to be built
  *     into a container image with cgroup tooling). The transport
  *     surfaces resource-limit hooks; the orchestrator wires them.
- *   - gVisor / Firecracker isolation. Those are tenant policy
- *     decisions, not per-server transport concerns.
+ *   - gVisor / Firecracker isolation. Those are tenant-policy decisions,
+ *     not per-server transport concerns.
  *   - Seccomp profile. Also deployment-side.
  *
- * Per the plan §D4.4 these are layered defenses applied above this
- * transport, not inside it. The transport handles framing, capture,
- * and lifecycle — the boring-but-correct part.
+ * These are layered defences applied above this transport, not inside
+ * it. The transport handles framing, capture, and lifecycle — the
+ * boring-but-correct part.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";

@@ -298,14 +298,12 @@ export type ProviderCallFn = (
 /**
  * Apply transport control headers to an outgoing provider call.
  *
- * Used by {@link RemoteAppstrateProviderResolver}. The historical
- * `SidecarProviderResolver` was retired in favour of the MCP
- * `provider_call` tool, which talks to the sidecar's `executeProviderCall`
- * directly without serialising over `X-Stream-Response` / `X-Stream-Request`
- * — this transport-control layer survives only for the CLI's HTTP path
- * to the platform's `/api/internal/credential-proxy/...` route.
+ * Used by {@link RemoteAppstrateProviderResolver} for the CLI's HTTP
+ * path to the platform's `/api/credential-proxy/proxy` route.
+ * Container runs reach the sidecar's `executeProviderCall` over MCP
+ * `provider_call` and bypass this header layer entirely.
  *
- * Rules applied (mirrors the sidecar server contract):
+ * Rules applied (mirrors the platform server contract):
  *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
  *    `X-Max-Response-Size` is omitted — it is redundant when streaming.
  *  - `isStreamingBody` → `X-Stream-Request: 1` + explicit `Content-Length`
@@ -689,9 +687,9 @@ export interface ResolveBodyStreamOptions {
    * stream as `body` with `duplex: "half"` to fetch. Files above
    * {@link MAX_STREAMED_BODY_SIZE} are still rejected up front.
    *
-   * When false (default), the runtime continues to buffer the file in
-   * memory up to {@link MAX_REQUEST_BODY_SIZE} — preserving the legacy
-   * 401-refresh-and-retry semantics on the transport.
+   * When false (default), the runtime buffers the file in memory up
+   * to {@link MAX_REQUEST_BODY_SIZE} — preserving 401-refresh-and-retry
+   * semantics on the transport.
    */
   allowStreaming?: boolean;
 }
@@ -990,7 +988,7 @@ export async function resolveBodyForFetch(
     const stream = await openFileReadStream(safePath);
     return { kind: "stream", stream, size: lst.size };
   }
-  // Buffered path: same hard cap as the legacy resolveBodyStream.
+  // Buffered path: same hard cap as the streaming variant.
   if (lst.size > MAX_REQUEST_BODY_SIZE) {
     throw new ResolverError(
       "RESOLVER_BODY_TOO_LARGE",

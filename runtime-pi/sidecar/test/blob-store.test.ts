@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the run-scoped blob cache (Phase 3a of #276).
+ * Tests for the run-scoped blob cache.
  *
  * Coverage focus:
- *   - URI shape conforms to the migration plan §V2.
+ *   - URI shape conforms to the documented `appstrate://blob/{run}/{ulid}` form.
  *   - URIs are unguessable (no sequential IDs).
- *   - Cross-run reads are silently rejected (security: §I3 isolation).
+ *   - Cross-run reads are silently rejected (run-scoped isolation).
  *   - Path-traversal attempts are rejected.
  *   - Cumulative size limit is enforced.
  */

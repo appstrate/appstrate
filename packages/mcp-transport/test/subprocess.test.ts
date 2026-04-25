@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for SubprocessTransport (Phase 4 of #276).
+ * Tests for SubprocessTransport.
  *
  * Coverage focus:
  *   - JSON-RPC framing — line-delimited send/receive.

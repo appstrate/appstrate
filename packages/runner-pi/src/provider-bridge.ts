@@ -10,8 +10,7 @@
  * identical regardless of whether the run executes inside a container
  * (MCP) or in-process (AFPS resolver).
  *
- * One tool, one schema. The legacy per-provider naming
- * (`appstrate_<slug>_call`) was retired together with `SidecarProviderResolver`.
+ * One tool, one schema, regardless of the resolver substrate.
  */
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";

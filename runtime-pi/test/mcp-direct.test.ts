@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the runtime-pi direct MCP tool surface (Phase 5 §D5.3 of #276).
+ * Tests for the runtime-pi direct MCP tool surface.
  *
  * Strategy:
  *   - Build an in-process MCP server exposing `provider_call`,
  *     `run_history`, and `llm_complete`.
  *   - Drive `buildMcpDirectFactories` against it.
- *   - Verify the LLM-facing Pi tools are registered with their MCP
- *     names (no per-provider aliases) and dispatch correctly.
+ *   - Verify the LLM-facing Pi tools are registered with their canonical
+ *     MCP names and dispatch correctly.
  */
 
 import { describe, it, expect } from "bun:test";

@@ -3,11 +3,10 @@
 /**
  * MCP endpoint integration tests.
  *
- * The sidecar mounts an `/mcp` endpoint that exposes `provider_call` and
- * `run_history` as MCP tools. These tests verify wire-format compliance
- * and contract preservation: the MCP path must surface the same auth /
- * authorisation / SSRF guarantees the legacy `/proxy` and `/run-history`
- * routes already enforce.
+ * The sidecar mounts `/mcp` and exposes `provider_call`, `run_history`,
+ * and `llm_complete` as MCP tools. These tests verify wire-format
+ * compliance and the auth / authorisation / SSRF guarantees that the
+ * MCP path enforces end-to-end.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -125,7 +124,7 @@ describe("POST /mcp — tools/list", () => {
 });
 
 describe("POST /mcp — tools/call run_history", () => {
-  it("delegates to /run-history and returns the upstream JSON", async () => {
+  it("delegates to the platform's /internal/run-history and returns the upstream JSON", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"runs":[{"id":"r1"}]}', {
@@ -145,7 +144,7 @@ describe("POST /mcp — tools/call run_history", () => {
     expect(result.content[0]!.text).toBe('{"runs":[{"id":"r1"}]}');
 
     // Verifies the `limit` and `fields` arguments propagated as query
-    // parameters into the underlying /run-history call.
+    // parameters into the underlying platform call.
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const calledUrl = fetchFn.mock.calls[0]![0] as string;
     expect(calledUrl).toContain("/internal/run-history");
@@ -155,7 +154,7 @@ describe("POST /mcp — tools/call run_history", () => {
 });
 
 describe("POST /mcp — tools/call provider_call", () => {
-  it("forwards through /proxy with credential injection", async () => {
+  it("forwards through executeProviderCall with credential injection", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"id":"abc"}', {
@@ -209,10 +208,10 @@ describe("POST /mcp — tools/call provider_call", () => {
     expect(result.content[0]!.text).toContain("not authorized");
   });
 
-  it("spills non-text upstream responses to a resource_link (Phase 3a)", async () => {
-    // Phase 1 narrowed binary content to errors; Phase 3a stores them
-    // in a run-scoped blob cache and returns a `resource_link` that
-    // the agent can read on demand via `client.readResource({ uri })`.
+  it("spills non-text upstream responses to a resource_link", async () => {
+    // Binary upstream responses are stored in a run-scoped blob cache
+    // and returned as a `resource_link` that the agent can read on
+    // demand via `client.readResource({ uri })`.
     const fetchFn = mock(
       async () =>
         new Response(new Uint8Array([0xde, 0xad, 0xbe, 0xef]), {
@@ -342,7 +341,8 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(secondResult.content[0]!.text).toBe('{"id":"abc"}');
 
     // Both invocations reached the upstream — proves the second MCP
-    // call did not fail at the transport layer before getting to /proxy.
+    // call did not fail at the transport layer before reaching the
+    // credential-proxy core.
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });
@@ -435,9 +435,9 @@ describe("POST /mcp — caller cannot forge sidecar control headers", () => {
       expect(result.content[0]!.text).toContain(forbidden);
 
       // The forbidden header must NOT have reached the upstream — the
-      // request is rejected before /proxy is invoked. fetchFn is the
-      // upstream stub on the far side of /proxy, so it must not have
-      // been called at all.
+      // request is rejected before executeProviderCall is invoked.
+      // fetchFn is the upstream stub on the far side of the credential
+      // proxy, so it must not have been called at all.
       expect(fetchFn).not.toHaveBeenCalled();
     });
   }
@@ -483,10 +483,10 @@ describe("POST /mcp — caller cannot forge sidecar control headers", () => {
       },
     });
     // The forbidden-name filter must let benign headers through to
-    // /proxy without producing a tool-level error. /proxy itself may
-    // further filter hop-by-hop or non-allowlisted headers before
-    // hitting the upstream — that's the legacy route's concern, not
-    // the MCP layer's. The contract here is "benign headers don't
+    // the credential-proxy core without producing a tool-level error.
+    // executeProviderCall further strips hop-by-hop headers before
+    // hitting the upstream — that's the credential proxy's concern,
+    // not the MCP layer's. The contract here is "benign headers don't
     // get rejected by the MCP filter".
     const result = res.json.result as { isError?: boolean };
     expect(result.isError).toBeUndefined();
@@ -552,12 +552,11 @@ describe("POST /mcp — request body size cap", () => {
 });
 
 describe("POST /mcp — bounded response read", () => {
-  // The legacy /proxy route already truncates outbound responses, but
-  // the MCP path's `responseToToolResult` previously did
-  // `await res.text()` with no cap. If a future route mounted on the
-  // same Hono app and reachable via app.request() bypassed the /proxy
-  // truncation, the MCP layer would happily materialise the entire
-  // body. The bounded reader is defence-in-depth.
+  // `responseToToolResult` reads upstream bodies via a bounded
+  // streaming reader so an oversized upstream response (e.g. from
+  // `run_history`'s platform passthrough) cannot blow the agent's
+  // memory or context window even when no upstream-side cap fires
+  // first. Defence-in-depth.
 
   it("truncates oversized upstream responses with an explicit marker", async () => {
     const oversized = "y".repeat(512 * 1024); // 512 KB > 256 KB MAX_RESPONSE_SIZE
@@ -565,9 +564,9 @@ describe("POST /mcp — bounded response read", () => {
       async () =>
         new Response(oversized, {
           status: 200,
-          // /proxy will already truncate — but to test the MCP-layer
-          // bound, we hit /run-history instead which we mock to return
-          // the oversized body directly.
+          // Hit `run_history`, mocked to return the oversized body
+          // directly, so the MCP-layer cap is the only thing standing
+          // between us and the full 512 KB.
           headers: { "Content-Type": "application/json" },
         }),
     );
@@ -577,9 +576,8 @@ describe("POST /mcp — bounded response read", () => {
       params: { name: "run_history", arguments: { limit: 1 } },
     });
     const result = res.json.result as { content: Array<{ text: string }> };
-    // Either /proxy or the MCP-layer cap must have kicked in. We don't
-    // assert exact length (depends on which truncation fires first)
-    // but we DO assert the result is bounded — never the full 512 KB.
+    // The MCP-layer cap must have kicked in. The result is bounded —
+    // never the full 512 KB.
     expect(result.content[0]!.text.length).toBeLessThanOrEqual(MAX_RESPONSE_SIZE_PLUS_MARKER);
   });
 });

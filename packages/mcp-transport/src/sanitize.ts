@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tool descriptor sanitisation (Phase 5 of #276, derived from the
- * threat model in claudedocs/MCP_MIGRATION_PLAN.md §"Threat model").
+ * Tool descriptor sanitisation.
  *
  * The 2026 MCP ecosystem has accumulated multiple "tool poisoning"
  * attack patterns where third-party MCP servers smuggle prompt-
@@ -19,18 +18,17 @@
  * we strip control characters, cap field lengths, and never trust
  * upstream content beyond the limits documented here.
  *
- * Limits (from the migration plan):
+ * Limits:
  *   - Tool description ≤ 2048 bytes.
  *   - Parameter description ≤ 512 bytes.
  *   - Total schema serialised size ≤ 8192 bytes.
  *
  * What this module deliberately does NOT do:
  *   - Block specific phrases ("IGNORE PREVIOUS"). The LLM's own
- *     instruction-tuning is the right line of defence for content;
- *     we just keep the sanitised payload below sizes that overwhelm
- *     it.
- *   - Round-trip the schema through a strict JSON Schema validator.
- *     Phase 4 / V13 covers that at the registry boundary.
+ *     instruction-tuning is the right line of defence for content; we
+ *     just keep the sanitised payload below sizes that overwhelm it.
+ *   - Round-trip the schema through a strict JSON Schema validator —
+ *     that's a registry-boundary concern, enforced at publish time.
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the shared credential-proxy core (#276 follow-up).
+ * Tests for the shared credential-proxy core.
  *
- * The /proxy HTTP route and the MCP `provider_call` tool both delegate
- * here. Most behavioural coverage lives in the existing `/proxy`
- * integration tests in `app.test.ts`; this file adds direct unit
- * coverage of the structured args/result surface so MCP-only
- * regressions (e.g. dropping a result branch) are caught without
- * needing a Hono context.
+ * The MCP `provider_call` tool delegates here. This file pins the
+ * structured args/result surface so MCP-only regressions (e.g. dropping
+ * a result branch) are caught without needing a Hono context.
  */
 
 import { describe, it, expect, mock } from "bun:test";

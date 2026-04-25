@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Phase 3a additions to the sidecar's `/mcp` endpoint:
- *   - `llm_complete` MCP tool wrapping `/llm/*`.
+ * Tests for the sidecar's `/mcp` resource surface:
+ *   - `llm_complete` MCP tool — platform-configured LLM passthrough.
  *   - `resources/list` + `resources/read` backed by the run-scoped blob cache.
  *   - `provider_call` spilling oversized / binary upstream responses to
- *     resource_link blocks.
+ *     `resource_link` blocks.
  *
  * The tests reuse the same `rpc()` JSON-RPC helper pattern as
  * `mcp.test.ts` to keep the wire contract honest.

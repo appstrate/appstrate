@@ -2,12 +2,11 @@
 // Copyright 2026 Appstrate
 
 /**
- * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface
- * (Phase 3a of #276).
+ * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface.
  *
  * Two writers populate this store:
  *   1. The `provider_call` tool when an upstream response is too large
- *      to inline (see V2 in claudedocs/MCP_MIGRATION_PLAN.md).
+ *      to inline.
  *   2. The `llm_complete` tool when a completion ships with file outputs.
  *
  * One reader: the MCP `resources/read` handler (validated against the

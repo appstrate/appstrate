@@ -26,9 +26,9 @@ Use a **separate sidecar container** that runs alongside each agent container on
 
 The agent container has no `RUN_TOKEN`, no `PLATFORM_API_URL`, and no `ExtraHosts` entry -- it cannot reach the host machine or the platform API directly. All external communication goes through the sidecar.
 
-**Agent-facing surface — MCP `provider_call` tool (2026-04, MCP V2 cleanup).** The agent invokes the sidecar through three canonical MCP tools: `provider_call({ providerId, method, target, headers?, body?, responseMode?, substituteBody? })` for credential-injecting outbound traffic, `run_history({ limit?, fields? })` for past-run metadata, and `llm_complete(...)` for platform-configured LLM passthrough. `runtime-pi/extensions/mcp-direct.ts` registers them as Pi tools at boot using `dependencies.providers[]` from the bundle manifest to populate `provider_call.providerId`'s enum. Non-2xx upstream responses surface `isError: true` to the LLM. The sidecar's MCP `tools/call` handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts` — the same helper that backed the historical HTTP `/proxy` route before it was retired. Credential isolation invariants (no `Authorization` on the wire, server-side injection only, `authorizedUris` enforcement, 401-with-refresh retry) are unchanged; only the wire format moved from bespoke HTTP to JSON-RPC over MCP.
+**Agent-facing surface — MCP tools.** The agent invokes the sidecar through three canonical MCP tools: `provider_call({ providerId, method, target, headers?, body?, responseMode?, substituteBody? })` for credential-injecting outbound traffic, `run_history({ limit?, fields? })` for past-run metadata, and `llm_complete(...)` for platform-configured LLM passthrough. `runtime-pi/extensions/mcp-direct.ts` registers them as Pi tools at boot using `dependencies.providers[]` from the bundle manifest to populate `provider_call.providerId`'s enum. Non-2xx upstream responses surface `isError: true` to the LLM. The sidecar's MCP `tools/call` handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts`. Credential isolation invariants (no `Authorization` on the wire, server-side injection only, `authorizedUris` enforcement, 401-with-refresh retry) are enforced inside that helper; the wire format is JSON-RPC over MCP end-to-end.
 
-**Zero-knowledge enforcement (2026-04).** Immediately after the MCP client connects in `runtime-pi/entrypoint.ts`, the bootloader runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence via `echo $SIDECAR_URL`. The historical `curl "$SIDECAR_URL/…"` bash pattern is fully retired — no prompt path documents it anymore. "Agent never sees the sidecar" is an enforced runtime invariant rather than a documentation convention.
+**Zero-knowledge enforcement.** Immediately after the MCP client connects in `runtime-pi/entrypoint.ts`, the bootloader runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence via `echo $SIDECAR_URL`. "Agent never sees the sidecar" is an enforced runtime invariant rather than a documentation convention.
 
 A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid cold-start latency. Pool size is configurable via `SIDECAR_POOL_SIZE` (default: 2). Pooled sidecars are configured at acquisition time via `POST /configure`.
 
@@ -41,7 +41,7 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 - URI allowlists enforced at the proxy layer, preventing agents from calling unauthorized endpoints
 - Sidecar pool eliminates container startup latency for most runs
 - Response pass-through preserves upstream HTTP status codes and content types
-- Large responses are truncated (>50KB) with `X-Truncated: true` header to protect agent context windows
+- Inline response cap (32 KB by default) keeps the agent's context window bounded — oversized or binary responses spill to the run-scoped `BlobStore` and surface as MCP `resource_link` blocks the agent reads on demand
 - Typed `provider_call` tool surface (one tool, `providerId` enum) gives structured observability (`provider.called` events carry `providerId`, `method`, `target`, `status`, `durationMs`) instead of opaque bash calls, and shortens the system prompt to a single `## Connected Providers` section
 
 **Negative:**
@@ -53,5 +53,5 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 
 **Neutral:**
 
-- Proxy cascade supports multiple layers: agent `X-Proxy` header, then `PROXY_URL` env var
+- Outbound proxy cascade: agent-supplied `proxyUrl` argument on `provider_call`, then `PROXY_URL` env var
 - Sidecar shares the same Hono framework as the main platform, keeping the stack consistent

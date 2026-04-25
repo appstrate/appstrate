@@ -90,7 +90,7 @@ const MAX_MCP_REQUEST_BODY_SIZE = 256 * 1024;
  * The MCP descriptor advertises that routing / sidecar-control headers
  * are filtered server-side. Without this filter, an LLM could supply
  * `X-Stream-Response: 1` to opt into the binary streaming path (which
- * the MCP layer is explicitly designed not to expose in Phase 1),
+ * the MCP layer deliberately does not expose),
  * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
  * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
  * the response truncation budget. The `X-Provider` and `X-Target`
@@ -135,8 +135,8 @@ function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
 /**
  * Inline payload threshold for `provider_call`. Above this size the
  * response is stored in the BlobStore and the tool returns a
- * `resource_link` content block (Phase 3a of #276) — saves the agent
- * from blowing its context window on a 5MB JSON dump. The agent reads
+ * `resource_link` content block — saves the agent from blowing its
+ * context window on a 5MB JSON dump. The agent reads
  * via `client.readResource({ uri })` only if it actually needs the
  * bytes.
  *
@@ -156,9 +156,9 @@ const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
  * upstreams. Nothing routes through a Hono HTTP envelope — the sidecar
  * no longer exposes `/proxy`, `/run-history`, or `/llm/*`.
  *
- * Phase 3a: when a `provider_call` upstream response is binary or
- * exceeds {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in
- * the supplied {@link BlobStore} and the tool returns a `resource_link`
+ * When a `provider_call` upstream response is binary or exceeds
+ * {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in the
+ * supplied {@link BlobStore} and the tool returns a `resource_link`
  * block instead of an inline text body.
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {

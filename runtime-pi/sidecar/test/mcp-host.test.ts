@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the multiplexing MCP host (Phase 4 of #276).
+ * Tests for the multiplexing MCP host.
  *
  * Strategy:
  *   - Build two in-memory MCP "upstreams" via createInProcessPair.

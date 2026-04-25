@@ -78,19 +78,6 @@ export {
   type RemoteAppstrateProviderResolverOptions,
 } from "./remote-appstrate-provider-resolver.ts";
 
-// Run history tool — sidecar-backed fetch of prior-run metadata.
-export {
-  makeRunHistoryTool,
-  createSidecarRunHistoryCall,
-  type RunHistoryRequest,
-  type RunHistoryResponse,
-  type RunHistoryEntry,
-  type RunHistoryField,
-  type RunHistoryCallFn,
-  type MakeRunHistoryToolOptions,
-  type CreateSidecarRunHistoryCallOptions,
-} from "./run-history-tool.ts";
-
 // Spec-compliant platform tools (memory, state, output, report, log)
 // — the runtime no longer hardcodes these internally; agents declare
 // them in dependencies.tools[] and a BundledToolResolver loads them.

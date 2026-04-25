@@ -216,7 +216,7 @@ describe("wrapClient — surface narrowing", () => {
   });
 });
 
-describe("wrapClient — capability discovery (Phase 6)", () => {
+describe("wrapClient — capability discovery", () => {
   it("getServerCapabilities returns the SDK's snapshot after connect", async () => {
     const pair = await createInProcessPair([echoTool()]);
     try {

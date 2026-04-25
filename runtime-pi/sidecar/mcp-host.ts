@@ -2,34 +2,30 @@
 // Copyright 2026 Appstrate
 
 /**
- * Multiplexing MCP host (Phase 4 of #276, §D4.3).
+ * Multiplexing MCP host.
  *
- * The sidecar exposes a single `/mcp` endpoint to the agent. Inside,
- * we aggregate tools from multiple MCP servers:
+ * The sidecar exposes a single `/mcp` endpoint to the agent. Inside, we
+ * aggregate tools from multiple MCP servers:
  *   - First-party (in-process): provider_call, run_history, llm_complete.
  *   - Third-party (subprocess via SubprocessTransport): notion-mcp,
  *     filesystem-mcp, etc.
  *
- * Every third-party tool is namespaced as `{namespace}__{tool}` per V3
- * to avoid collisions and to satisfy OpenAI/Anthropic's 64-char tool
- * name regex with headroom for downstream re-prefixing.
+ * Every third-party tool is namespaced as `{namespace}__{tool}` to avoid
+ * collisions and to fit OpenAI/Anthropic's 64-char tool name regex with
+ * headroom for downstream re-prefixing.
  *
  * What this module owns:
- *   - The {@link McpHost} class — registry of upstream MCP clients +
+ *   - The {@link McpHost} class — registry of upstream MCP clients plus
  *     a snapshot of their advertised tools.
  *   - The {@link buildMultiplexedTools} function — produces a flat
  *     `AppstrateToolDefinition[]` ready for `createMcpServer`.
- *   - The notifications/message → CloudEvents transducer hook (§D4.5).
+ *   - The `notifications/message` → CloudEvents transducer hook.
  *
  * What it deliberately does NOT own:
- *   - Spawning subprocesses. That's the orchestrator (it owns lifecycle
- *     across the run).
- *   - Trust isolation primitives — UID, namespaces, seccomp,
- *     cgroups. Deployment-side; this module just consumes the already-
- *     isolated SubprocessTransport.
- *   - Tool-description sanitisation against Tool Poisoning attacks —
- *     belongs in the multiplexer's tool-list reducer (added separately
- *     when registry-side validation lands per V13).
+ *   - Spawning subprocesses (orchestrator owns lifecycle).
+ *   - Trust-isolation primitives — UID, namespaces, seccomp, cgroups.
+ *     Deployment-side; this module just consumes the already-isolated
+ *     SubprocessTransport.
  */
 
 import { isValidToolNameForExisting } from "@appstrate/core/naming";
@@ -49,7 +45,7 @@ export interface McpHostUpstream {
 }
 
 export interface McpHostOptions {
-  /** Sink for `notifications/message` from third-party servers (D4.5). */
+  /** Sink for `notifications/message` from third-party servers. */
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
 }
 
@@ -63,10 +59,10 @@ export interface McpHostOptions {
  *      the right upstream by stripping the `{namespace}__` prefix.
  *   3. `dispose()` — closes every client. Idempotent.
  *
- * The host does NOT mutate the upstream descriptors beyond renaming —
- * descriptions, schemas, and annotations pass through verbatim. Tool
- * Poisoning hardening (length caps, hidden Unicode stripping) is a
- * registry-side concern per the migration plan §V13.
+ * The host renames each upstream tool to `{namespace}__{name}` and
+ * applies tool-poisoning sanitisation (length caps + hidden-Unicode
+ * stripping) before advertising it to the agent. Descriptors that
+ * exceed the schema-size cap after sanitisation are rejected.
  */
 export class McpHost {
   private readonly upstreams = new Map<string, McpHostUpstream>();
@@ -95,13 +91,12 @@ export class McpHost {
       throw new Error(`McpHost: namespace '${upstream.namespace}' is empty after normalisation`);
     }
 
-    // Phase 6 §V7 — capture the upstream's MCP `initialize` snapshot so
-    // operator dashboards can audit which third-party server version
-    // is actually wired (versions on disk drift from versions on the
-    // wire), and so we can skip `tools/list` against a server that
-    // didn't advertise the `tools` capability — JSON-RPC error round-
-    // trips on every register would otherwise add a per-server failure
-    // mode.
+    // Capture the upstream's MCP `initialize` snapshot so operator
+    // dashboards can audit which third-party server version is actually
+    // wired (versions on disk drift from versions on the wire), and so
+    // we can skip `tools/list` against a server that didn't advertise
+    // the `tools` capability — JSON-RPC error round-trips on every
+    // register would otherwise add a per-server failure mode.
     const serverVersion = upstream.client.getServerVersion();
     const capabilities = upstream.client.getServerCapabilities();
     this.options.onLog?.({
@@ -122,8 +117,8 @@ export class McpHost {
 
     const { tools } = await upstream.client.listTools();
     for (const tool of tools) {
-      // Phase 5 of #276 — strip hidden Unicode, cap field lengths,
-      // defeat tool poisoning before any third-party descriptor reaches
+      // Strip hidden Unicode, cap field lengths, defeat tool poisoning
+      // before any third-party descriptor reaches
       // the agent's LLM. A descriptor that exceeds the schema-size cap
       // after sanitisation is dropped entirely; the host emits a log
       // event so operators can audit the rejection.

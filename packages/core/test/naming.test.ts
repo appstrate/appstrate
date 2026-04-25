@@ -115,7 +115,7 @@ describe("buildPackageId", () => {
   });
 });
 
-describe("isValidToolNameForNew (Phase 4 / V13 strict predicate)", () => {
+describe("isValidToolNameForNew (strict predicate)", () => {
   test("accepts canonical {namespace}__{tool} snake_case", () => {
     expect(isValidToolNameForNew("fs__read_file")).toBe(true);
     expect(isValidToolNameForNew("notion__search_pages")).toBe(true);
@@ -153,8 +153,8 @@ describe("isValidToolNameForNew (Phase 4 / V13 strict predicate)", () => {
   });
 });
 
-describe("isValidToolNameForExisting (V13 lenient predicate)", () => {
-  test("currently mirrors the strict predicate (no legacy surface yet)", () => {
+describe("isValidToolNameForExisting (lenient predicate)", () => {
+  test("currently mirrors the strict predicate", () => {
     expect(isValidToolNameForExisting("fs__read_file")).toBe(true);
     expect(isValidToolNameForExisting("READ__FILE")).toBe(false);
   });

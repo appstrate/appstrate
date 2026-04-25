@@ -72,23 +72,22 @@ export function toSlug(value: string, maxLen?: number): string {
 }
 
 /**
- * MCP tool name validation (Phase 4 of #276, V3 + V13 in the migration plan).
+ * MCP tool name validation.
  *
- * The format is `{namespace_snake}__{tool_snake}` \u2014 two snake_case
- * tokens joined by a double underscore. Hard length ceiling 56 chars
- * leaves headroom under the 64-char OpenAI/Anthropic limit for
- * downstream host re-prefixing (Claude Code adds its own
+ * Format: `{namespace_snake}__{tool_snake}` \u2014 two snake_case tokens
+ * joined by a double underscore. Hard length ceiling 56 chars leaves
+ * headroom under the 64-char OpenAI/Anthropic limit for downstream
+ * host re-prefixing (e.g. Claude Code adds its own
  * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
  *
- * Bifurcated predicates per V13 (npm pattern):
+ * Bifurcated predicates (npm pattern):
  * - `isValidToolNameForNew`: strict \u2014 used at registry publish time.
- * - `isValidToolNameForExisting`: lenient \u2014 used at runtime install
- *   so previously-published tools keep loading even after rules tighten.
+ * - `isValidToolNameForExisting`: lenient \u2014 used at runtime install so
+ *   previously-published tools keep loading after rules tighten.
  *
- * The runtime predicate is currently identical to the strict one \u2014
- * no legacy tool surface predates this validation. Future tightenings
- * (e.g. forbidding new digit-prefixed names) go through `isValidToolNameForNew`
- * only.
+ * The runtime predicate is currently identical to the strict one. Future
+ * tightenings (e.g. forbidding new digit-prefixed names) go through
+ * `isValidToolNameForNew` only, leaving older tools unaffected.
  */
 export const TOOL_NAME_MAX_LEN = 56;
 const TOOL_NAME_PATTERN_NEW = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
@@ -100,9 +99,9 @@ export function isValidToolNameForNew(name: string): boolean {
 }
 
 /**
- * Lenient runtime check (V13). Mirrors `isValidToolNameForNew` for now;
- * extend the alphabet here (not in the strict predicate) when adding
- * legacy-tolerance for tightened rules.
+ * Lenient runtime check. Mirrors `isValidToolNameForNew` for now; extend
+ * the alphabet here (not in the strict predicate) when adding tolerance
+ * for tightened rules.
  */
 export function isValidToolNameForExisting(name: string): boolean {
   return isValidToolNameForNew(name);
@@ -114,8 +113,8 @@ export function isValidToolNameForExisting(name: string): boolean {
  *
  * Mapping rules:
  * - Hyphens \u2192 underscores.
- * - Single-underscore separator (legacy) \u2192 double-underscore boundary
- *   (only when no `__` is already present).
+ * - Single-underscore separator \u2192 double-underscore boundary (only when
+ *   no `__` is already present).
  * - Mixed-case \u2192 lower-case.
  */
 export function normalizeToolName(raw: string): string {

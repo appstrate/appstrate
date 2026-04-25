@@ -92,9 +92,7 @@ interface BuildMcpDirectFactoriesOptions {
 
 /**
  * Build the `provider_call` + `run_history` + `llm_complete` Pi
- * extension factories. The set is built once per agent — toggle into
- * the per-provider legacy aliases via `mcp-bridge.ts` instead when a
- * bundle's prompt references `appstrate_<slug>_call`.
+ * extension factories. The set is built once per agent.
  *
  * Returns `[]` for `provider_call` when the bundle declares no
  * providers (so the LLM doesn't see a tool whose `providerId` enum is

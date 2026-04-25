@@ -1,22 +1,17 @@
-# MCP V2 — Runtime Protocol 2.0 (final state)
+# MCP V2 — Runtime Protocol 2.0
 
-This worktree completes the migration from the legacy proxy-based runtime (`runtimeProtocolVersion: "1.0"`) to the MCP-native runtime (`"2.0"`). The 18-month V6 sunset window was skipped: this OSS controls every runner and bundle in-tree, so the legacy paths were retired in a single PR rather than carried for compatibility.
+This document describes the MCP-native runtime (`runtimeProtocolVersion: "2.0"`) that replaced the previous proxy-based runtime in a single cutover. The cutover was a hard switch: legacy paths were retired in-tree without a soft-deprecation window because this OSS controls every runner and bundle.
 
 ## TL;DR
 
-- **Wire format:** Streamable HTTP MCP (`POST /mcp`) is the only application-protocol surface. The sidecar's bespoke `/proxy`, `/run-history`, and `/llm/*` HTTP routes were removed.
-- **LLM-facing surface:** three canonical tools — `provider_call`, `run_history`, `llm_complete` — across every execution mode (Docker container, in-process subprocess, CLI). The legacy `appstrate_<slug>_call` per-provider tool naming is gone.
-- **Capability prompt:** `## Connected Providers` now documents `provider_call({ providerId, method, target, ... })` as the single entry point. Each connected provider contributes one `providerId` value to the tool's enum + a doc reference.
-- **No flags.** `RUNTIME_MCP_CLIENT` and `RUNTIME_MCP_DIRECT_TOOLS` were removed from `runtime-pi/env.ts` and from `packages/runner-pi/src/container-env.ts`.
+- **Wire format:** Streamable HTTP MCP (`POST /mcp`) is the only application-protocol surface between the agent container and the sidecar.
+- **LLM-facing surface:** three canonical tools — `provider_call`, `run_history`, `llm_complete` — across every execution mode (Docker container, in-process subprocess, CLI).
+- **Capability prompt:** `## Connected Providers` documents `provider_call({ providerId, method, target, ... })` as the single entry point. Each connected provider contributes one `providerId` value to the tool's enum plus a doc reference.
+- **No runtime flags** — direct MCP is the only mode.
 
-## Compatibility matrix
+## Compatibility
 
-| Runner                                              | Platform `main`                       | Platform `feat/mcp-runtime-adapter` (this branch) |
-| --------------------------------------------------- | ------------------------------------- | ------------------------------------------------- |
-| **1.x** (legacy `/proxy`, `/llm/*`, `/run-history`) | ✅ Full support                       | ❌ Not supported — legacy routes removed          |
-| **2.0** (MCP only)                                  | ❌ Not supported (no `/mcp` endpoint) | ✅ Full support                                   |
-
-A 1.x runner against a 2.0 platform crashes at boot when it tries to `GET /run-history` or `POST /proxy` — the routes return 404. There is no soft-deprecation period.
+A pre-cutover 1.x runner against a 2.0 platform crashes at boot — the legacy `/proxy`, `/run-history`, and `/llm/*` routes return 404. Operators who pinned a 1.x runner image must either upgrade the runner or pin the platform to a pre-cutover commit. There is no soft-deprecation period.
 
 ## What 2.0 looks like on the wire
 
@@ -26,7 +21,7 @@ POST /mcp        # JSON-RPC 2.0, Streamable HTTP, stateless, per-request transpo
 
 `tools/list` advertises three tools and dispatches via `tools/call`:
 
-- `provider_call({ providerId, method, target, headers?, body?, responseMode?, substituteBody? })` — credential-injecting proxy. `providerId` enum is the agent's declared providers. The sidecar's MCP handler delegates to `executeProviderCall` (the pure helper formerly behind `/proxy`).
+- `provider_call({ providerId, method, target, headers?, body?, responseMode?, substituteBody? })` — credential-injecting proxy. `providerId` enum is the agent's declared providers. The sidecar's MCP handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts`.
 - `run_history({ limit?, fields? })` — past-run metadata via the platform's per-run-token internal endpoint.
 - `llm_complete(...)` — platform-configured LLM passthrough.
 
@@ -52,7 +47,7 @@ Third-party MCP servers are namespaced as `{namespace_snake}__{tool_snake}`. Exa
 - ✅ `notion__search_pages`
 - ❌ `mcp-fs__read_file` (mixed separators, redundant prefix)
 
-The 56-character ceiling and pattern are validated by `@appstrate/core/naming`'s bifurcated predicates (`isValidToolNameForNew` at publish time, `isValidToolNameForExisting` at runtime).
+The 56-character ceiling and pattern are validated by `@appstrate/core/naming`'s bifurcated predicates: `isValidToolNameForNew` at publish time, `isValidToolNameForExisting` at runtime.
 
 ## `runtime-ready` event envelope
 
@@ -92,7 +87,7 @@ The runner reads `runtime`. If it's `"mcp-server"`, the tool loads via `@appstra
 
 ## Bundle authors
 
-Bundles with prompts that mention `appstrate_<slug>_call` need to be rewritten. The platform composes the `## Connected Providers` section automatically; bundle prompts only need to:
+The platform composes the `## Connected Providers` section automatically. Bundle prompts only need to:
 
 1. Reference the canonical tool by name (`provider_call`).
 2. Pick the relevant `providerId` from the enum the platform-prompt enumerates.
@@ -113,13 +108,11 @@ inbox. Pass `target` URLs that match the authorized URL list shown above.
 
 ## Rollback
 
-Rolling back the 2.0 protocol is a `git revert` against this branch's commits. There is no per-run flag. Operators who need to keep 1.x runners working should pin to the last commit on `main` before the 2.0 cutover.
+There is no per-run flag. Reverting to the pre-cutover protocol requires reverting the cutover commits or pinning the platform to a pre-cutover commit; mismatched runners (1.x runner against 2.0 platform, or vice versa) fail at boot.
 
 ## Reference
 
-- **Migration plan source of truth:** `claudedocs/MCP_MIGRATION_PLAN.md`.
-- **Acceptance criteria:** issue #276.
 - **Capability discovery:** `AppstrateMcpClient.getServerCapabilities()` / `getServerVersion()`.
 - **Tool descriptor sanitisation:** `@appstrate/mcp-transport`'s `sanitiseToolDescriptor`.
 - **Subprocess transport:** `@appstrate/mcp-transport`'s `SubprocessTransport` + `loadToolMcpServer`.
-- **Credential isolation invariant:** `runtime-pi/sidecar/credential-proxy.ts`'s `executeProviderCall` is now the single code path for all credential-injecting outbound traffic; the historical HTTP `/proxy` route shared the same helper before being removed.
+- **Credential isolation invariant:** `runtime-pi/sidecar/credential-proxy.ts`'s `executeProviderCall` is the single code path for all credential-injecting outbound traffic.

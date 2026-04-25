@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MCP client factories for first-party callers (Phase 2 of #276).
+ * MCP client factories for first-party callers.
  *
  * Two transports, one client surface. The wiring code in `runtime-pi`
  * branches on transport construction only — `listTools`, `callTool`,
@@ -46,8 +46,8 @@ export interface AppstrateMcpClientOptions {
   clientInfo?: Implementation;
   /**
    * Per-call timeout in milliseconds. Defaults to 30s — matches the
-   * `/proxy` upstream timeout. The SDK aborts the underlying fetch if
-   * the timeout fires.
+   * sidecar's outbound upstream timeout. The SDK aborts the underlying
+   * fetch if the timeout fires.
    */
   defaultTimeoutMs?: number;
 }

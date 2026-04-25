@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * Roots URI validation (Phase 3a of #276, V8 in the migration plan).
+ * Roots URI validation.
  *
  * The agent (MCP client) declares which file:// and s3:// URIs it
  * considers in-bounds via `roots/list`. When a tool argument carries

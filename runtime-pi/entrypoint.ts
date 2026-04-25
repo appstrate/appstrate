@@ -322,9 +322,7 @@ if (mcpClient) {
   try {
     // `buildMcpDirectFactories` registers `provider_call` (only when
     // the bundle declares providers — empty enum is rejected by the
-    // SDK), `run_history`, and `llm_complete` in one shot. No
-    // pre-existing bundle relies on per-provider alias names — those
-    // were retired together with `mcp-bridge.ts`.
+    // SDK), `run_history`, and `llm_complete` in one shot.
     const factories = await buildMcpDirectFactories({
       bundle: bundle ?? buildInContainerBundle(env.agentPrompt),
       mcp: mcpClient,

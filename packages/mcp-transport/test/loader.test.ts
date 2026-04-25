@@ -2,8 +2,7 @@
 
 /**
  * Tests for `loadToolMcpServer` — the manifest-driven entry point that
- * wires §D4.2 (manifest schema) to the SubprocessTransport machinery
- * from Phase 4.
+ * wires the manifest schema to the SubprocessTransport machinery.
  *
  * The same `echo-server.ts` fixture as subprocess.test.ts is used so
  * we exercise the actual stdio path, not a mocked transport.

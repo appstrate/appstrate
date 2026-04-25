@@ -24,10 +24,10 @@ export interface AppDeps {
   preConfigured?: boolean; // true when credentials come via env vars (fresh sidecar)
   /**
    * Run identifier for the agent run this sidecar serves. Used to
-   * scope the MCP blob cache (Phase 3a of #276) — a single sidecar
-   * process serves a single run, so the run id can be set once at
-   * boot. Defaults to `"unknown"` for tests; production sets it via
-   * the platform on container create / `/configure`.
+   * scope the MCP blob cache — a single sidecar process serves a single
+   * run, so the run id can be set once at boot. Defaults to `"unknown"`
+   * for tests; production sets it via the platform on container create
+   * / `/configure`.
    */
   runId?: string;
 }

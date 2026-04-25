@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tool-package manifest extension for declarative MCP server wiring
- * (Phase 4 §D4.2 of #276).
+ * Tool-package manifest extension for declarative MCP server wiring.
  *
  * AFPS leaves `definition` open for runner-specific fields (§3.4); we
  * use that escape hatch to let a tool package declare itself as a
@@ -26,23 +25,22 @@
  * The runner reads `runtime`. If it's `"mcp-server"`, it spawns the
  * entrypoint via {@link SubprocessTransport} and registers the
  * resulting client with the multiplexing host under the package's
- * normalised slug. Anything else flows through the legacy in-process
- * loader.
+ * normalised slug. Anything else flows through the in-process loader.
  *
  * Pure TypeScript validation — no Zod dependency. The schema is small
  * enough that a hand-rolled validator is clearer than another runtime.
  *
  * What this module does NOT do:
  *   - Spawn the subprocess itself with isolation primitives. UID
- *     namespacing, seccomp, cgroups, ulimits are deployment concerns
- *     per §D4.4 — the orchestrator wires them.
+ *     namespacing, seccomp, cgroups, ulimits are deployment concerns —
+ *     the orchestrator wires them.
  *   - Resolve the entrypoint against an installed path — the caller
  *     passes an absolute or workdir-relative path.
  */
 
 /**
  * Discriminator value for the MCP-server runtime. Any other value
- * (or missing field) means the legacy loader handles the tool.
+ * (or missing field) means the in-process loader handles the tool.
  */
 export const MCP_SERVER_RUNTIME = "mcp-server" as const;
 
@@ -51,7 +49,7 @@ export const MCP_SERVER_RUNTIME = "mcp-server" as const;
  * isolation profile applied at spawn time:
  *
  * - `first-party` — vetted, ships with the platform, can be relaxed.
- * - `third-party` — fully untrusted, gets the full §D4.4 sandbox.
+ * - `third-party` — fully untrusted, gets the full sandbox.
  *
  * Default is `third-party` whenever the field is omitted — fail-safe.
  */
@@ -59,9 +57,8 @@ export const TRUST_LEVELS = ["first-party", "third-party"] as const;
 export type TrustLevel = (typeof TRUST_LEVELS)[number];
 
 /**
- * Stdio is the only transport supported in this PR. HTTP / SSE
- * subprocesses are deferred (D4.1 lists `HttpTransport` as optional
- * for v1).
+ * Stdio is the only transport supported today. HTTP / SSE subprocesses
+ * remain a future option.
  */
 export const TRANSPORTS = ["stdio"] as const;
 export type ManifestTransport = (typeof TRANSPORTS)[number];
@@ -112,7 +109,7 @@ export function isMcpServerManifestDefinition(
 /**
  * Validate + apply defaults on a tool manifest's `definition`. Throws
  * with a clear message on the first violation — registry publish
- * surfaces the message verbatim per §D4.2.
+ * surfaces the message verbatim.
  */
 export function parseMcpServerManifest(definition: unknown): McpServerManifest {
   if (!isMcpServerManifestDefinition(definition)) {

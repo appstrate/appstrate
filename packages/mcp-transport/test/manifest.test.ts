@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Phase 4 §D4.2 manifest extension.
+ * Tests for the manifest extension.
  *
  * These exercise both the cheap type guard
  * ({@link isMcpServerManifestDefinition}) and the strict parser

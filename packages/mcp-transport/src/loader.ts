@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tool-package loader for the manifest-declared MCP server runtime
- * (Phase 4 §D4.2 of #276).
+ * Tool-package loader for the manifest-declared MCP server runtime.
  *
  * Glue between {@link parseMcpServerManifest}, {@link SubprocessTransport},
  * and the SDK `Client`. Exposes one entry point — {@link loadToolMcpServer}
@@ -29,8 +28,8 @@ export interface LoadToolMcpServerOptions {
   /** Working directory the entrypoint resolves from. */
   cwd: string;
   /**
-   * Logger called once per stderr line — feeds the §D4.5 transducer
-   * that maps `notifications/message` to `log.written` CloudEvents.
+   * Logger called once per stderr line — feeds the transducer that
+   * maps `notifications/message` to `log.written` CloudEvents.
    */
   onStderrLine?: (line: string) => void;
   /**

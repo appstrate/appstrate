@@ -35,11 +35,9 @@ export interface RuntimeReadyPayload {
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
   bootDurationMs: number;
   /**
-   * Runtime ↔ platform wire protocol version (Phase 6 §D6.1 of #276).
-   * MAJOR.MINOR — runners on `1.x` interoperate with platforms on
-   * `1.x`; runners on `2.0` advertise MCP-native tool surfaces and
-   * resource URIs. Platforms accept both for one minor cycle, then
-   * drop `1.x` per the §V6 18-month deprecation window. Old consumers
+   * Runtime ↔ platform wire protocol version. MAJOR.MINOR — runners on
+   * `2.0` advertise MCP-native tool surfaces (`provider_call`,
+   * `run_history`, `llm_complete`) and resource URIs. Old consumers
    * that don't read the field are unaffected (additive on the event
    * envelope).
    */
@@ -47,11 +45,8 @@ export interface RuntimeReadyPayload {
 }
 
 /**
- * Current runtime ↔ platform protocol version. Bumped to `2.0` in
- * Phase 6 of #276 to mark the boundary at which MCP-native tool
- * surfaces became the default and the `/llm/*`, `/run-history`,
- * `/proxy?X-Stream-Response` legacy routes entered their sunset
- * window.
+ * Current runtime ↔ platform protocol version. `2.0` marks the
+ * MCP-native tool surface — there is no `1.x` interop on this branch.
  */
 export const CURRENT_RUNTIME_PROTOCOL_VERSION = "2.0" as const;
 

@@ -1,40 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared credential-proxy core (#276 follow-up).
+ * Shared credential-proxy core.
  *
- * Both the legacy `/proxy` HTTP route and the MCP `provider_call`
- * tool handler used to do the same thing — fetch credentials,
- * substitute `{{vars}}` into URL/headers/body, validate the URL
- * against the provider's `authorizedUris`, inject the credential
- * header server-side, retry once on 401 with a refreshed token,
- * report persistent auth failures back to the platform — except
- * the MCP handler reached `/proxy` via `app.request()` after
- * re-encoding its typed JSON-RPC args into bespoke `X-Provider` /
- * `X-Target` / `X-Substitute-Body` headers, only for `/proxy` to
- * parse them back out.
+ * The single code path for all credential-injecting outbound traffic
+ * inside the sidecar. {@link executeProviderCall} owns the full
+ * sequence:
  *
- * That round-trip is now gone. This module owns the shared logic;
- * both transports become thin adapters:
+ *   1. Fetch credentials from the platform (per-run Bearer token).
+ *   2. Substitute `{{vars}}` into URL / headers / body.
+ *   3. Validate the resolved URL against the provider's
+ *      `authorizedUris` allowlist + the SSRF blocklist.
+ *   4. Inject the credential header server-side.
+ *   5. Forward the request to the upstream API.
+ *   6. Retry once on 401 with a refreshed token.
+ *   7. Report persistent auth failures back to the platform.
  *
- * - `/proxy` (`runtime-pi/sidecar/app.ts`) — parses HTTP envelope,
- *   handles `X-Stream-Response` passthrough + buffered truncation,
- *   delegates the cred-injection / outbound-fetch / 401-retry path
- *   to {@link executeProviderCall}.
- * - MCP `provider_call` (`runtime-pi/sidecar/mcp.ts`) — takes typed
- *   args from JSON-RPC, calls `executeProviderCall` directly, hands
- *   the resulting upstream `Response` to `responseToToolResult` for
- *   blob spillover / truncation.
+ * The MCP `provider_call` tool handler in `runtime-pi/sidecar/mcp.ts`
+ * takes typed JSON-RPC arguments and calls this helper directly, then
+ * hands the resulting upstream `Response` to `responseToToolResult` for
+ * blob spillover / truncation.
  *
  * What this module deliberately does NOT do:
- *   - Parse HTTP headers. That lives in the `/proxy` Hono handler.
- *   - Apply `X-Stream-Response` (legacy binary passthrough). That
- *     branch is HTTP-only and being deprecated; MCP returns a
- *     resource_link instead.
- *   - Truncate response bodies. The HTTP handler applies
- *     `MAX_RESPONSE_SIZE`; the MCP handler spills to the BlobStore.
- *   - Cache credentials. Each call fetches fresh from the platform
- *     — the platform owns the TTL.
+ *   - Truncate response bodies. The MCP handler spills oversized or
+ *     binary responses to the BlobStore as `resource_link` blocks.
+ *   - Cache credentials. Each call fetches fresh from the platform —
+ *     the platform owns the TTL.
  */
 
 import {

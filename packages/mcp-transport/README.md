@@ -4,11 +4,6 @@ Thin adapter on top of the official `@modelcontextprotocol/sdk` that lets
 Appstrate components register their tools and consume them through the
 **Model Context Protocol** wire format with zero bespoke JSON-RPC code.
 
-This package is part of [issue #276 — Runtime v2: adopt MCP as internal
-protocol](https://github.com/appstrate/appstrate/issues/276). Phase 1
-ships the adapter primitives; later phases use them to retire the
-in-house `appstrate_*_call` DSL.
-
 ## Why a wrapper at all?
 
 The official SDK already ships every JSON-RPC primitive, error code, and
@@ -158,9 +153,8 @@ isolation.
 
 ## Stability
 
-Phase 1 of #276 — additive, non-breaking. The contract surface above is
-the one Phase 2-5 will build on. Breaking changes will land behind a
-major version bump and the issue's `MAJOR schemaVersion` gate (Phase 6).
+Public API is stable across minor versions. Breaking changes land behind
+a major version bump.
 
 ## License
 

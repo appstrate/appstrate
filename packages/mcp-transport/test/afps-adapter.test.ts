@@ -28,7 +28,7 @@ function makeAfpsEcho(): AfpsTool {
   };
 }
 
-describe("fromAfpsTool — Phase 1 bridge for AFPS-shaped tools", () => {
+describe("fromAfpsTool — bridge for AFPS-shaped tools", () => {
   it("registers an AFPS Tool through the in-process MCP pair", async () => {
     const tool = fromAfpsTool(makeAfpsEcho(), {
       runId: "run_abc",

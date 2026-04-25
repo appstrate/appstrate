@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * `@appstrate/mcp-transport` — Phase 1 of #276 (Runtime v2).
+ * `@appstrate/mcp-transport` — Appstrate ↔ Model Context Protocol bridge.
  *
  * Thin adapter that bridges the Appstrate tool registry (whose tools carry
  * raw JSON Schema input descriptors and arbitrary async handlers) to the
@@ -113,7 +113,7 @@ function validateDescriptor(descriptor: Tool): void {
 }
 
 /**
- * Resource provider hooks (Phase 3a of #276). Pass `resources` to
+ * Resource provider hooks. Pass `resources` to
  * `createMcpServer` to expose `resources/list` and `resources/read`.
  *
  * - `list()` is called whenever the client invokes `resources/list`. It
@@ -213,8 +213,8 @@ export interface InProcessMcpPair {
  * Use this for first-party tools where the subprocess hop a stdio
  * transport implies has no payoff: same Bun process on both sides, no
  * isolation boundary worth crossing, but full MCP wire-format compliance
- * so the swap to `StdioClientTransport` (Phase 4 — third-party MCP
- * servers) is a one-line change.
+ * so swapping to `StdioClientTransport` for third-party MCP servers is a
+ * one-line change.
  */
 export async function createInProcessPair(
   tools: ReadonlyArray<AppstrateToolDefinition>,
@@ -263,9 +263,9 @@ export {
   type FromAfpsToolOptions,
 } from "./afps-adapter.ts";
 
-// MCP client factories — Phase 2 of #276. The agent connects to the
-// sidecar's `/mcp` over Streamable HTTP; the CLI uses the in-process
-// pair already exported above.
+// MCP client factories. The agent connects to the sidecar's `/mcp`
+// over Streamable HTTP; the CLI uses the in-process pair already
+// exported above.
 export {
   createMcpHttpClient,
   wrapClient,
@@ -274,20 +274,19 @@ export {
   type McpHttpClientOptions,
 } from "./client.ts";
 
-// Subprocess transport — Phase 4 of #276. Spawn a third-party MCP
-// server as a child process and speak newline-delimited JSON-RPC over
-// stdio. Compatible with the SDK's Transport interface so the same
-// `Client` works against http or subprocess servers without refactor.
+// Subprocess transport — spawn a third-party MCP server as a child
+// process and speak newline-delimited JSON-RPC over stdio. Compatible
+// with the SDK's Transport interface so the same `Client` works against
+// http or subprocess servers without refactor.
 export {
   SubprocessTransport,
   SubprocessTransportError,
   type SubprocessTransportOptions,
 } from "./transports/subprocess.ts";
 
-// Manifest-driven loader — Phase 4 §D4.2 of #276. Lets a tool package
-// declare itself as a subprocess MCP server in its manifest's
-// `definition` block; one helper spawns + connects + wraps in a
-// vetted AppstrateMcpClient.
+// Manifest-driven loader — lets a tool package declare itself as a
+// subprocess MCP server in its manifest's `definition` block; one helper
+// spawns + connects + wraps in a vetted AppstrateMcpClient.
 export {
   MCP_SERVER_RUNTIME,
   TRANSPORTS,
@@ -300,9 +299,9 @@ export {
 } from "./manifest.ts";
 export { loadToolMcpServer, type LoadToolMcpServerOptions } from "./loader.ts";
 
-// Tool descriptor sanitisation — Phase 5 of #276. Strip hidden
-// Unicode, cap field lengths, defeat Full-Schema Poisoning before any
-// third-party tool descriptor reaches the agent's LLM.
+// Tool descriptor sanitisation — strip hidden Unicode, cap field
+// lengths, defeat Full-Schema Poisoning before any third-party tool
+// descriptor reaches the agent's LLM.
 export {
   sanitiseTextField,
   sanitiseToolDescriptor,
@@ -310,15 +309,3 @@ export {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
-
-// Deprecation infrastructure — Phase 6 of #276. RFC 9745 +
-// RFC 8594 header builders, single source of truth for the V2
-// migration sunset dates.
-export {
-  deprecationHeaders,
-  DEPRECATIONS,
-  DEPRECATION_DATE_V2,
-  SUNSET_DATE_V2,
-  MIGRATION_GUIDE_URL,
-  type DeprecationId,
-} from "./deprecation.ts";
