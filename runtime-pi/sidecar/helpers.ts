@@ -27,6 +27,25 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
 
+/**
+ * Below this size, request bodies are buffered in memory so that the
+ * 401-refresh-and-retry-once path can replay them with rotated
+ * credentials. Above it, the sidecar streams the body upstream via
+ * `duplex: "half"` and surfaces 401 to the caller (the AFPS resolver's
+ * `{ fromFile }` resolution is reproducible — the LLM-driven retry
+ * path will refresh credentials and re-call cleanly).
+ */
+export const STREAMING_THRESHOLD = 1 * 1024 * 1024; // 1 MB
+
+/**
+ * Hard ceiling on streamed request/response bodies. Above this the
+ * sidecar refuses with 413 even when the caller opts in to streaming
+ * (`X-Stream-Response: 1` for downloads, `Content-Length` over
+ * {@link STREAMING_THRESHOLD} for uploads). Provides a safety bound
+ * for memory pressure regardless of streaming.
+ */
+export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+
 export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
 // The credentials payload the sidecar receives over HTTP is
