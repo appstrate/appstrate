@@ -17,6 +17,19 @@ export function setRequestClientIp(request: Request, ip: string): void {
   requestIpStore.set(request, ip);
 }
 
+/**
+ * Re-key the per-Request IP entry from `from` onto `to`. Used when an
+ * intermediate handler (e.g. the device-flow form-body transformer in
+ * `auth-pipeline.ts`) replaces `c.req.raw` with a freshly constructed
+ * `Request` — without this propagation, downstream lookups by Request
+ * identity miss and fall back to `"unknown"`.
+ */
+export function propagateRequestClientIp(from: Request, to: Request): void {
+  if (from === to) return;
+  const ip = requestIpStore.get(from);
+  if (ip) requestIpStore.set(to, ip);
+}
+
 function parseTrustProxy(raw: string): number {
   if (raw === "false") return 0;
   if (raw === "true") return 1;

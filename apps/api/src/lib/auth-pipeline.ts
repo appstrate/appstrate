@@ -29,7 +29,7 @@ import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
-import { getClientIp } from "./client-ip.ts";
+import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -336,7 +336,7 @@ export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Re
   headers.set("content-type", "application/json");
   // Let fetch/BA recompute the length from the new body.
   headers.delete("content-length");
-  return new Request(req.url, {
+  const replacement = new Request(req.url, {
     method: req.method,
     headers,
     body: JSON.stringify(body),
@@ -344,6 +344,12 @@ export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Re
     // already consumed the original body so the replacement is a complete
     // new request — no streaming to preserve.
   });
+  // Carry the client IP across the Request reconstruction. The IP store
+  // is keyed by Request identity (WeakMap), so without this propagation
+  // downstream lookups in BA plugin endpoints would fall back to
+  // `"unknown"` for every form-encoded device-flow request.
+  propagateRequestClientIp(req, replacement);
+  return replacement;
 }
 
 /** Paths that need auth but not org-context (user-scoped or self-resolving). */
