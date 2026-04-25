@@ -1337,6 +1337,291 @@ describe("binary roundtrip via /proxy", () => {
   });
 });
 
+// --- /proxy streaming pass-through (PR-4) ---
+//
+// Covers the new opt-in streaming paths on /proxy:
+//   - Response side: caller sets `X-Stream-Response: 1` to skip the
+//     buffered/truncated path and pipe upstream bytes through. The
+//     sidecar refuses up front via Content-Length when upstream
+//     declares a body larger than MAX_STREAMED_BODY_SIZE.
+//   - Request side: when content-length exceeds STREAMING_THRESHOLD
+//     and the caller has not requested X-Substitute-Body, the sidecar
+//     pipes the incoming body straight to upstream with duplex:
+//     "half" — no buffering, no transparent 401-replay.
+//   - 401 in streaming-request mode: credentials are refreshed but
+//     the sidecar surfaces the original 401 with X-Auth-Refreshed:
+//     true so the AFPS resolver retries idempotently.
+
+describe("/proxy streaming response (X-Stream-Response: 1)", () => {
+  it("pipes upstream body through without truncation when X-Stream-Response: 1", async () => {
+    // 2 MB upstream body — well above the 256 KB / 1 MB buffered caps
+    // — but well under the 100 MB streaming ceiling.
+    const payload = makePseudoRandomBytes(2 * 1024 * 1024, 0xfa_ce_b0_0c);
+    const expectedHash = sha256Hex(payload);
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": String(payload.byteLength),
+          },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/big-download",
+        "X-Stream-Response": "1",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(payload.byteLength);
+    expect(sha256Hex(received)).toBe(expectedHash);
+  });
+
+  it("refuses with 413 when upstream Content-Length exceeds MAX_STREAMED_BODY_SIZE", async () => {
+    // Don't actually send 200 MB through the test runner — the sidecar
+    // gates on the upstream Content-Length header before reading the
+    // body, so we can return an empty body with the oversized header.
+    const fetchFn = mock(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": String(200_000_000),
+          },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/giant",
+        "X-Stream-Response": "1",
+      },
+    });
+
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("too large");
+  });
+
+  it("buffered path still applies when X-Stream-Response is absent (truncates at 256 KB)", async () => {
+    // Sanity check — opting out of streaming preserves the legacy
+    // truncated-buffered behavior covered elsewhere in this suite.
+    const cap = 256 * 1024;
+    const payload = makePseudoRandomBytes(400_000, 0x42_42_42_42);
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(cap);
+  });
+});
+
+describe("/proxy streaming request (content-length > STREAMING_THRESHOLD)", () => {
+  it("pipes the incoming body to upstream as a ReadableStream (no buffering)", async () => {
+    // 2 MB upload — above the 1 MB STREAMING_THRESHOLD. The sidecar
+    // must hand fetch() a ReadableStream rather than ArrayBuffer.
+    const payload = makePseudoRandomBytes(2 * 1024 * 1024, 0xab_cd_ef_01);
+    const expectedHash = sha256Hex(payload);
+
+    let observedBodyType: string | null = null;
+    let observedDuplex: string | null = null;
+    let receivedHash: string | null = null;
+    const fetchFn = mock(async (_url: string, init: RequestInit & { duplex?: string }) => {
+      observedBodyType =
+        init.body instanceof ReadableStream
+          ? "ReadableStream"
+          : init.body instanceof ArrayBuffer
+            ? "ArrayBuffer"
+            : init.body instanceof Uint8Array
+              ? "Uint8Array"
+              : typeof init.body;
+      observedDuplex = init.duplex ?? null;
+      // Drain the stream body to verify byte fidelity.
+      if (init.body instanceof ReadableStream) {
+        const reader = init.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            total += value.byteLength;
+          }
+        }
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.byteLength;
+        }
+        receivedHash = sha256Hex(merged);
+      }
+      return new Response("ok", { status: 200, headers: { "Content-Type": "text/plain" } });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/upload",
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(payload.byteLength),
+      },
+      body: payload,
+    });
+
+    expect(res.status).toBe(200);
+    expect(observedBodyType).toBe("ReadableStream");
+    expect(observedDuplex).toBe("half");
+    expect(receivedHash).toBe(expectedHash);
+  });
+
+  it("refuses with 413 when content-length exceeds MAX_STREAMED_BODY_SIZE", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/upload",
+        "Content-Type": "application/octet-stream",
+        // Above the 100 MB streaming cap.
+        "Content-Length": String(200_000_000),
+      },
+      body: new Uint8Array([1, 2, 3]),
+    });
+
+    expect(res.status).toBe(413);
+    expect(fetchFn).toHaveBeenCalledTimes(0);
+  });
+
+  it("buffered path still applies below STREAMING_THRESHOLD (substitute-body still works)", async () => {
+    // 100 KB body — well under STREAMING_THRESHOLD, so the sidecar
+    // buffers as before. Sanity check that we didn't break the
+    // small-body case.
+    const small = makePseudoRandomBytes(100_000, 0x11_22_33_44);
+    let observedBodyType: string | null = null;
+    const fetchFn = mock(async (_url: string, init: RequestInit) => {
+      observedBodyType =
+        init.body instanceof ReadableStream
+          ? "ReadableStream"
+          : init.body instanceof ArrayBuffer
+            ? "ArrayBuffer"
+            : init.body instanceof Uint8Array
+              ? "Uint8Array"
+              : typeof init.body;
+      return new Response("ok", { status: 200 });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/upload",
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(small.byteLength),
+      },
+      body: small,
+    });
+
+    expect(res.status).toBe(200);
+    // Hono / Bun fetch may surface an ArrayBuffer here — anything
+    // non-stream is acceptable, the assertion is "NOT streamed".
+    expect(observedBodyType).not.toBe("ReadableStream");
+  });
+
+  it("on 401 in streaming-request mode: surfaces 401 with X-Auth-Refreshed: true", async () => {
+    // The sidecar consumed the body once on the first call — it
+    // cannot replay it. Instead, it refreshes credentials and tells
+    // the AFPS resolver via X-Auth-Refreshed so the next call will
+    // succeed without manual user intervention.
+    const big = makePseudoRandomBytes(2 * 1024 * 1024, 0xde_ad_be_ef);
+
+    let upstreamCalls = 0;
+    const fetchFn = mock(async (url: string, init: RequestInit) => {
+      // Filter out the fire-and-forget /internal/connections/report-auth-failure
+      // POST so the assertion below counts only true upstream calls.
+      if (typeof url === "string" && url.includes("/internal/")) {
+        return new Response("ok", { status: 200 });
+      }
+      // Drain stream body to mirror real fetch semantics.
+      if (init.body instanceof ReadableStream) {
+        const reader = init.body.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      }
+      upstreamCalls++;
+      return new Response("auth", { status: 401, headers: { "Content-Type": "text/plain" } });
+    });
+
+    let refreshCalled = 0;
+    const refreshCredentials = mock(async (): Promise<CredentialsResponse> => {
+      refreshCalled++;
+      return {
+        credentials: { access_token: "rotated-456" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      };
+    });
+
+    const app = createApp(makeDeps({ fetchFn, refreshCredentials }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/upload",
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(big.byteLength),
+      },
+      body: big,
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("X-Auth-Refreshed")).toBe("true");
+    // Only ONE upstream call — the body was streamed and cannot be replayed.
+    expect(upstreamCalls).toBe(1);
+    expect(refreshCalled).toBe(1);
+  });
+});
+
 // --- ALL /llm/* — LLM reverse proxy ---
 
 const LLM_CONFIG: LlmProxyConfig = {
