@@ -24,7 +24,19 @@ export type LogLevel = "info" | "warn" | "error";
  */
 export interface RunResult {
   memories: Memory[];
+  /**
+   * Aggregated checkpoint payload (last `checkpoint.set` or, for back-compat,
+   * `state.set`). The field name keeps `state` to avoid a breaking rename
+   * across every downstream consumer (sinks, runners, finalize bodies);
+   * the runtime + platform vocabulary now calls this a "checkpoint".
+   */
   state: unknown | null;
+  /**
+   * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no
+   * checkpoint event was emitted, or when the emitter is pre-1.4
+   * (`state.set` without `scope`) — consumers default to `"actor"`.
+   */
+  checkpointScope?: "actor" | "shared";
   output: unknown | null;
   report: string | null;
   logs: LogEntry[];
@@ -75,6 +87,11 @@ export interface TokenUsage {
 
 export interface Memory {
   content: string;
+  /**
+   * AFPS 1.4+ scope dimension for the unified persistence store.
+   * Absent on pre-1.4 events — consumers default to `"actor"`.
+   */
+  scope?: "actor" | "shared";
 }
 
 export interface LogEntry {

@@ -167,21 +167,24 @@ export async function upsertCheckpoint(
   runId: string | null,
 ): Promise<void> {
   const { actorType, actorId } = storageActor(scope);
-  const now = new Date();
   // jsonb expects valid JSON — sql.identifier paths aren't enough; we
-  // bind via Drizzle's parameterised sql.
+  // bind via Drizzle's parameterised sql. Timestamps go through `NOW()`
+  // because the `postgres.js` driver does not bind native `Date` objects
+  // for raw `db.execute(sql\`…\`)` queries (no column-type metadata to
+  // serialise against), and the column's `DEFAULT NOW()` is what every
+  // other path uses anyway.
   const contentJson = sql`${JSON.stringify(content ?? null)}::jsonb`;
 
   await db.execute(sql`
     INSERT INTO ${packagePersistence}
       (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
     VALUES
-      (${packageId}, ${applicationId}, ${orgId}, 'checkpoint', ${actorType}, ${actorId}, ${contentJson}, ${runId}, ${now}, ${now})
+      (${packageId}, ${applicationId}, ${orgId}, 'checkpoint', ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
     ON CONFLICT (package_id, application_id, actor_type, actor_id) WHERE kind = 'checkpoint'
     DO UPDATE SET
       content    = EXCLUDED.content,
       run_id     = EXCLUDED.run_id,
-      updated_at = EXCLUDED.updated_at
+      updated_at = NOW()
   `);
 }
 

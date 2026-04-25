@@ -1,0 +1,28 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/set-checkpoint",
+  "version": "2.0.0",
+  "type": "tool",
+  "displayName": "Set Checkpoint",
+  "description": "Persist a checkpoint for the next run. Supports per-actor and shared scopes.",
+  "schemaVersion": "1.4",
+  "entrypoint": "tool.ts",
+  "tool": {
+    "name": "set_checkpoint",
+    "description": "Persist a JSON value for the next run (last-write-wins). By default the checkpoint is scoped to the current actor (the user or end-user that triggered the run); pass scope=\"shared\" for an app-wide checkpoint.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "description": "JSON value to persist as the checkpoint for the next run"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["actor", "shared"],
+          "description": "Persistence scope: \"actor\" (default) keeps the checkpoint private to the run's actor; \"shared\" makes it app-wide."
+        }
+      },
+      "required": ["data"]
+    }
+  }
+}

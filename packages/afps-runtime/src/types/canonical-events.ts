@@ -39,16 +39,55 @@ interface BaseEnvelope {
   [key: string]: unknown;
 }
 
-/** `@afps/memory` — `add_memory()` tool. */
+/**
+ * `@afps/memory` — `add_memory()` tool.
+ *
+ * `scope` is the AFPS 1.4 unified-persistence dimension:
+ * - `"actor"` (default): memory belongs to the run's actor (member or end_user).
+ * - `"shared"`: memory is app-wide, visible to every actor.
+ *
+ * Pre-1.4 emitters omit the field entirely; consumers MUST treat absent
+ * `scope` as `"actor"` so the fail-safe is per-actor isolation rather
+ * than cross-actor leakage.
+ */
 export interface MemoryAddedEvent extends BaseEnvelope {
   type: "memory.added";
   content: string;
+  /** AFPS 1.4+. Defaults to `"actor"` when omitted. */
+  scope?: "actor" | "shared";
 }
 
-/** `@afps/state` — `set_state()` tool. */
+/**
+ * `@afps/state` — legacy `set_state()` tool event (AFPS ≤ 1.3).
+ *
+ * @deprecated Renamed to {@link CheckpointSetEvent} (`checkpoint.set`) in
+ * AFPS 1.4 alongside the unified persistence model. Kept for dual-event
+ * acceptance — pre-1.4 runners and shipped agent bundles still emit this
+ * shape and the reducer continues to fold it. Remove in a future major
+ * once the floor of supported AFPS bundles is ≥ 1.4.
+ */
 export interface StateSetEvent extends BaseEnvelope {
   type: "state.set";
   state: unknown;
+}
+
+/**
+ * `@afps/state` — `set_checkpoint()` tool (AFPS 1.4+).
+ *
+ * Replaces {@link StateSetEvent} — same fold semantics (last-write-wins
+ * into `RunResult.state`) but carries a `scope` dimension matching the
+ * unified persistence store.
+ *
+ * `scope` defaults to `"actor"` (per-run-actor isolation) when omitted.
+ * Agents that genuinely want app-wide checkpoints (cron-scheduled jobs,
+ * single-tenant catalogues) opt in by passing `"shared"`.
+ */
+export interface CheckpointSetEvent extends BaseEnvelope {
+  type: "checkpoint.set";
+  /** Arbitrary JSON value stored as the actor (or shared) checkpoint. */
+  data: unknown;
+  /** AFPS 1.4+. Defaults to `"actor"` when omitted. */
+  scope?: "actor" | "shared";
 }
 
 /** `@afps/output` — `output()` tool. Replace-on-emit semantics. */
@@ -105,6 +144,7 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
 export type CanonicalRunEvent =
   | MemoryAddedEvent
   | StateSetEvent
+  | CheckpointSetEvent
   | OutputEmittedEvent
   | ReportAppendedEvent
   | LogWrittenEvent
@@ -116,6 +156,7 @@ export type CanonicalRunEvent =
 export const CANONICAL_EVENT_TYPES = [
   "memory.added",
   "state.set",
+  "checkpoint.set",
   "output.emitted",
   "report.appended",
   "log.written",
@@ -138,10 +179,21 @@ const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_
 export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent {
   if (!CANONICAL_TYPE_SET.has(event.type)) return false;
   switch (event.type) {
-    case "memory.added":
-      return typeof (event as Record<string, unknown>).content === "string";
+    case "memory.added": {
+      const e = event as Record<string, unknown>;
+      if (typeof e.content !== "string") return false;
+      // Optional scope: when present must be "actor" | "shared".
+      if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
+      return true;
+    }
     case "state.set":
       return "state" in event;
+    case "checkpoint.set": {
+      const e = event as Record<string, unknown>;
+      if (!("data" in e)) return false;
+      if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
+      return true;
+    }
     case "output.emitted":
       return "data" in event;
     case "report.appended":

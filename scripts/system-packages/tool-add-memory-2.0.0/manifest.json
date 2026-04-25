@@ -1,0 +1,29 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/add-memory",
+  "version": "2.0.0",
+  "type": "tool",
+  "displayName": "Add Memory",
+  "description": "Save a discovery or learning as a long-term memory. Supports per-actor and shared scopes.",
+  "schemaVersion": "1.4",
+  "entrypoint": "tool.ts",
+  "tool": {
+    "name": "add_memory",
+    "description": "Save a discovery or learning as a long-term memory. By default memories are scoped to the current actor (the user or end-user that triggered the run); pass scope=\"shared\" for an app-wide memory visible to every actor.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "Memory text to save (max 2000 characters)"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["actor", "shared"],
+          "description": "Persistence scope: \"actor\" (default) keeps the memory private to the run's actor; \"shared\" makes it app-wide."
+        }
+      },
+      "required": ["content"]
+    }
+  }
+}

@@ -90,6 +90,7 @@ export {
 export {
   memoryTool,
   stateTool,
+  checkpointTool,
   outputTool,
   reportTool,
   logTool,

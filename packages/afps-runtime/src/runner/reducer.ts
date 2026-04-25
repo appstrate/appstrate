@@ -51,10 +51,22 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
 
   switch (canonical.type) {
     case "memory.added":
-      result.memories.push({ content: canonical.content });
+      result.memories.push({
+        content: canonical.content,
+        ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
+      });
       return;
     case "state.set":
+      // Pre-AFPS-1.4 alias for `checkpoint.set`. Folded into the same
+      // accumulator so dual-event acceptance is invisible to downstream
+      // consumers (HttpSink, run-event-ingestion). No `checkpointScope`
+      // is set — `state.set` carries no scope, so consumers default to
+      // the run's actor at the storage boundary.
       result.state = canonical.state ?? null;
+      return;
+    case "checkpoint.set":
+      result.state = canonical.data ?? null;
+      if (canonical.scope !== undefined) result.checkpointScope = canonical.scope;
       return;
     case "output.emitted":
       result.output = canonical.data ?? null;

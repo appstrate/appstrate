@@ -16,7 +16,10 @@ describe("isCanonicalRunEvent", () => {
   it("accepts all canonical, well-formed events", () => {
     const events: RunEvent[] = [
       { ...baseEnvelope, type: "memory.added", content: "hello" },
+      { ...baseEnvelope, type: "memory.added", content: "scoped", scope: "shared" },
       { ...baseEnvelope, type: "state.set", state: { counter: 1 } },
+      { ...baseEnvelope, type: "checkpoint.set", data: { counter: 1 } },
+      { ...baseEnvelope, type: "checkpoint.set", data: { c: 2 }, scope: "actor" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "report.appended", content: "## Title" },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
@@ -30,6 +33,29 @@ describe("isCanonicalRunEvent", () => {
       },
     ];
     for (const e of events) expect(isCanonicalRunEvent(e)).toBe(true);
+  });
+
+  it("rejects malformed scope on memory.added or checkpoint.set", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "memory.added",
+        content: "x",
+        scope: "global",
+      } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "checkpoint.set",
+        data: 1,
+        scope: "everyone",
+      } as RunEvent),
+    ).toBe(false);
+    // checkpoint.set without `data` is rejected
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "checkpoint.set" } as RunEvent)).toBe(
+      false,
+    );
   });
 
   it("rejects third-party event types", () => {
@@ -137,7 +163,7 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    expect(arr.length).toBe(8);
+    expect(arr.length).toBe(9);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

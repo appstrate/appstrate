@@ -5,6 +5,7 @@ import { describe, it, expect } from "bun:test";
 import {
   memoryTool,
   stateTool,
+  checkpointTool,
   outputTool,
   reportTool,
   logTool,
@@ -44,11 +45,34 @@ describe("platform tools — open envelope emission", () => {
     ]);
   });
 
-  it("stateTool emits state.set with arbitrary payload", async () => {
+  it("stateTool emits state.set with arbitrary payload (legacy)", async () => {
     const { ctx, events } = makeCtx();
     await stateTool.execute({ state: { step: 3 } }, ctx);
     expect(events[0]!.type).toBe("state.set");
     expect(events[0]!.state).toEqual({ step: 3 });
+  });
+
+  it("checkpointTool emits checkpoint.set with data + default scope omitted", async () => {
+    const { ctx, events } = makeCtx();
+    await checkpointTool.execute({ data: { step: 7 } }, ctx);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("checkpoint.set");
+    expect(events[0]!.data).toEqual({ step: 7 });
+    expect(events[0]!.scope).toBeUndefined();
+  });
+
+  it("checkpointTool propagates scope when set to 'shared'", async () => {
+    const { ctx, events } = makeCtx();
+    await checkpointTool.execute({ data: { cursor: "abc" }, scope: "shared" }, ctx);
+    expect(events[0]!.type).toBe("checkpoint.set");
+    expect(events[0]!.scope).toBe("shared");
+  });
+
+  it("memoryTool propagates scope when explicitly set", async () => {
+    const { ctx, events } = makeCtx();
+    await memoryTool.execute({ content: "preference: CSV", scope: "actor" }, ctx);
+    expect(events[0]!.type).toBe("memory.added");
+    expect(events[0]!.scope).toBe("actor");
   });
 
   it("outputTool emits output.emitted", async () => {
@@ -73,12 +97,63 @@ describe("platform tools — open envelope emission", () => {
     expect(events[0]!.message).toBe("slow");
   });
 
-  it("PLATFORM_TOOLS maps all five canonical tool names", () => {
+  it("PLATFORM_TOOLS maps all canonical tool names (incl. legacy set_state alias)", () => {
     expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(
-      ["add_memory", "log", "output", "report", "set_state"].sort(),
+      ["add_memory", "log", "output", "report", "set_checkpoint", "set_state"].sort(),
     );
     expect(PLATFORM_TOOLS.add_memory).toBe(memoryTool);
+    expect(PLATFORM_TOOLS.set_checkpoint).toBe(checkpointTool);
+    expect(PLATFORM_TOOLS.set_state).toBe(stateTool);
     expect(PLATFORM_TOOLS.log).toBe(logTool);
+  });
+});
+
+describe("dual-event acceptance — state.set and checkpoint.set", () => {
+  it("reducer folds checkpoint.set into result.state with scope captured", () => {
+    const events: RunEvent[] = [
+      {
+        type: "checkpoint.set",
+        timestamp: 1,
+        runId: "r",
+        data: { cursor: "abc" },
+        scope: "shared",
+      },
+    ];
+    const result = reduceEvents(events);
+    expect(result.state).toEqual({ cursor: "abc" });
+    expect(result.checkpointScope).toBe("shared");
+  });
+
+  it("reducer still folds legacy state.set into result.state (back-compat)", () => {
+    const events: RunEvent[] = [
+      { type: "state.set", timestamp: 1, runId: "r", state: { legacy: true } },
+    ];
+    const result = reduceEvents(events);
+    expect(result.state).toEqual({ legacy: true });
+    // No checkpointScope: state.set carries no scope, consumer defaults to actor.
+    expect(result.checkpointScope).toBeUndefined();
+  });
+
+  it("reducer last-write-wins across mixed legacy + new events", () => {
+    const events: RunEvent[] = [
+      { type: "state.set", timestamp: 1, runId: "r", state: { v: 1 } },
+      { type: "checkpoint.set", timestamp: 2, runId: "r", data: { v: 2 }, scope: "actor" },
+    ];
+    const result = reduceEvents(events);
+    expect(result.state).toEqual({ v: 2 });
+    expect(result.checkpointScope).toBe("actor");
+  });
+
+  it("reducer captures memory.added scope when present, leaves undefined otherwise", () => {
+    const events: RunEvent[] = [
+      { type: "memory.added", timestamp: 1, runId: "r", content: "no-scope" },
+      { type: "memory.added", timestamp: 2, runId: "r", content: "scoped", scope: "shared" },
+    ];
+    const result = reduceEvents(events);
+    expect(result.memories).toEqual([
+      { content: "no-scope" },
+      { content: "scoped", scope: "shared" },
+    ]);
   });
 });
 

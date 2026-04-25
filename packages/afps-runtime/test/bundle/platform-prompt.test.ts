@@ -159,15 +159,16 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./documents/report.pdf`");
   });
 
-  it("renders the Previous State section when context.state is set", () => {
+  it("renders the Checkpoint section when context.state is set", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx({ state: { cursor: "abc", count: 12 } }),
     });
-    expect(out).toContain("## Previous State");
+    expect(out).toContain("## Checkpoint");
+    expect(out).not.toContain("## Previous State");
     expect(out).toContain('"cursor": "abc"');
     expect(out).toContain('"count": 12');
-    expect(out).toContain("`set_state` tool");
+    expect(out).toContain("`set_checkpoint` tool");
   });
 
   it("renders the Memory section with stored memories", () => {
@@ -184,6 +185,8 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("- fact one");
     expect(out).toContain("- fact two");
     expect(out).toContain("`add_memory` tool");
+    // Memory section should mention scope-default behaviour.
+    expect(out).toMatch(/scope.*"shared"/);
   });
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {

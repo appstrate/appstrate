@@ -9,7 +9,7 @@
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
  * Tools / Skills / Connected Providers / User Input / Documents /
- * Configuration / Previous State / Memory / Run History) represent one
+ * Configuration / Checkpoint / Memory / Run History) represent one
  * reasonable convention for an AFPS-style agent; platforms and CLIs
  * may compose it as-is or override specific option fields.
  */
@@ -295,29 +295,28 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("");
   }
 
-  // --- Previous state ---
+  // --- Checkpoint ---
   if (context.state !== undefined && context.state !== null) {
-    sections.push("## Previous State\n");
+    sections.push("## Checkpoint\n");
     sections.push(
       "This agent supports stateful operation across runs. " +
-        "Your most recent run left the following state:\n",
+        "Your most recent run left the following checkpoint:\n",
     );
     sections.push("```json");
     sections.push(JSON.stringify(context.state, null, 2));
     sections.push("```\n");
     sections.push(
-      "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
-        "To update the state for the next run, use the `set_state` tool.\n",
+      "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
+        "To update the checkpoint for the next run, use the `set_checkpoint` tool. " +
+        "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
+        'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
     );
   }
 
   // --- Memory ---
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
-    sections.push(
-      "This agent has accumulated the following memories from previous runs. " +
-        "These are shared across all users running this agent:\n",
-    );
+    sections.push("This agent has accumulated the following memories from previous runs:\n");
     for (const mem of context.memories) {
       const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
       sections.push(`- ${mem.content}${date}`);
@@ -325,7 +324,9 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push(
       "\nTo add new memories, use the `add_memory` tool. " +
         "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
-        "Use `set_state` for structured data needed for the next run.\n",
+        'By default memories are scoped to the current actor; pass `scope: "shared"` ' +
+        "to make a memory app-wide (visible to every actor of this app). " +
+        "Use `set_checkpoint` for structured data needed for the next run.\n",
     );
   }
 

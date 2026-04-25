@@ -391,6 +391,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   if (result.memories?.length) {
     // Legacy double-write: keep `package_memories` populated so the
     // transition window is reversible. Future PR drops the legacy table.
+    // The legacy table is app-wide (no scope dimension), so we feed it
+    // every memory regardless of declared scope — matching pre-1.4
+    // behaviour where everything was effectively "shared".
     await addPackageMemories(
       run.packageId,
       run.orgId,
@@ -399,29 +402,52 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       run.id,
     );
 
-    // Unified write — defaults to the run's actor scope. Future-compat:
-    // when AFPS adds `scope: "shared" | "actor"` to memory events, route
-    // shared rows to `{ type: "shared" }` here.
-    await addUnifiedMemories(
-      run.packageId,
-      run.applicationId,
-      run.orgId,
-      persistenceScope,
-      result.memories.map((m) => m.content),
-      run.id,
-    );
+    // Unified write — partition by AFPS 1.4 `scope`. Pre-1.4 events have
+    // no `scope` and default to the run's actor scope (per-actor
+    // isolation is the safe default for multi-tenant headless runs).
+    // Explicit `scope: "shared"` opts into app-wide visibility.
+    const sharedContent: string[] = [];
+    const actorContent: string[] = [];
+    for (const m of result.memories) {
+      if (m.scope === "shared") sharedContent.push(m.content);
+      else actorContent.push(m.content);
+    }
+    if (actorContent.length > 0) {
+      await addUnifiedMemories(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        persistenceScope,
+        actorContent,
+        run.id,
+      );
+    }
+    if (sharedContent.length > 0) {
+      await addUnifiedMemories(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        { type: "shared" },
+        sharedContent,
+        run.id,
+      );
+    }
   }
 
   // Unified-persistence checkpoint write — same data the legacy
   // `runs.state` UPDATE above persisted, but in the per-actor unified
   // store. Skipped when the runner did not emit a checkpoint (matches
-  // the "no state.set event" semantics).
+  // the "no state.set event" semantics). Honors the AFPS 1.4 scope when
+  // the runtime stamped one onto `RunResult.checkpointScope`; falls back
+  // to the run's actor scope for legacy `state.set` events.
   if (stateToPersist !== null) {
+    const checkpointScope =
+      result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
     await upsertCheckpoint(
       run.packageId,
       run.applicationId,
       run.orgId,
-      persistenceScope,
+      checkpointScope,
       stateToPersist,
       run.id,
     );

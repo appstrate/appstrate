@@ -348,31 +348,31 @@ describe("buildEnrichedPrompt — configuration", () => {
 
 // ─── Previous state ─────────────────────────────────────────
 
-describe("buildEnrichedPrompt — previous state", () => {
-  it("includes previous state when set-state tool is available", () => {
+describe("buildEnrichedPrompt — checkpoint", () => {
+  it("includes checkpoint when set-checkpoint tool is available", () => {
     const ctx = contextWithSystemTools({
       previousState: { cursor: "abc123", processedCount: 42 },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Previous State");
+    expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("```json");
     expect(prompt).toContain('"cursor": "abc123"');
     expect(prompt).toContain('"processedCount": 42');
   });
 
-  it("omits previous state when null", () => {
+  it("omits checkpoint when null", () => {
     const ctx = contextWithSystemTools({ previousState: null });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Previous State");
+    expect(prompt).not.toContain("## Checkpoint");
   });
 
-  it("includes previous state regardless of available tools", () => {
+  it("includes checkpoint regardless of available tools", () => {
     const ctx = baseContext({
       previousState: { cursor: "abc123" },
       availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Previous State");
+    expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("abc123");
   });
 });

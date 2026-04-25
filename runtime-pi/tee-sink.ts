@@ -76,9 +76,11 @@ export function looksLikeRunEvent(value: unknown): value is RunEvent {
  * case) keeps its values when the aggregate is untouched.
  */
 export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResult): RunResult {
+  const checkpointScope = aggregate.checkpointScope ?? runnerResult.checkpointScope;
   return {
     memories: aggregate.memories.length > 0 ? aggregate.memories : runnerResult.memories,
     state: aggregate.state ?? runnerResult.state,
+    ...(checkpointScope !== undefined ? { checkpointScope } : {}),
     output: aggregate.output ?? runnerResult.output,
     report: aggregate.report ?? runnerResult.report,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,

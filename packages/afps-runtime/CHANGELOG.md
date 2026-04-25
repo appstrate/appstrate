@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `set_checkpoint` tool + scope-aware `add_memory`
+
+- New canonical event `checkpoint.set` (carries `data` + optional
+  `scope: "actor" | "shared"`). Emitted by the renamed `set_checkpoint`
+  tool — replaces the legacy `set_state` tool.
+- `add_memory` tool now accepts an optional `scope` parameter; the
+  emitted `memory.added` event carries the field through.
+- `RunResult.checkpointScope` records the scope of the most recent
+  checkpoint emit so platform finalize logic can route writes into the
+  unified `package_persistence` store.
+- Platform prompt section renamed `## Previous State` → `## Checkpoint`
+  and now documents the scope default (`"actor"`) for both tools.
+
+### Compat — dual-event acceptance for `state.set` ↔ `checkpoint.set`
+
+- The reducer + canonical-event narrower still accept the legacy
+  `state.set` event so already-published agents emitting the AFPS ≤ 1.3
+  event keep working. Both fold into `RunResult.state` with
+  last-write-wins semantics.
+- `PLATFORM_TOOLS` keeps the legacy `set_state` entry alongside the new
+  `set_checkpoint`. Bundles depending on `@appstrate/set-state@1.0.0`
+  resolve unchanged.
+- `stateTool` is marked `@deprecated` and emits the legacy `state.set`
+  event for end-to-end back-compat. Removal is gated on the floor of
+  supported AFPS bundles ≥ 1.4.
+
 ### Removed — `afps run` and `afps test` subcommands (BREAKING)
 
 - **`afps run <bundle>` is gone.** Live LLM execution now lives
