@@ -6,7 +6,12 @@ import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
-import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
+import {
+  parseTokenResponse,
+  parseTokenErrorResponse,
+  buildTokenHeaders,
+  buildTokenBody,
+} from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /** In-memory concurrency lock: one refresh at a time per connection. */
@@ -133,24 +138,10 @@ async function doRefresh(
 
   if (!response.ok) {
     const text = await response.text();
-    // Per RFC 6749 §5.2, a dead refresh_token is signaled by HTTP 400 +
-    // body {"error": "invalid_grant"}. Any other failure (5xx, 401, 403,
-    // other 4xx, non-JSON body, body without an `error` field, other OAuth
-    // error codes like invalid_client/invalid_scope) is treated as transient.
-    let kind: "revoked" | "transient" = "transient";
-    if (response.status === 400) {
-      try {
-        const parsed = JSON.parse(text) as { error?: unknown };
-        if (parsed && typeof parsed === "object" && parsed.error === "invalid_grant") {
-          kind = "revoked";
-        }
-      } catch {
-        // Non-JSON body on 400 — not a revocation signal
-      }
-    }
+    const classification = parseTokenErrorResponse(response.status, text);
     throw new RefreshError(
       `Token refresh failed for '${providerId}': ${response.status} ${text}`,
-      kind,
+      classification.kind,
       response.status,
       text,
     );

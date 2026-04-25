@@ -43,6 +43,23 @@ const envSchema = z
       .refine((val) => Buffer.from(val, "base64").length === 32, {
         message: "CONNECTION_ENCRYPTION_KEY must be 32 bytes (256-bit) base64-encoded",
       }),
+    // Active key id embedded in newly-encrypted credential blobs (v1 envelope).
+    // Stable across deploys — change only when promoting a freshly-rotated key.
+    // Must match /^[A-Za-z0-9_-]{1,32}$/.
+    CONNECTION_ENCRYPTION_KEY_ID: z
+      .string()
+      .default("k1")
+      .refine((v) => /^[A-Za-z0-9_-]{1,32}$/.test(v), {
+        message: "CONNECTION_ENCRYPTION_KEY_ID must match /^[A-Za-z0-9_-]{1,32}$/",
+      }),
+    // Retired keys held for decrypt-only during a rotation window. JSON map of
+    // kid → base64-encoded 32-byte key. Exclude the active kid (validated at boot).
+    // Empty map disables the legacy keyring; existing v0 blobs still decrypt with
+    // the active key.
+    CONNECTION_ENCRYPTION_KEYS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, string>),
     SYSTEM_PROXIES: z
       .string()
       .default("[]")

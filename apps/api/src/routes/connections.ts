@@ -23,7 +23,7 @@ import {
 import { getDefaultProfileId, getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import type { Actor } from "../lib/actor.ts";
-import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
+import { isProviderEnabled, getProviderCredentialId, OAuthCallbackError } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { Context } from "hono";
 import { getAppScope } from "../lib/scope.ts";
@@ -225,6 +225,25 @@ export function createConnectionsRouter() {
       logger.info("OAuth callback success", { state });
       return c.html(`<html><body><script>window.close();</script></body></html>`);
     } catch (err) {
+      // Distinguish revocation from transient failure so the user gets a tailored
+      // message instead of a raw provider error string. Revoked = restart the flow;
+      // transient = retry the request.
+      if (err instanceof OAuthCallbackError) {
+        const userMessage =
+          err.kind === "revoked"
+            ? "The authorization expired before it could be exchanged. Please retry the connection."
+            : "Could not complete the connection. Please try again in a moment.";
+        logger.error("OAuth callback failed", {
+          providerId: err.providerId,
+          kind: err.kind,
+          status: err.status,
+          oauthError: err.oauthError,
+          oauthErrorDescription: err.oauthErrorDescription,
+        });
+        return c.html(
+          `<html><body><p style="color:red;font-family:monospace;">${escapeHtml(userMessage)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
+        );
+      }
       const message = err instanceof Error ? err.message : "OAuth callback failed";
       logger.error("OAuth callback failed", { message });
       return c.html(

@@ -3,6 +3,8 @@
 import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
+import { and, eq } from "drizzle-orm";
+import { userProviderConnections } from "@appstrate/db/schema";
 import {
   initiateOAuth,
   handleOAuthCallback,
@@ -83,10 +85,43 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     },
   );
 
+  // Scope shortfall: provider granted fewer scopes than requested (RFC 6749 §3.3
+  // narrowing). Flag the connection so callers see a structured "needs reconnection"
+  // signal instead of silently working with reduced permissions.
+  if (result.scopeShortfall.length > 0) {
+    logger.warn("OAuth scope shortfall — flagging connection as needsReconnection", {
+      providerId: result.providerId,
+      profileId: result.profileId,
+      shortfall: result.scopeShortfall,
+    });
+    await db
+      .update(userProviderConnections)
+      .set({ needsReconnection: true, updatedAt: new Date() })
+      .where(
+        and(
+          eq(userProviderConnections.profileId, result.profileId),
+          eq(userProviderConnections.providerId, result.providerId),
+          eq(userProviderConnections.orgId, result.orgId),
+          eq(userProviderConnections.providerCredentialId, providerCredentialId),
+        ),
+      );
+  }
+
+  // Scope creep: provider returned more scopes than requested. Some providers
+  // (Slack, GitHub legacy) always return all owner scopes, so this is non-blocking.
+  if (result.scopeCreep.length > 0) {
+    logger.warn("OAuth scope creep — provider granted unrequested scopes", {
+      providerId: result.providerId,
+      profileId: result.profileId,
+      creep: result.scopeCreep,
+    });
+  }
+
   logger.info("OAuth connection established", {
     providerId: result.providerId,
     profileId: result.profileId,
     scopes: result.scopesGranted,
+    shortfall: result.scopeShortfall.length > 0 ? result.scopeShortfall : undefined,
   });
 
   return result;

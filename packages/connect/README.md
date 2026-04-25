@@ -18,8 +18,79 @@ OAuth2/PKCE, API key authentication, and encrypted credential storage for provid
 - **basic** — Username/password Base64
 - **custom** — Multi-field credential schema rendered as dynamic form
 
+## OAuth error classification
+
+Both the initial token exchange (`handleOAuthCallback`) and the refresh flow
+(`forceRefresh`) classify failures through the shared `parseTokenErrorResponse`
+helper so revocation handling stays symmetric per RFC 6749 §5.2.
+
+| Error class          | Triggered by                           | Caller behavior                              |
+| -------------------- | -------------------------------------- | -------------------------------------------- |
+| `OAuthCallbackError` | initial token exchange (callback path) | distinguish `kind: "revoked" \| "transient"` |
+| `RefreshError`       | token refresh (already-connected path) | same `kind` discriminant                     |
+
+`kind: "revoked"` (HTTP 400 + `{"error": "invalid_grant"}`) means the
+authorization code or refresh token is dead and the user must reconnect.
+Anything else is `transient` — retry the request, not the entire OAuth flow.
+
+## Scope validation
+
+`parseTokenResponse` returns two diff arrays alongside `scopesGranted`:
+
+- `scopeShortfall` — scopes requested but not granted (provider narrowing).
+  `services/connection-manager/oauth.ts` flags the saved connection with
+  `needsReconnection: true` when this is non-empty.
+- `scopeCreep` — scopes granted that were never requested (provider over-grant).
+  Some providers (Slack, GitHub legacy) always return all owner scopes; logged
+  as a warning, not blocked.
+
+## Credential encryption — versioned envelope
+
+Stored credentials use AES-256-GCM with a versioned envelope:
+
+```
+v1:<kid>:<base64(iv|authTag|ciphertext)>
+```
+
+Legacy ("v0") blobs — raw `base64(iv|authTag|ciphertext)` with no header — remain
+decryptable indefinitely with the active key, so the format change rolls out
+non-breaking. New writes always emit v1.
+
+### Online key rotation playbook
+
+Rotation does not require downtime or an offline batch re-encrypt. The version
+tag plus key id let the platform run with a multi-key keyring during the
+transition window.
+
+```
+# 1. Generate a new key
+NEW_KEY=$(openssl rand -base64 32)
+
+# 2. Move the current key into the retired keyring (decrypt-only)
+#    and promote the new key as primary.
+export CONNECTION_ENCRYPTION_KEYS='{"k1":"<current CONNECTION_ENCRYPTION_KEY value>"}'
+export CONNECTION_ENCRYPTION_KEY=$NEW_KEY
+export CONNECTION_ENCRYPTION_KEY_ID=k2
+
+# 3. Restart the platform. New writes emit `v1:k2:...`. Existing `v1:k1:...`
+#    blobs remain readable via the retired keyring; v0 blobs decrypt with the
+#    current active key.
+
+# 4. Run a background re-encrypt sweep (read → decrypt → encrypt → write) to
+#    rewrite every `userProviderConnections.credentialsEncrypted` row. Idempotent.
+
+# 5. Once sweep is complete, drop the retired key:
+unset CONNECTION_ENCRYPTION_KEYS
+```
+
+Restrictions:
+
+- `CONNECTION_ENCRYPTION_KEY_ID` must match `^[A-Za-z0-9_-]{1,32}$`.
+- Retired keys must use a different kid than the active one (validated at boot).
+- Each retired key must be 32 bytes (256-bit) base64-encoded.
+
 ## Dependencies
 
 - `@appstrate/db` — Database access for credential storage
-- `@appstrate/env` — `CONNECTION_ENCRYPTION_KEY` for credential encryption
+- `@appstrate/env` — `CONNECTION_ENCRYPTION_KEY` (+ optional rotation envs) for credential encryption
 - `@appstrate/shared-types` — Provider and connection type definitions

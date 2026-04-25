@@ -7,7 +7,7 @@ import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
 import { applicationProviderCredentials, userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
+import { encryptCredentials, decryptCredentials, OAuthCallbackError } from "@appstrate/connect";
 import {
   initiateConnection,
   handleCallback,
@@ -376,6 +376,59 @@ describe("OAuth2 flows", () => {
       await expect(handleCallback("bad-code", state)).rejects.toThrow("Token exchange failed");
     });
 
+    // The two paths that hit the token endpoint (initial callback + refresh) MUST
+    // classify a `400 invalid_grant` as a revocation per RFC 6749 §5.2 — historically
+    // only the refresh path did this, leaving the callback to surface a generic 400
+    // with no actionable signal.
+    it("classifies invalid_grant on the initial callback as a revocation (kind=revoked)", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({
+        error: "invalid_grant",
+        error_description: "Authorization code expired",
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      const cbErr = caught as OAuthCallbackError;
+      expect(cbErr.kind).toBe("revoked");
+      expect(cbErr.providerId).toBe(PROVIDER_ID);
+      expect(cbErr.oauthError).toBe("invalid_grant");
+      expect(cbErr.oauthErrorDescription).toBe("Authorization code expired");
+    });
+
+    it("classifies non-invalid_grant 400 errors as transient", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({ error: "invalid_client" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      expect((caught as OAuthCallbackError).kind).toBe("transient");
+    });
+
     it("throws when token response has no access_token", async () => {
       mockServer.setTokenResponse({ token_type: "Bearer" });
 
@@ -427,6 +480,61 @@ describe("OAuth2 flows", () => {
 
       // scopesGranted reflects what the token endpoint returned, not what was requested
       expect(result.scopesGranted).toEqual(["read"]);
+      // The provider granted "read" but we requested ["read", "write"] →
+      // shortfall surfaces "write".
+      expect(result.scopeShortfall).toEqual(["write"]);
+    });
+
+    it("flags the saved connection with needsReconnection on scope shortfall", async () => {
+      mockServer.setTokenResponse({
+        access_token: "token",
+        refresh_token: "refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "read", // only "read" granted, but ["read","write"] requested
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+      await handleCallback("mock-code", state);
+
+      const [conn] = await db
+        .select()
+        .from(userProviderConnections)
+        .where(eq(userProviderConnections.profileId, profileId));
+      expect(conn).toBeDefined();
+      expect(conn!.needsReconnection).toBe(true);
+      expect(conn!.scopesGranted).toEqual(["read"]);
+    });
+
+    it("does NOT flag needsReconnection on scope creep (provider over-grant)", async () => {
+      mockServer.setTokenResponse({
+        access_token: "token",
+        refresh_token: "refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "read write admin", // extra "admin" beyond the requested set
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+      const result = await handleCallback("mock-code", state);
+      expect(result.scopeCreep).toEqual(["admin"]);
+      expect(result.scopeShortfall).toEqual([]);
+
+      const [conn] = await db
+        .select()
+        .from(userProviderConnections)
+        .where(eq(userProviderConnections.profileId, profileId));
+      expect(conn!.needsReconnection).toBe(false);
     });
   });
 

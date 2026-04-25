@@ -5,8 +5,46 @@ import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
+import {
+  parseTokenResponse,
+  parseTokenErrorResponse,
+  buildTokenHeaders,
+  buildTokenBody,
+  type TokenErrorKind,
+} from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
+
+/**
+ * Error thrown by handleOAuthCallback when the initial token exchange fails.
+ *
+ * Mirrors the {@link import("./token-refresh.ts").RefreshError} pattern so
+ * revocation handling is symmetric across the two paths that call the OAuth2
+ * token endpoint. The discrimination matters because:
+ *
+ * - `"revoked"` (HTTP 400 + `{ "error": "invalid_grant" }` per RFC 6749 §5.2):
+ *   the authorization code is dead. The user must restart the OAuth flow.
+ *   Callers SHOULD surface a structured "please reconnect" message rather than
+ *   a generic 400.
+ *
+ * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, other
+ *   OAuth error codes). The authorization code might still be valid on retry
+ *   for some classes of failure; the user should be told to retry the request,
+ *   not the entire OAuth flow.
+ */
+export class OAuthCallbackError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: TokenErrorKind,
+    public readonly providerId: string,
+    public readonly status?: number,
+    public readonly body?: string,
+    public readonly oauthError?: string,
+    public readonly oauthErrorDescription?: string,
+  ) {
+    super(message);
+    this.name = "OAuthCallbackError";
+  }
+}
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
@@ -116,6 +154,20 @@ export interface OAuthCallbackResult {
   refreshToken?: string;
   expiresAt: string | null;
   scopesGranted: string[];
+  /**
+   * Scopes that were requested but not granted by the provider.
+   * Non-empty arrays indicate the user must reconnect (or accept a degraded
+   * surface). Callers SHOULD set `needsReconnection: true` when this is
+   * non-empty, except in cases where the missing scopes are explicitly
+   * optional in the provider definition.
+   */
+  scopeShortfall: string[];
+  /**
+   * Scopes the provider granted but were never requested. Some providers
+   * (Slack, GitHub legacy) always return all owner scopes. Treat as a
+   * warning signal (audit log), not as a rejection.
+   */
+  scopeCreep: string[];
 }
 
 /**
@@ -180,21 +232,36 @@ export async function handleOAuthCallback(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new Error(
+    throw new OAuthCallbackError(
       `Token exchange network error for '${stateRow.providerId}': ${extractErrorMessage(err)}`,
+      "transient",
+      stateRow.providerId,
     );
   }
 
   if (!tokenResponse.ok) {
     const body = await tokenResponse.text();
-    throw new Error(`Token exchange failed: ${tokenResponse.status} ${body}`);
+    const classification = parseTokenErrorResponse(tokenResponse.status, body);
+    throw new OAuthCallbackError(
+      `Token exchange failed for '${stateRow.providerId}': ${tokenResponse.status} ${body}`,
+      classification.kind,
+      stateRow.providerId,
+      tokenResponse.status,
+      body,
+      classification.error,
+      classification.errorDescription,
+    );
   }
 
   let tokenData: Record<string, unknown>;
   try {
     tokenData = (await tokenResponse.json()) as Record<string, unknown>;
   } catch {
-    throw new Error(`Token exchange returned non-JSON response for '${stateRow.providerId}'`);
+    throw new OAuthCallbackError(
+      `Token exchange returned non-JSON response for '${stateRow.providerId}'`,
+      "transient",
+      stateRow.providerId,
+    );
   }
 
   const parsed = parseTokenResponse(tokenData, stateRow.scopesRequested);
@@ -213,5 +280,7 @@ export async function handleOAuthCallback(
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
     scopesGranted: parsed.scopesGranted,
+    scopeShortfall: parsed.scopeShortfall,
+    scopeCreep: parsed.scopeCreep,
   };
 }
