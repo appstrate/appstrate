@@ -18,8 +18,9 @@ export const internalPaths = {
         {
           name: "fields",
           in: "query",
-          description: 'Comma-separated fields to include: "state", "result" (default: "state")',
-          schema: { type: "string", default: "state" },
+          description:
+            'Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint")',
+          schema: { type: "string", default: "checkpoint" },
         },
       ],
       responses: {
@@ -38,7 +39,7 @@ export const internalPaths = {
                   {
                     id: "run_cm9abc123",
                     status: "success",
-                    state: { lastProcessedId: 42 },
+                    checkpoint: { lastProcessedId: 42 },
                     createdAt: "2026-01-14T09:00:00Z",
                   },
                 ],

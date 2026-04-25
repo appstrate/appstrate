@@ -365,7 +365,7 @@ export const schemas = {
       },
       input: { type: "object" },
       result: { type: "object" },
-      state: { type: "object" },
+      checkpoint: { type: "object" },
       error: { type: "string" },
       tokenUsage: {
         type: ["object", "null"],

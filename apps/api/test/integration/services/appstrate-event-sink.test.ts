@@ -225,7 +225,7 @@ describe("AggregatingEventSink", () => {
     // No events handled yet — every read MUST return a valid empty value.
     expect(() => sink.snapshot()).not.toThrow();
     expect(sink.snapshot().memories).toEqual([]);
-    expect(sink.snapshot().state).toBeNull();
+    expect(sink.snapshot().checkpoint).toBeNull();
     expect(sink.snapshot().output).toBeNull();
     expect(sink.snapshot().report).toBeNull();
     expect(sink.usage.input_tokens).toBe(0);

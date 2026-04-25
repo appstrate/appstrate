@@ -62,9 +62,6 @@ const expectedEndpoints = [
   // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
   "GET /api/agents",
   "PUT /api/agents/{scope}/{name}/config",
-  "GET /api/agents/{scope}/{name}/memories",
-  "DELETE /api/agents/{scope}/{name}/memories",
-  "DELETE /api/agents/{scope}/{name}/memories/{memoryId}",
   // Unified persistence (ADR-011) — checkpoints + memories
   "GET /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence",

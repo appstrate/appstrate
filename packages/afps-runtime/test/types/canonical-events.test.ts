@@ -162,7 +162,7 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    expect(arr.length).toBe(9);
+    expect(arr.length).toBe(8);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

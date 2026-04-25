@@ -103,7 +103,7 @@ export function RunDetailPage() {
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
   const finalReport = reportContent || execResult?.report || null;
   const hasResult = hasOutput || !!finalReport;
-  const checkpointData = (run?.state as Record<string, unknown> | null) ?? null;
+  const checkpointData = (run?.checkpoint as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
   // Default tab: "result" if results exist, otherwise "logs".
