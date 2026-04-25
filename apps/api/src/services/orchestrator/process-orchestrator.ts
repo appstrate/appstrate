@@ -18,7 +18,7 @@
  * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm, open as fsOpen } from "node:fs/promises";
+import { mkdir, rm, readdir, open as fsOpen } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -83,17 +83,19 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     const handles = [...this.processes.entries()];
     await Promise.all(
       handles.map(async ([_id, handle]) => {
-        if (!handle.proc) return;
-        try {
-          handle.proc.kill("SIGTERM");
-          const exited = await Promise.race([
-            handle.proc.exited.then(() => true),
-            new Promise<false>((r) => setTimeout(() => r(false), 5000)),
-          ]);
-          if (!exited) handle.proc.kill("SIGKILL");
-        } catch {
-          // Already dead
+        if (handle.proc) {
+          try {
+            handle.proc.kill("SIGTERM");
+            const exited = await Promise.race([
+              handle.proc.exited.then(() => true),
+              new Promise<false>((r) => setTimeout(() => r(false), 5000)),
+            ]);
+            if (!exited) handle.proc.kill("SIGKILL");
+          } catch {
+            // Already dead
+          }
         }
+        await this.removePidfile(handle.runId, handle.role);
       }),
     );
     this.processes.clear();
@@ -105,8 +107,60 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     // No-op — no images needed in process mode
   }
 
+  /**
+   * Reconcile orphans left over from a previous platform process.
+   *
+   * Mode `process` has no Docker label to scan, so every spawn writes a pidfile
+   * inside its boundary directory (`./data/runs/<runId>/<role>.pid`). At boot,
+   * every subdirectory of `DATA_DIR` is by definition orphaned — boot.ts has
+   * already marked any in-progress runs as failed before we run, and the new
+   * platform process holds no in-memory handles yet. We SIGKILL each pid that
+   * is still alive and rm -rf the boundary directory.
+   *
+   * Best-effort throughout: an unreadable pidfile or a permission error never
+   * blocks startup. Idempotent — calling twice in a row returns zeros on the
+   * second call.
+   */
   async cleanupOrphans(): Promise<CleanupReport> {
-    return { workloads: 0, isolationBoundaries: 0 };
+    let workloads = 0;
+    let isolationBoundaries = 0;
+
+    let entries: string[];
+    try {
+      entries = (await readdir(DATA_DIR)) as unknown as string[];
+    } catch {
+      return { workloads: 0, isolationBoundaries: 0 };
+    }
+
+    for (const name of entries) {
+      const dir = join(DATA_DIR, name);
+      const files = ((await readdir(dir).catch(() => [])) as unknown as string[]) ?? [];
+      for (const f of files) {
+        if (!f.endsWith(".pid")) continue;
+        const text = await Bun.file(join(dir, f))
+          .text()
+          .catch(() => "");
+        const pid = Number(text.trim());
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        try {
+          process.kill(pid, 0);
+        } catch {
+          // Already dead — nothing to kill, but the pidfile still counts as a
+          // recovered orphan boundary (handled by the rm -rf below).
+          continue;
+        }
+        try {
+          process.kill(pid, "SIGKILL");
+          workloads++;
+        } catch {
+          // Race: died between the probe and the kill.
+        }
+      }
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      isolationBoundaries++;
+    }
+
+    return { workloads, isolationBoundaries };
   }
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
@@ -152,8 +206,24 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     this.drainStderr(proc, id);
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
+    await this.writePidfile(runId, "sidecar", proc.pid);
 
-    await this.waitForHealth(`http://localhost:${port}/health`, 5000);
+    try {
+      await this.waitForHealth(`http://localhost:${port}/health`, 5000);
+    } catch (err) {
+      // Health check failed — kill the spawned sidecar and purge state so the
+      // process doesn't outlive the failed createSidecar call. Without this,
+      // pi.ts's finally never sees a sidecarHandle and the leak persists.
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already dead
+      }
+      this.processes.delete(id);
+      this.sidecarPorts.delete(runId);
+      await this.removePidfile(runId, "sidecar");
+      throw err;
+    }
     logger.info("Sidecar ready", { runId, port, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
@@ -212,6 +282,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     ph.proc = proc;
     ph.stdoutPath = stdoutPath;
     this.pendingSpecs.delete(handle.id);
+    await this.writePidfile(handle.runId, ph.role, proc.pid);
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
@@ -235,6 +306,8 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       // Already dead
     }
     this.processes.delete(handle.id);
+    if (ph.role === "sidecar") this.sidecarPorts.delete(ph.runId);
+    await this.removePidfile(ph.runId, ph.role);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {
@@ -303,6 +376,30 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Persist a spawned subprocess's pid in its boundary directory so the next
+   * platform boot can reconcile the orphan if this process is killed before
+   * cleanup runs (SIGKILL, hot-reload crash, machine reboot).
+   *
+   * Best-effort: the pidfile is a recovery aid, not a correctness requirement.
+   * A failed write only loses the boot-time orphan recovery for one process.
+   */
+  private async writePidfile(runId: string, role: string, pid: number): Promise<void> {
+    try {
+      await Bun.write(join(DATA_DIR, runId, `${role}.pid`), String(pid));
+    } catch (err) {
+      logger.warn("Failed to write sidecar/workload pidfile", {
+        runId,
+        role,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async removePidfile(runId: string, role: string): Promise<void> {
+    await rm(join(DATA_DIR, runId, `${role}.pid`), { force: true }).catch(() => {});
+  }
 
   private async findAvailablePort(retries = 3): Promise<number> {
     for (let attempt = 0; attempt < retries; attempt++) {
