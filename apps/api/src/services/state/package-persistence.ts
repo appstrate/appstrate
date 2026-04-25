@@ -87,6 +87,21 @@ function fromStorageActor(
 }
 
 /**
+ * Build the WHERE clause that narrows a query to a single persistence
+ * scope. Encapsulates the `shared` ↔ `(actor_type, actor_id)` translation
+ * so every read/write path uses the exact same predicate (a divergence
+ * here would silently leak rows across actors).
+ *
+ * Returns a Drizzle SQL expression suitable for `and(...)` composition.
+ */
+function buildScopeFilter(scope: PersistenceScope) {
+  const { actorType, actorId } = storageActor(scope);
+  return actorType === "shared"
+    ? and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
+    : and(eq(packagePersistence.actorType, actorType), eq(packagePersistence.actorId, actorId!));
+}
+
+/**
  * Narrow an `Actor` (platform convention) into a `PersistenceScope`. Passing
  * `null` is the "scheduled / system run" path — maps to `shared`. This is the
  * adapter every caller should use: `Actor` flows through the app; scope stays
@@ -197,12 +212,6 @@ export async function deleteCheckpoint(
   applicationId: string,
   scope: PersistenceScope,
 ): Promise<boolean> {
-  const { actorType, actorId } = storageActor(scope);
-  const whereActor =
-    actorType === "shared"
-      ? and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
-      : and(eq(packagePersistence.actorType, actorType), eq(packagePersistence.actorId, actorId!));
-
   const deleted = await db
     .delete(packagePersistence)
     .where(
@@ -210,7 +219,7 @@ export async function deleteCheckpoint(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
         eq(packagePersistence.kind, "checkpoint"),
-        whereActor,
+        buildScopeFilter(scope),
       ),
     )
     .returning({ id: packagePersistence.id });
@@ -289,10 +298,6 @@ export async function addMemories(
   if (contents.length === 0) return 0;
 
   const { actorType, actorId } = storageActor(scope);
-  const scopeFilter =
-    actorType === "shared"
-      ? and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
-      : and(eq(packagePersistence.actorType, actorType), eq(packagePersistence.actorId, actorId!));
 
   const [row] = await db
     .select({ count: count() })
@@ -302,7 +307,7 @@ export async function addMemories(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
         eq(packagePersistence.kind, "memory"),
-        scopeFilter!,
+        buildScopeFilter(scope),
       ),
     );
   const existing = row?.count ?? 0;
@@ -362,26 +367,16 @@ export async function deleteAllMemories(
   applicationId: string,
   scope?: PersistenceScope,
 ): Promise<number> {
-  const baseWhere = [
+  const baseWhere = and(
     eq(packagePersistence.packageId, packageId),
     eq(packagePersistence.applicationId, applicationId),
     eq(packagePersistence.kind, "memory"),
-  ];
-
-  if (scope) {
-    const { actorType, actorId } = storageActor(scope);
-    if (actorType === "shared") {
-      baseWhere.push(eq(packagePersistence.actorType, "shared"));
-      baseWhere.push(isNull(packagePersistence.actorId));
-    } else {
-      baseWhere.push(eq(packagePersistence.actorType, actorType));
-      baseWhere.push(eq(packagePersistence.actorId, actorId!));
-    }
-  }
+    ...(scope ? [buildScopeFilter(scope)] : []),
+  );
 
   const deleted = await db
     .delete(packagePersistence)
-    .where(and(...baseWhere))
+    .where(baseWhere)
     .returning({ id: packagePersistence.id });
   return deleted.length;
 }
