@@ -13,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getLastRunState, getPackageMemories } from "./state/index.ts";
+import { getCheckpoint, listMemories, scopeFromActor } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
@@ -83,6 +83,7 @@ export async function buildRunContext(params: {
     params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
 
   // Step 1: load all independent data in parallel
+  const persistenceScope = scopeFromActor(actor);
   const [
     tokens,
     configFull,
@@ -94,7 +95,7 @@ export async function buildRunContext(params: {
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
     skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
-    getLastRunState({ orgId, applicationId }, agent.id, actor),
+    getCheckpoint(agent.id, applicationId, persistenceScope),
     resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
     params.overrideVersionLabel
@@ -102,7 +103,7 @@ export async function buildRunContext(params: {
       : agent.source !== "system"
         ? getLatestVersionInfo(agent.id).catch(() => null)
         : null,
-    getPackageMemories(agent.id, applicationId),
+    listMemories(agent.id, applicationId, persistenceScope),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};
@@ -159,7 +160,10 @@ export async function buildRunContext(params: {
     runId,
     input: input ?? {},
     memories: memories.map((m) => ({
-      content: m.content,
+      // Memory content is JSONB at the storage layer (post-unification).
+      // The AFPS runtime contract requires a string — stringify structured
+      // entries; pass strings through verbatim.
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
       createdAt: toEpochMs(m.createdAt),
     })),
     ...(previousState !== null ? { state: previousState } : {}),

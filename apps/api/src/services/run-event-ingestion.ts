@@ -39,6 +39,11 @@ import {
 } from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import { addPackageMemories } from "./state/package-memories.ts";
+import {
+  addMemories as addUnifiedMemories,
+  upsertCheckpoint,
+  scopeFromRunContext,
+} from "./state/package-persistence.ts";
 import { getPackage } from "./agent-service.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -366,12 +371,58 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       "error",
     );
   }
+
+  // Resolve the run's actor (for unified-persistence scope). The legacy
+  // package_memories table is app-wide so we don't need it for the legacy
+  // write below; the unified table is per-actor by default.
+  const [actorRow] = await db
+    .select({
+      dashboardUserId: runs.dashboardUserId,
+      endUserId: runs.endUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  const persistenceScope = scopeFromRunContext({
+    userId: actorRow?.dashboardUserId,
+    endUserId: actorRow?.endUserId,
+  });
+
   if (result.memories?.length) {
+    // Legacy double-write: keep `package_memories` populated so the
+    // transition window is reversible. Future PR drops the legacy table.
     await addPackageMemories(
       run.packageId,
       run.orgId,
       run.applicationId,
       result.memories.map((m) => m.content),
+      run.id,
+    );
+
+    // Unified write — defaults to the run's actor scope. Future-compat:
+    // when AFPS adds `scope: "shared" | "actor"` to memory events, route
+    // shared rows to `{ type: "shared" }` here.
+    await addUnifiedMemories(
+      run.packageId,
+      run.applicationId,
+      run.orgId,
+      persistenceScope,
+      result.memories.map((m) => m.content),
+      run.id,
+    );
+  }
+
+  // Unified-persistence checkpoint write — same data the legacy
+  // `runs.state` UPDATE above persisted, but in the per-actor unified
+  // store. Skipped when the runner did not emit a checkpoint (matches
+  // the "no state.set event" semantics).
+  if (stateToPersist !== null) {
+    await upsertCheckpoint(
+      run.packageId,
+      run.applicationId,
+      run.orgId,
+      persistenceScope,
+      stateToPersist,
       run.id,
     );
   }
