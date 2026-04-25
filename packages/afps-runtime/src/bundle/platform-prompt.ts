@@ -200,6 +200,12 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
     );
 
+    sections.push(
+      'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, and `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
+        'Without `toFile`, responses larger than 64 KB auto-spill to a file under `responses/<toolCallId>.bin`; smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
+        "Inspect `body.kind` on the returned JSON to dispatch.\n",
+    );
+
     for (const provider of connectedProviders) {
       const displayName = provider.displayName ?? provider.id;
       const toolName = provider.toolName ?? providerToolName(provider.id);
