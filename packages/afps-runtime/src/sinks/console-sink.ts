@@ -3,6 +3,7 @@
 
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
+import { narrowCanonicalEvent } from "../types/canonical-events.ts";
 import type { RunResult } from "../types/run-result.ts";
 
 /**
@@ -51,24 +52,37 @@ export class ConsoleSink implements EventSink {
 
   private formatEvent(event: RunEvent, sequence: number): string {
     const seq = `#${sequence.toString().padStart(4, "0")}`;
-    switch (event.type) {
-      case "memory.added":
-        return `${seq} ✚ memory: ${truncate(String(event.content ?? ""), 200)}`;
-      case "state.set":
-        return `${seq} ▲ state: ${truncate(safeStringify(event.state), 200)}`;
-      case "output.emitted":
-        return `${seq} ◆ output: ${truncate(safeStringify(event.data), 200)}`;
-      case "report.appended":
-        return `${seq} 📝 report: ${truncate(String(event.content ?? ""), 200)}`;
-      case "log.written":
-        return `${seq} ${logMarker(event.level)} ${String(event.message ?? "")}`;
-      default:
-        return `${seq} • ${event.type}: ${truncate(safeStringify(eventPayload(event)), 200)}`;
+    const canonical = narrowCanonicalEvent(event);
+    if (canonical !== null) {
+      switch (canonical.type) {
+        case "memory.added":
+          return `${seq} ✚ memory: ${truncate(canonical.content, 200)}`;
+        case "state.set":
+          return `${seq} ▲ state: ${truncate(safeStringify(canonical.state), 200)}`;
+        case "output.emitted":
+          return `${seq} ◆ output: ${truncate(safeStringify(canonical.data), 200)}`;
+        case "report.appended":
+          return `${seq} 📝 report: ${truncate(canonical.content, 200)}`;
+        case "log.written":
+          return `${seq} ${logMarker(canonical.level)} ${canonical.message}`;
+        case "appstrate.progress":
+          return `${seq} → ${canonical.message}`;
+        case "appstrate.error":
+          return `${seq} ✗ ${canonical.message}`;
+        case "appstrate.metric":
+          return `${seq} ⊘ metric: ${truncate(safeStringify(canonical.data ?? {}), 200)}`;
+        default: {
+          const _exhaustive: never = canonical;
+          void _exhaustive;
+          break;
+        }
+      }
     }
+    return `${seq} • ${event.type}: ${truncate(safeStringify(eventPayload(event)), 200)}`;
   }
 }
 
-function logMarker(level: unknown): string {
+function logMarker(level: "info" | "warn" | "error"): string {
   switch (level) {
     case "info":
       return "ℹ";
@@ -76,8 +90,11 @@ function logMarker(level: unknown): string {
       return "⚠";
     case "error":
       return "✗";
-    default:
+    default: {
+      const _exhaustive: never = level;
+      void _exhaustive;
       return "·";
+    }
   }
 }
 

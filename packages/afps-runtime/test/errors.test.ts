@@ -75,7 +75,7 @@ describe("isAfpsError marker", () => {
     expect(isAfpsError(new RunHistoryError("RUN_HISTORY_FETCH_FAILED", "x"))).toBe(true);
     expect(isAfpsError(new CredentialResolutionError("x"))).toBe(true);
     expect(isAfpsError(new BundleError("INTEGRITY_MISMATCH", "x"))).toBe(true);
-    expect(isAfpsError(new BundleSignaturePolicyError("invalid_signature", "x"))).toBe(true);
+    expect(isAfpsError(new BundleSignaturePolicyError("signature_invalid", "x"))).toBe(true);
     expect(isAfpsError(new AfpsEntrypointError("MISSING", "x"))).toBe(true);
   });
 

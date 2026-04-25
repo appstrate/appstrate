@@ -16,6 +16,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import { narrowCanonicalEvent } from "../types/canonical-events.ts";
 import type { RunError, RunResult } from "../types/run-result.ts";
 
 export interface ReduceOptions {
@@ -36,45 +37,51 @@ export function emptyRunResult(): RunResult {
 /**
  * Fold a single event into a mutable result accumulator. Consumers that
  * want an immutable pipeline can seed a fresh accumulator per call.
+ *
+ * Open-envelope `RunEvent`s flow in; the canonical narrower projects
+ * the five reserved namespaces (memory / state / output / report / log)
+ * + the runner-internal `appstrate.*` namespace into a discriminated
+ * union, so the switch is exhaustively typed. Third-party / unknown
+ * events are silently passed through — the sink still sees them, they
+ * just do not contribute to the aggregated result.
  */
 export function foldEvent(result: RunResult, event: RunEvent): void {
-  switch (event.type) {
-    case "memory.added": {
-      if (typeof event.content === "string") {
-        result.memories.push({ content: event.content });
-      }
+  const canonical = narrowCanonicalEvent(event);
+  if (canonical === null) return;
+
+  switch (canonical.type) {
+    case "memory.added":
+      result.memories.push({ content: canonical.content });
+      return;
+    case "state.set":
+      result.state = canonical.state ?? null;
+      return;
+    case "output.emitted":
+      result.output = canonical.data ?? null;
+      return;
+    case "report.appended":
+      result.report =
+        result.report === null ? canonical.content : `${result.report}\n${canonical.content}`;
+      return;
+    case "log.written":
+      result.logs.push({
+        level: canonical.level,
+        message: canonical.message,
+        timestamp: canonical.timestamp,
+      });
+      return;
+    case "appstrate.progress":
+    case "appstrate.error":
+    case "appstrate.metric":
+      // Runner-internal lifecycle events — do not contribute to the
+      // aggregated result. Listed here so adding a new appstrate.*
+      // variant is caught by the exhaustiveness check below.
+      return;
+    default: {
+      const _exhaustive: never = canonical;
+      void _exhaustive;
       return;
     }
-    case "state.set": {
-      result.state = event.state ?? null;
-      return;
-    }
-    case "output.emitted": {
-      result.output = event.data ?? null;
-      return;
-    }
-    case "report.appended": {
-      if (typeof event.content === "string") {
-        result.report =
-          result.report === null ? event.content : `${result.report}\n${event.content}`;
-      }
-      return;
-    }
-    case "log.written": {
-      const level = event.level;
-      const message = event.message;
-      if (
-        (level === "info" || level === "warn" || level === "error") &&
-        typeof message === "string"
-      ) {
-        result.logs.push({ level, message, timestamp: event.timestamp });
-      }
-      return;
-    }
-    default:
-      // Third-party / unknown event types do not contribute — the sink
-      // still sees them, they just do not fold into the summary.
-      return;
   }
 }
 
