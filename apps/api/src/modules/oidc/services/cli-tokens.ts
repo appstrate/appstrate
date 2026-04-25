@@ -858,6 +858,57 @@ export async function checkFamilyAndTouch(params: {
   return true;
 }
 
+/**
+ * Module-owned lookup consumed by the platform's runner-name resolver
+ * (`apps/api/src/lib/runner-context.ts`). Returns the device name
+ * recorded on a CLI session's head row, used as the human-friendly label
+ * stamped on `runs.runner_name` at run-creation time when the caller
+ * authenticated via a CLI JWT and didn't override via
+ * `X-Appstrate-Runner-Name`.
+ *
+ * Cached in-memory (TTL 60 s) — runner-name resolution sits on the
+ * run-creation hot path and the underlying row barely ever changes
+ * (device names are stamped at login and never re-captured on rotation).
+ * A short TTL also bounds the staleness window after a manual rename
+ * via the dashboard.
+ */
+const RUNNER_DEVICE_NAME_CACHE_TTL_MS = 60 * 1000;
+const _runnerDeviceNameCache = new Map<string, { name: string | null; expiresAt: number }>();
+
+export async function lookupCliDeviceName(familyId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = _runnerDeviceNameCache.get(familyId);
+  if (cached && cached.expiresAt > now) return cached.name;
+  try {
+    const [row] = await db
+      .select({ deviceName: cliRefreshToken.deviceName })
+      .from(cliRefreshToken)
+      .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.parentId)))
+      .limit(1);
+    const name = row?.deviceName ?? null;
+    _runnerDeviceNameCache.set(familyId, {
+      name,
+      expiresAt: now + RUNNER_DEVICE_NAME_CACHE_TTL_MS,
+    });
+    return name;
+  } catch (err) {
+    logger.warn("oidc: cli device-name lookup failed (runner attribution)", {
+      module: "oidc",
+      familyId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Test-only — drop the device-name cache between fixtures so stale
+ * entries from one test don't bleed into the next.
+ */
+export function _resetRunnerDeviceNameCacheForTesting(): void {
+  _runnerDeviceNameCache.clear();
+}
+
 // ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
 
 /**

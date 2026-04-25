@@ -120,7 +120,18 @@ export const oidcAuthStrategy: AuthStrategy = {
     }
 
     if (claims.actorType === "user") {
-      return resolveInstanceUser(claims);
+      return resolveInstanceUser(claims).then((resolution) => {
+        // Surface the CLI family id on `c.var.extra.cliFamilyId` so route
+        // handlers (and `lib/runner-context.ts`) can resolve the runner's
+        // device name without re-parsing the JWT.
+        if (resolution && claims.cliFamilyId) {
+          return {
+            ...resolution,
+            extra: { ...(resolution.extra ?? {}), cliFamilyId: claims.cliFamilyId },
+          };
+        }
+        return resolution;
+      });
     }
     if (claims.actorType === "dashboard_user") {
       return resolveDashboardUser(claims);

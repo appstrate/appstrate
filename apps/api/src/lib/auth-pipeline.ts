@@ -113,6 +113,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.deferOrgResolution) {
           c.set("deferOrgResolution", true);
         }
+        if (resolution.extra && Object.keys(resolution.extra).length > 0) {
+          // Strategy-specific opaque metadata. Consumers cast to the
+          // shape they expect — keeping it untyped here avoids dragging
+          // every strategy's extension keys into core types.
+          c.set("authExtra", resolution.extra);
+        }
         return next();
       }
     }

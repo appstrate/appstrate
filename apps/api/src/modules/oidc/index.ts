@@ -77,6 +77,8 @@ import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
 import { verifyEndUserAccessToken } from "./services/enduser-token.ts";
+import { setRunnerResolver } from "../../lib/runner-resolver.ts";
+import { lookupCliDeviceName } from "./services/cli-tokens.ts";
 
 /**
  * Public API surface exposed via `services.modules.get("oidc")?.api`. Other
@@ -138,6 +140,14 @@ const oidcModule: AppstrateModule = {
     logger.info("OIDC cached trusted clients snapshotted", {
       module: "oidc",
       count: cachedTrustedClientIds.length,
+    });
+    // Register the runner-name resolver so `lib/runner-context.ts` can
+    // map a CLI JWT's `cli_family_id` claim to the device name persisted
+    // at login. Pure module-owned lookup — core stays vocabulary-free.
+    setRunnerResolver(async ({ cliFamilyId }) => {
+      if (!cliFamilyId) return null;
+      const name = await lookupCliDeviceName(cliFamilyId);
+      return { name, kind: "cli" };
     });
   },
 

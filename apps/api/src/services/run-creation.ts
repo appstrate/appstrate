@@ -78,6 +78,9 @@ export interface CreateRunInput {
   sink?: SinkRequest;
   /** CLI-provided execution environment metadata (os, cli version, git sha, ...). */
   contextSnapshot?: Record<string, unknown>;
+  /** Resolved by `lib/runner-context.ts` from request headers + auth context. */
+  runnerName?: string | null;
+  runnerKind?: string | null;
 }
 
 export type CreateRunResult =
@@ -122,6 +125,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       connectionProfileId: input.connectionProfileId,
       overrideVersionLabel: input.overrideVersionLabel,
       uploadedFiles: input.uploadedFiles,
+      runnerName: input.runnerName ?? null,
+      runnerKind: input.runnerKind ?? null,
     });
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, runId: result.runId };
@@ -221,6 +226,8 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       sinkExpiresAt: new Date(credentials.expiresAt),
       ...(overrideVersionLabel ? { versionLabel: overrideVersionLabel } : {}),
       ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
+      runnerName: input.runnerName ?? null,
+      runnerKind: input.runnerKind ?? null,
     },
   );
 

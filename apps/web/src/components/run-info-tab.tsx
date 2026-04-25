@@ -54,8 +54,14 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   } | null;
   const metadata = run.metadata as Record<string, unknown> | null;
   const hasUsage = run.cost != null || usage != null || run.modelLabel != null;
-  const runnerLabel =
+  const runnerOriginLabel =
     run.runOrigin === "remote" ? t("exec.infoRunnerRemote") : t("exec.infoRunnerPlatform");
+  // Append the runner name when present so the dashboard shows
+  // "Distant · pierres-mbp" or "Distant · acme/web #42" instead of the
+  // bare origin word.
+  const runnerLabel = run.runnerName
+    ? `${runnerOriginLabel} · ${run.runnerName}`
+    : runnerOriginLabel;
   const startedAt = formatTimestamp(run.startedAt);
   const completedAt = formatTimestamp(run.completedAt);
 
