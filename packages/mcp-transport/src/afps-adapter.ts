@@ -98,6 +98,22 @@ export function fromAfpsTool(
   tool: AfpsTool,
   options: FromAfpsToolOptions,
 ): AppstrateToolDefinition {
+  // Validate AFPS-specific shape requirements UP FRONT so the failure
+  // message names the AFPS field, not the MCP one. Without this guard,
+  // a malformed AFPS tool fails inside `createMcpServer` with a message
+  // like "tool 'X' must declare inputSchema with { type: 'object' }",
+  // sending the user looking at the wrong place. AFPS `parameters` is
+  // typed `Record<string, unknown>` (not `JSONSchema7`), so `type:
+  // "object"` is a convention the spec strongly assumes but doesn't
+  // enforce at the type level.
+  const parameters = tool.parameters as { type?: unknown } | undefined;
+  if (parameters === null || typeof parameters !== "object" || parameters.type !== "object") {
+    throw new Error(
+      `fromAfpsTool: tool '${tool.name}' must declare AFPS \`parameters\` as a JSON Schema object ` +
+        `with \`type: "object"\` at the root. ` +
+        `AFPS spec §5.2 requires this shape so MCP \`inputSchema\` can be derived without translation.`,
+    );
+  }
   const provider: AfpsContextProvider =
     options.contextProvider ??
     (({ signal, runId, workspace, emit, requestId }) => ({
@@ -163,6 +179,19 @@ function afpsResultToMcp(result: ToolResult): CallToolResult {
         uri: block.uri,
         ...(block.mimeType !== undefined ? { mimeType: block.mimeType } : {}),
       };
+    }
+    // Surface drift between AFPS and MCP content discriminants AT THE
+    // ADAPTER instead of letting an unknown block leak onto the wire,
+    // where the MCP SDK rejects it with a less actionable message. AFPS
+    // and MCP both currently support `text` and `image`; we explicitly
+    // pass those through. Anything else (a future AFPS-specific type,
+    // or a typo) becomes a clear adapter-level error.
+    if (block.type !== "text" && block.type !== "image") {
+      throw new Error(
+        `afpsResultToMcp: unknown content block type '${(block as { type: string }).type}'. ` +
+          `Supported AFPS → MCP types are 'text', 'image', 'resource'. ` +
+          `If AFPS has added a new content discriminant, update this adapter.`,
+      );
     }
     return block;
   });

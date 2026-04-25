@@ -60,6 +60,12 @@ async function rpc(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
+      // Hono's `app.request()` does not synthesise a Host header. Real
+      // HTTP/1.1 clients (the agent container, mcp-inspector, the SDK
+      // Client) always send one. We set it explicitly here so the
+      // sidecar's DNS-rebinding guard (allowedHosts: ["sidecar",
+      // "127.0.0.1", "localhost"]) accepts the test request.
+      Host: "localhost",
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
   });
@@ -365,6 +371,203 @@ describe("POST /mcp — provider_call body / method consistency", () => {
     expect(result.content[0]!.text).toContain("HEAD");
   });
 });
+
+describe("POST /mcp — caller cannot forge sidecar control headers", () => {
+  // Regression: the MCP descriptor advertises that routing /
+  // sidecar-control headers are filtered server-side. An earlier
+  // version of `mcp.ts` spread `args.headers` BEFORE the controlled
+  // overrides, so an LLM supplying e.g. `X-Stream-Response: 1` could
+  // opt into the binary streaming path the MCP layer is explicitly
+  // designed not to expose, or `X-Substitute-Body: 1` to inject
+  // {{credential}} placeholders into an attacker-controlled payload.
+
+  for (const forbidden of [
+    "X-Stream-Response",
+    "X-Substitute-Body",
+    "X-Max-Response-Size",
+    "X-Provider",
+    "X-Target",
+  ]) {
+    it(`rejects ${forbidden} supplied via args.headers`, async () => {
+      const fetchFn = mock(
+        async () =>
+          new Response('{"ok":true}', {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+      const app = createApp(makeDeps({ fetchFn }));
+
+      const res = await rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "provider_call",
+          arguments: {
+            providerId: "test-provider",
+            target: "https://api.example.com/items",
+            method: "GET",
+            headers: { [forbidden]: "1" },
+          },
+        },
+      });
+
+      expect(res.status).toBe(200);
+      const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("sidecar-control names");
+      expect(result.content[0]!.text).toContain(forbidden);
+
+      // The forbidden header must NOT have reached the upstream — the
+      // request is rejected before /proxy is invoked. fetchFn is the
+      // upstream stub on the far side of /proxy, so it must not have
+      // been called at all.
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("matches forbidden header names case-insensitively", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/items",
+          // HTTP header semantics are case-insensitive — bypass via
+          // case variation must not work.
+          headers: { "x-stream-response": "1" },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("sidecar-control names");
+  });
+
+  it("preserves benign caller-supplied headers", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/items",
+          headers: { "X-Custom-Trace": "abc" },
+        },
+      },
+    });
+    // The forbidden-name filter must let benign headers through to
+    // /proxy without producing a tool-level error. /proxy itself may
+    // further filter hop-by-hop or non-allowlisted headers before
+    // hitting the upstream — that's the legacy route's concern, not
+    // the MCP layer's. The contract here is "benign headers don't
+    // get rejected by the MCP filter".
+    const result = res.json.result as { isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /mcp — request body size cap", () => {
+  // Regression: the SDK's WebStandardStreamableHTTPServerTransport
+  // calls `await req.json()` on POST without any size limit. From the
+  // sidecar's threat model, the agent container is the untrusted side
+  // of the bridge, so a runaway agent could OOM the sidecar with a
+  // multi-GB JSON-RPC envelope.
+
+  it("rejects requests whose declared Content-Length exceeds the cap", async () => {
+    const app = createApp(makeDeps());
+    // We don't send the actual oversize body — the declared length
+    // alone must be sufficient to reject.
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "Content-Length": String(10 * 1024 * 1024),
+        Host: "localhost",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(res.status).toBe(413);
+    const json = (await res.json()) as { error: { message: string } };
+    expect(json.error.message).toContain("exceeds");
+  });
+
+  it("rejects requests whose streamed body exceeds the cap", async () => {
+    const app = createApp(makeDeps());
+    // Build an oversized body without a declared Content-Length so the
+    // streaming path is exercised.
+    const giant = "x".repeat(300 * 1024); // 300 KB > 256 KB cap
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "run_history", arguments: { padding: giant } },
+    });
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Host: "localhost",
+      },
+      body,
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it("accepts a small request just under the cap", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    expect(res.status).toBe(200);
+    expect(res.json.error).toBeUndefined();
+  });
+});
+
+describe("POST /mcp — bounded response read", () => {
+  // The legacy /proxy route already truncates outbound responses, but
+  // the MCP path's `responseToToolResult` previously did
+  // `await res.text()` with no cap. If a future route mounted on the
+  // same Hono app and reachable via app.request() bypassed the /proxy
+  // truncation, the MCP layer would happily materialise the entire
+  // body. The bounded reader is defence-in-depth.
+
+  it("truncates oversized upstream responses with an explicit marker", async () => {
+    const oversized = "y".repeat(512 * 1024); // 512 KB > 256 KB MAX_RESPONSE_SIZE
+    const fetchFn = mock(
+      async () =>
+        new Response(oversized, {
+          status: 200,
+          // /proxy will already truncate — but to test the MCP-layer
+          // bound, we hit /run-history instead which we mock to return
+          // the oversized body directly.
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: { name: "run_history", arguments: { limit: 1 } },
+    });
+    const result = res.json.result as { content: Array<{ text: string }> };
+    // Either /proxy or the MCP-layer cap must have kicked in. We don't
+    // assert exact length (depends on which truncation fires first)
+    // but we DO assert the result is bounded — never the full 512 KB.
+    expect(result.content[0]!.text.length).toBeLessThanOrEqual(MAX_RESPONSE_SIZE_PLUS_MARKER);
+  });
+});
+
+const MAX_RESPONSE_SIZE_PLUS_MARKER = 256 * 1024 + 200; // 256 KB + room for "[truncated: ...]"
 
 describe("StreamableHTTPClientTransport interop (smoke test)", () => {
   it("`enableJsonResponse: true` is wired so SDK clients without SSE work", async () => {

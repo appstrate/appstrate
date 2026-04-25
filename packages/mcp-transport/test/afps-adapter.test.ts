@@ -164,4 +164,60 @@ describe("fromAfpsTool — Phase 1 bridge for AFPS-shaped tools", () => {
       await pair.close();
     }
   });
+
+  it("rejects malformed AFPS parameters with an AFPS-flavoured message", () => {
+    // Regression: a malformed AFPS tool used to fail inside
+    // createMcpServer with an MCP-flavoured message
+    // ("must declare inputSchema with { type: 'object' }"), sending
+    // users to the wrong place. fromAfpsTool now surfaces the failure
+    // pointing at the AFPS `parameters` field.
+    const broken: AfpsTool = {
+      name: "broken",
+      description: "missing root type",
+      // Intentionally not `{ type: "object", … }` — this is what we
+      // want to catch at the adapter boundary.
+      parameters: { properties: {} } as unknown as Record<string, unknown>,
+      async execute() {
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    };
+    expect(() => fromAfpsTool(broken, { runId: "run_x", workspace: "/tmp/run_x" })).toThrow(
+      /AFPS `parameters`/,
+    );
+  });
+
+  it("throws an adapter-level error on unknown AFPS content blocks", async () => {
+    // If AFPS ever introduces a content discriminant the adapter does
+    // not yet know about (or a tool emits a typo), we want the failure
+    // surface to be the adapter — clear message, fixable in this file
+    // — not the wire, where the SDK rejects with a less actionable
+    // schema-validation error.
+    const tool: AfpsTool = {
+      name: "drift",
+      description: "emits an unsupported content block type",
+      parameters: { type: "object", additionalProperties: false },
+      async execute() {
+        return {
+          content: [
+            // Typed-loose return: AFPS spec only enforces shape at runtime.
+            { type: "audio", data: "…" } as unknown as { type: "text"; text: string },
+          ],
+        };
+      },
+    };
+    const pair = await createInProcessPair([
+      fromAfpsTool(tool, { runId: "r", workspace: "/tmp/r" }),
+    ]);
+    try {
+      // The SDK propagates handler throws as JSON-RPC InternalError
+      // (-32603) — that's the "runtime fault" path of the AFPS
+      // contract, distinct from "business failure" (`isError: true` in
+      // a returned result). Adapter drift is a runtime fault.
+      await expect(pair.client.callTool({ name: "drift", arguments: {} })).rejects.toThrow(
+        /unknown content block type.*audio/,
+      );
+    } finally {
+      await pair.close();
+    }
+  });
 });
