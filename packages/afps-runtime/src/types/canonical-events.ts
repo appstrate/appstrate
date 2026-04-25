@@ -26,6 +26,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import type { TokenUsage } from "./run-result.ts";
 
 interface BaseEnvelope {
   timestamp: number;
@@ -83,14 +84,21 @@ export interface AppstrateErrorEvent extends BaseEnvelope {
   data?: Record<string, unknown>;
 }
 
-/** `appstrate.metric` — token usage / cost / duration emitted by the runner at agent_end. */
+/**
+ * `appstrate.metric` — token usage / cost / duration emitted by the runner.
+ *
+ * `usage` is a {@link TokenUsage} object, `cost` is a USD number, both
+ * optional so a runner with no LLM traffic can still emit a metric
+ * carrying just `durationMs`.
+ */
 export interface AppstrateMetricEvent extends BaseEnvelope {
   type: "appstrate.metric";
-  data?: Record<string, unknown>;
-  /** Sometimes inlined alongside `data` for legacy reasons. */
+  /** Token usage counters; mirrors `runs.tokenUsage` JSONB shape. */
+  usage?: TokenUsage;
+  /** Cost in USD attributed to this segment of the run. Non-negative. */
   cost?: number;
-  inputTokens?: number;
-  outputTokens?: number;
+  /** Optional wall-clock duration in milliseconds covered by this metric. */
+  durationMs?: number;
 }
 
 /** Discriminated union over every canonical event the runtime owns. */
@@ -148,8 +156,18 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     case "appstrate.progress":
     case "appstrate.error":
       return typeof (event as Record<string, unknown>).message === "string";
-    case "appstrate.metric":
+    case "appstrate.metric": {
+      const e = event as Record<string, unknown>;
+      // usage and cost are both optional, but when present must be valid:
+      // usage = plain object, cost = non-negative finite number.
+      if (e.usage !== undefined) {
+        if (e.usage === null || typeof e.usage !== "object" || Array.isArray(e.usage)) return false;
+      }
+      if (e.cost !== undefined) {
+        if (typeof e.cost !== "number" || !Number.isFinite(e.cost) || e.cost < 0) return false;
+      }
       return true;
+    }
     default:
       return false;
   }
