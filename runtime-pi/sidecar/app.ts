@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { mountMcp } from "./mcp.ts";
 import { BlobStore } from "./blob-store.ts";
+import { DEPRECATION_HEADERS } from "./deprecation.ts";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
@@ -211,10 +212,13 @@ export function createApp(deps: AppDeps): Hono {
     if (!result.ok) return result.errorResponse;
 
     // Stream-through response (zero-copy — no buffering/truncation)
-    const responseHeaders: Record<string, string> = {};
+    const responseHeaders: Record<string, string> = { ...DEPRECATION_HEADERS };
     const ct = result.response.headers.get("content-type");
     if (ct) responseHeaders["Content-Type"] = ct;
 
+    // Phase 3b of #276 — `/llm/*` is being phased out in favour of the
+    // MCP `llm_complete` tool (Phase 3a). The Deprecation/Sunset
+    // headers above signal this to operators on the 18-month timeline.
     return new Response(result.response.body, {
       status: result.response.status,
       headers: responseHeaders,
@@ -544,7 +548,14 @@ export function createApp(deps: AppDeps): Hono {
         return c.json({ error: "Response body too large" }, 413);
       }
 
-      const streamHeaders: Record<string, string> = { "Content-Type": contentType };
+      // Phase 3b of #276 — the X-Stream-Response branch is being
+      // phased out in favour of `provider_call` returning a
+      // `resource_link` block (Phase 3a). The Deprecation/Sunset
+      // headers signal the migration on the 18-month timeline.
+      const streamHeaders: Record<string, string> = {
+        "Content-Type": contentType,
+        ...DEPRECATION_HEADERS,
+      };
       if (authRefreshed) streamHeaders["X-Auth-Refreshed"] = "true";
       const upstreamCl = targetRes.headers.get("content-length");
       if (upstreamCl) streamHeaders["Content-Length"] = upstreamCl;
