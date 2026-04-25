@@ -138,11 +138,11 @@ describe("SidecarProviderResolver streaming roundtrip (PR-4)", () => {
     const fileName = "upload-6mb.bin";
     await Bun.write(join(workspace, fileName), payload);
 
-    let observedHash: string | null = null;
-    let observedDuplex: string | null = null;
-    let observedBodyKind: string | null = null;
+    let observedHash = "" as string;
+    let observedDuplex = "" as string;
+    let observedBodyKind = "" as string;
     const fetchImpl = (async (_url: string, init: RequestInit & { duplex?: string }) => {
-      observedDuplex = init.duplex ?? null;
+      observedDuplex = init.duplex ?? "";
       observedBodyKind =
         init.body instanceof ReadableStream
           ? "stream"
@@ -259,7 +259,7 @@ describe("SidecarProviderResolver streaming roundtrip (PR-4)", () => {
     const expected = sha256Hex(payload);
 
     let stripStreamHeader = false;
-    const fetchImpl = (async (url: string, init: RequestInit) => {
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
       // Verify the resolver opted into streaming via X-Stream-Response: 1
       const headers = init.headers as Record<string, string>;
       if (headers["X-Stream-Response"] === "1") {
@@ -314,7 +314,7 @@ describe("SidecarProviderResolver streaming roundtrip (PR-4)", () => {
       new Response(JSON.stringify({ error: "Response body too large" }), {
         status: 413,
         headers: { "Content-Type": "application/json" },
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
 
     const resolver = buildResolver(fetchImpl);
     const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], buildBundle());
@@ -359,7 +359,7 @@ describe("SidecarProviderResolver streaming roundtrip (PR-4)", () => {
           // No Content-Length — chunked / unknown length.
         },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const resolver = buildResolver(fetchImpl);
     const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], buildBundle());
