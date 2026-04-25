@@ -13,6 +13,8 @@ const DEFAULT_CONFIG: AppConfig = {
     googleAuth: false,
     githubAuth: false,
     smtp: false,
+    signupDisabled: false,
+    orgCreationDisabled: false,
   },
   trustedOrigins: [],
 };

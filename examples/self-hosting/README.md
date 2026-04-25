@@ -241,6 +241,27 @@ See `.env.example` for all available environment variables. Key settings:
 | `SIDECAR_POOL_SIZE`                       | Pre-warmed sidecar containers (default: 2, 0 to disable) |
 | `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`      |
 
+## Locking Down Signup (Closed Mode)
+
+By default Appstrate runs in **open mode** — anyone with the URL can sign
+up and create their own organization. For private production deployments,
+switch to **closed mode** (invitation-only signup, single-org-per-tenant,
+optional domain allowlist):
+
+```env
+AUTH_DISABLE_SIGNUP=true
+AUTH_DISABLE_ORG_CREATION=true
+AUTH_PLATFORM_ADMIN_EMAILS=admin@your-domain.com
+AUTH_BOOTSTRAP_OWNER_EMAIL=admin@your-domain.com
+AUTH_BOOTSTRAP_ORG_NAME=Acme
+```
+
+Sign up once as the bootstrap email — the root organization is created
+automatically. Invite teammates from the dashboard; invitations bypass the
+signup lock.
+
+Full guide, recipes, and pitfalls: [`AUTH_MODES.md`](./AUTH_MODES.md).
+
 ## LLM Provider Setup
 
 Appstrate needs at least one LLM provider to run agents. Configure it via the `SYSTEM_PROVIDER_KEYS` environment variable:

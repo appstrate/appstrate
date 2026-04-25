@@ -15,7 +15,13 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
 import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
-import { generateEnvForTier, renderEnvFile, type Tier } from "../lib/install/secrets.ts";
+import {
+  generateEnvForTier,
+  isValidBootstrapEmail,
+  renderEnvFile,
+  type BootstrapOverrides,
+  type Tier,
+} from "../lib/install/secrets.ts";
 import {
   assertDockerAvailable,
   checkDockerNetworkBudget,
@@ -98,6 +104,31 @@ function appUrlForPort(port: number): string {
   return port === 80 ? "http://localhost" : `http://localhost:${port}`;
 }
 
+/**
+ * Print the closed-mode follow-up note (issue #228) so the user knows
+ * exactly where to go next when bootstrap was configured. The dashboard
+ * pre-fills + locks the email field via `AppConfig.bootstrapOwnerEmail`,
+ * so the only remaining action is "open the URL and pick a password".
+ *
+ * Renders nothing in open mode (no env var written, no friction added).
+ * Called by both Tier 0 and Docker-tier installers right before `outro()`
+ * — the placement matters: clack groups note + outro together, and the
+ * outro dominates the bottom of the terminal so the action stays
+ * immediately visible.
+ */
+export function printBootstrapFollowup(
+  appUrl: string,
+  bootstrap: BootstrapOverrides,
+  note: (message: string, title?: string) => void = clack.note,
+): void {
+  const email = bootstrap.bootstrapOwnerEmail;
+  if (!email) return;
+  note(
+    `Open  ${appUrl}/register\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
+    "Next: create your owner account",
+  );
+}
+
 export async function installCommand(opts: InstallOptions): Promise<void> {
   intro("Appstrate install");
 
@@ -155,8 +186,17 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
           )
         : undefined;
 
+    // Closed-mode bootstrap (issue #228) — env var > prompt > undefined.
+    // Skipped on upgrades (mergeEnv preserves whatever the user had) and
+    // on Tier 0 interactive (local dev — invitation-only is meaningless).
+    const bootstrap = await resolveBootstrapEmail({
+      tier,
+      mode: installState.mode,
+      nonInteractive,
+    });
+
     if (tier === 0) {
-      await installTier0(dir, port, { autoConfirm });
+      await installTier0(dir, port, { autoConfirm, bootstrap });
     } else {
       await installDockerTier(dir, tier, port, minioConsolePort, {
         force: opts.force ?? false,
@@ -164,11 +204,68 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         existing: installState.existing,
         project: project!,
         autoConfirm,
+        bootstrap,
       });
     }
   } catch (err) {
     exitWithError(err);
   }
+}
+
+/**
+ * Resolve the closed-mode bootstrap inputs for a fresh install (issue #228).
+ *
+ * Order of precedence:
+ *   1. `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` env var — the IaC / `curl|bash`
+ *      path. Always wins, on every tier and mode. Invalid email throws
+ *      so the misconfiguration surfaces at install time, not at first
+ *      signup.
+ *   2. Interactive prompt — fired only on a Tier ≥ 1 fresh install when
+ *      no env var is set and the install is interactive. Empty input
+ *      means "skip" (open mode + footer pointer in the generated `.env`).
+ *   3. Otherwise → undefined (open mode).
+ *
+ * Upgrades short-circuit to undefined: `mergeEnv` preserves whatever
+ * `AUTH_*` keys the user already has in their `.env`, so re-running
+ * `appstrate install` on a closed-mode instance never silently flips
+ * the policy.
+ */
+export async function resolveBootstrapEmail(opts: {
+  tier: Tier;
+  mode: InstallMode;
+  nonInteractive: boolean;
+}): Promise<BootstrapOverrides> {
+  const fromEnv = process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL?.trim();
+  if (fromEnv) {
+    if (!isValidBootstrapEmail(fromEnv)) {
+      throw new Error(
+        `APPSTRATE_BOOTSTRAP_OWNER_EMAIL="${fromEnv}" is not a valid email — aborting install.`,
+      );
+    }
+    const orgName = process.env.APPSTRATE_BOOTSTRAP_ORG_NAME?.trim();
+    return { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
+  }
+  if (opts.mode === "upgrade") return {};
+  if (opts.nonInteractive) return {};
+  if (opts.tier === 0) return {};
+
+  // Interactive Docker tier, fresh install, no env override → ask once.
+  // Empty input is the documented "skip" path; clack returns "" on Enter
+  // with no `placeholder`. The note explains *why* this prompt exists so
+  // the user understands the trade-off before answering.
+  clack.note(
+    "Closed mode locks down public signup so only invited users can join.\nLeave empty to keep the default open mode (anyone with the URL can sign up).",
+    "Invitation-only mode (optional)",
+  );
+  const answer = (await askText("Bootstrap admin email (or empty to skip):", "")).trim();
+  if (!answer) return {};
+  if (!isValidBootstrapEmail(answer)) {
+    clack.log.warn(
+      `"${answer}" doesn't look like an email — keeping open mode. Edit .env manually to enable closed mode later.`,
+    );
+    return {};
+  }
+  return { bootstrapOwnerEmail: answer };
 }
 
 /** Default-shaped `ExistingInstall` used when the resolver is called without upgrade context. */
@@ -578,7 +675,7 @@ export async function resolveDir(
 async function installTier0(
   dir: string,
   port: number,
-  opts: { autoConfirm: boolean },
+  opts: { autoConfirm: boolean; bootstrap: BootstrapOverrides },
 ): Promise<void> {
   const appUrl = appUrlForPort(port);
   // Bun — either already present, or install it via the upstream script.
@@ -626,7 +723,7 @@ async function installTier0(
   installSpinner.stop("Dependencies installed");
 
   // `.env`.
-  const env = generateEnvForTier(0, appUrl, { port });
+  const env = generateEnvForTier(0, appUrl, { port }, opts.bootstrap);
   await writeTier0Env(dir, renderEnvFile(env));
 
   // Run dev server? Under --yes, auto-start matches the "curl|bash and
@@ -635,6 +732,7 @@ async function installTier0(
   // immediately usable.
   const shouldStart = opts.autoConfirm ? true : await confirm("Start the dev server now?");
   if (!shouldStart) {
+    printBootstrapFollowup(appUrl, opts.bootstrap);
     outro(
       `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen ${appUrl} once it boots.`,
     );
@@ -647,6 +745,7 @@ async function installTier0(
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
   await openBrowser(appUrl);
+  printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
 
@@ -730,6 +829,7 @@ async function installDockerTier(
     existing: ExistingInstall;
     project: { name: string; origin: "sidecar" | "legacy" | "derived" };
     autoConfirm: boolean;
+    bootstrap: BootstrapOverrides;
   },
 ): Promise<void> {
   const appUrl = appUrlForPort(port);
@@ -817,7 +917,7 @@ async function installDockerTier(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
       );
       await writeComposeFile(dir, tier);
-      const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort });
+      const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort }, opts.bootstrap);
       const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(
@@ -859,6 +959,7 @@ async function installDockerTier(
   );
 
   await openBrowser(appUrl);
+  printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(
     `Appstrate is running at ${appUrl}.\n` +
       `Manage the stack from ${dir}:\n` +

@@ -2,10 +2,11 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
 import { createLogger } from "@appstrate/core/logger";
 
@@ -15,6 +16,116 @@ import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
+import { evaluateSignupPolicy, isBootstrapOwner, normalizeEmail } from "./auth-policy.ts";
+import { createBootstrapOrg } from "./bootstrap-org.ts";
+
+/**
+ * True when a `pending` non-expired invitation exists for `email`. Used by
+ * the platform signup gate to let invited users complete signup even when
+ * `AUTH_DISABLE_SIGNUP=true`. The single SQL query keeps overhead
+ * negligible — the `idx_org_invitations_email` index covers it.
+ */
+async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  const [row] = await db
+    .select({ id: orgInvitations.id })
+    .from(orgInvitations)
+    .where(
+      and(
+        eq(orgInvitations.email, normalized),
+        eq(orgInvitations.status, "pending"),
+        gt(orgInvitations.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+/**
+ * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
+ * has actually inserted the org row — never on the idempotent no-op path.
+ * apps/api wires this at boot to (a) emit `onOrgCreate` so cloud free-tier
+ * and other module listeners observe the bootstrap org, and (b) provision
+ * the default application + hello-world agent so the post-signup onboarding
+ * path lands on a usable workspace, mirroring `POST /api/orgs`.
+ *
+ * Lives as an injection slot rather than a direct call because the
+ * platform service layer (applications, default-agent, module event bus)
+ * lives in `apps/api`, which `packages/db` cannot import without inverting
+ * the dependency graph.
+ */
+export interface PostBootstrapOrgInfo {
+  orgId: string;
+  slug: string;
+  userId: string;
+  userEmail: string;
+}
+
+let _postBootstrapOrgHook: ((info: PostBootstrapOrgInfo) => Promise<void>) | null = null;
+
+export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Promise<void>): void {
+  _postBootstrapOrgHook = hook;
+}
+
+/**
+ * Auto-create the bootstrap organization when the freshly-signed-up user
+ * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Delegates the idempotent create-or-noop
+ * to `createBootstrapOrg`, which is shared with `apps/api/scripts/bootstrap-org.ts`.
+ *
+ * Runs in the BA `after` hook, after the profile row is inserted. Errors are
+ * swallowed (logged): the user is already created and can be recovered via
+ * the explicit `bootstrap-org.ts` script if the auto-path fails transiently.
+ *
+ * Realm-guarded: only fires for `platform` realm signups. Without this guard,
+ * an OIDC end-user flow that happens to target `AUTH_BOOTSTRAP_OWNER_EMAIL`
+ * (`realm = end_user:<applicationId>`) would provision a platform org for an
+ * end-user, mixing audiences that the realm separation exists to keep apart.
+ */
+async function maybeBootstrapOrgForOwner(
+  userId: string,
+  email: string,
+  realm: string,
+): Promise<void> {
+  if (realm !== "platform") return;
+  if (!isBootstrapOwner(email)) return;
+  const env = getEnv();
+  try {
+    const result = await createBootstrapOrg(userId, env.AUTH_BOOTSTRAP_ORG_NAME);
+    if (!result.created) return;
+    logger.info("auth: bootstrap org created for AUTH_BOOTSTRAP_OWNER_EMAIL", {
+      userId,
+      email,
+      orgId: result.orgId,
+      slug: result.slug,
+    });
+    if (_postBootstrapOrgHook) {
+      // Side effects (event emit, default app, default agent) run in
+      // apps/api. Failures here are logged but never break signup — the
+      // org itself is already committed.
+      try {
+        await _postBootstrapOrgHook({
+          orgId: result.orgId,
+          slug: result.slug,
+          userId,
+          userEmail: email,
+        });
+      } catch (err) {
+        logger.error("auth: post-bootstrap hook failed", {
+          userId,
+          email,
+          orgId: result.orgId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } catch (err) {
+    logger.error("auth: bootstrap org creation failed", {
+      userId,
+      email,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 // Env is read lazily inside `buildAuth()` rather than at module load time so
 // that `_rebuildAuthForTesting()` can flip SMTP / social flags between tests
@@ -573,6 +684,31 @@ function buildAuth(
             // the OIDC `beforeSignup` guard. `context` is `null` when BA
             // creates users outside an HTTP request (seeds, admin scripts).
             const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+            // Platform-level signup gate (self-hosting lockdown). Runs FIRST
+            // so the cheapest, most specific decision wins before any module
+            // hook. Skipped entirely when neither restriction is configured
+            // (open mode = single env read, no policy eval, no DB query).
+            //
+            // The invitation lookup is always performed when at least one
+            // restriction is active, because a pending invitation overrides
+            // BOTH closed mode and the domain allowlist. The lookup is
+            // index-covered (`idx_org_invitations_email`) — negligible cost
+            // for the only path where a restriction applies.
+            const envForGate = getEnv();
+            if (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length) {
+              const hasInvite = await hasPendingInvitationByEmail(user.email);
+              const decision = evaluateSignupPolicy(user.email, hasInvite);
+              if (!decision.allowed) {
+                logger.info("auth: platform signup gate blocked signup", {
+                  email: user.email,
+                  reason: decision.reason,
+                });
+                throw new APIError("FORBIDDEN", {
+                  message: decision.reason,
+                  code: decision.reason,
+                });
+              }
+            }
             if (_beforeSignupHook) {
               await _beforeSignupHook(user.email, { headers });
             }
@@ -591,6 +727,24 @@ function buildAuth(
               displayName: user.name || user.email,
               language: "fr",
             });
+            // Read the realm written by the before-hook. BA's drizzle adapter
+            // returns the inserted row, so `user.realm` is populated when the
+            // additionalField is declared. Fall back to "platform" if the
+            // adapter strips it (defensive — the SQL default matches anyway).
+            const realm = (user as { realm?: string }).realm ?? "platform";
+            // Self-hosting bootstrap path (issue #228) — auto-create the
+            // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
+            // BEFORE the module after-hook so cloud's free-tier hook etc.
+            // see a coherent state.
+            try {
+              await maybeBootstrapOrgForOwner(user.id, user.email, realm);
+            } catch (err) {
+              logger.error("auth: bootstrap org creation failed", {
+                userId: user.id,
+                email: user.email,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
             if (_afterSignupHook) {
               const ctx = context as
                 | { headers?: Headers; request?: { headers?: Headers } }

@@ -33,6 +33,8 @@ import {
 } from "../services/invitations.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
+import { getEnv } from "@appstrate/env";
+import { isPlatformAdmin } from "@appstrate/db/auth-policy";
 import { createDefaultApplication } from "../services/applications.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -105,6 +107,13 @@ router.post("/", async (c) => {
     throw forbidden("API keys cannot create organizations");
   }
   const user = c.get("user");
+  // Self-hosting closed mode (issue #228): when org creation is disabled
+  // platform-wide, only platform admins (AUTH_PLATFORM_ADMIN_EMAILS) may
+  // create new organizations. The OrgGate webapp branch surfaces a
+  // "waiting for invitation" page to non-admin users with no org.
+  if (getEnv().AUTH_DISABLE_ORG_CREATION && !isPlatformAdmin(user.email)) {
+    throw forbidden("Organization creation is disabled on this instance");
+  }
   const body = await c.req.json();
   const data = parseBody(createOrgSchema, body);
 

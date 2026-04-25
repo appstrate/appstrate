@@ -48,6 +48,8 @@ const baseConfig: AppConfig = {
     googleAuth: false,
     githubAuth: false,
     smtp: false,
+    signupDisabled: false,
+    orgCreationDisabled: false,
   },
   trustedOrigins: [],
 };

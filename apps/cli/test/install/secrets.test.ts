@@ -11,7 +11,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { generateEnvForTier, renderEnvFile, type EnvVars } from "../../src/lib/install/secrets.ts";
+import {
+  generateEnvForTier,
+  isValidBootstrapEmail,
+  renderEnvFile,
+  type EnvVars,
+} from "../../src/lib/install/secrets.ts";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 // `randomBytes(32).toString("base64")` is always 44 chars including padding.
@@ -200,5 +205,96 @@ describe("renderEnvFile", () => {
     for (const key of Object.keys(env)) {
       expect(body).toContain(`${key}=${env[key]}\n`);
     }
+  });
+
+  it("appends the closed-mode pointer footer when no bootstrap email is set", () => {
+    const env = generateEnvForTier(3);
+    const body = renderEnvFile(env);
+    expect(body).toContain("Auth lockdown (optional, self-hosting)");
+    expect(body).toContain("examples/self-hosting/AUTH_MODES.md");
+  });
+
+  it("suppresses the footer when AUTH_BOOTSTRAP_OWNER_EMAIL is set", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com" },
+    );
+    const body = renderEnvFile(env);
+    expect(body).not.toContain("Auth lockdown (optional");
+    expect(body).not.toContain("AUTH_MODES.md");
+  });
+});
+
+describe("generateEnvForTier — bootstrap (issue #228)", () => {
+  it("does NOT emit AUTH_* keys when no bootstrap email is provided", () => {
+    const env = generateEnvForTier(3);
+    expect(env.AUTH_DISABLE_SIGNUP).toBeUndefined();
+    expect(env.AUTH_DISABLE_ORG_CREATION).toBeUndefined();
+    expect(env.AUTH_BOOTSTRAP_OWNER_EMAIL).toBeUndefined();
+    expect(env.AUTH_PLATFORM_ADMIN_EMAILS).toBeUndefined();
+  });
+
+  it("emits the closed-mode trio + admin allowlist when bootstrap email is provided", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com" },
+    );
+    expect(env.AUTH_DISABLE_SIGNUP).toBe("true");
+    expect(env.AUTH_DISABLE_ORG_CREATION).toBe("true");
+    expect(env.AUTH_BOOTSTRAP_OWNER_EMAIL).toBe("admin@acme.com");
+    // Same email is mirrored into PLATFORM_ADMIN_EMAILS so the owner can
+    // still call POST /api/orgs after the bootstrap (without it they'd be
+    // locked out of creating any future tenant org).
+    expect(env.AUTH_PLATFORM_ADMIN_EMAILS).toBe("admin@acme.com");
+  });
+
+  it("emits AUTH_BOOTSTRAP_ORG_NAME only when explicitly provided", () => {
+    const withName = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com", bootstrapOrgName: "Acme HQ" },
+    );
+    expect(withName.AUTH_BOOTSTRAP_ORG_NAME).toBe("Acme HQ");
+
+    const withoutName = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com" },
+    );
+    // Server defaults to "Default" when the env var is absent — keep .env
+    // minimal by NOT writing the redundant default.
+    expect(withoutName.AUTH_BOOTSTRAP_ORG_NAME).toBeUndefined();
+  });
+
+  it("works on Tier 0 too (covers the local-dev IaC pass-through case)", () => {
+    const env = generateEnvForTier(
+      0,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com" },
+    );
+    expect(env.AUTH_BOOTSTRAP_OWNER_EMAIL).toBe("admin@acme.com");
+  });
+});
+
+describe("isValidBootstrapEmail", () => {
+  it("accepts well-formed emails", () => {
+    expect(isValidBootstrapEmail("admin@acme.com")).toBe(true);
+    expect(isValidBootstrapEmail("user.name+tag@sub.example.io")).toBe(true);
+  });
+
+  it("rejects malformed inputs", () => {
+    expect(isValidBootstrapEmail("")).toBe(false);
+    expect(isValidBootstrapEmail("noatsign")).toBe(false);
+    expect(isValidBootstrapEmail("@no-local.com")).toBe(false);
+    expect(isValidBootstrapEmail("trailing@")).toBe(false);
+    expect(isValidBootstrapEmail("no-tld@example")).toBe(false);
+    expect(isValidBootstrapEmail("white space@example.com")).toBe(false);
   });
 });
