@@ -14,9 +14,9 @@
  *     drops it. No reducer is constructed, no in-memory state is kept.
  *
  *   {@link AggregatingEventSink} — long-lived sink for parity tests
- *     and in-process runners that read back `current` / `result`
+ *     and in-process runners that read back `snapshot()` / `result`
  *     between events. Wraps {@link PersistingEventSink} and feeds the
- *     same events into a runtime reducer + platform projection.
+ *     same events into a runtime reducer + token/cost accumulators.
  *
  * Splitting the two eliminates the previous `persistOnly` flag whose
  * `current` getter threw — every method on every public surface is now
@@ -57,30 +57,6 @@ import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import type { TokenUsage } from "./types.ts";
-
-/**
- * Platform-facing projection of the runtime {@link RunResult} + the
- * platform-specific accumulators. Only exposed by the
- * {@link AggregatingEventSink} for in-process consumers that read back
- * the running snapshot. The ingestion path uses the persisting sink
- * which has no `current` projection.
- */
-export interface AggregatedRunState {
-  /** Latest `output.emitted` object payload (replaces previous). Non-object payloads project to `{}`. */
-  output: Record<string, unknown>;
-  /** Last object `state.set` payload. `null` if never set or set to non-object. */
-  state: Record<string, unknown> | null;
-  /** All `memory.added` contents projected from the reducer, in arrival order. */
-  memories: string[];
-  /** Concatenated `report.appended` contents (runtime-canonical `\n` separator). */
-  report: string;
-  /** Accumulated token usage from `appstrate.metric` events. */
-  usage: TokenUsage;
-  /** Accumulated cost (USD) from `appstrate.metric` events. */
-  cost: number;
-  /** Most recent `appstrate.error.message`; drives the run's failure reason. */
-  lastAdapterError: string | null;
-}
 
 export interface PersistingEventSinkOptions {
   scope: AppScope;
@@ -228,14 +204,15 @@ export class PersistingEventSink implements EventSink {
 
 /**
  * Long-lived sink that wraps {@link PersistingEventSink} with an
- * additional in-memory reducer + platform projection. Use when a caller
- * needs to read `current` / `result` between events (parity tests,
- * in-process runners). The ingestion path does not need this — it
- * builds a fresh persisting sink per event.
+ * additional in-memory reducer + token/cost accumulators. Use when a
+ * caller needs to read `snapshot()` / `result` / `usage` / `cost`
+ * between events (parity tests, in-process runners). The ingestion
+ * path does not need this — it builds a fresh persisting sink per
+ * event.
  */
 export class AggregatingEventSink extends PersistingEventSink {
   private readonly reducer: ReducerSinkHandle;
-  private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+  private readonly accumulatedUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
   private accumulatedCost = 0;
   private finalResult: RunResult | null = null;
 
@@ -248,14 +225,14 @@ export class AggregatingEventSink extends PersistingEventSink {
   }
 
   override async handle(event: RunEvent): Promise<void> {
-    // 1. Feed the runtime reducer so `current` reflects every event.
+    // 1. Feed the runtime reducer so `snapshot()` reflects every event.
     await this.reducer.sink.handle(event);
 
     // 2. Accumulate platform-specific running totals from metric events.
     if (event.type === "appstrate.metric") {
       const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
       const cost = typeof event.cost === "number" ? event.cost : null;
-      if (usage) accumulateUsage(this.usage, usage);
+      if (usage) accumulateUsage(this.accumulatedUsage, usage);
       if (cost !== null) this.accumulatedCost += cost;
     }
 
@@ -269,20 +246,22 @@ export class AggregatingEventSink extends PersistingEventSink {
   }
 
   /**
-   * Live snapshot — projects the runtime reducer + platform
-   * accumulators into the platform DTO shape. Total: never throws.
+   * Live snapshot of the runtime reducer — memories, state, output,
+   * report, logs. The native {@link RunResult} shape, no platform
+   * projection. Total: never throws.
    */
-  get current(): Readonly<AggregatedRunState> {
-    const snapshot = this.reducer.snapshot();
-    return {
-      output: isPlainObject(snapshot.output) ? snapshot.output : {},
-      state: isPlainObject(snapshot.state) ? snapshot.state : null,
-      memories: snapshot.memories.map((m) => m.content),
-      report: snapshot.report ?? "",
-      usage: this.usage,
-      cost: this.accumulatedCost,
-      lastAdapterError: this.lastError,
-    };
+  snapshot(): RunResult {
+    return this.reducer.snapshot();
+  }
+
+  /** Accumulated token usage across all `appstrate.metric` events. */
+  get usage(): Readonly<TokenUsage> {
+    return this.accumulatedUsage;
+  }
+
+  /** Accumulated cost (USD) across all `appstrate.metric` events. */
+  get cost(): number {
+    return this.accumulatedCost;
   }
 
   /** Canonical {@link RunResult} — `null` until `finalize` has been called. */

@@ -3,9 +3,10 @@
 /**
  * Tests for the two split sinks:
  *
- *   - {@link AggregatingEventSink} — long-lived, exposes `current` /
- *     `result` for parity tests + in-process runners. Verifies fan-out
- *     to run_logs + the in-memory reducer projection.
+ *   - {@link AggregatingEventSink} — long-lived, exposes `snapshot()`,
+ *     `result`, `usage`, `cost`, `lastError` for parity tests +
+ *     in-process runners. Verifies fan-out to run_logs + the
+ *     in-memory reducer.
  *
  *   - {@link PersistingEventSink} — stateless persistence used by the
  *     ingestion hot path. Verifies fan-out to run_logs + ledger writes
@@ -71,21 +72,21 @@ describe("AggregatingEventSink", () => {
     await sink.handle(event("memory.added", { content: "first" }));
     await sink.handle(event("memory.added", { content: "second" }));
 
-    expect(sink.current.memories).toEqual(["first", "second"]);
+    expect(sink.snapshot().memories).toEqual([{ content: "first" }, { content: "second" }]);
   });
 
   it("stores state.set as-is when payload is an object", async () => {
     const sink = newSink();
     await sink.handle(event("state.set", { state: { counter: 42 } }));
 
-    expect(sink.current.state).toEqual({ counter: 42 });
+    expect(sink.snapshot().state).toEqual({ counter: 42 });
   });
 
-  it("projects non-object state.set payloads to null (runtime stores raw, projection drops)", async () => {
+  it("stores state.set raw values verbatim (no projection — runtime keeps the payload)", async () => {
     const sink = newSink();
     await sink.handle(event("state.set", { state: "just a string" }));
 
-    expect(sink.current.state).toBeNull();
+    expect(sink.snapshot().state).toBe("just a string");
   });
 
   it("replaces output on each emission + writes a run log per call", async () => {
@@ -93,7 +94,7 @@ describe("AggregatingEventSink", () => {
     await sink.handle(event("output.emitted", { data: { a: 1, b: 2 } }));
     await sink.handle(event("output.emitted", { data: { b: 3, c: 4 } }));
 
-    expect(sink.current.output).toEqual({ b: 3, c: 4 });
+    expect(sink.snapshot().output).toEqual({ b: 3, c: 4 });
 
     const logs = await loadLogs();
     const outputLogs = logs.filter((l) => l.event === "output");
@@ -102,12 +103,12 @@ describe("AggregatingEventSink", () => {
     expect(outputLogs[0]!.data).toEqual({ a: 1, b: 2 });
   });
 
-  it("projects non-object output replacement to empty object", async () => {
+  it("stores output.emitted raw payload — runtime keeps the last emit verbatim", async () => {
     const sink = newSink();
     await sink.handle(event("output.emitted", { data: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: [1, 2, 3] }));
 
-    expect(sink.current.output).toEqual({});
+    expect(sink.snapshot().output).toEqual([1, 2, 3]);
   });
 
   it("concatenates report.appended events with \\n + writes a run log per line", async () => {
@@ -115,7 +116,7 @@ describe("AggregatingEventSink", () => {
     await sink.handle(event("report.appended", { content: "line one" }));
     await sink.handle(event("report.appended", { content: "line two" }));
 
-    expect(sink.current.report).toBe("line one\nline two");
+    expect(sink.snapshot().report).toBe("line one\nline two");
 
     const logs = await loadLogs();
     const reportLogs = logs.filter((l) => l.event === "report");
@@ -156,7 +157,7 @@ describe("AggregatingEventSink", () => {
     const sink = newSink();
     await sink.handle(event("appstrate.error", { message: "OOM killed" }));
 
-    expect(sink.current.lastAdapterError).toBe("OOM killed");
+    expect(sink.lastError).toBe("OOM killed");
 
     const logs = await loadLogs();
     const systemLogs = logs.filter((l) => l.type === "system");
@@ -181,9 +182,9 @@ describe("AggregatingEventSink", () => {
       }),
     );
 
-    expect(sink.current.usage.input_tokens).toBe(300);
-    expect(sink.current.usage.output_tokens).toBe(125);
-    expect(sink.current.cost).toBeCloseTo(0.003, 5);
+    expect(sink.usage.input_tokens).toBe(300);
+    expect(sink.usage.output_tokens).toBe(125);
+    expect(sink.cost).toBeCloseTo(0.003, 5);
 
     // Aggregating sinks NEVER write the ledger — `writeLedger` is forced
     // off in the constructor, so the runner row is skipped.
@@ -219,17 +220,17 @@ describe("AggregatingEventSink", () => {
     expect(sink.result).toEqual(emptyRunResult());
   });
 
-  it("current never throws — totality across every public method (LSP)", async () => {
+  it("snapshot/usage/cost/lastError never throw — totality across every public method (LSP)", async () => {
     const sink = newSink();
-    // No events handled yet — current MUST return a valid empty snapshot.
-    expect(() => sink.current).not.toThrow();
-    expect(sink.current.memories).toEqual([]);
-    expect(sink.current.state).toBeNull();
-    expect(sink.current.output).toEqual({});
-    expect(sink.current.report).toBe("");
-    expect(sink.current.usage.input_tokens).toBe(0);
-    expect(sink.current.cost).toBe(0);
-    expect(sink.current.lastAdapterError).toBeNull();
+    // No events handled yet — every read MUST return a valid empty value.
+    expect(() => sink.snapshot()).not.toThrow();
+    expect(sink.snapshot().memories).toEqual([]);
+    expect(sink.snapshot().state).toBeNull();
+    expect(sink.snapshot().output).toBeNull();
+    expect(sink.snapshot().report).toBeNull();
+    expect(sink.usage.input_tokens).toBe(0);
+    expect(sink.cost).toBe(0);
+    expect(sink.lastError).toBeNull();
   });
 });
 
@@ -352,10 +353,10 @@ describe("PersistingEventSink", () => {
 
     await sink.handle(event("output.emitted", { data: { x: 1 } }));
 
-    // The persisting sink intentionally does NOT expose `current` —
+    // The persisting sink intentionally does NOT expose `snapshot()` —
     // accessing it is a TS error and at runtime the property is
     // undefined. Fan-out to run_logs is still verified.
-    expect((sink as unknown as { current?: unknown }).current).toBeUndefined();
+    expect((sink as unknown as { snapshot?: unknown }).snapshot).toBeUndefined();
 
     const logs = await db
       .select()
