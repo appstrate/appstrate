@@ -736,7 +736,7 @@ export const agentsPaths = {
             },
           },
           content: {
-            "application/vnd.appstrate.bundle+zip": {
+            "application/zip": {
               schema: { type: "string", format: "binary" },
             },
           },

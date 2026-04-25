@@ -105,6 +105,108 @@ describe("isCanonicalRunEvent", () => {
       } as RunEvent),
     ).toBe(true);
   });
+
+  it("accepts run lifecycle events (#278 item I)", () => {
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.started" })).toBe(true);
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.started",
+        runnerKind: "platform",
+        runnerName: "appstrate-pi@1.0.0",
+      }),
+    ).toBe(true);
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.success", durationMs: 4200 })).toBe(
+      true,
+    );
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.timeout" })).toBe(true);
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "run.cancelled", reason: "user_cancelled" }),
+    ).toBe(true);
+  });
+
+  it("accepts run.failed with structured error", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { code: "manifest_invalid", message: "missing scope" },
+      }),
+    ).toBe(true);
+    // Error is optional.
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed" })).toBe(true);
+  });
+
+  it("rejects run.failed with malformed error (no message)", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { code: "x" },
+      } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed", error: 42 } as RunEvent),
+    ).toBe(false);
+  });
+
+  it("rejects run.failed with malformed structured error fields", () => {
+    // code must be string when present
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { message: "boom", code: 42 },
+      } as RunEvent),
+    ).toBe(false);
+    // stack must be string when present
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { message: "boom", stack: 123 },
+      } as RunEvent),
+    ).toBe(false);
+    // timestamp must be string (RFC 3339) when present
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { message: "boom", timestamp: 1700000000 },
+      } as RunEvent),
+    ).toBe(false);
+    // context must be plain object when present
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { message: "boom", context: "oops" },
+      } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: { message: "boom", context: ["arr"] },
+      } as RunEvent),
+    ).toBe(false);
+  });
+
+  it("accepts run.failed with all structured fields well-formed", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "run.failed",
+        error: {
+          code: "manifest_invalid",
+          message: "missing scope",
+          stack: "Error: …",
+          timestamp: "2026-04-25T10:00:00.000Z",
+          context: { providerId: "@appstrate/gmail", retries: 2 },
+        },
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("narrowCanonicalEvent", () => {
@@ -137,7 +239,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    expect(arr.length).toBe(8);
+    // 8 reserved namespaces (memory/state/output/report/log + appstrate.{progress,error,metric})
+    // + 5 run lifecycle events (run.{started,success,failed,timeout,cancelled}, #278 item I).
+    expect(arr.length).toBe(13);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

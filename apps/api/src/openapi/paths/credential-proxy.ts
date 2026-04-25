@@ -80,10 +80,50 @@ export const credentialProxyPaths = {
             "Impersonation header — scopes the call to this end-user's connection profile.",
           schema: { type: "string", pattern: "^eu_" },
         },
+        {
+          name: "X-Stream-Request",
+          in: "header",
+          required: false,
+          description:
+            "When `1`, forward the request body as a stream instead of buffering. Required for " +
+            "uploads larger than the buffered body cap; the upstream content length is still " +
+            "validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`.",
+          schema: { type: "string", enum: ["0", "1"] },
+        },
+        {
+          name: "X-Run-Id",
+          in: "header",
+          required: false,
+          description:
+            "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. " +
+            "Not validated against the principal — a mismatched runId is a reporting oddity, not " +
+            "a security boundary.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Upstream response (status code, headers, body forwarded verbatim).",
+          description:
+            "Upstream response (status code, headers, body forwarded verbatim). Buffered " +
+            "responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the " +
+            "platform truncation cap; streamed responses (when the upstream sends " +
+            "`Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) " +
+            "do not carry these headers.",
+          headers: {
+            "X-Truncated": {
+              description:
+                "Set to `true` when the buffered upstream body was truncated to " +
+                "`CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+              schema: { type: "string", enum: ["true"] },
+            },
+            "X-Truncated-Size": {
+              description:
+                "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, " +
+                "so the caller can decide whether to retry with `X-Stream-Request: 1` or accept " +
+                "the truncated body.",
+              schema: { type: "string" },
+            },
+          },
           content: { "*/*": {} },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
