@@ -22,7 +22,12 @@ describe("isCanonicalRunEvent", () => {
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
       { ...baseEnvelope, type: "appstrate.progress", message: "running" },
       { ...baseEnvelope, type: "appstrate.error", message: "boom" },
-      { ...baseEnvelope, type: "appstrate.metric", data: { cost: 0.01 } },
+      {
+        ...baseEnvelope,
+        type: "appstrate.metric",
+        usage: { input_tokens: 10, output_tokens: 5 },
+        cost: 0.01,
+      },
     ];
     for (const e of events) expect(isCanonicalRunEvent(e)).toBe(true);
   });
@@ -68,6 +73,37 @@ describe("isCanonicalRunEvent", () => {
     expect(isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.progress" } as RunEvent)).toBe(
       false,
     );
+    // appstrate.metric with non-object usage
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric", usage: 42 } as RunEvent),
+    ).toBe(false);
+    // appstrate.metric with negative cost
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric", cost: -1 } as RunEvent),
+    ).toBe(false);
+    // appstrate.metric with non-finite cost
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "appstrate.metric",
+        cost: Number.POSITIVE_INFINITY,
+      } as RunEvent),
+    ).toBe(false);
+  });
+
+  it("accepts appstrate.metric with no payload (durationMs-only or empty)", () => {
+    // A runner with no LLM traffic still emits a metric event — usage
+    // and cost are both optional.
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric" } as RunEvent)).toBe(
+      true,
+    );
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "appstrate.metric",
+        durationMs: 1234,
+      } as RunEvent),
+    ).toBe(true);
   });
 });
 
