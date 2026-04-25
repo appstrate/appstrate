@@ -64,6 +64,13 @@
       "when": 1777939300000,
       "tag": "0008_runner_ledger_simple",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777939400000,
+      "tag": "0009_package_persistence",
+      "breakpoints": true
     }
   ]
 }

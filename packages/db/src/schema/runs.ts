@@ -211,6 +211,80 @@ export const packageMemories = pgTable(
 );
 
 /**
+ * Unified agent persistence — one row per piece of cross-run state the agent
+ * chooses to keep, regardless of its shape. Replaces `runs.state` (which was
+ * per-actor but keyed on a specific run row) and `package_memories` (which
+ * was app-wide without actor scoping) with a single store where `scope` is
+ * a first-class dimension.
+ *
+ * - `kind = 'checkpoint'` — one row per `(package, app, actor)`, upserted
+ *   last-write-wins (legacy: `runs.state`). Used for tactical carry-over
+ *   like pagination cursors or "last synced at".
+ * - `kind = 'memory'`     — append-only list, bounded at 100 per
+ *   `(package, app, actor)` with content capped at 2000 chars (legacy:
+ *   `package_memories`). Used for durable facts — user preferences, API
+ *   quirks, workflow patterns.
+ *
+ * The actor columns mirror the `runs` convention: `actor_type ∈
+ * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type = 'shared'`.
+ * Headless applications serving many end-users get per-actor isolation by
+ * default; OSS single-tenant stacks can opt into shared rows explicitly.
+ *
+ * Transition window: `runs.state` + `package_memories` are kept alive
+ * (double-write on finalize) and will be dropped in a follow-up migration
+ * once production has been running on this table exclusively for 1-2 weeks.
+ * See `docs/adr/ADR-011-checkpoint-unification.md`.
+ */
+export const packagePersistence = pgTable(
+  "package_persistence",
+  {
+    id: serial("id").primaryKey(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<"checkpoint" | "memory">(),
+    actorType: text("actor_type").notNull().$type<"user" | "end_user" | "shared">(),
+    actorId: text("actor_id"),
+    content: jsonb("content").notNull(),
+    runId: text("run_id").references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // Upsert target: at most one checkpoint per (package, app, actor). The
+    // coalesce turns NULL actor_id (shared) into a distinct key from any
+    // (user / end_user) row, so the three scopes genuinely coexist.
+    uniqueIndex("pkp_checkpoint_unique")
+      .on(table.packageId, table.applicationId, table.actorType, table.actorId)
+      .where(sql`kind = 'checkpoint'`),
+    // Primary read path: getCheckpoint / listMemories.
+    index("pkp_lookup").on(
+      table.packageId,
+      table.applicationId,
+      table.kind,
+      table.actorType,
+      table.actorId,
+    ),
+    index("pkp_org").on(table.orgId),
+    check("pkp_kind_valid", sql`kind IN ('checkpoint', 'memory')`),
+    check("pkp_actor_type_valid", sql`actor_type IN ('user', 'end_user', 'shared')`),
+    // actor_id NULL iff actor_type = 'shared'.
+    check(
+      "pkp_actor_id_shape",
+      sql`(actor_type = 'shared' AND actor_id IS NULL) OR (actor_type <> 'shared' AND actor_id IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
  * Unified LLM cost ledger — one row per attributable upstream LLM call,
  * regardless of how it reached the provider. The `source` discriminator
  * separates two emitters:
