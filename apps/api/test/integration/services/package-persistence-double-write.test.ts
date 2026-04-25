@@ -103,7 +103,7 @@ describe("finalizeRun — double-write to legacy + unified persistence", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -153,7 +153,7 @@ describe("finalizeRun — double-write to legacy + unified persistence", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -192,7 +192,7 @@ describe("finalizeRun — double-write to legacy + unified persistence", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -248,7 +248,7 @@ describe("addMemories — limit enforcement", () => {
     );
     expect(inserted2).toBe(0);
 
-    const [{ value }] = await db
+    const countRows = await db
       .select({ value: count() })
       .from(packagePersistence)
       .where(
@@ -258,7 +258,7 @@ describe("addMemories — limit enforcement", () => {
           eq(packagePersistence.actorType, "shared"),
         ),
       );
-    expect(value).toBe(MAX_MEMORIES_PER_SCOPE);
+    expect(countRows[0]!.value).toBe(MAX_MEMORIES_PER_SCOPE);
   });
 
   it("memory content > MAX_MEMORY_CONTENT is truncated, not rejected", async () => {
@@ -340,7 +340,7 @@ describe("finalizeRun — dual-event acceptance for checkpoint", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -374,7 +374,7 @@ describe("finalizeRun — dual-event acceptance for checkpoint", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -404,7 +404,7 @@ describe("finalizeRun — dual-event acceptance for checkpoint", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink.id}`,
     });
@@ -431,7 +431,7 @@ describe("finalizeRun — dual-event acceptance for checkpoint", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink1.id}`,
     });
@@ -446,7 +446,7 @@ describe("finalizeRun — dual-event acceptance for checkpoint", () => {
         report: null,
         logs: [],
         status: "success",
-        usage: { totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+        usage: { input_tokens: 1, output_tokens: 0 },
       },
       webhookId: `webhook-${sink2.id}`,
     });
