@@ -278,7 +278,6 @@
   "editor.customServiceIdentifierPlaceholder": "my-notion-api",
   "editor.customServiceIdentifierDesc": "Auto-generated (kebab-case)",
   "editor.customServiceIdentifierInvalid": "Must be kebab-case (a-z, 0-9, hyphens)",
-  "editor.builtIn": "Built-in",
   "runs.goToAgents": "Go to agents",
   "detail.emptyMemoriesHint": "Memories are created automatically during runs",
   "editor.goToPackages": "Go to packages",

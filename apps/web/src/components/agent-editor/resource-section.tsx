@@ -184,18 +184,12 @@ export function ResourceSection({
                 </div>
                 {isSelected && (
                   <div className="ml-auto shrink-0">
-                    {isBuiltIn ? (
-                      <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
-                        {t("editor.builtIn")}
-                      </span>
-                    ) : (
-                      <VersionSelect
-                        type={type}
-                        packageId={item.id}
-                        value={entry?.version ?? "*"}
-                        onChange={(v) => updateVersion(item.id, v)}
-                      />
-                    )}
+                    <VersionSelect
+                      type={type}
+                      packageId={item.id}
+                      value={entry?.version ?? "*"}
+                      onChange={(v) => updateVersion(item.id, v)}
+                    />
                   </div>
                 )}
               </label>
