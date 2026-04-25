@@ -489,19 +489,22 @@ export function makeProviderTool(
  * Canonical slug applied to every provider id before we form a tool name.
  * Strips a leading `@` and replaces any non-word character with `_` so
  * scoped package ids like `@appstrate/gmail` become safe tool identifiers.
+ *
+ * Internal: still used by {@link makeProviderTool} to derive the default
+ * Pi-tool name for {@link LocalProviderResolver} /
+ * {@link RemoteAppstrateProviderResolver} (the CLI's local-resolver path —
+ * the platform/agent runtime now exposes providers via the canonical MCP
+ * `provider_call` tool, not per-provider aliases).
  */
-export function slugifyProviderId(providerId: string): string {
+function slugifyProviderId(providerId: string): string {
   return providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
 /**
- * The tool name `makeProviderTool` registers for a given provider id.
- * Consumers that need to reference the tool before the resolver runs
- * (e.g. the platform system prompt listing connected providers) should
- * call this helper rather than recomputing the slug locally — any future
- * change to the slug rules only needs to land here.
+ * The default tool name {@link makeProviderTool} registers for a given
+ * provider id. Internal: only consumed inside this file.
  */
-export function providerToolName(providerId: string): string {
+function providerToolName(providerId: string): string {
   return `${slugifyProviderId(providerId)}_call`;
 }
 

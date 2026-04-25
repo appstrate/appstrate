@@ -15,7 +15,6 @@
  */
 
 import type { ExecutionContext } from "../types/execution-context.ts";
-import { providerToolName } from "../resolvers/index.ts";
 import { renderTemplate } from "../template/mustache.ts";
 import type { PromptView, PromptViewProvider, PromptViewUpload } from "./prompt-renderer.ts";
 
@@ -61,8 +60,6 @@ export interface PlatformPromptTool {
 }
 
 export interface PlatformPromptProvider extends PromptViewProvider {
-  /** Tool name the provider exposes (defaults to `providerToolName(id)`). */
-  toolName?: string;
   /** When true, a per-provider `PROVIDER.md` ships in the workspace skills tree. */
   hasProviderDoc?: boolean;
 }
@@ -143,7 +140,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   sections.push(
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
       "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-      "Authenticated requests to connected providers go through the `<provider>_call` tools " +
+      "Authenticated requests to connected providers go through the `provider_call` MCP tool " +
       "listed under **Connected Providers** — credentials are injected server-side.",
   );
   if (opts.timeoutSeconds) {
@@ -193,10 +190,12 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   if (connectedProviders.length > 0) {
     sections.push("## Connected Providers\n");
     sections.push(
-      "Use the tool listed next to each provider to make authenticated calls. " +
-        "Pass `method`, `target` (absolute URL — must match the provider's authorized URLs), " +
-        "and optional `headers` / `body`. Non-2xx upstream responses are returned with `isError: true` — " +
-        "read the body to diagnose rather than retrying blindly. Proxy timeout is 30 s. " +
+      "To call any connected provider, use the `provider_call` MCP tool with " +
+        "`{ providerId, method, target, headers?, body?, responseMode? }`. " +
+        "Pass the `providerId` from the list below; `target` must be an absolute URL " +
+        "matching one of the provider's authorized URLs. " +
+        "Non-2xx upstream responses are returned with `isError: true` — read the body to " +
+        "diagnose rather than retrying blindly. Proxy timeout is 30 s. " +
         "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
     );
 
@@ -215,11 +214,11 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Total size across all parts is capped at 5 MB; use a single `{ fromFile }` body for larger uploads.\n",
     );
 
+    sections.push("Available providers:\n");
     for (const provider of connectedProviders) {
       const displayName = provider.displayName ?? provider.id;
-      const toolName = provider.toolName ?? providerToolName(provider.id);
 
-      sections.push(`- **${displayName}** (\`${provider.id}\`) → \`${toolName}\``);
+      sections.push(`- **${displayName}** (\`${provider.id}\`)`);
 
       if (provider.hasProviderDoc) {
         sections.push(`  API docs: \`.pi/providers/${provider.id}/PROVIDER.md\``);
