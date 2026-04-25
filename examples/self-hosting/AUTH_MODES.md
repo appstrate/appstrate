@@ -110,6 +110,36 @@ AUTH_BOOTSTRAP_ORG_NAME=Acme HQ
 
 ## Recipes
 
+### Recipe 0 — closed mode at install time (easiest)
+
+The `appstrate install` command picks up closed-mode config in two ways,
+so you usually never have to touch `.env` by hand:
+
+**Interactive** (`appstrate install` from a terminal):
+
+```
+? Bootstrap admin email (or empty to skip): admin@acme.com
+```
+
+Type your email → install writes `AUTH_DISABLE_SIGNUP=true`,
+`AUTH_DISABLE_ORG_CREATION=true`, `AUTH_PLATFORM_ADMIN_EMAILS=…`, and
+`AUTH_BOOTSTRAP_OWNER_EMAIL=…` into the generated `.env`. Empty input
+keeps the default open mode.
+
+**Non-interactive** (`curl|bash`, CI, Ansible, cloud-init):
+
+```sh
+APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@acme.com \
+APPSTRATE_BOOTSTRAP_ORG_NAME="Acme" \
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+Same result, no prompt. The env vars are read by the installer and
+written into the generated `.env`.
+
+After install, sign up once with that email through the dashboard — the
+root org is auto-provisioned and you're owner. Done.
+
 ### Recipe 1 — public SaaS (default)
 
 Leave every `AUTH_*` flag unset. Anyone with the URL can sign up and gets

@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     the root organization on first signup of the configured email.
   - `bun apps/api/scripts/bootstrap-org.ts --owner=… --name=…` for explicit
     ops bootstrap with idempotent JSON output.
+  - `appstrate install` integration: interactive prompt asks for the
+    bootstrap admin email (Tier ≥ 1, fresh installs only); non-interactive
+    via `APPSTRATE_BOOTSTRAP_OWNER_EMAIL=… curl|bash` for IaC. When set,
+    the closed-mode trio is written into the generated `.env`.
   - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)
