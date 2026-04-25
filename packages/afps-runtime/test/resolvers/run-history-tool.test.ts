@@ -144,7 +144,7 @@ describe("makeRunHistoryTool — request normalisation", () => {
     expect(captured!.limit).toBe(7);
   });
 
-  it("deduplicates and filters fields to known values, collapsing legacy state alias", async () => {
+  it("deduplicates and filters fields to known values, dropping unknown and legacy `state`", async () => {
     let captured: RunHistoryRequest | null = null;
     const tool = makeRunHistoryTool(async (req) => {
       captured = req;
@@ -152,11 +152,11 @@ describe("makeRunHistoryTool — request normalisation", () => {
     });
     const { ctx } = makeCtx();
     await tool.execute({ fields: ["checkpoint", "state", "checkpoint", "result", "unknown"] }, ctx);
-    // `state` collapses into `checkpoint` — the canonical wire name.
+    // `state` is no longer accepted (ADR-011 final cut) — silently dropped.
     expect(captured!.fields.sort()).toEqual(["checkpoint", "result"]);
   });
 
-  it("accepts the legacy `state` alias on its own and rewrites to `checkpoint`", async () => {
+  it("falls back to default fields when only the legacy `state` alias is supplied", async () => {
     let captured: RunHistoryRequest | null = null;
     const tool = makeRunHistoryTool(async (req) => {
       captured = req;

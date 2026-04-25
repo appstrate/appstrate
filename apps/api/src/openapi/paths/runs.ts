@@ -483,7 +483,7 @@ export const runsPaths = {
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
                 result: { processed: 42, labeled: 38 },
-                state: { lastProcessedId: "msg_99f2a" },
+                checkpoint: { lastProcessedId: "msg_99f2a" },
                 tokenUsage: {
                   input_tokens: 8200,
                   output_tokens: 4250,
@@ -819,10 +819,10 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `state`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "AFPS runtime `RunResult` — `memories`, `checkpoint`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
               properties: {
                 memories: { type: "array" },
-                state: {},
+                checkpoint: {},
                 output: {},
                 report: { type: ["string", "null"] },
                 logs: { type: "array" },

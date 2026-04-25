@@ -107,7 +107,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { counter: 1 },
+        checkpoint: { counter: 1 },
       });
       await seedRun({
         packageId: pkgId,
@@ -115,7 +115,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { counter: 2 },
+        checkpoint: { counter: 2 },
       });
 
       const res = await app.request("/internal/run-history", {
@@ -137,7 +137,7 @@ describe("Internal API", () => {
           applicationId: ctx.defaultAppId,
           dashboardUserId: ctx.user.id,
           status: "success",
-          state: { i },
+          checkpoint: { i },
         });
       }
 
@@ -190,7 +190,7 @@ describe("Internal API", () => {
         applicationId: other.defaultAppId,
         dashboardUserId: other.user.id,
         status: "success",
-        state: { foreign: true },
+        checkpoint: { foreign: true },
       });
 
       const res = await app.request("/internal/run-history", {
@@ -209,7 +209,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { key: "value" },
+        checkpoint: { key: "value" },
         result: { output: "done" },
       });
 
@@ -234,7 +234,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { key: "v" },
+        checkpoint: { key: "v" },
       });
 
       const res = await app.request("/internal/run-history?fields=state", {
@@ -266,7 +266,7 @@ describe("Internal API", () => {
         dashboardUserId: null,
         endUserId: eu.id,
         status: "success",
-        state: { secret: true },
+        checkpoint: { secret: true },
       });
 
       const res = await app.request("/internal/run-history?fields=checkpoint", {

@@ -79,14 +79,14 @@ describe("mergeTerminalResult", () => {
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
       memories: [{ content: "hello" }],
-      state: { step: 2 },
+      checkpoint: { step: 2 },
       output: { foo: "bar" },
       report: "# Report\nline",
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: RunResult = {
       memories: [{ content: "old" }],
-      state: { step: 1 },
+      checkpoint: { step: 1 },
       output: { foo: "baz" },
       report: "fallback",
       logs: [{ level: "info", message: "y", timestamp: 50 }],
@@ -95,7 +95,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "hello" }]);
-    expect(merged.state).toEqual({ step: 2 });
+    expect(merged.checkpoint).toEqual({ step: 2 });
     expect(merged.output).toEqual({ foo: "bar" });
     expect(merged.report).toBe("# Report\nline");
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
@@ -108,7 +108,7 @@ describe("mergeTerminalResult", () => {
     const aggregate = emptyRunResult();
     const runner: RunResult = {
       memories: [{ content: "r" }],
-      state: { ok: true },
+      checkpoint: { ok: true },
       output: { answer: 42 },
       report: "runner-report",
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
@@ -117,7 +117,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "r" }]);
-    expect(merged.state).toEqual({ ok: true });
+    expect(merged.checkpoint).toEqual({ ok: true });
     expect(merged.output).toEqual({ answer: 42 });
     expect(merged.report).toBe("runner-report");
     expect(merged.logs).toHaveLength(1);
@@ -280,7 +280,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
       type: "state.set",
       timestamp: 1,
       runId: "r",
-      state: { step: 1 },
+      checkpoint: { step: 1 },
     });
 
     // Stdout-style: tool writes a JSON line.
@@ -310,7 +310,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.report).toBe("## Header\nbody");
     expect(final.output).toEqual({ answer: 42 });
-    expect(final.state).toEqual({ step: 1 });
+    expect(final.checkpoint).toEqual({ step: 1 });
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(500);
     tee.restore();
@@ -353,7 +353,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     tee.restore();
   });
 
-  it("aggregates checkpoint.set (AFPS 1.4) into result.state with scope captured", async () => {
+  it("aggregates checkpoint.set (AFPS 1.4) into result.checkpoint with scope captured", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
@@ -368,12 +368,12 @@ describe("attachTeeSink — aggregation via finalize", () => {
     await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
 
     const final = underlying.finalized!;
-    expect(final.state).toEqual({ cursor: "abc" });
+    expect(final.checkpoint).toEqual({ cursor: "abc" });
     expect(final.checkpointScope).toBe("shared");
     tee.restore();
   });
 
-  it("dual-event acceptance: legacy state.set and new checkpoint.set both write into result.state", async () => {
+  it("dual-event acceptance: legacy state.set and new checkpoint.set both write into result.checkpoint", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
@@ -391,7 +391,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
 
     const final = underlying.finalized!;
-    expect(final.state).toEqual({ v: 2 });
+    expect(final.checkpoint).toEqual({ v: 2 });
     expect(final.checkpointScope).toBe("actor");
     tee.restore();
   });

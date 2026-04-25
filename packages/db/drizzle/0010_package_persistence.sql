@@ -53,4 +53,13 @@ CREATE INDEX IF NOT EXISTS "pkp_org"
 -- store above is the single source of truth for both checkpoints and
 -- memories with first-class actor scoping.
 DROP TABLE IF EXISTS "package_memories";
+--> statement-breakpoint
+
+-- Rename `runs.state` → `runs.checkpoint` to match the in-process and
+-- AFPS 1.4 wire vocabulary (ADR-011 final cut). The column kept the
+-- legacy name through the transition window; the unified persistence
+-- store is the system of record now and `runs.checkpoint` survives only
+-- as a per-run snapshot of what the runner emitted at finalize.
+ALTER TABLE "runs" RENAME COLUMN "state" TO "checkpoint";
+
 

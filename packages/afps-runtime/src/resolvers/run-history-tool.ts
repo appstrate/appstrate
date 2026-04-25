@@ -78,10 +78,10 @@ const VALID_FIELDS: readonly RunHistoryField[] = ["checkpoint", "result"];
 
 /**
  * Wire-level field vocabulary the platform's `/internal/run-history`
- * endpoint still accepts for one release. `state` is the deprecated
- * pre-1.4 alias — see {@link normalizeRequest} for the alias collapse.
+ * endpoint accepts. The legacy `state` alias is no longer accepted
+ * (ADR-011 final cut — runners ≥ AFPS 1.4 only).
  */
-const WIRE_FIELDS: readonly string[] = ["checkpoint", "state", "result"];
+const WIRE_FIELDS: readonly string[] = ["checkpoint", "result"];
 
 export interface MakeRunHistoryToolOptions {
   /** Emit `run_history.called` events via `ctx.emit`. Default: true. */
@@ -171,14 +171,12 @@ function normalizeRequest(args: unknown): RunHistoryRequest {
     typeof raw.limit === "number" && Number.isFinite(raw.limit) && raw.limit >= 1
       ? Math.min(Math.floor(raw.limit), MAX_LIMIT)
       : DEFAULT_LIMIT;
-  // Accept legacy `state` and the new `checkpoint` interchangeably from
-  // the LLM input — both collapse to `checkpoint` on the wire. Anything
-  // outside `WIRE_FIELDS` is dropped silently.
+  // Anything outside `WIRE_FIELDS` is dropped silently.
   const collected = new Set<RunHistoryField>();
   if (Array.isArray(raw.fields)) {
     for (const v of raw.fields) {
       if (typeof v !== "string" || !WIRE_FIELDS.includes(v)) continue;
-      collected.add(v === "state" ? "checkpoint" : (v as RunHistoryField));
+      collected.add(v as RunHistoryField);
     }
   }
   return {

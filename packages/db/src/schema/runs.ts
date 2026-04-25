@@ -45,7 +45,7 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result"),
-    state: jsonb("state"),
+    checkpoint: jsonb("checkpoint"),
     error: text("error"),
     // Snake-case keys: matches the wire format produced by every runner
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from

@@ -15,7 +15,7 @@ export type LogLevel = "info" | "warn" | "error";
  * against the canonical AFPS 1.3 semantics:
  *
  * - `memory.added` events append to `memories`
- * - `state.set` events overwrite `state` (last-write-wins)
+ * - `checkpoint.set` events overwrite `checkpoint` (last-write-wins)
  * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
  * - `report.appended` events concatenate into `report` with `\n` separators
  * - `log.written` events append to `logs`
@@ -25,16 +25,14 @@ export type LogLevel = "info" | "warn" | "error";
 export interface RunResult {
   memories: Memory[];
   /**
-   * Aggregated checkpoint payload (last `checkpoint.set` or, for back-compat,
-   * `state.set`). The field name keeps `state` to avoid a breaking rename
-   * across every downstream consumer (sinks, runners, finalize bodies);
-   * the runtime + platform vocabulary now calls this a "checkpoint".
+   * Aggregated checkpoint payload — the last `checkpoint.set` value. Single
+   * source of truth for the carry-over snapshot; the legacy `state` alias
+   * was dropped at the AFPS 1.4 final cut (ADR-011).
    */
-  state: unknown | null;
+  checkpoint: unknown | null;
   /**
    * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no
-   * checkpoint event was emitted, or when the emitter is pre-1.4
-   * (`state.set` without `scope`) — consumers default to `"actor"`.
+   * checkpoint event was emitted — consumers default to `"actor"`.
    */
   checkpointScope?: "actor" | "shared";
   output: unknown | null;

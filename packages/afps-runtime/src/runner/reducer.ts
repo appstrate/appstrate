@@ -27,7 +27,7 @@ export interface ReduceOptions {
 export function emptyRunResult(): RunResult {
   return {
     memories: [],
-    state: null,
+    checkpoint: null,
     output: null,
     report: null,
     logs: [],
@@ -62,10 +62,10 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
       // consumers (HttpSink, run-event-ingestion). No `checkpointScope`
       // is set — `state.set` carries no scope, so consumers default to
       // the run's actor at the storage boundary.
-      result.state = canonical.state ?? null;
+      result.checkpoint = canonical.state ?? null;
       return;
     case "checkpoint.set":
-      result.state = canonical.data ?? null;
+      result.checkpoint = canonical.data ?? null;
       if (canonical.scope !== undefined) result.checkpointScope = canonical.scope;
       return;
     case "output.emitted":

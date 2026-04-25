@@ -63,7 +63,7 @@ const RunResultSchema = z
       .array(z.object({ content: z.string() }))
       .optional()
       .default([]),
-    state: z.unknown().nullable().optional(),
+    checkpoint: z.unknown().nullable().optional(),
     output: z.unknown().nullable().optional(),
     report: z.string().nullable().optional(),
     logs: z
@@ -167,7 +167,7 @@ export function createRunsEventsRouter() {
     const d = parsed.data;
     const result: RunResult = {
       memories: d.memories,
-      state: d.state ?? null,
+      checkpoint: d.checkpoint ?? null,
       output: d.output ?? null,
       report: d.report ?? null,
       logs: d.logs,

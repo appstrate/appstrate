@@ -133,7 +133,7 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
       dashboardUserId: ctx.user.id,
       status: "success",
       duration: 1000,
-      state: { turn: 1 },
+      checkpoint: { turn: 1 },
     });
     await seedRun({
       packageId: pkgId,
@@ -142,7 +142,7 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
       dashboardUserId: ctx.user.id,
       status: "success",
       duration: 2000,
-      state: { turn: 2 },
+      checkpoint: { turn: 2 },
     });
     await seedRun({
       packageId: pkgId,
@@ -151,7 +151,7 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
       dashboardUserId: ctx.user.id,
       status: "success",
       duration: 3000,
-      state: { turn: 3 },
+      checkpoint: { turn: 3 },
     });
     // Plus one failed run that should be excluded by the platform filter.
     await seedRun({
@@ -161,7 +161,7 @@ describe("run_history — end-to-end (Pi tool → sidecar → platform → DB)",
       dashboardUserId: ctx.user.id,
       status: "failed",
       duration: 500,
-      state: { turn: 99 },
+      checkpoint: { turn: 99 },
     });
 
     const running = await seedRun({

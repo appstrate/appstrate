@@ -144,13 +144,9 @@ export function createInternalRouter() {
       .catch(10)
       .parse(limitParam ?? 10);
 
-    // `state` is the AFPS ≤ 1.3 wire name for the carry-over field.
-    // Accepted as a deprecated alias for one release alongside the new
-    // `checkpoint` name (ADR-011 Phase 5). Both fold into the same
-    // service-layer field; the response key is always `checkpoint`.
-    // TODO(ADR-011 final-cut): remove the `state` alias once the floor
-    // of supported runners ≥ AFPS 1.4.
-    const VALID_WIRE_FIELDS = ["checkpoint", "state", "result"] as const;
+    // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
+    // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
+    const VALID_WIRE_FIELDS = ["checkpoint", "result"] as const;
     type WireField = (typeof VALID_WIRE_FIELDS)[number];
 
     const wireFields = fieldsParam
@@ -161,7 +157,7 @@ export function createInternalRouter() {
       );
     const seen = new Set<"checkpoint" | "result">();
     for (const f of wireFields ?? []) {
-      seen.add(f === "state" ? "checkpoint" : f);
+      seen.add(f);
     }
     const fields: ("checkpoint" | "result")[] = seen.size > 0 ? [...seen] : ["checkpoint"];
 

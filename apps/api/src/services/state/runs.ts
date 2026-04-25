@@ -223,7 +223,7 @@ export async function updateRun(
   updates: {
     status?: string;
     result?: Record<string, unknown>;
-    state?: Record<string, unknown>;
+    checkpoint?: Record<string, unknown>;
     error?: string;
     completedAt?: string;
     duration?: number;
@@ -241,7 +241,7 @@ export async function updateRun(
   if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
   if (updates.duration !== undefined) set.duration = updates.duration;
   if (updates.result !== undefined) set.result = updates.result;
-  if (updates.state !== undefined) set.state = updates.state;
+  if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
   if (updates.metadata !== undefined) set.metadata = updates.metadata;
@@ -275,7 +275,7 @@ export async function getLastRunState(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.applicationId, scope.applicationId),
-    isNotNull(runs.state),
+    isNotNull(runs.checkpoint),
   ];
   if (actor) {
     conditions.push(
@@ -284,21 +284,14 @@ export async function getLastRunState(
   }
 
   const [row] = await db
-    .select({ state: runs.state })
+    .select({ checkpoint: runs.checkpoint })
     .from(runs)
     .where(and(...conditions))
     .orderBy(desc(runs.startedAt))
     .limit(1);
-  return asRecordOrNull(row?.state);
+  return asRecordOrNull(row?.checkpoint);
 }
 
-/**
- * `state` is the legacy field name (AFPS ≤ 1.3 / pre-ADR-011) for the
- * carry-over checkpoint. The current name is `checkpoint` — accepted on
- * the wire alongside `state` for back-compat. The internal handler
- * folds the wire shape into this canonical type before calling
- * {@link getRecentRuns}, so the service never sees the legacy alias.
- */
 export type RecentRunsField = "checkpoint" | "result";
 
 export async function getRecentRuns(
@@ -341,10 +334,7 @@ export async function getRecentRuns(
       status: runs.status,
       startedAt: runs.startedAt,
       duration: runs.duration,
-      // `runs.state` is the column name — the response key is
-      // `checkpoint`. The legacy column is kept until the schema drop
-      // PR; no SQL rename here, just a service-layer projection.
-      state: runs.state,
+      checkpoint: runs.checkpoint,
       result: runs.result,
     })
     .from(runs)
@@ -359,7 +349,7 @@ export async function getRecentRuns(
       date: toISO(row.startedAt),
       duration: row.duration,
     };
-    if (fields.includes("checkpoint")) entry.checkpoint = row.state;
+    if (fields.includes("checkpoint")) entry.checkpoint = row.checkpoint;
     if (fields.includes("result")) entry.result = row.result;
     return entry;
   });

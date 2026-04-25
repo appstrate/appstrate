@@ -44,7 +44,7 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appA" },
+        checkpoint: { source: "appA" },
         startedAt: new Date("2025-01-01"),
       });
 
@@ -55,7 +55,7 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: appBId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appB" },
+        checkpoint: { source: "appB" },
         startedAt: new Date("2025-01-02"),
       });
 
@@ -82,7 +82,7 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: appBId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appB" },
+        checkpoint: { source: "appB" },
       });
 
       const state = await getLastRunState(

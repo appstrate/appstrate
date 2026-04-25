@@ -457,8 +457,8 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     if (r.memories[0]!.content !== "first" || r.memories[1]!.content !== "second") {
       return fail("memory order / content mismatch");
     }
-    if (!r.state || (r.state as { counter: number }).counter !== 2) {
-      return fail(`state should be last-write-wins, got ${JSON.stringify(r.state)}`);
+    if (!r.checkpoint || (r.checkpoint as { counter: number }).counter !== 2) {
+      return fail(`checkpoint should be last-write-wins, got ${JSON.stringify(r.checkpoint)}`);
     }
     const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
@@ -491,7 +491,7 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
     if (
       r.memories.length !== 0 ||
       r.logs.length !== 0 ||
-      r.state !== null ||
+      r.checkpoint !== null ||
       r.output !== null ||
       r.report !== null
     ) {

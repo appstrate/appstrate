@@ -109,7 +109,7 @@ describe("platform tools — open envelope emission", () => {
 });
 
 describe("dual-event acceptance — state.set and checkpoint.set", () => {
-  it("reducer folds checkpoint.set into result.state with scope captured", () => {
+  it("reducer folds checkpoint.set into result.checkpoint with scope captured", () => {
     const events: RunEvent[] = [
       {
         type: "checkpoint.set",
@@ -120,16 +120,16 @@ describe("dual-event acceptance — state.set and checkpoint.set", () => {
       },
     ];
     const result = reduceEvents(events);
-    expect(result.state).toEqual({ cursor: "abc" });
+    expect(result.checkpoint).toEqual({ cursor: "abc" });
     expect(result.checkpointScope).toBe("shared");
   });
 
-  it("reducer still folds legacy state.set into result.state (back-compat)", () => {
+  it("reducer still folds legacy state.set into result.checkpoint (back-compat)", () => {
     const events: RunEvent[] = [
       { type: "state.set", timestamp: 1, runId: "r", state: { legacy: true } },
     ];
     const result = reduceEvents(events);
-    expect(result.state).toEqual({ legacy: true });
+    expect(result.checkpoint).toEqual({ legacy: true });
     // No checkpointScope: state.set carries no scope, consumer defaults to actor.
     expect(result.checkpointScope).toBeUndefined();
   });
@@ -140,7 +140,7 @@ describe("dual-event acceptance — state.set and checkpoint.set", () => {
       { type: "checkpoint.set", timestamp: 2, runId: "r", data: { v: 2 }, scope: "actor" },
     ];
     const result = reduceEvents(events);
-    expect(result.state).toEqual({ v: 2 });
+    expect(result.checkpoint).toEqual({ v: 2 });
     expect(result.checkpointScope).toBe("actor");
   });
 
@@ -172,7 +172,7 @@ describe("reduceEvents", () => {
     ];
     const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "a" }, { content: "b" }]);
-    expect(result.state).toEqual({ x: 1 });
+    expect(result.checkpoint).toEqual({ x: 1 });
     expect(result.output).toEqual({ b: 2 });
     expect(result.report).toBe("line 1\nline 2");
     expect(result.logs).toHaveLength(1);

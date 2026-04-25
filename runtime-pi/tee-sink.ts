@@ -79,7 +79,7 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
   const checkpointScope = aggregate.checkpointScope ?? runnerResult.checkpointScope;
   return {
     memories: aggregate.memories.length > 0 ? aggregate.memories : runnerResult.memories,
-    state: aggregate.state ?? runnerResult.state,
+    checkpoint: aggregate.checkpoint ?? runnerResult.checkpoint,
     ...(checkpointScope !== undefined ? { checkpointScope } : {}),
     output: aggregate.output ?? runnerResult.output,
     report: aggregate.report ?? runnerResult.report,
