@@ -153,7 +153,7 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to build the typed Pi tools (`<provider>_call`, `run_history`), and then `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated outbound traffic flows exclusively through the typed tools, which proxy to the sidecar internally.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`<provider>_call`, `run_history`), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` is `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
 
 **What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 
@@ -184,19 +184,20 @@ const containerId = await createContainer(runId, containerEnv, {
 
 ---
 
-## Layer 2 — Credential Brokering via Sidecar Proxy
+## Layer 2 — Credential Brokering via Sidecar MCP Server
 
-**Files:** `runtime-pi/sidecar/server.ts`, `apps/api/src/routes/internal.ts`
+**Files:** `runtime-pi/sidecar/mcp.ts`, `runtime-pi/sidecar/credential-proxy.ts`, `apps/api/src/routes/internal.ts`
 
-Credentials are **never** passed to the agent container — not as environment variables, not as files, not as API responses. Instead, the agent makes standard HTTP requests through the sidecar proxy, which injects credentials transparently.
+Credentials are **never** passed to the agent container — not as environment variables, not as files, not as API responses. The agent invokes a typed MCP tool, and the sidecar injects credentials transparently before forwarding to the upstream API.
 
 ### How the agent makes authenticated API calls
 
-Every sidecar-backed capability is registered as a **typed Pi tool** at container boot (`runtime-pi/entrypoint.ts`). The agent calls the tool with structured arguments; the tool proxies to the sidecar internally. The agent has no bash-level visibility into the sidecar URL — it is deleted from `process.env` after bootstrap.
+The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. Three canonical tools are registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`): `provider_call`, `run_history`, `llm_complete`. The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
 
 ```ts
 // What the agent actually calls (not curl, not bash)
-appstrate_gmail_call({
+provider_call({
+  providerId: "@appstrate/gmail",
   method: "GET",
   target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
 });
@@ -204,24 +205,24 @@ appstrate_gmail_call({
 run_history({ limit: 5, fields: ["state"] });
 ```
 
-Internally, the `<provider>_call` tool POSTs to the sidecar's `/proxy` endpoint with `X-Provider` / `X-Target` routing headers (`run_history` hits `/run-history`). The sidecar:
+Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts`, which:
 
-1. **Fetches credentials** from the platform API (`GET /internal/credentials/gmail`) using its `RUN_TOKEN`
+1. **Fetches credentials** from the platform API (`GET /internal/credentials/:scope/:name`) using its `RUN_TOKEN`
 2. **Substitutes** `{{token}}` placeholders with the real OAuth access token in headers and URL
 3. **Validates** the resolved URL against `authorizedUris` (see [Layer 3](#layer-3--url-authorization))
 4. **Forwards** the request to the target API with real credentials
-5. **Returns** only the response body (status + text) — no credentials in the response
+5. **Returns** the response as a structured MCP result — body inline (text under 32 KB) or as a `resource_link` block backed by the run-scoped blob cache
 
 ### What the agent sees vs. what is transmitted
 
-| Component   | Agent sees                                 | Wire (to target API)                   |
-| ----------- | ------------------------------------------ | -------------------------------------- |
-| Tool call   | `appstrate_gmail_call({ method, target })` | `POST http://sidecar:8080/proxy`       |
-| URL         | `https://gmail.googleapis.com/...`         | `https://gmail.googleapis.com/...`     |
-| Auth header | (not supplied — injected server-side)      | `Bearer ya29.a0AfH6SM...` (real token) |
-| Response    | Raw upstream body (status code forwarded)  | —                                      |
-| Credentials | Never                                      | Substituted by sidecar                 |
-| Sidecar URL | Never (deleted from env after bootstrap)   | —                                      |
+| Component   | Agent sees                                                           | Wire (to target API)                   |
+| ----------- | -------------------------------------------------------------------- | -------------------------------------- |
+| Tool call   | `provider_call({ providerId, method, target })`                      | `POST http://sidecar:8080/mcp`         |
+| URL         | `https://gmail.googleapis.com/...`                                   | `https://gmail.googleapis.com/...`     |
+| Auth header | (not supplied — injected server-side)                                | `Bearer ya29.a0AfH6SM...` (real token) |
+| Response    | MCP `CallToolResult` — text body or `resource_link` for binary/large | —                                      |
+| Credentials | Never                                                                | Substituted by sidecar                 |
+| Sidecar URL | Never (deleted from env after bootstrap)                             | —                                      |
 
 ### Credential access is scoped and audited
 

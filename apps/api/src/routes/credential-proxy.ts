@@ -5,9 +5,10 @@
  *
  * Used by external runners (CLI, GitHub Action, third-party agents) to
  * reach an application's providers without copying raw credentials out
- * of Appstrate. Wire-compatible with the sidecar `/proxy` contract — the
- * agent code-path (spec.md §8.3 `RemoteAppstrateProviderResolver`) is
- * identical to the in-container sidecar call.
+ * of Appstrate. The CLI's `RemoteAppstrateProviderResolver` (spec.md
+ * §8.3) is the canonical consumer; in-container runs reach the same
+ * `executeProviderCall` helper via the sidecar's MCP `provider_call`
+ * tool instead.
  *
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
@@ -183,9 +184,9 @@ export function createCredentialProxyRouter() {
   router.use("/*", requireAppContext());
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
-  // upstream fetch, mirroring the in-container sidecar's `app.all("/proxy")`
-  // contract. A POST-only route silently 404s GET/PUT/DELETE tool calls,
-  // which the agent paraphrases as "the Gmail API is not available".
+  // upstream fetch. A POST-only route would silently 404 GET/PUT/DELETE
+  // tool calls, which the agent paraphrases as "the Gmail API is not
+  // available".
   router.all(
     "/proxy",
     rateLimit(limits.rate_per_min),

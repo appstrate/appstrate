@@ -129,7 +129,6 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       const isStreamingBody = resolved.kind === "stream";
 
       // Apply transport headers (streaming + response mode hints).
-      // Mirrors sidecar-provider-resolver.ts exactly via the shared helper.
       const headers = applyTransportHeaders(
         { ...baseHeaders },
         {

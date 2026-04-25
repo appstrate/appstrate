@@ -59,6 +59,13 @@ export interface RuntimeEnv {
    * and falls back to a fresh trace on malformed values.
    */
   traceparent?: string;
+  /**
+   * Per-run Bearer token for the MCP HTTP transport. When unset, the
+   * MCP client connects unauthenticated — relies on Docker network
+   * isolation only. Reuses the platform's existing `RUN_TOKEN` env to
+   * avoid minting a separate secret.
+   */
+  runToken?: string;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -281,5 +288,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     heartbeatIntervalMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
+    runToken: source.RUN_TOKEN || undefined,
   };
 }

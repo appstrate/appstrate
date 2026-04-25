@@ -31,6 +31,7 @@ COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
 COPY packages/emails/package.json        packages/emails/
 COPY packages/env/package.json           packages/env/
+COPY packages/mcp-transport/package.json packages/mcp-transport/
 COPY packages/runner-pi/package.json     packages/runner-pi/
 COPY packages/shared-types/package.json  packages/shared-types/
 COPY packages/ui/package.json            packages/ui/
@@ -54,15 +55,23 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/connect/proxy-primitives     shared URL matchers + header filter
 #   - @appstrate/afps-runtime/resolvers       `matchesAuthorizedUriSpec`, re-exported
 #                                             by proxy-primitives
-COPY packages/connect/src       packages/connect/src
-COPY packages/afps-runtime/src  packages/afps-runtime/src
+#   - @appstrate/mcp-transport                MCP adapter on the official SDK,
+#                                             used by mcp.ts to expose `tools/*`
+COPY packages/connect/src        packages/connect/src
+COPY packages/afps-runtime/src   packages/afps-runtime/src
+COPY packages/mcp-transport/src  packages/mcp-transport/src
 
 # Sidecar sources.
-COPY runtime-pi/sidecar/server.ts        \
-     runtime-pi/sidecar/app.ts           \
-     runtime-pi/sidecar/helpers.ts       \
-     runtime-pi/sidecar/forward-proxy.ts \
-     runtime-pi/sidecar/ssrf.ts          \
+COPY runtime-pi/sidecar/server.ts           \
+     runtime-pi/sidecar/app.ts              \
+     runtime-pi/sidecar/helpers.ts          \
+     runtime-pi/sidecar/forward-proxy.ts    \
+     runtime-pi/sidecar/ssrf.ts             \
+     runtime-pi/sidecar/mcp.ts              \
+     runtime-pi/sidecar/mcp-host.ts         \
+     runtime-pi/sidecar/blob-store.ts       \
+     runtime-pi/sidecar/credential-proxy.ts \
+     runtime-pi/sidecar/roots.ts            \
      runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar

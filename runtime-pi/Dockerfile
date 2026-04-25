@@ -33,6 +33,7 @@ COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
 COPY packages/emails/package.json        packages/emails/
 COPY packages/env/package.json           packages/env/
+COPY packages/mcp-transport/package.json packages/mcp-transport/
 COPY packages/runner-pi/package.json     packages/runner-pi/
 COPY packages/shared-types/package.json  packages/shared-types/
 COPY packages/ui/package.json            packages/ui/
@@ -97,32 +98,39 @@ WORKDIR /runtime
 # Workspace node_modules. Bun stores shared deps at the root and links
 # per-package trees into it — both levels are required at import time.
 COPY --from=deps --chown=pi:pi /build/node_modules                       ./node_modules
-COPY --from=deps --chown=pi:pi /build/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
-COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules    ./packages/runner-pi/node_modules
-COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules            ./runtime-pi/node_modules
+COPY --from=deps --chown=pi:pi /build/packages/afps-runtime/node_modules  ./packages/afps-runtime/node_modules
+COPY --from=deps --chown=pi:pi /build/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
+COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules     ./packages/runner-pi/node_modules
+COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runtime-pi/node_modules
 
-# Workspace sources — `@appstrate/afps-runtime` and `@appstrate/runner-pi`
-# are source-only (Bun loads .ts directly, no build step).
-COPY --chown=pi:pi packages/afps-runtime/src           ./packages/afps-runtime/src
-COPY --chown=pi:pi packages/afps-runtime/package.json  ./packages/afps-runtime/
-COPY --chown=pi:pi packages/runner-pi/src              ./packages/runner-pi/src
-COPY --chown=pi:pi packages/runner-pi/package.json     ./packages/runner-pi/
+# Workspace sources — `@appstrate/afps-runtime`, `@appstrate/mcp-transport`,
+# and `@appstrate/runner-pi` are source-only (Bun loads .ts directly, no
+# build step).
+COPY --chown=pi:pi packages/afps-runtime/src            ./packages/afps-runtime/src
+COPY --chown=pi:pi packages/afps-runtime/package.json   ./packages/afps-runtime/
+COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport/src
+COPY --chown=pi:pi packages/mcp-transport/package.json  ./packages/mcp-transport/
+COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
+COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
 
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/runner-pi \
- && ln -s   /runtime/packages/afps-runtime node_modules/@appstrate/afps-runtime \
- && ln -s   /runtime/packages/runner-pi    node_modules/@appstrate/runner-pi \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi \
+ && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
+ && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
+ && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
  && chown -h pi:pi \
         node_modules/@appstrate \
         node_modules/@appstrate/afps-runtime \
+        node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi
 
 # Bootstrap sources.
 COPY --chown=pi:pi runtime-pi/extensions/          ./extensions/
 COPY --chown=pi:pi runtime-pi/extension-wrapper.ts ./extension-wrapper.ts
 COPY --chown=pi:pi runtime-pi/tee-sink.ts          ./tee-sink.ts
+COPY --chown=pi:pi runtime-pi/env.ts               ./env.ts
 COPY --chown=pi:pi runtime-pi/entrypoint.ts        ./entrypoint.ts
 
 # Agent workspace. AFPS tools ship pre-bundled with their deps inlined

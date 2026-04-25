@@ -70,3 +70,60 @@ export function toSlug(value: string, maxLen?: number): string {
     .replace(/^-+|-+$/g, "");
   return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
 }
+
+/**
+ * MCP tool name validation.
+ *
+ * Format: `{namespace_snake}__{tool_snake}` \u2014 two snake_case tokens
+ * joined by a double underscore. Hard length ceiling 56 chars leaves
+ * headroom under the 64-char OpenAI/Anthropic limit for downstream
+ * host re-prefixing (e.g. Claude Code adds its own
+ * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
+ *
+ * Bifurcated predicates (npm pattern):
+ * - `isValidToolNameForNew`: strict \u2014 used at registry publish time.
+ * - `isValidToolNameForExisting`: lenient \u2014 used at runtime install so
+ *   previously-published tools keep loading after rules tighten.
+ *
+ * The runtime predicate is currently identical to the strict one. Future
+ * tightenings (e.g. forbidding new digit-prefixed names) go through
+ * `isValidToolNameForNew` only, leaving older tools unaffected.
+ */
+export const TOOL_NAME_MAX_LEN = 56;
+const TOOL_NAME_PATTERN_NEW = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
+
+export function isValidToolNameForNew(name: string): boolean {
+  if (typeof name !== "string") return false;
+  if (name.length === 0 || name.length > TOOL_NAME_MAX_LEN) return false;
+  return TOOL_NAME_PATTERN_NEW.test(name);
+}
+
+/**
+ * Lenient runtime check. Mirrors `isValidToolNameForNew` for now; extend
+ * the alphabet here (not in the strict predicate) when adding tolerance
+ * for tightened rules.
+ */
+export function isValidToolNameForExisting(name: string): boolean {
+  return isValidToolNameForNew(name);
+}
+
+/**
+ * Normalise a raw tool name into the canonical snake_case `__`-joined
+ * form. Returns the input unchanged when it's already valid.
+ *
+ * Mapping rules:
+ * - Hyphens \u2192 underscores.
+ * - Single-underscore separator \u2192 double-underscore boundary (only when
+ *   no `__` is already present).
+ * - Mixed-case \u2192 lower-case.
+ */
+export function normalizeToolName(raw: string): string {
+  if (typeof raw !== "string" || raw.length === 0) return raw;
+  let out = raw.toLowerCase();
+  out = out.replace(/[-]+/g, "_");
+  // If there's no `__` boundary yet, promote the first single underscore.
+  if (!out.includes("__")) {
+    out = out.replace(/_/, "__");
+  }
+  return out.slice(0, TOOL_NAME_MAX_LEN);
+}

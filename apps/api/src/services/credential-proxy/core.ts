@@ -5,14 +5,15 @@
  * provider credentials into agent-generated requests and forwarding the
  * result upstream.
  *
- * Used by:
- *   1. The `/api/credential-proxy/proxy` public endpoint (this repo).
- *      Caller authenticates via API key scoped with `credential-proxy:call`.
- *      Used by external runners (CLI, GitHub Action, third-party agents)
- *      to reach the application's providers from outside Appstrate.
- *   2. (In the longer-term plan) the runtime-pi sidecar `/proxy` handler.
- *      The contract is wire-compatible today; extracting the exact same
- *      code here is intentional so both entrypoints stay in lockstep.
+ * Consumed by the `/api/credential-proxy/proxy` public endpoint, used
+ * by external runners (CLI, GitHub Action, third-party agents) to
+ * reach the application's providers from outside Appstrate. The caller
+ * authenticates via an API key scoped with `credential-proxy:call`.
+ *
+ * The in-container sidecar uses its own `executeProviderCall` helper
+ * (`runtime-pi/sidecar/credential-proxy.ts`) — same algorithm, same
+ * shared primitives in `@appstrate/connect/proxy-primitives`, but
+ * tailored to the per-run-token authorisation model.
  *
  * The module deliberately does NOT implement rate-limiting, authz, or
  * audit logging — those are the caller's responsibility. This function

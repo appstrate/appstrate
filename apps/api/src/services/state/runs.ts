@@ -30,7 +30,8 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
-import type { RunHistoryField } from "@appstrate/afps-runtime/resolvers";
+export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
+export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
 
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";

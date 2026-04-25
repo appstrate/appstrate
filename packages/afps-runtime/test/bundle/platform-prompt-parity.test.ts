@@ -12,7 +12,6 @@
  * Platform-specific divergences (by design):
  *   - `platformName`: "Appstrate" / "Appstrate CLI" / caller-defined
  *   - `## Documents` section: only the platform has DB-backed uploads
- *   - `## Run History`: only enabled when a sidecar/proxy is wired
  *   - `## Connected Providers`: platform may filter by credential
  *     availability (providersReplace); CLI takes the bundle list as-is
  *

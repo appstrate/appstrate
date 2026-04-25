@@ -49,6 +49,12 @@ interface ProcessHandle {
   runId: string;
   workDir?: string;
   stdoutPath?: string;
+  /**
+   * Last N lines of drained stderr. Read by `streamLogs()` on exit so an
+   * agent that dies before producing any stdout still surfaces a reason
+   * upstream (the platform's `pi.ts` error log only reads stdout).
+   */
+  stderrTail?: string[];
 }
 
 interface PendingSpec {
@@ -278,11 +284,32 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       stderr: "pipe",
     });
 
-    this.drainStderr(proc, handle.id);
+    const stderrTail: string[] = [];
+    ph.stderrTail = stderrTail;
+    this.drainStderr(proc, handle.id, stderrTail);
     ph.proc = proc;
     ph.stdoutPath = stdoutPath;
     this.pendingSpecs.delete(handle.id);
     await this.writePidfile(handle.runId, ph.role, proc.pid);
+
+    // Co-locate stderr with the exit code so a silent crash (zero
+    // stdout, drained stderr arriving after the platform's
+    // "exited non-zero" log) still surfaces a reason in the same place
+    // operators look first. Fire-and-forget — this is a diagnostic-only
+    // observer; the actual exit handling stays in pi.ts.
+    proc.exited.then(async (code) => {
+      if (code === 0) return;
+      // Give the stderr drain a moment to flush remaining buffered lines
+      // (the reader sees `done: true` only after the kernel closes the pipe).
+      await new Promise((r) => setTimeout(r, 100));
+      logger.error("Subprocess exited non-zero", {
+        label: handle.id,
+        runId: handle.runId,
+        role: ph.role,
+        exitCode: code,
+        stderrTail: stderrTail.slice(-50).join("\n"),
+      });
+    });
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
@@ -432,14 +459,28 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     throw new Error(`Sidecar health check timed out after ${timeoutMs}ms (${url})`);
   }
 
-  /** Drain stderr from a subprocess and log each line. */
-  private drainStderr(proc: BunProcess, label: string): void {
+  /**
+   * Drain stderr from a subprocess. Each line is logged at warn level
+   * for live tailing; the same line is appended to {@link tail} (capped
+   * at the last 50 lines) so the platform can surface stderr in the
+   * agent-exit error log even when the process dies before the live
+   * warn lines reach the user's filtered view.
+   */
+  private drainStderr(proc: BunProcess, label: string, tail?: string[]): void {
     const stderr = proc.stderr;
     if (!stderr || typeof stderr === "number") return;
 
     const reader = (stderr as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buf = "";
+
+    const append = (line: string) => {
+      logger.warn(`[process:${label}:stderr] ${line}`);
+      if (tail) {
+        tail.push(line);
+        if (tail.length > 50) tail.shift();
+      }
+    };
 
     const drain = async () => {
       try {
@@ -450,10 +491,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";
           for (const line of lines) {
-            if (line.trim()) logger.warn(`[process:${label}:stderr] ${line}`);
+            if (line.trim()) append(line);
           }
         }
-        if (buf.trim()) logger.warn(`[process:${label}:stderr] ${buf}`);
+        if (buf.trim()) append(buf);
       } catch {
         // Stream closed
       } finally {
