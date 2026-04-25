@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+/**
+ * `@appstrate/mcp-transport` — Phase 1 of #276 (Runtime v2).
+ *
+ * Thin adapter that bridges the Appstrate tool registry (whose tools carry
+ * raw JSON Schema input descriptors and arbitrary async handlers) to the
+ * official Model Context Protocol TypeScript SDK.
+ *
+ * Why a wrapper at all: AFPS tools ship JSON Schema (not Zod) input shapes,
+ * and the SDK's high-level `McpServer.registerTool()` only accepts Zod raw
+ * shapes — converting JSON Schema → Zod just to convert it back to JSON
+ * Schema on the wire is wasteful. The low-level `Server` lets us pass the
+ * descriptor through verbatim, which is what `tools/list` carries anyway.
+ *
+ * What this module exposes:
+ *
+ * - `AppstrateToolDefinition` — the shape callers use to register tools.
+ * - `createMcpServer(tools, info?)` — returns a `Server` with `tools/list`
+ *   and `tools/call` handlers wired to the supplied registry.
+ * - `createInProcessPair(tools, info?)` — convenience helper that returns a
+ *   `Server` and `Client` already connected via `InMemoryTransport`. The
+ *   default surface for first-party tools where subprocess overhead is
+ *   unjustifiable (one of the explicit drivers behind issue #276).
+ *
+ * What it deliberately does *not* re-export: JSON-RPC envelope types, error
+ * codes, transport implementations. Callers depend on the SDK directly for
+ * those — duplicating them in this package would just create drift.
+ */
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+  ErrorCode,
+  type CallToolResult,
+  type Implementation,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
+
+/**
+ * Handler for a single Appstrate tool. Receives validated arguments (the
+ * SDK does not validate input against `inputSchema` automatically — the
+ * caller must `.parse()` inside the handler if it needs strict checking)
+ * and returns the SDK's `CallToolResult`.
+ *
+ * Thrown errors become JSON-RPC `InternalError` responses; tool-level
+ * errors that the model should still see should be returned as
+ * `{ content: [...], isError: true }` instead of being thrown.
+ */
+export type AppstrateToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
+
+/**
+ * Tool registration shape — pairs the wire-format `Tool` descriptor with
+ * the in-process handler that fulfils it.
+ */
+export interface AppstrateToolDefinition {
+  /**
+   * MCP `Tool` descriptor as it appears in `tools/list`. The SDK requires
+   * `name` and `inputSchema`; everything else (`description`, `title`,
+   * `annotations`) is optional.
+   */
+  descriptor: Tool;
+  handler: AppstrateToolHandler;
+}
+
+const DEFAULT_SERVER_INFO: Implementation = {
+  name: "appstrate-mcp-server",
+  version: "0.0.0",
+};
+
+/**
+ * Build an MCP `Server` that exposes the supplied tool definitions via
+ * `tools/list` and `tools/call`. The server is *not* yet connected to a
+ * transport — the caller decides whether to wire it through
+ * `InMemoryTransport`, stdio, or HTTP.
+ *
+ * Duplicate tool names throw eagerly (silent overrides hide adapter bugs
+ * in whichever layer aggregates Appstrate's per-package registries).
+ */
+export function createMcpServer(
+  tools: ReadonlyArray<AppstrateToolDefinition>,
+  serverInfo: Implementation = DEFAULT_SERVER_INFO,
+): Server {
+  const registry = new Map<string, AppstrateToolDefinition>();
+  for (const tool of tools) {
+    if (registry.has(tool.descriptor.name)) {
+      throw new Error(`createMcpServer: duplicate tool registration for '${tool.descriptor.name}'`);
+    }
+    registry.set(tool.descriptor.name, tool);
+  }
+
+  const server = new Server(serverInfo, {
+    capabilities: { tools: { listChanged: false } },
+  });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [...registry.values()].map((t) => t.descriptor),
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const reg = registry.get(request.params.name);
+    if (!reg) {
+      // MethodNotFound is the closest standard code for "this method
+      // exists, but the named tool does not". Per MCP convention, callers
+      // distinguish unknown-tool from unknown-method via the error message
+      // (the SDK does not reserve a separate code).
+      throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${request.params.name}`);
+    }
+    return reg.handler(request.params.arguments ?? {});
+  });
+
+  return server;
+}
+
+/** A connected `(server, client)` pair sharing an in-memory transport. */
+export interface InProcessMcpPair {
+  server: Server;
+  client: Client;
+  /** Closes both transports. Idempotent. */
+  close(): Promise<void>;
+}
+
+/**
+ * Build a server-and-client pair already bridged by
+ * `InMemoryTransport.createLinkedPair()`.
+ *
+ * Use this for first-party tools where the subprocess hop a stdio
+ * transport implies has no payoff: same Bun process on both sides, no
+ * isolation boundary worth crossing, but full MCP wire-format compliance
+ * so the swap to `StdioClientTransport` (Phase 4 — third-party MCP
+ * servers) is a one-line change.
+ */
+export async function createInProcessPair(
+  tools: ReadonlyArray<AppstrateToolDefinition>,
+  options: {
+    serverInfo?: Implementation;
+    clientInfo?: Implementation;
+  } = {},
+): Promise<InProcessMcpPair> {
+  const server = createMcpServer(tools, options.serverInfo);
+  const client = new Client(
+    options.clientInfo ?? { name: "appstrate-mcp-client", version: "0.0.0" },
+  );
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  return {
+    server,
+    client,
+    async close() {
+      // `client.close()` shuts the protocol down on its side; the server's
+      // transport closes via the linked pair's `onclose` propagation.
+      await client.close();
+      await server.close();
+    },
+  };
+}
+
+// Re-export the SDK error primitives so callers don't need a second
+// dependency line just to inspect error codes thrown by the server.
+export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+export type { CallToolResult, Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
