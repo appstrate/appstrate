@@ -294,3 +294,15 @@ export {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
+
+// Deprecation infrastructure — Phase 6 of #276. RFC 9745 +
+// RFC 8594 header builders, single source of truth for the V2
+// migration sunset dates.
+export {
+  deprecationHeaders,
+  DEPRECATIONS,
+  DEPRECATION_DATE_V2,
+  SUNSET_DATE_V2,
+  MIGRATION_GUIDE_URL,
+  type DeprecationId,
+} from "./deprecation.ts";

@@ -31,6 +31,7 @@ import type {
   CallToolResult,
   Implementation,
   ReadResourceResult,
+  ServerCapabilities,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
@@ -72,6 +73,23 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
 export interface AppstrateMcpClient {
   /** The connected SDK `Client`. Exposed for advanced use cases. */
   readonly client: Client;
+  /**
+   * Server capabilities snapshotted during the MCP `initialize`
+   * handshake. Returns `undefined` if the client hasn't completed
+   * `connect()` yet — callers must check before branching on
+   * `tools` / `resources` / `prompts` / `logging` support.
+   *
+   * Phase 6 (#276): the agent uses this to skip `resources/list`
+   * against servers that didn't advertise the capability instead of
+   * paying for a round-trip + JSON-RPC error.
+   */
+  getServerCapabilities(): ServerCapabilities | undefined;
+  /**
+   * Server `Implementation` (`{ name, version }`) snapshotted during
+   * `initialize`. Used by McpHost log lines so operators can audit
+   * which upstream version is actually connected.
+   */
+  getServerVersion(): Implementation | undefined;
   /** List server-advertised tools. */
   listTools(options?: { signal?: AbortSignal }): Promise<{ tools: Tool[] }>;
   /** Invoke a tool by name. */
@@ -141,6 +159,12 @@ export function wrapClient(
   let closed = false;
   return {
     client,
+    getServerCapabilities() {
+      return client.getServerCapabilities();
+    },
+    getServerVersion() {
+      return client.getServerVersion();
+    },
     async listTools(options) {
       const result = await client.listTools(undefined, {
         ...(options?.signal ? { signal: options.signal } : {}),

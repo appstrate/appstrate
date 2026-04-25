@@ -2,56 +2,37 @@
 // Copyright 2026 Appstrate
 
 /**
- * Deprecation header builder (Phase 3b of #276, V6 in the migration plan).
+ * Sidecar-facing deprecation header surface.
  *
- * RFC 9745 (Deprecation) + RFC 8594 (Sunset) instruct HTTP clients
- * that a route is being phased out. Adding these headers is the first
- * milestone in the 18-month removal cycle defined in V6 — they're
- * machine-readable so external operators can build dashboards on the
- * deprecation state without grepping log lines.
+ * Phase 3b introduced these constants locally; Phase 6 (#276) hoisted
+ * the implementation into `@appstrate/mcp-transport` so registry,
+ * future hosts, and the sidecar all surface the same Sunset date.
+ * This file remains as the sidecar's import barrel — same names, same
+ * shape — with the single source of truth one layer deeper.
  *
- * What we apply to which route:
+ * Routes covered:
  * - `/llm/*` — replaced by the MCP `llm_complete` tool. Agents on
- *   RUNTIME_MCP_CLIENT=1 should NEVER hit this route directly.
- * - `/proxy` (when `X-Stream-Response: 1` is set) — replaced by
- *   `provider_call` returning a `resource_link` block. The non-streaming
- *   `/proxy` path is NOT deprecated (still load-bearing for non-MCP
- *   runtime-pi paths until Phase 6).
- *
- * Sunset date: 2027-10-25 = 18 months from this PR's land date.
- * The platform's removal gate (per V6 telemetry rules) may bring the
- * actual removal earlier or push it later. The header is a *promise*
- * to clients, not a binding contract; the operator dashboard owns the
- * actual cutoff decision.
+ *   `RUNTIME_MCP_CLIENT=1` should NEVER hit this route directly.
+ * - `/proxy?X-Stream-Response=1` — replaced by `provider_call`
+ *   returning a `resource_link` block. The buffered `/proxy` path is
+ *   NOT deprecated yet (still load-bearing for non-MCP runtime-pi).
  */
 
-/**
- * RFC 9745 `Deprecation` header value: an HTTP date describing when
- * the route was officially marked deprecated. Pinned to the migration
- * plan's authoring date so the value is stable across releases.
- */
-export const DEPRECATION_DATE = "Wed, 25 Apr 2026 00:00:00 GMT";
+import {
+  DEPRECATION_DATE_V2,
+  SUNSET_DATE_V2,
+  MIGRATION_GUIDE_URL as _MIGRATION_GUIDE_URL,
+  deprecationHeaders,
+} from "@appstrate/mcp-transport";
+
+export const DEPRECATION_DATE = DEPRECATION_DATE_V2.toUTCString();
+export const SUNSET_DATE = SUNSET_DATE_V2.toUTCString();
+export const MIGRATION_GUIDE_URL = _MIGRATION_GUIDE_URL;
 
 /**
- * RFC 8594 `Sunset` header value: 18 months from {@link DEPRECATION_DATE}.
+ * Standard set of headers applied to deprecated routes. Both legacy
+ * surfaces (legacy-llm-routes, legacy-binary-passthrough) share the
+ * same V2 sunset, so one record is sufficient. Spread directly into
+ * Hono `c.header()` calls.
  */
-export const SUNSET_DATE = "Mon, 25 Oct 2027 00:00:00 GMT";
-
-/**
- * Migration guide URL — surfaced via the `Link; rel="sunset"` header so
- * `mcp-inspector` and other tooling can surface a one-click pointer.
- */
-export const MIGRATION_GUIDE_URL =
-  "https://github.com/appstrate/appstrate/blob/main/docs/migrations/MCP_V2.md";
-
-/**
- * Standard set of headers to apply to deprecated routes. Always
- * returns the same shape — no cleverness — so callers can spread it
- * directly and reviewers can verify each route's deprecation surface
- * by string-grepping for `DEPRECATION_HEADERS`.
- */
-export const DEPRECATION_HEADERS: Record<string, string> = {
-  Deprecation: DEPRECATION_DATE,
-  Sunset: SUNSET_DATE,
-  Link: `<${MIGRATION_GUIDE_URL}>; rel="sunset"; type="text/markdown"`,
-};
+export const DEPRECATION_HEADERS: Record<string, string> = deprecationHeaders("legacy-llm-routes");

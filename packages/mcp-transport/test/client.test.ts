@@ -215,3 +215,43 @@ describe("wrapClient — surface narrowing", () => {
     }
   });
 });
+
+describe("wrapClient — capability discovery (Phase 6)", () => {
+  it("getServerCapabilities returns the SDK's snapshot after connect", async () => {
+    const pair = await createInProcessPair([echoTool()]);
+    try {
+      const caps = pair.client.getServerCapabilities();
+      expect(caps).toBeDefined();
+      expect(caps?.tools).toBeDefined();
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("getServerVersion returns the server Implementation info", async () => {
+    const pair = await createInProcessPair([echoTool()], {
+      serverInfo: { name: "test-server", version: "9.9.9" },
+    });
+    try {
+      const info = pair.client.getServerVersion();
+      expect(info).toEqual({ name: "test-server", version: "9.9.9" });
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("AppstrateMcpClient exposes both via the wrapper", async () => {
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = createMcpServer([echoTool()], { name: "srv", version: "1.2.3" });
+    const sdkClient = new Client({ name: "cli", version: "0.0.0" });
+    await Promise.all([server.connect(b), sdkClient.connect(a)]);
+    const wrapped = wrapClient(sdkClient, { close: () => Promise.resolve() });
+    try {
+      expect(wrapped.getServerVersion()).toEqual({ name: "srv", version: "1.2.3" });
+      expect(wrapped.getServerCapabilities()?.tools).toBeDefined();
+    } finally {
+      await wrapped.close();
+      await server.close();
+    }
+  });
+});
