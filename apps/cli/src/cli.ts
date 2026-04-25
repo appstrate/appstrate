@@ -47,6 +47,14 @@ import {
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
+import { selfUpdateCommand } from "./commands/self-update.ts";
+import { doctorCommand } from "./commands/doctor.ts";
+import { internalInfoCommand } from "./commands/internal.ts";
+import {
+  ackDualInstall,
+  runDualInstallCheck,
+  shouldSkipDualInstallCheck,
+} from "./lib/dual-install-check.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -113,12 +121,47 @@ program
     "--insecure",
     "Allow connecting to a non-HTTPS, non-loopback instance. Your bearer token will be transmitted in plaintext — only use on a trusted network. Equivalent to APPSTRATE_INSECURE=1.",
   )
-  .hook("preAction", () => {
+  .hook("preAction", async (_thisCommand, actionCommand) => {
     // Hoist `--insecure` into the env so every downstream module that
     // reads it (instance-url.ts::isInsecureOptIn) sees a single source
     // of truth — no need to thread the flag through every command.
     if (program.opts<{ insecure?: boolean }>().insecure) {
       process.env.APPSTRATE_INSECURE = "1";
+    }
+
+    // One-time runtime warning when more than one `appstrate` is on PATH
+    // (issue #249, phase 5). Skipped for machine-readable subcommands and
+    // help/version flags — see `lib/dual-install-check.ts`.
+    const subName = actionCommand.name();
+    if (
+      !shouldSkipDualInstallCheck({
+        args: [subName, ...actionCommand.args],
+        rawArgv: process.argv.slice(2),
+      })
+    ) {
+      try {
+        const warning = await runDualInstallCheck();
+        if (warning) {
+          process.stderr.write(`${warning.message}\n`);
+          // Await the ack: writing a tiny JSON file costs <1ms and the
+          // alternative (fire-and-forget) lets a synchronously-throwing
+          // command exit before the write resolves, leaving the user
+          // re-warned forever. The catch keeps the user's command running
+          // even if the disk is read-only / the parent dir is unwritable.
+          await ackDualInstall(warning.paths).catch(() => {});
+        }
+      } catch (err) {
+        // Defensive: any error inside the check (PATH parse, fs ENOENT,
+        // exotic filesystem) must NEVER prevent the user's command from
+        // running. Swallow and continue, but surface the cause under
+        // APPSTRATE_DEBUG=1 so silent failures don't mask future bugs in
+        // the check.
+        if (process.env.APPSTRATE_DEBUG === "1") {
+          process.stderr.write(
+            `[debug] dual-install check failed: ${(err as Error)?.message ?? String(err)}\n`,
+          );
+        }
+      }
     }
   });
 
@@ -574,6 +617,38 @@ program
   });
 
 registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
+
+program
+  .command("doctor")
+  .description("Diagnose appstrate installations on $PATH (channels, versions, dual-install).")
+  .option("--json", "Emit machine-readable JSON instead of the framed report.")
+  .action(async (opts) => {
+    await doctorCommand({ json: opts.json === true });
+  });
+
+// Hidden command: machine-readable introspection for `doctor` to call across binaries.
+// Not visible in `--help`. Output contract: one line of JSON on stdout, see `commands/internal.ts`.
+program
+  .command("__install-source", { hidden: true })
+  .description("(internal) Print this binary's stamped install source as JSON.")
+  .action(() => {
+    internalInfoCommand();
+  });
+
+program
+  .command("self-update")
+  .description("Upgrade the running appstrate binary in place (curl channel only — issue #249).")
+  .option(
+    "--release <version>",
+    "Pin a specific release version (default: latest from GitHub Releases).",
+  )
+  .option("-f, --force", "Reinstall even if the current version equals the target.")
+  .action(async (opts) => {
+    await selfUpdateCommand({
+      version: typeof opts.release === "string" ? opts.release : undefined,
+      force: opts.force === true,
+    });
+  });
 
 program
   .command("run")
