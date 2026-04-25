@@ -240,6 +240,84 @@ describe("SidecarProviderResolver: X-Auth-Refreshed retry", () => {
   });
 });
 
+// ─── EDGE-7: stale headers on retry ──────────────────────────────────────────
+
+describe("SidecarProviderResolver: retry uses fresh headers (EDGE-7)", () => {
+  let workspace: string;
+
+  beforeAll(async () => {
+    workspace = await mkdtemp(join(tmpdir(), "afps-auth-refresh-stale-"));
+  });
+
+  afterAll(async () => {
+    if (workspace) await rm(workspace, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("retry Content-Length does not carry stale value from first attempt", async () => {
+    // Simulate a file that grows between the first attempt and the retry.
+    // The sidecar returns 401 + X-Auth-Refreshed: true on first call.
+    // We track the Content-Length header sent on each call.
+    const fileName = "growing-file.bin";
+    const firstPayload = new Uint8Array(100).fill(0xaa); // 100 bytes
+    const secondPayload = new Uint8Array(200).fill(0xbb); // 200 bytes (file "grew")
+    await writeFile(join(workspace, fileName), firstPayload);
+
+    const observedContentLengths: string[] = [];
+    let callCount = 0;
+
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      callCount++;
+      const hdrs = init.headers as Record<string, string>;
+      // Capture the Content-Length header (may be absent for non-streaming bodies)
+      const cl = hdrs["Content-Length"] ?? hdrs["content-length"] ?? "";
+      observedContentLengths.push(cl);
+
+      if (callCount === 1) {
+        // Grow the file before the retry resolves it
+        await writeFile(join(workspace, fileName), secondPayload);
+        return new Response("Unauthorized", {
+          status: 401,
+          headers: { "x-auth-refreshed": "true" },
+        });
+      }
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const resolver = makeSidecarResolver(fetchImpl);
+    const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], makeBundle_());
+    const result = await tools[0]!.execute(
+      {
+        method: "POST",
+        target: "https://api.example.com/upload",
+        // Use a small file so it goes through the buffered (non-streaming) path.
+        // Content-Length is only set on the streaming path (isStreamingBody),
+        // so we verify that stale headers from the first attempt are NOT
+        // present on the retry's base headers object.
+        body: { fromFile: fileName },
+      },
+      makeCtx(workspace, "tc_sidecar_stale_cl"),
+    );
+
+    expect(callCount).toBe(2);
+    const parsed = JSON.parse(
+      (result as { content: Array<{ text: string }> }).content[0]!.text,
+    ) as { status: number };
+    expect(parsed.status).toBe(200);
+
+    // The key property: the retry must use a fresh headers object.
+    // For buffered (non-streaming) bodies, Content-Length should not be
+    // set by applyTransportHeaders — both calls should have no stale CL.
+    // If the retry reused the first attempt's mutated headers object and
+    // it somehow set a Content-Length, that stale value would be wrong.
+    // This test verifies the retry headers are cleanly re-derived.
+    expect(observedContentLengths[0]).toBe(""); // no CL on buffered body
+    expect(observedContentLengths[1]).toBe(""); // retry also has no stale CL
+  });
+});
+
 // ─── RemoteAppstrateProviderResolver ─────────────────────────────────────────
 
 describe("RemoteAppstrateProviderResolver: X-Auth-Refreshed retry", () => {

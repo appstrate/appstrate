@@ -190,7 +190,7 @@ describe("truncation metadata propagation", () => {
     const parsed = parseBody(res);
     expect(parsed.body.kind).toBe("text");
     if (parsed.body.kind !== "text") throw new Error("unreachable");
-    expect(parsed.body.truncated).toBe(true);
+    expect(parsed.body.truncated).toBe(true); // truncated: true is emitted
     expect(parsed.body.truncatedSize).toBe(cap);
   });
 
@@ -212,7 +212,8 @@ describe("truncation metadata propagation", () => {
     const parsed = parseBody(res);
     expect(parsed.body.kind).toBe("text");
     if (parsed.body.kind !== "text") throw new Error("unreachable");
-    expect(parsed.body.truncated).toBe(false);
+    // When not truncated, `truncated` field is omitted (absence means false).
+    expect(parsed.body.truncated).toBeUndefined();
     expect(parsed.body.truncatedSize).toBeUndefined();
   });
 
@@ -241,9 +242,67 @@ describe("truncation metadata propagation", () => {
     const parsed = parseBody(res);
     expect(parsed.body.kind).toBe("inline");
     if (parsed.body.kind !== "inline") throw new Error("unreachable");
-    expect(parsed.body.truncated).toBe(true);
+    expect(parsed.body.truncated).toBe(true); // truncated: true is emitted
     expect(parsed.body.truncatedSize).toBe(cap);
     expect(parsed.body.encoding).toBe("base64");
+  });
+
+  // ─── AP-4: malformed X-Truncated-Size ──────────────────────────────────
+
+  it("malformed X-Truncated-Size (non-numeric) → truncated:true but truncatedSize is undefined", async () => {
+    const cap = 256 * 1024;
+    const truncatedText = "b".repeat(cap);
+
+    const { execute } = buildSidecarResolver(
+      async () =>
+        new Response(truncatedText, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain",
+            "X-Truncated": "true",
+            "X-Truncated-Size": "abc", // malformed — not a valid integer
+          },
+        }),
+    );
+
+    const res = await execute(
+      { method: "GET", target: "https://api.example.com/v1/malformed-size" },
+      makeCtx(workspace, "tc_trunc_nan"),
+    );
+    const parsed = parseBody(res);
+    expect(parsed.body.kind).toBe("text");
+    if (parsed.body.kind !== "text") throw new Error("unreachable");
+    // truncated is still true (the header was present), but truncatedSize is
+    // dropped because parseInt("abc", 10) = NaN which is not finite.
+    expect(parsed.body.truncated).toBe(true);
+    expect(parsed.body.truncatedSize).toBeUndefined();
+  });
+
+  it("valid X-Truncated-Size → numeric value preserved", async () => {
+    const cap = 100 * 1024;
+    const truncatedText = "c".repeat(cap);
+
+    const { execute } = buildSidecarResolver(
+      async () =>
+        new Response(truncatedText, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain",
+            "X-Truncated": "true",
+            "X-Truncated-Size": String(cap),
+          },
+        }),
+    );
+
+    const res = await execute(
+      { method: "GET", target: "https://api.example.com/v1/valid-size" },
+      makeCtx(workspace, "tc_trunc_valid"),
+    );
+    const parsed = parseBody(res);
+    expect(parsed.body.kind).toBe("text");
+    if (parsed.body.kind !== "text") throw new Error("unreachable");
+    expect(parsed.body.truncated).toBe(true);
+    expect(parsed.body.truncatedSize).toBe(cap);
   });
 
   // ─── file (toFile) variant — never truncated ───────────────────────────

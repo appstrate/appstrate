@@ -720,3 +720,128 @@ describe("multipart body variant", () => {
     });
   });
 });
+
+// ─── BUG-3: fromBytes undefined filename ───────────────────────────────────
+
+describe("multipart fromBytes filename handling (BUG-3)", () => {
+  let workspace: string;
+
+  beforeAll(async () => {
+    workspace = await mkdtemp(join(tmpdir(), "afps-mp-filename-"));
+  });
+
+  afterAll(async () => {
+    if (workspace) await rm(workspace, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("fromBytes part with no filename → Content-Disposition filename is not the literal string 'undefined'", async () => {
+    const bytes = deterministicBytes(16, 0xf00d);
+    const b64 = toBase64(bytes);
+
+    const result = await resolveBodyForFetch(
+      {
+        multipart: [{ name: "data", fromBytes: b64, encoding: "base64" }],
+      },
+      { allowFromFile: true, workspace },
+    );
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") throw new Error("unreachable");
+
+    const parts = parseMultipart(result.bytes as Uint8Array, result.contentType!);
+    const dataPart = parts.get("data")!;
+    expect(dataPart).toBeDefined();
+    // BUG-3: when filename is undefined, the old code passed `undefined` to
+    // fd.append, which in some runtimes serializes as the literal string "undefined".
+    // The fix ensures we call fd.append without the filename argument, so the
+    // runtime uses its default empty string rather than the string "undefined".
+    expect(dataPart.disposition["filename"]).not.toBe("undefined");
+  });
+
+  it("fromBytes part with explicit filename → Content-Disposition carries it", async () => {
+    const bytes = deterministicBytes(16, 0xbeef);
+    const b64 = toBase64(bytes);
+
+    const result = await resolveBodyForFetch(
+      {
+        multipart: [
+          { name: "upload", fromBytes: b64, encoding: "base64", filename: "payload.bin" },
+        ],
+      },
+      { allowFromFile: true, workspace },
+    );
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") throw new Error("unreachable");
+
+    const parts = parseMultipart(result.bytes as Uint8Array, result.contentType!);
+    const uploadPart = parts.get("upload")!;
+    expect(uploadPart).toBeDefined();
+    expect(uploadPart.disposition["filename"]).toBe("payload.bin");
+  });
+});
+
+// ─── BUG-2 / M1: byte-counting correctness for text fields ─────────────────
+
+describe("multipart byte-counting — text field byte vs char length (BUG-2)", () => {
+  let workspace: string;
+
+  beforeAll(async () => {
+    workspace = await mkdtemp(join(tmpdir(), "afps-mp-bytecount-"));
+  });
+
+  afterAll(async () => {
+    if (workspace) await rm(workspace, { recursive: true, force: true }).catch(() => {});
+  });
+
+  /**
+   * MAX_REQUEST_BODY_SIZE is 5 MB (5 * 1024 * 1024 = 5_242_880).
+   * "😀" is a 4-byte UTF-8 codepoint. To craft a payload that is:
+   *   - under the cap in char-count: 5_242_880 / 4 = 1_310_720 chars → 5 MB exactly
+   *   - over the cap in byte-count:  use 1_310_721 chars → 5_242_884 bytes
+   *
+   * We use 5_242_881 / 4 + 1 = 1_310_721 emoji chars so byte length is
+   * 1_310_721 * 4 = 5_242_884 > 5_242_880 but char count is 1_310_721 < 5_242_880.
+   */
+  it("text field: char-length < 5 MB cap but byte-length > 5 MB → RESOLVER_BODY_TOO_LARGE", async () => {
+    const MAX = 5 * 1024 * 1024; // 5_242_880
+
+    // Each "😀" is 1 char but 4 bytes. Build a string where:
+    //   chars = MAX / 4 + 1 = 1_310_721  (<< MAX, so old code wouldn't reject)
+    //   bytes = chars * 4  = 5_242_884   (>> MAX, so correct code must reject)
+    const emojiCount = Math.floor(MAX / 4) + 1; // 1_310_721
+    const bigTextValue = "😀".repeat(emojiCount);
+
+    expect(bigTextValue.length).toBeLessThan(MAX); // char-length check: old guard would pass
+    expect(Buffer.byteLength(bigTextValue, "utf8")).toBeGreaterThan(MAX); // byte-length: must reject
+
+    await expect(
+      resolveBodyForFetch(
+        { multipart: [{ name: "emoji", value: bigTextValue }] },
+        { allowFromFile: true, workspace },
+      ),
+    ).rejects.toMatchObject({ code: "RESOLVER_BODY_TOO_LARGE" });
+  });
+
+  /**
+   * Accumulation test: 100 text fields each just under 5 MB in byte-length
+   * when concatenated exceed the cap.
+   *
+   * Strategy: use ASCII so char == byte. Each field is (MAX / 100) bytes.
+   * 100 fields × (MAX / 100) bytes = MAX bytes total — exactly at the cap, NOT over.
+   * To go over: use (MAX / 100) + 1 bytes per field → total > MAX.
+   */
+  it("100 text fields each just under cap, total > 5 MB → RESOLVER_BODY_TOO_LARGE", async () => {
+    const MAX = 5 * 1024 * 1024; // 5_242_880
+    const perField = Math.floor(MAX / 100) + 1; // just over the per-field share
+    // Total byte-length = 100 * perField = 100 * (MAX/100 + 1) = MAX + 100 > MAX
+    const fieldValue = "x".repeat(perField); // ASCII: 1 byte per char
+
+    const parts = Array.from({ length: 100 }, (_, i) => ({
+      name: `f${i}`,
+      value: fieldValue,
+    }));
+
+    await expect(
+      resolveBodyForFetch({ multipart: parts }, { allowFromFile: true, workspace }),
+    ).rejects.toMatchObject({ code: "RESOLVER_BODY_TOO_LARGE" });
+  });
+});

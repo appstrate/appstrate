@@ -147,14 +147,21 @@ export interface ProviderCallRequest {
  * `file` variant is never truncated — bytes are always streamed in full.
  */
 export type ProviderCallResponseBody =
-  | { kind: "text"; text: string; truncated: boolean; truncatedSize?: number }
+  | {
+      kind: "text";
+      text: string;
+      /** When `true`, the sidecar capped the upstream response. Absent means `false`. */
+      truncated?: true;
+      truncatedSize?: number;
+    }
   | {
       kind: "inline";
       data: string;
       encoding: "base64";
       mimeType: string;
       size: number;
-      truncated: boolean;
+      /** When `true`, the sidecar capped the upstream response. Absent means `false`. */
+      truncated?: true;
       truncatedSize?: number;
     }
   | { kind: "file"; path: string; size: number; mimeType: string; sha256: string };
@@ -206,6 +213,23 @@ export type ProviderCallFn = (
  *
  * Mutates `headers` in place and returns it for convenience.
  */
+/**
+ * Returns true when the body can be re-resolved from scratch for a retry.
+ * `ReadableStream` bodies are not reproducible — the caller has already
+ * consumed the stream. All other variants can be re-passed to
+ * `resolveBodyForFetch` to produce fresh bytes/stream.
+ */
+export function isReproducibleBody(body: ProviderCallRequest["body"]): boolean {
+  if (body == null || typeof body === "string") return true;
+  if (body instanceof Uint8Array) return true; // caller still holds the reference
+  if (
+    typeof body === "object" &&
+    ("fromFile" in body || "fromBytes" in body || "multipart" in body)
+  )
+    return true;
+  return false; // ReadableStream or other non-serialisable value
+}
+
 export function applyTransportHeaders(
   headers: Record<string, string>,
   opts: {
@@ -228,12 +252,16 @@ export function applyTransportHeaders(
     }
   }
   if (opts.isStreamingBody) {
-    headers["X-Stream-Request"] = "1";
-    if (
-      opts.bodySize !== undefined &&
-      !("content-length" in headers) &&
-      !("Content-Length" in headers)
-    ) {
+    // Use a case-insensitive check so mixed-case keys (e.g. "content-Length")
+    // are detected correctly regardless of how the caller populated the object.
+    const hasXStreamRequest = Object.keys(headers).some(
+      (k) => k.toLowerCase() === "x-stream-request",
+    );
+    if (!hasXStreamRequest) {
+      headers["X-Stream-Request"] = "1";
+    }
+    const hasContentLength = Object.keys(headers).some((k) => k.toLowerCase() === "content-length");
+    if (opts.bodySize !== undefined && !hasContentLength) {
       headers["Content-Length"] = String(opts.bodySize);
     }
   }
@@ -296,7 +324,10 @@ export function makeProviderTool(
             properties: {
               fromBytes: {
                 type: "string",
-                description: "Base64-encoded body bytes (for inline binary uploads up to 5 MB)",
+                description:
+                  "Base64-encoded body bytes (for inline binary uploads up to 5 MB). " +
+                  "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
+                  "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
               },
               encoding: { type: "string", enum: ["base64"] },
             },
@@ -351,7 +382,9 @@ export function makeProviderTool(
           { type: "null" },
         ],
         description:
-          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, { fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB, or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
+          "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
+          "{ fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB (standard base64 RFC 4648 §4 only — alphabet `+/`, no URL-safe `-_` or MIME line-folding), " +
+          "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
       },
       responseMode: {
         type: "object",
@@ -561,6 +594,41 @@ export async function resolveSafePath(workspace: string, relative: string): Prom
 }
 
 /**
+ * Resolve a workspace-relative OUTPUT path safely. Delegates workspace
+ * rooting and traversal checks to {@link resolveSafePath}. Additionally
+ * refuses to write through a pre-existing symlink at the destination —
+ * guards against an attacker pre-placing a symlink to redirect writes
+ * outside the workspace.
+ *
+ * For a path that does not yet exist, the parent directory is checked.
+ * ENOENT on the file itself is fine (we are creating it); any other
+ * error is re-thrown.
+ *
+ * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` on
+ * traversal or symlink violation.
+ */
+async function resolveSafeOutputPath(workspace: string, rel: string): Promise<string> {
+  const absPath = await resolveSafePath(workspace, rel);
+  const fs = await import("node:fs/promises");
+  try {
+    const stat = await fs.lstat(absPath);
+    if (stat.isSymbolicLink()) {
+      throw new ResolverError(
+        "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+        `Refusing to write through symlink: ${rel}`,
+        { workspace, rel, resolved: absPath },
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResolverError) throw err;
+    // ENOENT is fine — we are creating a new file.
+    const e = err as NodeJS.ErrnoException;
+    if (e.code !== "ENOENT") throw err;
+  }
+  return absPath;
+}
+
+/**
  * Resolve and stat a workspace-relative path in a single step, refusing
  * symlinks at the final path (in addition to the traversal check
  * performed by {@link resolveSafePath}).
@@ -665,9 +733,10 @@ async function buildMultipartBytes(
 
   for (const part of parts) {
     if ("value" in part) {
-      // Plain text field.
+      // Plain text field — byte-count via Buffer.byteLength so multi-byte
+      // Unicode characters (emoji, CJK, …) are counted correctly.
       fd.append(part.name, part.value);
-      totalSize += part.value.length;
+      totalSize += Buffer.byteLength(part.value, "utf8");
     } else if ("fromFile" in part) {
       // Workspace file reference.
       const { absPath, stat } = await resolveSafeFile(workspace, part.fromFile);
@@ -678,45 +747,82 @@ async function buildMultipartBytes(
         );
       }
       totalSize += stat.size;
-      if (totalSize > MAX_REQUEST_BODY_SIZE) {
-        throw new ResolverError(
-          "RESOLVER_BODY_TOO_LARGE",
-          `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
-          { max: MAX_REQUEST_BODY_SIZE },
-        );
-      }
       const fileBytes = await fs.readFile(absPath);
       const blob = new Blob([fileBytes], {
         type: part.contentType ?? "application/octet-stream",
       });
       fd.append(part.name, blob, part.filename ?? path.basename(part.fromFile));
     } else {
-      // Inline base64 bytes.
-      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(part.fromBytes)) {
-        throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in multipart fromBytes");
-      }
-      const decoded = Uint8Array.from(Buffer.from(part.fromBytes, "base64"));
+      // Inline base64 bytes — validate and decode via shared helper.
+      // Note: the per-part size check uses MAX_REQUEST_BODY_SIZE as the
+      // per-part upper bound; the total across all parts is checked below.
+      const decoded = decodeBase64Body(part.fromBytes, part.encoding, MAX_REQUEST_BODY_SIZE);
       totalSize += decoded.byteLength;
-      if (totalSize > MAX_REQUEST_BODY_SIZE) {
-        throw new ResolverError(
-          "RESOLVER_BODY_TOO_LARGE",
-          `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
-          { max: MAX_REQUEST_BODY_SIZE },
-        );
-      }
       const blob = new Blob([decoded], {
         type: part.contentType ?? "application/octet-stream",
       });
-      fd.append(part.name, blob, part.filename);
+      // Omit filename entirely when undefined — passing `undefined` to
+      // Bun's FormData serializes as the literal string "undefined" in
+      // the Content-Disposition header, which is incorrect.
+      if (part.filename != null) {
+        fd.append(part.name, blob, part.filename);
+      } else {
+        fd.append(part.name, blob);
+      }
+    }
+    // Cap check after every part type — defense in depth.
+    if (totalSize > MAX_REQUEST_BODY_SIZE) {
+      throw new ResolverError(
+        "RESOLVER_BODY_TOO_LARGE",
+        `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+        { max: MAX_REQUEST_BODY_SIZE },
+      );
     }
   }
 
   // Serialize FormData to bytes. The Response constructor computes the
   // multipart boundary and writes the correct Content-Type header.
   const tempResp = new Response(fd);
-  const contentType = tempResp.headers.get("content-type")!;
+  const contentType = tempResp.headers.get("content-type");
+  if (!contentType) {
+    throw new ResolverError(
+      "RESOLVER_BODY_INVALID",
+      "Failed to serialize multipart body: missing Content-Type with boundary",
+    );
+  }
   const arrayBuffer = await tempResp.arrayBuffer();
   return { bytes: toArrayBufferUint8(new Uint8Array(arrayBuffer)), contentType };
+}
+
+/**
+ * Validate and decode a base64-encoded body string.
+ * Accepts only standard base64 (RFC 4648 §4, alphabet `+/`).
+ * URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines)
+ * are not accepted. Throws {@link ResolverError} on invalid input or
+ * when the decoded size exceeds `maxSize`.
+ */
+function decodeBase64Body(fromBytes: string, encoding: string, maxSize: number): Uint8Array {
+  if (encoding !== "base64") {
+    throw new ResolverError("RESOLVER_BODY_INVALID", `Unsupported fromBytes encoding: ${encoding}`);
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(fromBytes)) {
+    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
+  }
+  let decoded: Uint8Array;
+  try {
+    decoded = Uint8Array.from(Buffer.from(fromBytes, "base64"));
+  } catch (err) {
+    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", {
+      cause: err,
+    });
+  }
+  if (decoded.byteLength > maxSize) {
+    throw new ResolverError("RESOLVER_BODY_TOO_LARGE", `fromBytes exceeds ${maxSize} bytes`, {
+      size: decoded.byteLength,
+      max: maxSize,
+    });
+  }
+  return decoded;
 }
 
 export async function resolveBodyStream(
@@ -745,28 +851,7 @@ export async function resolveBodyStream(
     return bytes;
   }
   if (typeof body === "object" && body !== null && "fromBytes" in body) {
-    if (body.encoding !== "base64") {
-      throw new ResolverError(
-        "RESOLVER_BODY_INVALID",
-        `Unsupported fromBytes encoding: ${body.encoding}`,
-      );
-    }
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.fromBytes)) {
-      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
-    }
-    let decoded: Uint8Array;
-    try {
-      decoded = Uint8Array.from(Buffer.from(body.fromBytes, "base64"));
-    } catch {
-      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
-    }
-    if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
-      throw new ResolverError(
-        "RESOLVER_BODY_TOO_LARGE",
-        `fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
-        { size: decoded.byteLength, max: MAX_REQUEST_BODY_SIZE },
-      );
-    }
+    const decoded = decodeBase64Body(body.fromBytes, body.encoding, MAX_REQUEST_BODY_SIZE);
     return toArrayBufferUint8(decoded);
   }
   if (!opts.allowFromFile) {
@@ -846,28 +931,7 @@ export async function resolveBodyForFetch(
     return { kind: "bytes", bytes, contentType } as ResolvedRequestBody;
   }
   if (typeof body === "object" && body !== null && "fromBytes" in body) {
-    if (body.encoding !== "base64") {
-      throw new ResolverError(
-        "RESOLVER_BODY_INVALID",
-        `Unsupported fromBytes encoding: ${body.encoding}`,
-      );
-    }
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.fromBytes)) {
-      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
-    }
-    let decoded: Uint8Array;
-    try {
-      decoded = Uint8Array.from(Buffer.from(body.fromBytes, "base64"));
-    } catch {
-      throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
-    }
-    if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
-      throw new ResolverError(
-        "RESOLVER_BODY_TOO_LARGE",
-        `fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
-        { size: decoded.byteLength, max: MAX_REQUEST_BODY_SIZE },
-      );
-    }
+    const decoded = decodeBase64Body(body.fromBytes, body.encoding, MAX_REQUEST_BODY_SIZE);
     return { kind: "bytes", bytes: toArrayBufferUint8(decoded) };
   }
   if (!opts.allowFromFile) {
@@ -1049,6 +1113,16 @@ async function writeStreamToFile(
       })
     : null;
 
+  // TOCTOU re-check: the signal may have fired between fs.open and the
+  // addEventListener call above. addEventListener does NOT fire retroactively
+  // for already-aborted signals, so we must re-check here explicitly.
+  if (signal?.aborted) {
+    reader.cancel(signal.reason).catch(() => {});
+    await handle.close().catch(() => {});
+    await fs.unlink(absPath).catch(() => {});
+    throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
+  }
+
   try {
     while (true) {
       const readPromise = reader.read();
@@ -1100,6 +1174,16 @@ async function writeStreamToFile(
       // surface an unhandled rejection if the signal fires after we return.
       abortPromise.catch(() => {});
     }
+    // Release the reader lock. Per WHATWG streams, releaseLock() is a
+    // no-op when called after cancel() (which already releases it on the
+    // error path), so this is safe to call unconditionally and only has
+    // an effect on the success path after the stream ends naturally.
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore — reader may already be released or closed */
+    }
+    options.signal?.removeEventListener("abort", () => {});
     try {
       await handle.close();
     } catch {
@@ -1175,7 +1259,7 @@ export async function serializeFetchResponse(
     requestedToFileEarly.length > 0 &&
     res.body
   ) {
-    const safePath = await resolveSafePath(ctx.workspace, requestedToFileEarly);
+    const safePath = await resolveSafeOutputPath(ctx.workspace, requestedToFileEarly);
     const written = await writeStreamToFile(res.body, safePath, { signal: ctx.signal });
     return {
       status: res.status,
@@ -1204,8 +1288,11 @@ export async function serializeFetchResponse(
   const truncatedHeader = res.headers.get("x-truncated");
   const truncated = truncatedHeader?.toLowerCase() === "true";
   const truncatedSizeRaw = res.headers.get("x-truncated-size");
+  // Guard against malformed header values (e.g. "abc") by checking
+  // that the parsed integer is finite before accepting it.
+  const parsedTruncatedSize = truncatedSizeRaw !== null ? parseInt(truncatedSizeRaw, 10) : NaN;
   const truncatedSize =
-    truncated && truncatedSizeRaw !== null ? parseInt(truncatedSizeRaw, 10) : undefined;
+    truncated && Number.isFinite(parsedTruncatedSize) ? parsedTruncatedSize : undefined;
 
   const requestedToFile = ctx.responseMode?.toFile;
   const requestedInlineLimit = ctx.responseMode?.maxInlineBytes;
@@ -1218,7 +1305,7 @@ export async function serializeFetchResponse(
 
   // 1. Caller asked for a file: write there, regardless of size or mime.
   if (typeof requestedToFile === "string" && requestedToFile.length > 0) {
-    const safePath = await resolveSafePath(ctx.workspace, requestedToFile);
+    const safePath = await resolveSafeOutputPath(ctx.workspace, requestedToFile);
     const path = await import("node:path");
     const fs = await import("node:fs/promises");
     await fs.mkdir(path.dirname(safePath), { recursive: true });
@@ -1258,7 +1345,9 @@ export async function serializeFetchResponse(
       body: {
         kind: "text",
         text,
-        truncated,
+        // Omit `truncated` entirely when false — absence means false,
+        // which reduces JSON noise and keeps backward-compat cleaner.
+        ...(truncated ? { truncated: true as const } : {}),
         ...(truncatedSize !== undefined && { truncatedSize }),
       },
     };
@@ -1277,7 +1366,8 @@ export async function serializeFetchResponse(
       encoding: "base64",
       mimeType,
       size,
-      truncated,
+      // Omit `truncated` entirely when false — absence means false.
+      ...(truncated ? { truncated: true as const } : {}),
       ...(truncatedSize !== undefined && { truncatedSize }),
     },
   };

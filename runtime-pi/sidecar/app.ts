@@ -323,9 +323,14 @@ export function createApp(deps: AppDeps): Hono {
     // without Content-Length (e.g. from tests / simple clients) still
     // goes through the buffered path.
     const declaredContentLength = parseInt(c.req.header("content-length") || "-1", 10);
-    const isChunkedTransfer = (c.req.header("transfer-encoding") ?? "")
-      .toLowerCase()
-      .includes("chunked");
+    // RFC 9112 §6.1: "chunked" MUST be the last transfer-encoding.
+    // A header like "identity, chunked" is chunked; "chunked, gzip" is not.
+    const te = (c.req.header("transfer-encoding") ?? "").toLowerCase();
+    const isChunkedTransfer =
+      te
+        .split(",")
+        .map((s) => s.trim())
+        .at(-1) === "chunked";
     const hasUnknownLength = declaredContentLength < 0 && isChunkedTransfer;
     const useStreamingRequest =
       hasBody &&

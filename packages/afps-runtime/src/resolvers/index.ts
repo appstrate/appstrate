@@ -53,6 +53,7 @@ export {
   matchesAuthorizedUriSpec,
   providerToolName,
   readProviderMeta,
+  isReproducibleBody,
   resolveBodyForFetch,
   resolveBodyStream,
   resolveSafePath,

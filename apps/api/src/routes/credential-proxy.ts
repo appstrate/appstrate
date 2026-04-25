@@ -33,10 +33,13 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 
-// Streaming thresholds — mirrored from runtime-pi/sidecar constants.
-const STREAMING_REQUEST_THRESHOLD = 1 * 1024 * 1024; // 1 MB (unused sentinel; size checked via X-Stream-Request header)
+// Streaming cap — mirrored from runtime-pi/sidecar constants.
+// The streaming/buffered decision is header-driven (X-Stream-Request),
+// not threshold-driven, so only the hard cap is needed here.
 const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
-void STREAMING_REQUEST_THRESHOLD; // referenced for documentation parity only
+
+/** Wall-clock timeout for piping an upstream streaming response to the client. */
+export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles } from "@appstrate/db/schema";
@@ -284,14 +287,28 @@ export function createCredentialProxyRouter() {
       const streamResponse = c.req.header("x-stream-response") === "1";
       const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
-      // Guard: streaming request body must fit within the hard cap.
+      // Guard: declared Content-Length already exceeds the hard cap.
       if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
         return c.json({ error: "request body too large" }, 413);
       }
 
+      // Build a combined abort signal for streaming pipes: honours both the
+      // request's client-disconnect signal and the wall-clock deadline.
+      const pipeDeadline = AbortSignal.timeout(STREAMING_PIPE_TIMEOUT_MS);
+      const pipeSignal = AbortSignal.any([c.req.raw.signal, pipeDeadline]);
+
+      const streamLogCtx = {
+        requestId: c.get("requestId"),
+        orgId,
+        providerId,
+        target,
+      };
+
       // Body handling — read raw bytes when present so substitution can
       // operate on the decoded string. Streaming uploads skip the buffer
-      // entirely — the raw body stream is forwarded directly to upstream.
+      // entirely — the raw body stream is forwarded directly to upstream
+      // through a byte-counting cap (defense in depth when Content-Length
+      // is absent or mis-declared).
       let body: string | Uint8Array | ReadableStream<Uint8Array> | null = null;
       const method = c.req.method;
       if (method !== "GET" && method !== "HEAD") {
@@ -300,7 +317,17 @@ export function createCredentialProxyRouter() {
           // 401-retry is not possible (body unreplayable); the route
           // sets X-Auth-Refreshed: true on 401 so the client knows to
           // refresh credentials and replay the next call itself.
-          body = c.req.raw.body as ReadableStream<Uint8Array>;
+          // Apply byte-counting cap regardless of Content-Length — a
+          // chunked upload without CL would otherwise bypass the guard above.
+          body = capStreamingBody(
+            c.req.raw.body as ReadableStream<Uint8Array>,
+            MAX_STREAMED_BODY_SIZE,
+            {
+              ...streamLogCtx,
+              direction: "upload",
+            },
+            pipeSignal,
+          );
         } else {
           const buf = await c.req.arrayBuffer();
           if (buf.byteLength > 0) {
@@ -411,11 +438,19 @@ export function createCredentialProxyRouter() {
         }
 
         // Streaming response path: pipe upstream bytes through a 100 MB
-        // capping transform stream. X-Truncated is not applicable here —
-        // the stream throws instead, which closes the connection and lets
-        // the client surface the error naturally.
+        // capping transform stream and wall-clock timeout. X-Truncated is
+        // not applicable here — the stream throws instead, which closes the
+        // connection and lets the client surface the error naturally.
         if (streamResponse && result.body) {
-          const cappedStream = capStreamingResponse(result.body, MAX_STREAMED_BODY_SIZE);
+          const cappedStream = capStreamingBody(
+            result.body,
+            MAX_STREAMED_BODY_SIZE,
+            {
+              ...streamLogCtx,
+              direction: "download",
+            },
+            pipeSignal,
+          );
           // X-Truncated headers are not applicable to streaming responses.
           responseHeaders.delete("X-Truncated");
           responseHeaders.delete("X-Truncated-Size");
@@ -511,35 +546,98 @@ const HOP_BY_HOP = new Set([
   "upgrade",
 ]);
 
+/** Context passed to {@link capStreamingBody} for structured warning logs. */
+interface StreamCapLogCtx {
+  requestId: string;
+  orgId: string;
+  providerId: string;
+  target: string;
+  direction: "upload" | "download";
+}
+
 /**
- * Wrap a streaming response body in a WHATWG TransformStream that throws
- * (closing the connection) if the cumulative byte count exceeds `maxBytes`.
- * Unlike the buffered cap used for inline responses, this does NOT silently
- * truncate — the client will see a broken stream and can surface the error.
+ * Wrap a streaming body in a WHATWG TransformStream that:
+ *  - Counts bytes and errors the stream when `maxBytes` is exceeded
+ *    (logs a `warn` with context before signalling the error).
+ *  - Optionally aborts when `signal` fires (wall-clock timeout or
+ *    client disconnect) — logs a `warn` and errors the stream.
  *
- * Used exclusively on the `X-Stream-Response: 1` path where the runtime is
- * writing bytes to a file and needs an error rather than silent truncation.
+ * Used on both the upload path (streaming request to upstream) and the
+ * download path (streaming response to the client) so the two directions
+ * share identical cap + timeout semantics.
+ *
+ * Unlike the buffered cap used for inline responses, this does NOT
+ * silently truncate — callers see a broken stream and can surface the
+ * error naturally.
  */
-function capStreamingResponse(
+function capStreamingBody(
   source: ReadableStream<Uint8Array>,
   maxBytes: number,
+  ctx: StreamCapLogCtx,
+  signal?: AbortSignal,
 ): ReadableStream<Uint8Array> {
   let received = 0;
+  let capped = false;
+
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
+      if (capped) return;
       received += chunk.byteLength;
       if (received > maxBytes) {
+        capped = true;
+        logger.warn("credential-proxy: streaming body exceeded size cap", {
+          requestId: ctx.requestId,
+          orgId: ctx.orgId,
+          providerId: ctx.providerId,
+          target: ctx.target,
+          direction: ctx.direction,
+          bytesReceived: received,
+          maxBytes,
+        });
         controller.error(
-          new Error(`Streaming response exceeded ${maxBytes} bytes (MAX_STREAMED_BODY_SIZE)`),
+          new Error(
+            `Streaming ${ctx.direction} exceeded ${maxBytes} bytes (MAX_STREAMED_BODY_SIZE)`,
+          ),
         );
         return;
       }
       controller.enqueue(chunk);
     },
   });
+
+  // Abort handler: fires when either the client disconnects or the
+  // wall-clock deadline elapses. Close the writable side so the
+  // readable side errors and the client/upstream sees the abort.
+  if (signal) {
+    const onAbort = () => {
+      if (capped) return;
+      capped = true;
+      const reason =
+        signal.reason instanceof Error ? signal.reason : new Error("streaming timeout");
+      logger.warn("credential-proxy: streaming pipe aborted", {
+        requestId: ctx.requestId,
+        orgId: ctx.orgId,
+        providerId: ctx.providerId,
+        target: ctx.target,
+        direction: ctx.direction,
+        bytesReceived: received,
+        reason: reason.message,
+      });
+      // Abort the source and error the writable so the readable side closes.
+      source.cancel(reason).catch(() => {});
+      writable.abort(reason).catch(() => {});
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
   source.pipeTo(writable).catch(() => {
-    // pipeTo rejection is handled by the TransformStream error above;
-    // swallow here to prevent an unhandled-rejection in the Bun process.
+    // pipeTo rejection is handled by the TransformStream error or the
+    // abort handler above; swallow here to prevent an unhandled-rejection
+    // in the Bun process.
   });
   return readable;
 }

@@ -8,8 +8,8 @@ import {
   resolveBodyForFetch,
   serializeFetchResponse,
   applyTransportHeaders,
+  isReproducibleBody,
   type ProviderCallFn,
-  type ProviderCallRequest,
   type ProviderMeta,
 } from "./provider-tool.ts";
 
@@ -45,22 +45,6 @@ export interface SidecarProviderResolverOptions {
  * sidecar itself has no workspace access — it only sees the
  * already-materialised request body and the upstream response bytes.
  */
-/**
- * Returns true when the body can be re-resolved from scratch for a retry.
- * `ReadableStream` bodies are not reproducible — the caller has already
- * consumed the stream conceptually. All other variants can be re-passed
- * to `resolveBodyForFetch` to produce fresh bytes/stream.
- */
-function isReproducibleBody(body: ProviderCallRequest["body"]): boolean {
-  if (body == null || typeof body === "string") return true;
-  if (body instanceof Uint8Array) return true; // caller still holds the reference
-  if (
-    typeof body === "object" &&
-    ("fromFile" in body || "fromBytes" in body || "multipart" in body)
-  )
-    return true;
-  return false; // ReadableStream or other non-serialisable value
-}
 
 export class SidecarProviderResolver implements ProviderResolver {
   private readonly sidecarUrl: string;
@@ -104,7 +88,10 @@ export class SidecarProviderResolver implements ProviderResolver {
       // header itself. The agent's `<provider>_call` tool never touches
       // a credential placeholder, so nothing from the manifest's
       // transport metadata needs to travel through this resolver.
-      const headers: Record<string, string> = {
+      // Clone the base headers before the first applyTransportHeaders call
+      // so we can re-apply fresh transport headers for the retry path with
+      // the retry body's actual size — avoiding stale Content-Length values.
+      const baseHeaders: Record<string, string> = {
         ...this.baseHeaders,
         ...(req.headers ?? {}),
         "X-Provider": ref.name,
@@ -115,12 +102,15 @@ export class SidecarProviderResolver implements ProviderResolver {
 
       // Apply transport headers (streaming + response mode hints).
       // Uses the shared helper so both resolvers stay in lockstep.
-      applyTransportHeaders(headers, {
-        wantsFile,
-        isStreamingBody,
-        bodySize: isStreamingBody ? resolved.size : undefined,
-        maxInlineBytes: req.responseMode?.maxInlineBytes,
-      });
+      const headers = applyTransportHeaders(
+        { ...baseHeaders },
+        {
+          wantsFile,
+          isStreamingBody,
+          bodySize: isStreamingBody ? resolved.size : undefined,
+          maxInlineBytes: req.responseMode?.maxInlineBytes,
+        },
+      );
 
       // For multipart bodies, forward the Content-Type (including boundary)
       // computed during serialization. Bun/fetch would normally compute it
@@ -159,12 +149,27 @@ export class SidecarProviderResolver implements ProviderResolver {
           allowStreaming: true,
           workspace: ctx.workspace,
         });
+        // Re-apply transport headers from the clean base so Content-Length
+        // reflects the retry body's actual size (not the first attempt's).
+        const retryIsStreamingBody = retryResolved.kind === "stream";
+        const retryHeaders = applyTransportHeaders(
+          { ...baseHeaders },
+          {
+            wantsFile,
+            isStreamingBody: retryIsStreamingBody,
+            bodySize: retryIsStreamingBody ? retryResolved.size : undefined,
+            maxInlineBytes: req.responseMode?.maxInlineBytes,
+          },
+        );
+        if (retryResolved.kind === "bytes" && retryResolved.contentType) {
+          retryHeaders["Content-Type"] = retryResolved.contentType;
+        }
         const retryInit: RequestInit & Record<string, unknown> = {
           method: req.method,
-          headers,
+          headers: retryHeaders,
           signal: ctx.signal,
         };
-        if (retryResolved.kind === "stream") {
+        if (retryIsStreamingBody) {
           retryInit.body = retryResolved.stream;
           retryInit.duplex = "half";
         } else {

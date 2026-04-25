@@ -834,6 +834,66 @@ describe("writeStreamToFile AbortSignal (Phase 4)", () => {
     expect(exists).toBe(false);
   });
 
+  it("TOCTOU: signal aborted between fs.open and addEventListener → cleanup fires, error thrown", async () => {
+    // This test exercises the race between fs.open and the abort listener
+    // by pre-aborting the signal just before writeStreamToFile is entered.
+    // The re-check added after addEventListener guarantees cleanup even if
+    // the signal fires in the narrow window after open but before the listener.
+    const ctrl = new AbortController();
+
+    // Build a stream that yields one chunk. The signal will be aborted
+    // before writeStreamToFile even gets to process it.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        // Never close — stream hangs after the first chunk
+      },
+    });
+
+    const fetchImpl = (async () =>
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "application/octet-stream" },
+      })) as unknown as typeof fetch;
+
+    const resolver = new SidecarProviderResolver({
+      sidecarUrl: "http://sidecar:8080",
+      fetch: fetchImpl,
+    });
+    const bundle = buildBundle();
+    const tools = await resolver.resolve([{ name: "@acme/p", version: "^1" }], bundle);
+
+    // Abort BEFORE the execute call so the signal is already aborted when
+    // writeStreamToFile checks it after addEventListener.
+    ctrl.abort(new Error("toctou-abort"));
+
+    let threw = false;
+    try {
+      await tools[0]!.execute(
+        {
+          method: "GET",
+          target: "https://api.example.com/data",
+          responseMode: { toFile: "abort-test/toctou.bin" },
+        },
+        makeCtx(workspace, ctrl.signal, "tc_toctou"),
+      );
+    } catch {
+      threw = true;
+    }
+    // Either fetch threw (AbortError) or writeStreamToFile's TOCTOU re-check
+    // fired — either way, the call must have thrown and no file should remain.
+    expect(threw).toBe(true);
+
+    let exists: boolean;
+    try {
+      await stat(join(workspace, "abort-test/toctou.bin"));
+      exists = true;
+    } catch {
+      exists = false;
+    }
+    expect(exists).toBe(false);
+  });
+
   it("already-aborted signal: writeStreamToFile throws immediately", async () => {
     // Pre-abort the signal before the fetch call completes.
     // The fetch itself will abort, so we verify that no partial file

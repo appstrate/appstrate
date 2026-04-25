@@ -8,8 +8,8 @@ import {
   resolveBodyForFetch,
   serializeFetchResponse,
   applyTransportHeaders,
+  isReproducibleBody,
   type ProviderCallFn,
-  type ProviderCallRequest,
   type ProviderMeta,
 } from "./provider-tool.ts";
 
@@ -57,21 +57,6 @@ export interface RemoteAppstrateProviderResolverOptions {
  * long-lived Appstrate deployment — no copy-pasting tokens into a local
  * creds.json every time they refresh.
  */
-/**
- * Returns true when the body can be re-resolved from scratch for a retry.
- * Mirrors the same helper in sidecar-provider-resolver — kept local to
- * avoid a cross-file import of a small utility.
- */
-function isReproducibleBody(body: ProviderCallRequest["body"]): boolean {
-  if (body == null || typeof body === "string") return true;
-  if (body instanceof Uint8Array) return true;
-  if (
-    typeof body === "object" &&
-    ("fromFile" in body || "fromBytes" in body || "multipart" in body)
-  )
-    return true;
-  return false;
-}
 
 export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly instance: string;
@@ -125,7 +110,10 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       // provider manifest. The inbound `Authorization` is consumed by
       // api-key auth and stripped before reaching upstream, so there
       // is no collision.
-      const headers: Record<string, string> = {
+      // Clone the base headers before the first applyTransportHeaders call
+      // so we can re-apply fresh transport headers for the retry path with
+      // the retry body's actual size — avoiding stale Content-Length values.
+      const baseHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
@@ -142,12 +130,15 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
 
       // Apply transport headers (streaming + response mode hints).
       // Mirrors sidecar-provider-resolver.ts exactly via the shared helper.
-      applyTransportHeaders(headers, {
-        wantsFile,
-        isStreamingBody,
-        bodySize: isStreamingBody ? resolved.size : undefined,
-        maxInlineBytes: req.responseMode?.maxInlineBytes,
-      });
+      const headers = applyTransportHeaders(
+        { ...baseHeaders },
+        {
+          wantsFile,
+          isStreamingBody,
+          bodySize: isStreamingBody ? resolved.size : undefined,
+          maxInlineBytes: req.responseMode?.maxInlineBytes,
+        },
+      );
 
       // For multipart bodies, forward the Content-Type (including boundary)
       // computed during serialization. Bun/fetch would normally compute it
@@ -186,12 +177,27 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
           allowStreaming: true,
           workspace: ctx.workspace,
         });
+        // Re-apply transport headers from the clean base so Content-Length
+        // reflects the retry body's actual size (not the first attempt's).
+        const retryIsStreamingBody = retryResolved.kind === "stream";
+        const retryHeaders = applyTransportHeaders(
+          { ...baseHeaders },
+          {
+            wantsFile,
+            isStreamingBody: retryIsStreamingBody,
+            bodySize: retryIsStreamingBody ? retryResolved.size : undefined,
+            maxInlineBytes: req.responseMode?.maxInlineBytes,
+          },
+        );
+        if (retryResolved.kind === "bytes" && retryResolved.contentType) {
+          retryHeaders["Content-Type"] = retryResolved.contentType;
+        }
         const retryInit: RequestInit & Record<string, unknown> = {
           method: req.method,
-          headers,
+          headers: retryHeaders,
           signal: ctx.signal,
         };
-        if (retryResolved.kind === "stream") {
+        if (retryIsStreamingBody) {
           retryInit.body = retryResolved.stream;
           retryInit.duplex = "half";
         } else {

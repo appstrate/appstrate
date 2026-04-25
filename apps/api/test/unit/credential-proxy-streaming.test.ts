@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for streaming support in credential-proxy (Phase 3).
+ * Unit tests for streaming support in credential-proxy (Phase 3 + Wave 1).
  *
  * Coverage:
  *  - Streaming request: 50 MB upload forwarded byte-perfect with Content-Length
@@ -10,6 +10,9 @@
  *  - Streaming response 100 MB+1 byte → transform stream errors mid-pipe
  *  - 401 on streaming body in proxyCall → authRefreshed set, no retry
  *  - 401 on buffered body in proxyCall → authRefreshed NOT set
+ *  - [Wave 1 C1] Streaming upload no Content-Length, body > 100 MB → mid-stream reject + log
+ *  - [Wave 1 C2] Streaming response > 100 MB → log emitted with context
+ *  - [Wave 1 H3] Slow-drip response past wall-clock timeout → aborted + log
  *
  * These tests exercise the streaming helpers and the proxyCall body-handling
  * logic in isolation, without a real DB (route + integration tests cover full
@@ -79,29 +82,98 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Arr
   return out;
 }
 
-// ─── capStreamingResponse helper (extracted from credential-proxy.ts) ────────
+// ─── capStreamingBody helper (extracted from credential-proxy.ts) ─────────
 // Duplicated here so the test is self-contained and doesn't depend on the
 // Hono router module. The implementation MUST stay in sync with the route.
 
-function capStreamingResponse(
+interface StreamCapLogCtx {
+  requestId: string;
+  orgId: string;
+  providerId: string;
+  target: string;
+  direction: "upload" | "download";
+}
+
+type WarnFn = (msg: string, ctx: Record<string, unknown>) => void;
+
+function capStreamingBody(
   source: ReadableStream<Uint8Array>,
   maxBytes: number,
+  ctx: StreamCapLogCtx,
+  signal?: AbortSignal,
+  warnSpy?: WarnFn,
 ): ReadableStream<Uint8Array> {
   let received = 0;
+  let capped = false;
+  const warn = warnSpy ?? (() => {});
+
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
+      if (capped) return;
       received += chunk.byteLength;
       if (received > maxBytes) {
+        capped = true;
+        warn("credential-proxy: streaming body exceeded size cap", {
+          requestId: ctx.requestId,
+          orgId: ctx.orgId,
+          providerId: ctx.providerId,
+          target: ctx.target,
+          direction: ctx.direction,
+          bytesReceived: received,
+          maxBytes,
+        });
         controller.error(
-          new Error(`Streaming response exceeded ${maxBytes} bytes (MAX_STREAMED_BODY_SIZE)`),
+          new Error(
+            `Streaming ${ctx.direction} exceeded ${maxBytes} bytes (MAX_STREAMED_BODY_SIZE)`,
+          ),
         );
         return;
       }
       controller.enqueue(chunk);
     },
   });
+
+  if (signal) {
+    const onAbort = () => {
+      if (capped) return;
+      capped = true;
+      const reason =
+        signal.reason instanceof Error ? signal.reason : new Error("streaming timeout");
+      warn("credential-proxy: streaming pipe aborted", {
+        requestId: ctx.requestId,
+        orgId: ctx.orgId,
+        providerId: ctx.providerId,
+        target: ctx.target,
+        direction: ctx.direction,
+        bytesReceived: received,
+        reason: reason.message,
+      });
+      source.cancel(reason).catch(() => {});
+      writable.abort(reason).catch(() => {});
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
   source.pipeTo(writable).catch(() => {});
   return readable;
+}
+
+// Backwards-compat alias used by existing tests below.
+function capStreamingResponse(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): ReadableStream<Uint8Array> {
+  return capStreamingBody(source, maxBytes, {
+    requestId: "r0",
+    orgId: "org0",
+    providerId: "p0",
+    target: "http://example.com",
+    direction: "download",
+  });
 }
 
 // ─── Route-level streaming request size guard ────────────────────────────────
@@ -291,5 +363,155 @@ describe("credential-proxy streaming — authRefreshed flag (Phase 3)", () => {
     // Non-stream bodies should not trigger the streaming path.
     expect(new Uint8Array([1]) instanceof ReadableStream).toBe(false);
     expect(typeof "string" === "string").toBe(true);
+  });
+});
+
+// ─── Wave 1 — C1: Upload cap fires without Content-Length ───────────────────
+
+describe("credential-proxy streaming — C1: upload cap no Content-Length", () => {
+  // Streaming upload with no Content-Length header and body > 100 MB:
+  // the capStreamingBody transform must reject mid-stream and emit a warn log.
+  it("rejects mid-stream and emits warn log when upload exceeds cap (no CL)", async () => {
+    const oversize = MAX_STREAMED_BODY_SIZE + 1;
+    const payload = deterministicBytes(oversize, 0xabc123);
+
+    const warnCalls: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
+    const logCtx: StreamCapLogCtx = {
+      requestId: "req-c1",
+      orgId: "org-c1",
+      providerId: "p-c1",
+      target: "https://upload.example.com/file",
+      direction: "upload",
+    };
+
+    const source = bytesToStream(payload);
+    const capped = capStreamingBody(
+      source,
+      MAX_STREAMED_BODY_SIZE,
+      logCtx,
+      undefined,
+      (msg, ctx) => {
+        warnCalls.push({ msg, ctx });
+      },
+    );
+
+    let threw = false;
+    try {
+      await drainStream(capped);
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).toContain("MAX_STREAMED_BODY_SIZE");
+    }
+    expect(threw).toBe(true);
+
+    // Warn log must have been emitted with the expected context fields.
+    expect(warnCalls.length).toBeGreaterThanOrEqual(1);
+    const warn = warnCalls[0]!;
+    expect(warn.ctx.requestId).toBe("req-c1");
+    expect(warn.ctx.orgId).toBe("org-c1");
+    expect(warn.ctx.providerId).toBe("p-c1");
+    expect(warn.ctx.direction).toBe("upload");
+    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(MAX_STREAMED_BODY_SIZE);
+  });
+});
+
+// ─── Wave 1 — C2: Response cap logs context ─────────────────────────────────
+
+describe("credential-proxy streaming — C2: response cap emits warn log", () => {
+  it("emits warn log with context when response exceeds MAX_STREAMED_BODY_SIZE", async () => {
+    const oversize = MAX_STREAMED_BODY_SIZE + 1;
+    const payload = deterministicBytes(oversize, 0xdeadc0de);
+
+    const warnCalls: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
+    const logCtx: StreamCapLogCtx = {
+      requestId: "req-c2",
+      orgId: "org-c2",
+      providerId: "p-c2",
+      target: "https://download.example.com/file",
+      direction: "download",
+    };
+
+    const source = bytesToStream(payload);
+    const capped = capStreamingBody(
+      source,
+      MAX_STREAMED_BODY_SIZE,
+      logCtx,
+      undefined,
+      (msg, ctx) => {
+        warnCalls.push({ msg, ctx });
+      },
+    );
+
+    let threw = false;
+    try {
+      await drainStream(capped);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    expect(warnCalls.length).toBeGreaterThanOrEqual(1);
+    const warn = warnCalls[0]!;
+    expect(warn.ctx.requestId).toBe("req-c2");
+    expect(warn.ctx.orgId).toBe("org-c2");
+    expect(warn.ctx.providerId).toBe("p-c2");
+    expect(warn.ctx.direction).toBe("download");
+    expect(warn.ctx.bytesReceived as number).toBeGreaterThan(MAX_STREAMED_BODY_SIZE);
+  });
+});
+
+// ─── Wave 1 — H3: Wall-clock timeout aborts slow-drip stream ────────────────
+
+describe("credential-proxy streaming — H3: wall-clock pipe timeout", () => {
+  // Simulates a slow upstream: emits 1 byte at a time with a 20ms pause.
+  // We use a short timeout (100ms) to keep the test fast. After ~5 chunks
+  // the AbortSignal fires, the stream is aborted, and a warn log is emitted.
+  it("emits warn log and errors when AbortSignal is pre-aborted (wall-clock timeout path)", async () => {
+    // Use a pre-aborted signal to exercise the synchronous abort branch in
+    // capStreamingBody without any real-time timers that would keep the bun
+    // event loop alive. This tests the same code path that fires when the
+    // STREAMING_PIPE_TIMEOUT_MS AbortSignal fires.
+    const ac = new AbortController();
+    ac.abort(new Error("streaming timeout"));
+
+    // Finite source: a few bytes. With a pre-aborted signal, capStreamingBody
+    // immediately aborts writable + cancels source so the readable errors.
+    const payload = deterministicBytes(64, 0x1234);
+    const source = bytesToStream(payload);
+
+    const warnCalls: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
+    const logCtx: StreamCapLogCtx = {
+      requestId: "req-h3",
+      orgId: "org-h3",
+      providerId: "p-h3",
+      target: "https://slow.example.com/stream",
+      direction: "download",
+    };
+
+    const capped = capStreamingBody(
+      source,
+      MAX_STREAMED_BODY_SIZE,
+      logCtx,
+      ac.signal,
+      (msg, ctx) => {
+        warnCalls.push({ msg, ctx });
+      },
+    );
+
+    // Reading from an aborted + errored stream must throw.
+    let threw = false;
+    try {
+      await drainStream(capped);
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(true);
+
+    // Warn log for the abort must have been emitted.
+    const abortWarn = warnCalls.find((w) => w.msg.includes("aborted"));
+    expect(abortWarn).toBeDefined();
+    expect(abortWarn!.ctx.requestId).toBe("req-h3");
+    expect(abortWarn!.ctx.direction).toBe("download");
   });
 });

@@ -2207,3 +2207,79 @@ describe("ALL /proxy — chunked upload without Content-Length", () => {
     expect(bodyWasStream).toBe(false);
   });
 });
+
+// ─── RFC 9112 §6.1 chunked Transfer-Encoding detection ────────────────────
+
+describe("chunked Transfer-Encoding detection (RFC 9112 §6.1)", () => {
+  // These tests verify that `isChunkedTransfer` treats "chunked" as
+  // chunked only when it is the LAST element of the Transfer-Encoding
+  // list — per RFC 9112 §6.1.
+
+  it('TE="chunked" alone → streaming path (isChunked=true)', async () => {
+    let bodyWasStream = false;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      bodyWasStream = init?.body instanceof ReadableStream;
+      return new Response("ok", { status: 200 });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/action",
+        "Transfer-Encoding": "chunked",
+        "Content-Type": "application/octet-stream",
+      },
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(res.status).toBe(200);
+    // No Content-Length + TE=chunked → streaming path
+    expect(bodyWasStream).toBe(true);
+  });
+
+  it('TE="identity, chunked" → chunked is last → streaming path (isChunked=true)', async () => {
+    let bodyWasStream = false;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      bodyWasStream = init?.body instanceof ReadableStream;
+      return new Response("ok", { status: 200 });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/action",
+        "Transfer-Encoding": "identity, chunked",
+        "Content-Type": "application/octet-stream",
+      },
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(res.status).toBe(200);
+    expect(bodyWasStream).toBe(true);
+  });
+
+  it('TE="chunked, gzip" → chunked is NOT last → buffered path (isChunked=false)', async () => {
+    let bodyWasStream = false;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      bodyWasStream = init?.body instanceof ReadableStream;
+      return new Response("ok", { status: 200 });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    // Provide Content-Length so it does not accidentally trigger
+    // the size-based streaming path; only TE decides here.
+    const body = new Uint8Array([1, 2, 3]);
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/action",
+        "Transfer-Encoding": "chunked, gzip",
+        "Content-Length": String(body.byteLength),
+        "Content-Type": "application/octet-stream",
+      },
+      body,
+    });
+    expect(res.status).toBe(200);
+    expect(bodyWasStream).toBe(false);
+  });
+});

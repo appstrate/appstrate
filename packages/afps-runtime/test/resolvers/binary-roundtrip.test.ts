@@ -476,6 +476,43 @@ describe("provider-tool binary round-trip", () => {
       void blob;
     });
 
+    it("rejects responseMode.toFile that points at a pre-existing symlink in the workspace (M4)", async () => {
+      // An attacker could pre-place a symlink inside the workspace pointing
+      // outside it. resolveSafeOutputPath must refuse to write through it.
+      const outside = await mkdtemp(join(tmpdir(), "afps-outside-tofile-"));
+      const targetFile = join(outside, "sensitive.dat");
+      await writeFile(targetFile, new Uint8Array([0xde, 0xad]));
+      // Place the symlink inside the workspace.
+      const symlinkInWorkspace = join(workspace, "output-link.bin");
+      await symlink(targetFile, symlinkInWorkspace);
+
+      try {
+        const { execute } = buildSidecarResolver(
+          async () =>
+            new Response(new Uint8Array([1, 2, 3]), {
+              status: 200,
+              headers: { "content-type": "application/octet-stream" },
+            }),
+        );
+        try {
+          await execute(
+            {
+              method: "GET",
+              target: "https://api.example.com/x",
+              responseMode: { toFile: "output-link.bin" },
+            },
+            makeCtx(workspace, "tc_tofile_symlink"),
+          );
+          throw new Error("expected throw");
+        } catch (err) {
+          expect((err as { code?: string }).code).toBe("RESOLVER_PATH_OUTSIDE_WORKSPACE");
+        }
+      } finally {
+        await rm(outside, { recursive: true, force: true }).catch(() => {});
+        await rm(symlinkInWorkspace, { force: true }).catch(() => {});
+      }
+    });
+
     it("honours responseMode.toFile (writes the requested workspace path)", async () => {
       const pdf = tinyPdf();
       const expectedSha = sha256(pdf);
