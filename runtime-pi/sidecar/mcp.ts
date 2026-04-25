@@ -53,6 +53,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { MAX_RESPONSE_SIZE, PROVIDER_ID_RE } from "./helpers.ts";
 import type { BlobStore } from "./blob-store.ts";
+import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
@@ -149,7 +150,8 @@ const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
  * block instead of an inline text body.
  */
-function buildSidecarTools(app: Hono, blobStore?: BlobStore): AppstrateToolDefinition[] {
+function buildSidecarTools(app: Hono, options: MountMcpOptions): AppstrateToolDefinition[] {
+  const { blobStore, proxyDeps } = options;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
       name: "provider_call",
@@ -256,18 +258,59 @@ function buildSidecarTools(app: Hono, blobStore?: BlobStore): AppstrateToolDefin
           isError: true,
         };
       }
+
+      // When the credential-proxy core deps were wired into mountMcp
+      // (production path), call it directly with structured args —
+      // skips the X-Provider/X-Target/X-Substitute-Body header
+      // round-trip the legacy `/proxy` route would otherwise impose.
+      // The fallback path (legacy test fixtures that mount `/mcp`
+      // without proxyDeps) re-encodes the args into HTTP headers and
+      // dispatches through `/proxy` for behavioural parity.
+      if (proxyDeps) {
+        const buffered: ArrayBuffer | undefined =
+          args.body !== undefined ? new TextEncoder().encode(args.body).buffer : undefined;
+        const result = await executeProviderCall(
+          {
+            providerId: args.providerId,
+            targetUrl: args.target,
+            method,
+            callerHeaders,
+            body: buffered
+              ? {
+                  kind: "buffered",
+                  bytes: buffered,
+                  ...(args.substituteBody ? { text: args.body } : {}),
+                }
+              : { kind: "none" },
+            substituteBody: !!args.substituteBody,
+            proxyUrl: proxyDeps.config.proxyUrl,
+          },
+          proxyDeps,
+        );
+        if (!result.ok) {
+          return {
+            content: [{ type: "text", text: `provider_call: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return responseToToolResult(result.response, {
+          ...(blobStore ? { blobStore } : {}),
+          source: `provider:${args.providerId}`,
+        });
+      }
+
+      // Legacy fallback (no proxyDeps wired): reach the /proxy route
+      // via in-process app.request(). Kept so test fixtures that
+      // mount only the Hono app (without the executeProviderCall deps)
+      // still exercise a functioning provider_call surface.
       const headers: Record<string, string> = {
         ...callerHeaders,
         "X-Provider": args.providerId,
         "X-Target": args.target,
       };
       if (args.substituteBody) headers["X-Substitute-Body"] = "1";
-
       const init: RequestInit = { method, headers };
-      if (args.body !== undefined) {
-        init.body = args.body;
-      }
-
+      if (args.body !== undefined) init.body = args.body;
       const res = await app.request("/proxy", init);
       return responseToToolResult(res, {
         ...(blobStore ? { blobStore } : {}),
@@ -685,10 +728,19 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
 export interface MountMcpOptions {
   /** Run-scoped blob store for `provider_call` / `llm_complete` resource spillover. */
   blobStore?: BlobStore;
+  /**
+   * Credential-proxy core deps. When supplied, `provider_call` calls
+   * {@link executeProviderCall} directly with structured args instead
+   * of round-tripping through the legacy `/proxy` HTTP envelope.
+   * Optional only for backward compatibility with old test fixtures
+   * that mount `/mcp` without wiring the proxy core; production always
+   * supplies it.
+   */
+  proxyDeps?: ProviderCallDeps;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions = {}): void {
-  const tools = buildSidecarTools(app, options.blobStore);
+  const tools = buildSidecarTools(app, options);
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
 
   app.all("/mcp", async (c) => {
