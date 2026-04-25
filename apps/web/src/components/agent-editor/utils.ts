@@ -17,6 +17,24 @@ import {
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
+// ─── Version ranges ─────────────────────────────────────────
+
+/**
+ * Range form stored in agent manifests. Mirrors `npm install foo` (no
+ * `--save-exact`), which writes `^X.Y.Z` — auto-receive non-breaking
+ * fixes within the current major, opt-in major bumps. The legacy `*`
+ * wildcard is intentionally never emitted from this UI; existing rows
+ * carrying it (or any other unrecognized range) are migrated to caret-
+ * of-latest the first time the editor mounts.
+ *
+ * For exact pinning, the user can hand-edit the raw manifest; the
+ * backend resolver (`resolveVersionFromCatalog`) accepts every semver
+ * range form. The UI is the recommendation, not the schema.
+ */
+export function caretRange(version: string): string {
+  return `^${version}`;
+}
+
 // ─── Default state ──────────────────────────────────────────
 
 export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentEditorState {
@@ -31,6 +49,11 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
       description: "",
       author: userEmail ?? "",
       timeout: 300,
+      // `*` is a placeholder — `VersionSelect` migrates each entry to
+      // caret-of-latest (`^X.Y.Z`) the first time the editor mounts.
+      // Hardcoding caret here would couple the template to a frozen
+      // major; the migration keeps new agents on whatever major the
+      // registry currently ships as canonical.
       dependencies: {
         providers: {},
         tools: {

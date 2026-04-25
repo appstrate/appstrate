@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  caretRange,
   defaultEditorState,
   getManifestName,
   getProviderEntries,
@@ -137,6 +138,15 @@ describe("defaultEditorState", () => {
   it("handles missing org slug", () => {
     const state = defaultEditorState();
     expect(state.manifest.name).toBe("");
+  });
+});
+
+// ─── caretRange ─────────────────────────────────────────────
+
+describe("caretRange", () => {
+  it("prefixes a version with `^`", () => {
+    expect(caretRange("1.2.3")).toBe("^1.2.3");
+    expect(caretRange("0.0.1")).toBe("^0.0.1");
   });
 });
 
