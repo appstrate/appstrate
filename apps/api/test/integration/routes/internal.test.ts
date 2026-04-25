@@ -227,7 +227,33 @@ describe("Internal API", () => {
       expect(entry.state).toBeUndefined();
     });
 
-    it("accepts the legacy fields=state alias and returns under `checkpoint`", async () => {
+    it("returns 400 with the valid-fields list when an unknown field is passed", async () => {
+      // The legacy AFPS ≤ 1.3 alias `state` is no longer accepted. Failing
+      // loudly here is what protects agents whose runtime is stale: the
+      // earlier silent-filter behaviour stripped the field and fell back to
+      // `["checkpoint"]`, masking the misconfiguration.
+      const res = await app.request("/internal/run-history?fields=state", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string; errors?: { field?: string }[] };
+      expect(body.detail).toContain("state");
+      expect(body.detail).toContain("checkpoint");
+      expect(body.detail).toContain("result");
+    });
+
+    it("returns 400 when only some fields are valid", async () => {
+      const res = await app.request("/internal/run-history?fields=checkpoint,bogus", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("bogus");
+    });
+
+    it("treats an empty fields= query as default (`checkpoint` only)", async () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
@@ -235,9 +261,10 @@ describe("Internal API", () => {
         dashboardUserId: ctx.user.id,
         status: "success",
         checkpoint: { key: "v" },
+        result: { output: "irrelevant" },
       });
 
-      const res = await app.request("/internal/run-history?fields=state", {
+      const res = await app.request("/internal/run-history?fields=", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -245,7 +272,8 @@ describe("Internal API", () => {
       const body = (await res.json()) as { runs: Record<string, unknown>[] };
       expect(body.runs).toHaveLength(1);
       expect(body.runs[0]!.checkpoint).toEqual({ key: "v" });
-      expect(body.runs[0]!.state).toBeUndefined();
+      // No `result` because we defaulted to `checkpoint` only.
+      expect(body.runs[0]!.result).toBeUndefined();
     });
 
     it("does not return checkpoints from a different end-user (actor isolation)", async () => {

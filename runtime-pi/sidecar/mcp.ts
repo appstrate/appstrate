@@ -443,7 +443,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     descriptor: {
       name: "run_history",
       description:
-        "Fetch metadata and optionally the carry-over state or final output of the agent's " +
+        "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
         "most recent past runs (current run excluded). Returns JSON. " +
         "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
       inputSchema: {
@@ -458,9 +458,9 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           },
           fields: {
             type: "array",
-            items: { type: "string", enum: ["state", "result"] },
+            items: { type: "string", enum: ["checkpoint", "result"] },
             uniqueItems: true,
-            description: "Optional subset of `{state, result}` to include per run.",
+            description: "Optional subset of `{checkpoint, result}` to include per run.",
           },
         },
       },

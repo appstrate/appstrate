@@ -215,8 +215,10 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
       const runHistory = captured.find((c) => c.name === "run_history");
-      await runHistory!.execute("call-1", { limit: 5, fields: ["state"] });
-      expect(calls).toEqual([{ name: "run_history", arguments: { limit: 5, fields: ["state"] } }]);
+      await runHistory!.execute("call-1", { limit: 5, fields: ["checkpoint"] });
+      expect(calls).toEqual([
+        { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
+      ]);
     } finally {
       await pair.close();
     }

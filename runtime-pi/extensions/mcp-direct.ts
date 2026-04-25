@@ -162,7 +162,7 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
       name: RUN_HISTORY_TOOL_NAME,
       label: RUN_HISTORY_TOOL_NAME,
       description:
-        "Fetch metadata and optionally state/result of recent past runs (current run excluded).",
+        "Fetch metadata and optionally checkpoint/result of recent past runs (current run excluded).",
       parameters: Type.Unsafe<Record<string, unknown>>({
         type: "object",
         additionalProperties: false,
@@ -170,7 +170,7 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
           limit: { type: "integer", minimum: 1, maximum: 50 },
           fields: {
             type: "array",
-            items: { type: "string", enum: ["state", "result"] },
+            items: { type: "string", enum: ["checkpoint", "result"] },
             uniqueItems: true,
           },
         },

@@ -188,6 +188,23 @@ describe("POST /mcp — tools/list", () => {
     const history = result.tools.find((t) => t.name === "run_history")!;
     expect(Object.keys(history.inputSchema.properties).sort()).toEqual(["fields", "limit"]);
   });
+
+  // Regression — the agent-facing `run_history.fields` enum is the LLM's
+  // single source of truth for the wire vocabulary. If the legacy `state`
+  // value re-appears here, agents start sending it again and the platform
+  // 400s every call. Lock it to the canonical AFPS 1.4+ values.
+  it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{
+        name: string;
+        inputSchema: { properties: { fields?: { items?: { enum?: string[] } } } };
+      }>;
+    };
+    const history = result.tools.find((t) => t.name === "run_history")!;
+    expect(history.inputSchema.properties.fields?.items?.enum).toEqual(["checkpoint", "result"]);
+  });
 });
 
 describe("POST /mcp — tools/call run_history", () => {
@@ -203,7 +220,7 @@ describe("POST /mcp — tools/call run_history", () => {
 
     const res = await rpc(app, {
       method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 5, fields: ["state"] } },
+      params: { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
     });
     expect(res.status).toBe(200);
     const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
@@ -216,7 +233,7 @@ describe("POST /mcp — tools/call run_history", () => {
     const calledUrl = fetchFn.mock.calls[0]![0] as string;
     expect(calledUrl).toContain("/internal/run-history");
     expect(calledUrl).toContain("limit=5");
-    expect(calledUrl).toContain("fields=state");
+    expect(calledUrl).toContain("fields=checkpoint");
   });
 });
 

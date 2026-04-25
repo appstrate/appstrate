@@ -150,17 +150,24 @@ export function createInternalRouter() {
 
     // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
     // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
-    // Vocabulary lives in the runtime so the agent-facing tool schema and
-    // the platform's accept-list stay byte-identical.
-    const wireFields = fieldsParam
-      ?.split(",")
-      .map((f) => f.trim())
-      .filter((f): f is RunHistoryField => RUN_HISTORY_FIELDS.includes(f as RunHistoryField));
-    const seen = new Set<RunHistoryField>();
-    for (const f of wireFields ?? []) {
-      seen.add(f);
+    // Unknown values fail loudly with 400 so a stale runner schema can't
+    // silently strip fields the agent is asking for.
+    let fields: RunHistoryField[] = ["checkpoint"];
+    if (fieldsParam !== undefined) {
+      const requested = fieldsParam
+        .split(",")
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0);
+      const invalid = requested.filter((f) => !RUN_HISTORY_FIELDS.includes(f as RunHistoryField));
+      if (invalid.length > 0) {
+        throw invalidRequest(
+          `Unknown fields: ${invalid.join(", ")}. Valid: ${RUN_HISTORY_FIELDS.join(", ")}.`,
+          "fields",
+        );
+      }
+      const dedup = [...new Set(requested as RunHistoryField[])];
+      if (dedup.length > 0) fields = dedup;
     }
-    const fields: RunHistoryField[] = seen.size > 0 ? [...seen] : ["checkpoint"];
 
     try {
       // Actor isolation is mandatory: `getRecentRuns` filters runs by
