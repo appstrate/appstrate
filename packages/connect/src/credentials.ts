@@ -208,6 +208,16 @@ export async function saveConnection(
     providerCredentialId: string;
     scopesGranted?: string[];
     expiresAt?: string | null;
+    /**
+     * Initial value for the `needsReconnection` flag. Defaults to `false`
+     * (a fresh OAuth callback grants a working connection). Callers that
+     * detect a scope shortfall can pass `true` here to make the insert
+     * atomic — without this option, a separate UPDATE follows the INSERT
+     * and any consumer reading between the two queries sees a brief
+     * "connected with full scopes" window that disappears once the flag
+     * flips. Atomic upsert eliminates that window.
+     */
+    needsReconnection?: boolean;
   },
 ): Promise<void> {
   const encrypted = encryptCredentials(credentials);
@@ -216,7 +226,7 @@ export async function saveConnection(
     credentialsEncrypted: encrypted,
     scopesGranted: options.scopesGranted ?? [],
     expiresAt: options.expiresAt ? new Date(options.expiresAt) : null,
-    needsReconnection: false,
+    needsReconnection: options.needsReconnection ?? false,
     providerCredentialId: options.providerCredentialId,
   };
 

@@ -43,6 +43,40 @@ const envSchema = z
       .refine((val) => Buffer.from(val, "base64").length === 32, {
         message: "CONNECTION_ENCRYPTION_KEY must be 32 bytes (256-bit) base64-encoded",
       }),
+    // Active key id embedded in newly-encrypted credential blobs (v1 envelope).
+    // Stable across deploys — change only when promoting a freshly-rotated key.
+    // Must match /^[A-Za-z0-9_-]{1,32}$/.
+    CONNECTION_ENCRYPTION_KEY_ID: z
+      .string()
+      .default("k1")
+      .refine((v) => /^[A-Za-z0-9_-]{1,32}$/.test(v), {
+        message: "CONNECTION_ENCRYPTION_KEY_ID must match /^[A-Za-z0-9_-]{1,32}$/",
+      }),
+    // Retired keys held for decrypt-only during a rotation window. JSON map of
+    // kid → base64-encoded 32-byte key. Exclude the active kid (validated at boot).
+    // Empty map disables the legacy keyring; existing v0 blobs still decrypt with
+    // the active key.
+    //
+    // Validated as `Record<string, string>` AT BOOT — a non-string value or
+    // JSON parse error fails fast with a clear Zod issue path, rather than
+    // surfacing inside `loadKeyring()` as a `Buffer.from(b64, "base64")`
+    // length mismatch hours later. The kid format itself is validated by
+    // `loadKeyring()` against the same `KID_PATTERN` used for envelopes.
+    CONNECTION_ENCRYPTION_KEYS: z
+      .string()
+      .default("{}")
+      .transform((s, ctx) => {
+        try {
+          return JSON.parse(s) as unknown;
+        } catch {
+          ctx.addIssue({
+            code: "custom",
+            message: "CONNECTION_ENCRYPTION_KEYS must be valid JSON",
+          });
+          return z.NEVER;
+        }
+      })
+      .pipe(z.record(z.string(), z.string())),
     SYSTEM_PROXIES: z
       .string()
       .default("[]")
