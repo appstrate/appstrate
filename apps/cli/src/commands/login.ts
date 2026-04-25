@@ -65,6 +65,12 @@ export interface LoginOptions {
   createApp?: string;
   /** `--no-app` — explicitly skip the app-pinning step. */
   noApp?: boolean;
+  /**
+   * `--device-name <name>` — human-friendly label rendered in the
+   * dashboard's authorized-devices list. Defaults to `os.hostname()`
+   * when unset.
+   */
+  deviceName?: string;
   deps?: LoginDeps;
 }
 
@@ -176,6 +182,7 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   const token = await pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
     interval: code.interval,
     expiresIn: code.expiresIn,
+    deviceName: opts.deviceName,
   });
   pollSpinner.stop("Approved");
 
