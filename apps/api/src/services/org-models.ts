@@ -310,25 +310,14 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
 // --- Connection test ---
 
-/** Test a model config directly (no DB lookup). */
-export async function testModelConfig(config: {
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): Promise<TestResult> {
-  if (isBlockedUrl(config.baseUrl)) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "BLOCKED_URL",
-      message: "URL targets a blocked network",
-    };
-  }
-
+/** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
+export function buildModelTestRequest(config: { api: string; baseUrl: string; apiKey: string }): {
+  url: string;
+  headers: Record<string, string>;
+} {
   const base = config.baseUrl.replace(/\/+$/, "");
-  let url: string;
   const headers: Record<string, string> = {};
+  let url: string;
 
   switch (config.api) {
     case "anthropic-messages":
@@ -340,6 +329,10 @@ export async function testModelConfig(config: {
         headers["x-api-key"] = config.apiKey;
       }
       headers["anthropic-version"] = "2023-06-01";
+      break;
+    case "mistral-conversations":
+      url = `${base}/v1/models`;
+      headers["Authorization"] = `Bearer ${config.apiKey}`;
       break;
     case "google-generative-ai":
       url = `${base}/models?key=${encodeURIComponent(config.apiKey)}`;
@@ -360,6 +353,27 @@ export async function testModelConfig(config: {
       headers["Authorization"] = `Bearer ${config.apiKey}`;
       break;
   }
+
+  return { url, headers };
+}
+
+/** Test a model config directly (no DB lookup). */
+export async function testModelConfig(config: {
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}): Promise<TestResult> {
+  if (isBlockedUrl(config.baseUrl)) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+
+  const { url, headers } = buildModelTestRequest(config);
 
   const start = performance.now();
   try {
