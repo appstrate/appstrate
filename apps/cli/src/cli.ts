@@ -47,6 +47,7 @@ import {
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
+import { selfUpdateCommand } from "./commands/self-update.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -574,6 +575,21 @@ program
   });
 
 registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
+
+program
+  .command("self-update")
+  .description("Upgrade the running appstrate binary in place (curl channel only — issue #249).")
+  .option(
+    "--release <version>",
+    "Pin a specific release version (default: latest from GitHub Releases).",
+  )
+  .option("-f, --force", "Reinstall even if the current version equals the target.")
+  .action(async (opts) => {
+    await selfUpdateCommand({
+      version: typeof opts.release === "string" ? opts.release : undefined,
+      force: opts.force === true,
+    });
+  });
 
 program
   .command("run")
