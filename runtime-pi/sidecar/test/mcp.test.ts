@@ -456,6 +456,98 @@ describe("POST /mcp — provider_call body / method consistency", () => {
   });
 });
 
+describe("POST /mcp — provider_call binary body via { fromBytes }", () => {
+  // The agent never sees the raw bytes — runtime resolvers materialise
+  // workspace files (`{ fromFile }`) or in-memory buffers
+  // (`{ fromBytes }`) into base64 before MCP because JSON-RPC has no
+  // native byte type. The sidecar decodes once on the server side and
+  // forwards the bytes byte-for-byte.
+
+  function makeProviderDeps() {
+    return makeDeps({
+      fetchCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        }),
+      ),
+    });
+  }
+
+  it("decodes base64 body and forwards bytes verbatim to upstream", async () => {
+    // Non-UTF-8 bytes — would be corrupted by the legacy text path.
+    const binary = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+    const base64 = Buffer.from(binary).toString("base64");
+    let received: ArrayBuffer | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      received = init?.body as ArrayBuffer | undefined;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const app = createApp({ ...makeProviderDeps(), fetchFn: fetchFn as unknown as typeof fetch });
+
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/upload",
+          method: "POST",
+          body: { fromBytes: base64, encoding: "base64" },
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as { isError?: boolean };
+    expect(result.isError).toBeFalsy();
+    expect(received).toBeDefined();
+    expect(new Uint8Array(received as ArrayBuffer)).toEqual(binary);
+  });
+
+  it("rejects body { fromBytes } with invalid base64", async () => {
+    const app = createApp(makeProviderDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/upload",
+          method: "POST",
+          body: { fromBytes: "not-base64!!!", encoding: "base64" },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("not standard base64");
+  });
+
+  it("rejects substituteBody: true when body is { fromBytes }", async () => {
+    const app = createApp(makeProviderDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/upload",
+          method: "POST",
+          body: { fromBytes: Buffer.from("hi").toString("base64"), encoding: "base64" },
+          substituteBody: true,
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("substituteBody requires a text body");
+  });
+});
+
 describe("POST /mcp — caller cannot forge sidecar control headers", () => {
   // Regression: the MCP descriptor advertises that routing /
   // sidecar-control headers are filtered server-side. An earlier

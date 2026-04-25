@@ -327,6 +327,12 @@ if (mcpClient) {
       bundle: bundle ?? buildInContainerBundle(env.agentPrompt),
       mcp: mcpClient,
       runId: AGENT_RUN_ID,
+      // The workspace is the path-safety root for `provider_call`'s
+      // `{ fromFile }` / `{ multipart }` body resolution. The container
+      // injects bundle files into this directory at boot, and the agent
+      // can only write inside it — `resolveSafePath` refuses anything
+      // else.
+      workspace: WORKSPACE,
       emitProvider: (event) => {
         void teeSink.handle(event as RunEvent);
       },

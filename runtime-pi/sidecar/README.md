@@ -51,11 +51,13 @@ When the upstream response exceeds the inline threshold, the bytes are stored in
 The AFPS provider tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
 
 1. The agent calls `provider_call` with `{ body: { fromFile: "report.pdf" } }`.
-2. The AFPS resolver in `packages/afps-runtime/src/resolvers/provider-tool.ts` reads the workspace bytes locally.
-3. The resolver invokes the MCP `provider_call` tool with the raw bytes as the body, plus the appropriate `Content-Type`.
-4. The sidecar sees only bytes — by design.
+2. The runner-pi `McpProviderResolver` (in container mode) — or `RemoteAppstrateProviderResolver` (in CLI mode) — reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
+3. JSON-RPC has no native byte type, so the resolver base64-encodes the bytes and ships them over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
+4. The sidecar's `provider_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
 
-The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver opts into the streaming path, reads the response bytes, and writes them to the workspace before handing a `{ savedTo, byteLength }` summary back to the agent.
+The MCP `provider_call.body` schema accepts either `string` (text/JSON) or `{ fromBytes, encoding: "base64" }` (binary). The `{ fromFile }`, `{ multipart }`, and inline-`Uint8Array` shapes are runtime-side conveniences resolved client-side before MCP — the sidecar only sees the canonical wire forms.
+
+The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver reads the response bytes (inline text block or `resource_link` → `resources/read`) and writes them to the workspace before handing a `{ kind: "file", path, size, sha256 }` summary back to the agent.
 
 ## What lives outside this README
 

@@ -60,8 +60,38 @@ import {
   isBlockedUrl,
   LLM_PROXY_TIMEOUT_MS,
   MAX_RESPONSE_SIZE,
+  MAX_SUBSTITUTE_BODY_SIZE,
   PROVIDER_ID_RE,
 } from "./helpers.ts";
+
+/**
+ * Hard upper bound on `provider_call` request bodies. Aliased here so
+ * the limit name reads consistently with the `body.fromBytes` schema.
+ * The text path (`body: <string>`) and the binary path
+ * (`body: { fromBytes, encoding: "base64" }`) share the same ceiling
+ * because both materialise into a buffered ArrayBuffer before
+ * `executeProviderCall`.
+ */
+const MAX_REQUEST_BODY_SIZE = MAX_SUBSTITUTE_BODY_SIZE;
+
+/**
+ * Strict standard base64 decoder (RFC 4648 §4). Refuses URL-safe
+ * (`-_`), MIME-folded (whitespace/newlines), and any non-canonical
+ * characters. Returns `"invalid"` instead of throwing so the MCP
+ * handler can surface a tool-level error rather than crashing the
+ * transport.
+ */
+function decodeStrictBase64(s: string): Uint8Array | "invalid" {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) return "invalid";
+  try {
+    const buf = Buffer.from(s, "base64");
+    const u8 = new Uint8Array(buf.byteLength);
+    u8.set(buf);
+    return u8;
+  } catch {
+    return "invalid";
+  }
+}
 import type { BlobStore } from "./blob-store.ts";
 import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
 
@@ -249,8 +279,22 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             additionalProperties: { type: "string" },
           },
           body: {
-            type: "string",
-            description: "Request body. Use a JSON-encoded string for JSON endpoints.",
+            description:
+              "Request body. Use a string for text/JSON endpoints, or " +
+              "`{ fromBytes: <base64>, encoding: 'base64' }` for binary uploads. " +
+              "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.",
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["fromBytes", "encoding"],
+                properties: {
+                  fromBytes: { type: "string" },
+                  encoding: { const: "base64" },
+                },
+              },
+            ],
           },
           substituteBody: {
             type: "boolean",
@@ -267,7 +311,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         target: string;
         method?: string;
         headers?: Record<string, string>;
-        body?: string;
+        body?: string | { fromBytes: string; encoding: "base64" };
         substituteBody?: boolean;
       };
 
@@ -307,8 +351,63 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         };
       }
 
-      const buffered: ArrayBuffer | undefined =
-        args.body !== undefined ? new TextEncoder().encode(args.body).buffer : undefined;
+      // Resolve the request body to raw bytes. Two shapes supported:
+      //  - string: TextEncoder → bytes (text/JSON endpoints)
+      //  - { fromBytes, encoding: "base64" }: base64 → bytes (binary
+      //    uploads — runtime resolvers materialise workspace files into
+      //    this shape before MCP because JSON-RPC has no native byte
+      //    type and forwarding bytes as a string corrupts non-UTF-8
+      //    payloads).
+      let buffered: ArrayBuffer | undefined;
+      let bodyText: string | undefined;
+      if (typeof args.body === "string") {
+        buffered = new TextEncoder().encode(args.body).buffer;
+        bodyText = args.body;
+      } else if (args.body && typeof args.body === "object" && "fromBytes" in args.body) {
+        if (args.substituteBody) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  "provider_call: substituteBody requires a text body — pass body as a string, " +
+                  "not { fromBytes }.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const decoded = decodeStrictBase64(args.body.fromBytes);
+        if (decoded === "invalid") {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  "provider_call: body.fromBytes is not standard base64 (RFC 4648 §4, " +
+                  "alphabet `+/`, no whitespace).",
+              },
+            ],
+            isError: true,
+          };
+        }
+        if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `provider_call: body.fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes (got ${decoded.byteLength}).`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        buffered = decoded.buffer.slice(
+          decoded.byteOffset,
+          decoded.byteOffset + decoded.byteLength,
+        ) as ArrayBuffer;
+      }
+
       const result = await executeProviderCall(
         {
           providerId: args.providerId,
@@ -319,7 +418,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             ? {
                 kind: "buffered",
                 bytes: buffered,
-                ...(args.substituteBody ? { text: args.body } : {}),
+                ...(bodyText !== undefined && args.substituteBody ? { text: bodyText } : {}),
               }
             : { kind: "none" },
           substituteBody: !!args.substituteBody,

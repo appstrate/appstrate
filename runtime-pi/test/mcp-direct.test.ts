@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { tmpdir } from "node:os";
 import {
   createInProcessPair,
   wrapClient,
@@ -20,6 +21,12 @@ import {
 } from "@appstrate/mcp-transport";
 import type { Bundle, PackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { buildMcpDirectFactories, DIRECT_TOOL_PROMPT } from "../extensions/mcp-direct.ts";
+
+// Provider tools never resolve `{ fromFile }` against this workspace
+// in these tests — the body is always a string or absent — but
+// `runner-pi`'s factory requires a workspace path for its
+// `AfpsToolContext`, so we point at a stable directory.
+const TEST_WORKSPACE = tmpdir();
 
 interface CapturedTool {
   name: string;
@@ -118,6 +125,7 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
         }),
         mcp,
         runId: "run-1",
+        workspace: TEST_WORKSPACE,
         emitProvider: () => {},
         emit: () => {},
       });
@@ -142,15 +150,25 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
         "@appstrate/gmail",
       ]);
 
-      // Dispatch test.
+      // Dispatch test. The Pi tool flows through runner-pi's
+      // dispatcher → AFPS tool wrapper → McpProviderResolver →
+      // mcp.callTool — every layer is wired through the same factory
+      // CLI mode uses, so the MCP envelope sent to the sidecar carries
+      // the providerId, target, and method (the AFPS provider_call
+      // schema requires `method`).
       await providerCall!.execute("call-1", {
         providerId: "@appstrate/gmail",
         target: "https://example.com",
+        method: "GET",
       });
       expect(calls).toEqual([
         {
           name: "provider_call",
-          arguments: { providerId: "@appstrate/gmail", target: "https://example.com" },
+          arguments: {
+            providerId: "@appstrate/gmail",
+            target: "https://example.com",
+            method: "GET",
+          },
         },
       ]);
     } finally {
@@ -165,6 +183,7 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
         bundle: makeBundleWithProviders({}),
         mcp,
         runId: "run-1",
+        workspace: TEST_WORKSPACE,
         emitProvider: () => {},
         emit: () => {},
       });
@@ -188,6 +207,7 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
         bundle: makeBundleWithProviders({}),
         mcp,
         runId: "run-1",
+        workspace: TEST_WORKSPACE,
         emitProvider: () => {},
         emit: () => {},
       });
@@ -211,6 +231,7 @@ describe("buildMcpDirectFactories — llm_complete dispatch", () => {
         bundle: makeBundleWithProviders({}),
         mcp,
         runId: "run-1",
+        workspace: TEST_WORKSPACE,
         emitProvider: () => {},
         emit: () => {},
       });
@@ -250,6 +271,7 @@ describe("buildMcpDirectFactories — failure modes", () => {
           bundle: makeBundleWithProviders({}),
           mcp,
           runId: "run-1",
+          workspace: TEST_WORKSPACE,
           emitProvider: () => {},
           emit: () => {},
         }),

@@ -23,7 +23,12 @@ import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
-import { readProviderRefs, type ProviderEventEmitter } from "@appstrate/runner-pi";
+import {
+  buildProviderCallExtensionFactory,
+  readProviderRefs,
+  type ProviderEventEmitter,
+} from "@appstrate/runner-pi";
+import { McpProviderResolver } from "./mcp-provider-resolver.ts";
 
 // ─── MCP CallToolResult → Pi AgentToolResult adapter ──────────────────
 // Folded in from the prior `./mcp-result.ts` module (single consumer
@@ -86,6 +91,14 @@ interface BuildMcpDirectFactoriesOptions {
   bundle: Bundle;
   mcp: AppstrateMcpClient;
   runId: string;
+  /**
+   * Workspace root used by `provider_call` for path-safe `{ fromFile }`
+   * / `{ multipart }` body resolution. Required: the container's
+   * `provider_call` Pi tool delegates to AFPS's resolver so the
+   * `fromFile` contract documented in the sidecar README behaves
+   * identically to the CLI path.
+   */
+  workspace: string;
   emitProvider: ProviderEventEmitter;
   emit: (event: { type: string; [k: string]: unknown }) => void;
 }
@@ -93,6 +106,14 @@ interface BuildMcpDirectFactoriesOptions {
 /**
  * Build the `provider_call` + `run_history` + `llm_complete` Pi
  * extension factories. The set is built once per agent.
+ *
+ * `provider_call` delegates to `runner-pi`'s
+ * `buildProviderCallExtensionFactory` (the same factory CLI mode uses)
+ * with an `McpProviderResolver` that forwards every call over MCP.
+ * That single factory is the canonical Pi-tool wiring for AFPS
+ * `provider_call`, so the LLM-facing schema (including `body` accepting
+ * `{ fromFile | fromBytes | multipart | string }`) and observability
+ * are identical across execution modes.
  *
  * Returns `[]` for `provider_call` when the bundle declares no
  * providers (so the LLM doesn't see a tool whose `providerId` enum is
@@ -121,80 +142,18 @@ export async function buildMcpDirectFactories(
 
   const factories: ExtensionFactory[] = [];
   if (providerIds.length > 0) {
-    factories.push(makeProviderCallExtension(providerIds, opts));
+    const providerFactories = await buildProviderCallExtensionFactory({
+      bundle: opts.bundle,
+      providerResolver: new McpProviderResolver(opts.mcp),
+      runId: opts.runId,
+      workspace: opts.workspace,
+      emitProvider: opts.emitProvider,
+    });
+    factories.push(...providerFactories);
   }
   factories.push(makeRunHistoryExtension(opts));
   factories.push(makeLlmCompleteExtension(opts));
   return factories;
-}
-
-function makeProviderCallExtension(
-  providerIds: string[],
-  opts: BuildMcpDirectFactoriesOptions,
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: PROVIDER_CALL_TOOL_NAME,
-      label: PROVIDER_CALL_TOOL_NAME,
-      description:
-        "Make an authenticated request through the credential-injecting proxy. " +
-        "Pick the provider via `providerId` (one of the declared providers in this run).",
-      parameters: Type.Unsafe<Record<string, unknown>>({
-        type: "object",
-        additionalProperties: false,
-        required: ["providerId", "target"],
-        properties: {
-          providerId: { type: "string", enum: providerIds },
-          target: { type: "string", format: "uri" },
-          method: {
-            type: "string",
-            enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
-          },
-          headers: { type: "object", additionalProperties: { type: "string" } },
-          body: { type: "string" },
-          substituteBody: { type: "boolean" },
-        },
-      }),
-      async execute(toolCallId, params, signal) {
-        const args = params as { providerId: string } & Record<string, unknown>;
-        const startedAt = Date.now();
-        opts.emitProvider({
-          type: "provider.called",
-          runId: opts.runId,
-          providerId: args.providerId,
-          toolCallId,
-          timestamp: startedAt,
-        });
-        try {
-          const result = await opts.mcp.callTool(
-            { name: PROVIDER_CALL_TOOL_NAME, arguments: args },
-            { ...(signal ? { signal } : {}) },
-          );
-          opts.emitProvider({
-            type: "provider.completed",
-            runId: opts.runId,
-            providerId: args.providerId,
-            toolCallId,
-            durationMs: Date.now() - startedAt,
-            isError: result.isError === true,
-            timestamp: Date.now(),
-          });
-          return callToolResultToPi(result);
-        } catch (err) {
-          opts.emitProvider({
-            type: "provider.failed",
-            runId: opts.runId,
-            providerId: args.providerId,
-            toolCallId,
-            durationMs: Date.now() - startedAt,
-            error: err instanceof Error ? err.message : String(err),
-            timestamp: Date.now(),
-          });
-          throw err;
-        }
-      },
-    });
-  };
 }
 
 function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): ExtensionFactory {
