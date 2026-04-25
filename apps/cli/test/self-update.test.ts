@@ -135,8 +135,28 @@ describe("compareSemver", () => {
     expect(compareSemver("1.0.0", "1.0.0-alpha.5")).toBe(1);
   });
 
-  it("orders alpha.5 < alpha.6 (lexical within numeric tie)", () => {
-    expect(compareSemver("1.0.0-alpha.5", "1.0.0-alpha.6")).toBe(-1);
+  it("orders pre-release identifiers per SemVer 2.0 §11.4 (numeric, not lexical)", () => {
+    // Pure lexical compare would put alpha.10 BEFORE alpha.2 — SemVer 2.0 says
+    // numeric identifiers compare numerically, so alpha.10 > alpha.2.
+    expect(compareSemver("1.0.0-alpha.10", "1.0.0-alpha.2")).toBe(1);
+    expect(compareSemver("1.0.0-alpha.2", "1.0.0-alpha.10")).toBe(-1);
+  });
+
+  it("ranks numeric identifiers below alphanumeric per §11.4.3", () => {
+    // 1.0.0-1 (numeric) < 1.0.0-alpha (alphanumeric).
+    expect(compareSemver("1.0.0-1", "1.0.0-alpha")).toBe(-1);
+    expect(compareSemver("1.0.0-alpha", "1.0.0-1")).toBe(1);
+  });
+
+  it("ranks longer pre-release identifier sets higher per §11.4.4", () => {
+    // alpha.1 > alpha — same prefix, more identifiers wins.
+    expect(compareSemver("1.0.0-alpha.1", "1.0.0-alpha")).toBe(1);
+    expect(compareSemver("1.0.0-alpha", "1.0.0-alpha.1")).toBe(-1);
+  });
+
+  it("ignores build metadata per §10", () => {
+    expect(compareSemver("1.2.3+sha.abcd", "1.2.3+sha.efgh")).toBe(0);
+    expect(compareSemver("1.2.3+sha.abcd", "1.2.3")).toBe(0);
   });
 });
 
@@ -182,6 +202,17 @@ describe("resolveTargetVersion", () => {
     await expect(resolveTargetVersion(undefined, { fetchText: async () => "{}" })).rejects.toThrow(
       /missing tag_name/,
     );
+  });
+
+  it("surfaces a clear error when GitHub returns 403 (rate limit)", async () => {
+    const { HttpError } = await import("../src/lib/self-update.ts");
+    await expect(
+      resolveTargetVersion(undefined, {
+        fetchText: async () => {
+          throw new HttpError("403 forbidden", 403, "Forbidden", "https://api.github.com/…");
+        },
+      }),
+    ).rejects.toThrow(/rate-limited|--release/);
   });
 });
 

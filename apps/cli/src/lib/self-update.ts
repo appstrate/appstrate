@@ -17,7 +17,7 @@
  *     this binary, so we cannot prove the update target matches.
  */
 
-import { mkdtemp, rename, rm, stat, writeFile, chmod, mkdir } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile, chmod, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { runCommand, type CommandResult } from "./install/os.ts";
@@ -28,6 +28,25 @@ export const APPSTRATE_MINISIGN_PUBKEY = "RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaX
 
 const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
 const LATEST_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases/latest";
+
+/**
+ * Error thrown by the default fetch deps when an HTTP request returns a
+ * non-2xx. Carries the status so callers can special-case rate limits
+ * (GitHub's unauthenticated API caps at 60 req/h per IP — a shared CI
+ * runner hitting the limit would otherwise show a generic "non-JSON"
+ * error). Test fakes that throw plain `Error` are unaffected.
+ */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly url: string,
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
 
 export type Platform = "darwin" | "linux";
 export type Architecture = "x64" | "arm64";
@@ -142,21 +161,33 @@ export function parseChecksumLine(content: string, asset: string): string {
 }
 
 /**
- * Compare two semver-ish strings. Pure prefix-of-numeric-segments compare —
- * good enough for the "current vs target" check in `self-update`, which only
- * needs to know if they are equal. Pre-release suffixes (`1.0.0-alpha.5`)
- * compare lexicographically after the numeric prefix, matching npm.
+ * Compare two semver strings per SemVer 2.0 §11.
  *
- * Returns -1 if `a < b`, 0 if equal, 1 if `a > b`.
+ * Returns -1 if `a < b`, 0 if equal, 1 if `a > b`. Used by `self-update`
+ * to detect "already on target version" (equality check), but the full
+ * ordering is implemented so callers can also gate downgrade refusal etc.
+ *
+ * Pre-release identifier rules (§11.4):
+ *   - A version with a pre-release is LOWER than the same version without one.
+ *   - Identifiers are compared dot-separated, left to right.
+ *   - Numeric identifiers compare numerically; alphanumeric compare in ASCII;
+ *     numeric identifiers always rank lower than alphanumeric. So
+ *     `1.0.0-alpha.10` > `1.0.0-alpha.2` (correct), unlike a pure
+ *     lexicographic compare which gets it wrong.
+ *
+ * Build metadata (`+...`) is stripped per §10 ("MUST be ignored when
+ * determining version precedence").
  */
 export function compareSemver(a: string, b: string): number {
-  const split = (v: string): { numeric: [number, number, number]; pre: string } => {
-    const trimmed = v.replace(/^v/, "");
+  const split = (v: string): { numeric: [number, number, number]; pre: string[] } => {
+    // Drop build metadata (§10).
+    const trimmed = v.replace(/^v/, "").split("+", 1)[0]!;
     const [core, ...preParts] = trimmed.split("-");
     const segments = (core ?? "").split(".").map((s) => Number.parseInt(s, 10) || 0);
+    const preJoined = preParts.join("-");
     return {
       numeric: [segments[0] ?? 0, segments[1] ?? 0, segments[2] ?? 0],
-      pre: preParts.join("-"),
+      pre: preJoined === "" ? [] : preJoined.split("."),
     };
   };
   const A = split(a);
@@ -167,12 +198,36 @@ export function compareSemver(a: string, b: string): number {
     if (ai < bi) return -1;
     if (ai > bi) return 1;
   }
-  // Numeric-prefix tie. A pre-release is LOWER than a release (npm semver §11).
-  if (A.pre === "" && B.pre === "") return 0;
-  if (A.pre === "" && B.pre !== "") return 1;
-  if (A.pre !== "" && B.pre === "") return -1;
-  if (A.pre < B.pre) return -1;
-  if (A.pre > B.pre) return 1;
+  // §11.3: a version without pre-release ranks HIGHER than one with.
+  if (A.pre.length === 0 && B.pre.length === 0) return 0;
+  if (A.pre.length === 0) return 1;
+  if (B.pre.length === 0) return -1;
+  // §11.4: identifier-by-identifier compare.
+  const len = Math.min(A.pre.length, B.pre.length);
+  const numericRe = /^[0-9]+$/;
+  for (let i = 0; i < len; i++) {
+    const ai = A.pre[i]!;
+    const bi = B.pre[i]!;
+    const aNum = numericRe.test(ai);
+    const bNum = numericRe.test(bi);
+    if (aNum && bNum) {
+      const an = Number.parseInt(ai, 10);
+      const bn = Number.parseInt(bi, 10);
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+    } else if (aNum) {
+      // §11.4.3: numeric identifiers have lower precedence than alphanumeric.
+      return -1;
+    } else if (bNum) {
+      return 1;
+    } else {
+      if (ai < bi) return -1;
+      if (ai > bi) return 1;
+    }
+  }
+  // §11.4.4: a longer set of identifiers (when prefixes are equal) ranks higher.
+  if (A.pre.length < B.pre.length) return -1;
+  if (A.pre.length > B.pre.length) return 1;
   return 0;
 }
 
@@ -212,7 +267,14 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
       headers: { "User-Agent": CLI_USER_AGENT },
       redirect: "follow",
     });
-    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      throw new HttpError(
+        `GET ${url} → ${res.status} ${res.statusText}`,
+        res.status,
+        res.statusText,
+        url,
+      );
+    }
     return new Uint8Array(await res.arrayBuffer());
   },
   async fetchText(url) {
@@ -220,7 +282,14 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
       headers: { "User-Agent": CLI_USER_AGENT },
       redirect: "follow",
     });
-    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      throw new HttpError(
+        `GET ${url} → ${res.status} ${res.statusText}`,
+        res.status,
+        res.statusText,
+        url,
+      );
+    }
     return res.text();
   },
   async sha256Hex(data) {
@@ -261,9 +330,6 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
   },
 };
 
-// Re-exported only for test introspection — production callers shouldn't need it.
-export const _internals = { stat };
-
 export interface ResolveTargetVersionDeps {
   fetchText(url: string): Promise<string>;
 }
@@ -287,7 +353,23 @@ export async function resolveTargetVersion(
     }
     return v;
   }
-  const body = await deps.fetchText(LATEST_API_URL);
+  let body: string;
+  try {
+    body = await deps.fetchText(LATEST_API_URL);
+  } catch (err) {
+    // GitHub's unauthenticated API caps at 60 req/h per IP. On shared CI
+    // runners this often surfaces as a 403 with X-RateLimit-Remaining: 0;
+    // distinguish that case so the user gets a direct fix ("authenticate
+    // or pin --release") instead of a generic "non-JSON" error.
+    if (err instanceof HttpError && err.status === 403) {
+      throw new Error(
+        `GitHub Releases API returned 403 (likely rate-limited). ` +
+          `Pin a specific version with --release X.Y.Z, or wait for the ` +
+          `60 req/h-per-IP limit to reset.`,
+      );
+    }
+    throw err;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);

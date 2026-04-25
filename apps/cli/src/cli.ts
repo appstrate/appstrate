@@ -121,7 +121,7 @@ program
     "--insecure",
     "Allow connecting to a non-HTTPS, non-loopback instance. Your bearer token will be transmitted in plaintext — only use on a trusted network. Equivalent to APPSTRATE_INSECURE=1.",
   )
-  .hook("preAction", async (thisCommand, actionCommand) => {
+  .hook("preAction", async (_thisCommand, actionCommand) => {
     // Hoist `--insecure` into the env so every downstream module that
     // reads it (instance-url.ts::isInsecureOptIn) sees a single source
     // of truth — no need to thread the flag through every command.
@@ -150,13 +150,19 @@ program
           // even if the disk is read-only / the parent dir is unwritable.
           await ackDualInstall(warning.paths).catch(() => {});
         }
-      } catch {
+      } catch (err) {
         // Defensive: any error inside the check (PATH parse, fs ENOENT,
         // exotic filesystem) must NEVER prevent the user's command from
-        // running. Swallow and continue.
+        // running. Swallow and continue, but surface the cause under
+        // APPSTRATE_DEBUG=1 so silent failures don't mask future bugs in
+        // the check.
+        if (process.env.APPSTRATE_DEBUG === "1") {
+          process.stderr.write(
+            `[debug] dual-install check failed: ${(err as Error)?.message ?? String(err)}\n`,
+          );
+        }
       }
     }
-    void thisCommand;
   });
 
 program

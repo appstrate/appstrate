@@ -24,8 +24,6 @@ declare const __APPSTRATE_INSTALL_SOURCE__: string;
 
 export type InstallSource = "curl" | "bun" | "unknown";
 
-export const INSTALL_SOURCES: readonly InstallSource[] = ["curl", "bun", "unknown"] as const;
-
 function resolveInstallSource(): InstallSource {
   // `typeof` on a missing identifier returns "undefined" without throwing,
   // unlike a bare reference. Required because the identifier is replaced

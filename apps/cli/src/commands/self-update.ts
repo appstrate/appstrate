@@ -40,12 +40,18 @@ export interface SelfUpdateOptions {
   log?: (line: string) => void;
 }
 
-/** Exit-code constants used by `runSelfUpdate` so the CLI top-level can map to `process.exit`. */
+/**
+ * Exit-code contract for `appstrate self-update`. Distinct codes for
+ * configuration-class failures (wrong channel / no stamp — `2`) vs runtime
+ * update failures (network / verification / disk — `1`) so shell scripts
+ * can branch on `case $?` without parsing stderr. Mirrors the rustup
+ * convention (1 = transient/runtime, 2 = configuration / wrong context).
+ */
 export const SELF_UPDATE_EXIT = {
   OK: 0,
-  WRONG_CHANNEL: 1,
-  UNKNOWN_SOURCE: 1,
   UPDATE_FAILED: 1,
+  WRONG_CHANNEL: 2,
+  UNKNOWN_SOURCE: 2,
 } as const;
 
 export interface SelfUpdateRunResult {

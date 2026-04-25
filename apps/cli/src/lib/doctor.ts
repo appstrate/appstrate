@@ -139,12 +139,20 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
   );
 
   // The running CLI may not be on $PATH (e.g. the user invoked it via
-  // absolute path). Match by realpath since the user's PATH entry might
-  // be a symlink to the real binary.
+  // absolute path). Resolve realpath on BOTH sides: the PATH entry can
+  // be a symlink to the real binary, and `execPath` itself can also be
+  // a symlink (e.g. a wrapper script in `~/.local/bin` pointing into a
+  // brewed cellar). Comparing only one side misses the case where the
+  // symlink lives at the running binary path.
+  const execRealPath = await fs.realpath(execPath);
   let runningIndex = -1;
   for (let i = 0; i < installations.length; i++) {
     const entry = installations[i]!;
-    if (entry.binary === execPath || entry.realPath === execPath) {
+    if (
+      entry.binary === execPath ||
+      entry.realPath === execPath ||
+      entry.realPath === execRealPath
+    ) {
       runningIndex = i;
       break;
     }

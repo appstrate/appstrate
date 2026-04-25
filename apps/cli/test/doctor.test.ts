@@ -119,6 +119,30 @@ describe("runDoctor", () => {
     });
     expect(report.runningIndex).toBe(0);
   });
+
+  it("matches the running binary when execPath itself is a symlink", async () => {
+    // Reverse case: the PATH entry resolves directly, but execPath is a
+    // wrapper symlink. Both sides must be realpath'd to find the match.
+    const report = await runDoctor({
+      pathEnv: "/opt/appstrate/bin",
+      pathScanFs: fs({
+        "/opt/appstrate/bin/appstrate": {
+          exec: true,
+          real: "/opt/appstrate/bin/appstrate",
+        },
+        // execPath used by the running CLI — a symlink alias.
+        "/home/user/.local/bin/appstrate": {
+          exec: true,
+          real: "/opt/appstrate/bin/appstrate",
+        },
+      }),
+      probeBinary: probe({
+        "/opt/appstrate/bin/appstrate": { version: "1.0.0", source: "curl" },
+      }),
+      execPath: "/home/user/.local/bin/appstrate",
+    });
+    expect(report.runningIndex).toBe(0);
+  });
 });
 
 describe("formatDoctorReport", () => {

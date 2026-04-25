@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { INSTALL_SOURCE, INSTALL_SOURCES, upgradeHint } from "../src/lib/install-source.ts";
+import { INSTALL_SOURCE, upgradeHint } from "../src/lib/install-source.ts";
 
 /**
  * Phase 1 — `__APPSTRATE_INSTALL_SOURCE__` build-time stamp (issue #249).
@@ -29,10 +29,6 @@ describe("install-source", () => {
       // `bun test` runs source files directly without a `--define`, so the
       // identifier is undefined and the typeof guard kicks in.
       expect(INSTALL_SOURCE).toBe("unknown");
-    });
-
-    it("exposes the canonical channel list", () => {
-      expect(INSTALL_SOURCES).toEqual(["curl", "bun", "unknown"]);
     });
 
     it("returns a stable upgrade hint per channel", () => {

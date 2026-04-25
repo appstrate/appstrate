@@ -175,7 +175,19 @@ _appstrate_bootstrap() {
     # that already has the curl-channel binary at $DEST is a normal re-install
     # — we don't want to nag.
     if [ "$EXISTING_REAL" != "$DEST_REAL" ]; then
-      EXISTING_VERSION="$("$EXISTING_APPSTRATE" --version 2>/dev/null | head -n 1 || echo "?")"
+      # Wrap the probe in a 2s timeout: a wedged or interactive existing
+      # binary (e.g. one stuck on a TTY prompt because $stdin isn't a TTY
+      # under `curl | bash`) would otherwise hang the bootstrap forever.
+      # `timeout` is GNU; on macOS without coreutils we fall back to
+      # `gtimeout` if installed, else accept the (rare) hang risk and
+      # invoke the binary directly — same trade-off rustup makes.
+      _probe_cmd=""
+      if command -v timeout >/dev/null 2>&1; then
+        _probe_cmd="timeout 2"
+      elif command -v gtimeout >/dev/null 2>&1; then
+        _probe_cmd="gtimeout 2"
+      fi
+      EXISTING_VERSION="$($_probe_cmd "$EXISTING_APPSTRATE" --version 2>/dev/null | head -n 1 || echo "?")"
       err "Another \`appstrate\` is already on PATH at:"
       err "    $EXISTING_APPSTRATE  (version: $EXISTING_VERSION)"
       err ""
