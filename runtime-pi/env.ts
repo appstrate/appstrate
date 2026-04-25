@@ -60,34 +60,12 @@ export interface RuntimeEnv {
    */
   traceparent?: string;
   /**
-   * Phase 2 of #276 feature flag. When `true`, sidecar-backed tools
-   * (provider_call, run_history) route through the sidecar's `/mcp`
-   * endpoint via JSON-RPC instead of bespoke `/proxy` + `/run-history`
-   * routes. Defaults to `false` so the soak window is opt-in until
-   * the flag flips at end of Phase 2 soak. Rollback = redeploy with
-   * the flag off; no DB migration, no file format change.
-   */
-  runtimeMcpClient: boolean;
-  /**
    * Per-run Bearer token for the MCP HTTP transport. When unset, the
    * MCP client connects unauthenticated — relies on Docker network
    * isolation only. Reuses the platform's existing `RUN_TOKEN` env to
    * avoid minting a separate secret.
    */
   runToken?: string;
-  /**
-   * Phase 5 §D5.3 of #276 feature flag. Implies `runtimeMcpClient`.
-   * When `true`, the LLM sees the standard MCP tool names directly
-   * (`provider_call`, `run_history`, `llm_complete`) instead of the
-   * legacy per-provider `appstrate_<slug>_call` aliases. Bundles
-   * shipping the new ≤3-line capability prompt opt in here; bundles
-   * with the legacy per-provider prompt vocabulary leave it off and
-   * keep using the alias layer in `mcp-bridge.ts` (D5.2).
-   *
-   * Default OFF — the alias layer is the safe path until existing
-   * bundles ship updated prompts. Removed entirely in Phase 6.
-   */
-  runtimeMcpDirectTools: boolean;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -310,9 +288,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     heartbeatIntervalMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
-    runtimeMcpClient: source.RUNTIME_MCP_CLIENT === "1" || source.RUNTIME_MCP_CLIENT === "true",
     runToken: source.RUN_TOKEN || undefined,
-    runtimeMcpDirectTools:
-      source.RUNTIME_MCP_DIRECT_TOOLS === "1" || source.RUNTIME_MCP_DIRECT_TOOLS === "true",
   };
 }

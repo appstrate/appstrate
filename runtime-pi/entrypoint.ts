@@ -38,22 +38,68 @@ import { type Api, type Model } from "@mariozechner/pi-ai";
 import {
   PiRunner,
   prepareBundleForPi,
-  buildProviderExtensionFactories,
-  buildRunHistoryExtensionFactory,
   emitRuntimeReady,
   startSinkHeartbeat,
 } from "@appstrate/runner-pi";
-import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
+import {
+  BUNDLE_FORMAT_VERSION,
+  bundleIntegrity,
+  computeRecordEntries,
+  readBundleFromFile,
+  recordIntegrity,
+  serializeRecord,
+  type Bundle,
+  type PackageIdentity,
+} from "@appstrate/afps-runtime/bundle";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
-import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
-import { buildMcpProviderFactories, buildMcpRunHistoryFactory } from "./extensions/mcp-bridge.ts";
 import { buildMcpDirectFactories } from "./extensions/mcp-direct.ts";
+
+/**
+ * Synthesise a Bundle the runner can consume when no `.afps` ships
+ * with the run. The platform pre-installs files into the workspace
+ * directly in that case, so the bundle's content is never re-read —
+ * but PiRunner.run() still wants a Bundle to satisfy the AFPS
+ * Runner contract.
+ */
+function buildInContainerBundle(prompt: string): Bundle {
+  const encoder = new TextEncoder();
+  const manifestBytes = encoder.encode(
+    JSON.stringify({ name: "@appstrate/in-container", version: "0.0.0", type: "agent" }),
+  );
+  const promptBytes = encoder.encode(prompt);
+  const files = new Map<string, Uint8Array>([
+    ["manifest.json", manifestBytes],
+    ["prompt.md", promptBytes],
+  ]);
+  const recordBody = serializeRecord(computeRecordEntries(files));
+  const integrity = recordIntegrity(recordBody);
+  const identity = "@appstrate/in-container@0.0.0" as PackageIdentity;
+  return {
+    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+    root: identity,
+    packages: new Map([
+      [
+        identity,
+        {
+          identity,
+          manifest: { name: "@appstrate/in-container", version: "0.0.0", type: "agent" },
+          files,
+          integrity,
+        },
+      ],
+    ]),
+    integrity: bundleIntegrity(
+      new Map([[identity, { path: "packages/@appstrate/in-container/0.0.0/", integrity }]]),
+    ),
+  };
+}
 
 // Captured as early as possible so the "runtime ready in {N}ms" signal
 // reflects the full bootloader cost (bundle extract, providers wiring,
@@ -239,32 +285,26 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
-// --- 2c. Phase C: wire sidecar-backed tools (providers + run_history) ---
-// Everything that needs to talk to the sidecar is wired here. The agent
-// LLM never sees the sidecar URL — each capability is surfaced as a
-// typed, observable Pi tool:
-//   - `dependencies.providers[]` → `<provider>_call` (e.g.
-//     `appstrate_gmail_call`) via SidecarProviderResolver.
-//   - run history → `run_history` via buildRunHistoryExtensionFactory.
-// Replaces every legacy `curl $SIDECAR_URL/*` pattern documented in older
-// prompts. The sidecar HTTP contract (`/proxy`, `/run-history`) is
-// unchanged — this is a client-surface migration only.
+// --- 2c. Phase C: wire sidecar-backed tools via MCP ---
+// Every sidecar-backed capability is surfaced as a typed Pi tool whose
+// implementation forwards to the sidecar's MCP `tools/call` endpoint:
+//   - `provider_call({ providerId, … })` — credential-injecting proxy.
+//   - `run_history` — recent past-run metadata.
+//   - `llm_complete` — platform-configured LLM passthrough.
+// The agent LLM never sees the sidecar URL; the contract ("agent never
+// talks to the sidecar directly") is enforced via the env-var deletion
+// in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
-// Empty stub used as a final fallback by `runner.run({ providerResolver })`.
-// The real `SidecarProviderResolver` is constructed lazily only when the
-// legacy non-MCP path runs, since the two MCP paths bypass the resolver
-// entirely (provider routing happens in MCP `tools/call` instead).
-let providerResolver: ProviderResolver = { resolve: async () => [] };
+// Empty stub forwarded to `runner.run({ providerResolver })` to satisfy
+// the AFPS spec contract — PiRunner does not invoke the resolver
+// (provider tools are pre-built MCP-backed factories above), but the
+// `RunOptions.providerResolver` field is REQUIRED on the AFPS interface.
+const providerResolver: ProviderResolver = { resolve: async () => [] };
 
-// Phase 2 of #276 — MCP-backed wiring is opt-in via RUNTIME_MCP_CLIENT.
-// When the flag is set, both provider tools and run_history route
-// through the sidecar's `/mcp` endpoint instead of `/proxy` and
-// `/run-history`. Same LLM-facing surface (`<slug>_call`, `run_history`),
-// one wire format underneath. Default OFF until soak completes.
 let mcpClient: AppstrateMcpClient | null = null;
 
-if (sidecarUrl && env.runtimeMcpClient) {
+if (sidecarUrl) {
   try {
     mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
       ...(env.runToken ? { bearerToken: env.runToken } : {}),
@@ -278,107 +318,38 @@ if (sidecarUrl && env.runtimeMcpClient) {
   }
 }
 
-if (bundle && sidecarUrl) {
+if (mcpClient) {
   try {
-    if (mcpClient && env.runtimeMcpDirectTools) {
-      // Phase 5 §D5.3 — LLM sees `provider_call`, `run_history`,
-      // `llm_complete` directly. The single factory call covers all
-      // three tools, so the run_history block below short-circuits.
-      const factories = await buildMcpDirectFactories({
-        bundle,
-        mcp: mcpClient,
-        runId: AGENT_RUN_ID,
-        emitProvider: (event) => {
-          void teeSink.handle(event as RunEvent);
-        },
-        emit: (event) => {
-          void teeSink.handle(event as RunEvent);
-        },
-      });
-      extensionFactories.push(...factories);
-    } else if (mcpClient) {
-      const factories = await buildMcpProviderFactories({
-        bundle,
-        mcp: mcpClient,
-        runId: AGENT_RUN_ID,
-        emitProvider: (event) => {
-          void teeSink.handle(event as RunEvent);
-        },
-      });
-      extensionFactories.push(...factories);
-    } else {
-      // Legacy path — only here do we need the sidecar resolver.
-      providerResolver = new SidecarProviderResolver({ sidecarUrl });
-      const providerFactories = await buildProviderExtensionFactories({
-        bundle,
-        providerResolver,
-        runId: AGENT_RUN_ID,
-        workspace: WORKSPACE,
-        emitProvider: (event) => {
-          // Route provider lifecycle events through the tee sink so the
-          // platform observes each call structurally AND the aggregate
-          // reducer sees every event. Fire-and-forget — HttpSink handles
-          // retries internally.
-          void teeSink.handle(event as RunEvent);
-        },
-      });
-      extensionFactories.push(...providerFactories);
-    }
+    // `buildMcpDirectFactories` registers `provider_call` (only when
+    // the bundle declares providers — empty enum is rejected by the
+    // SDK), `run_history`, and `llm_complete` in one shot. No
+    // pre-existing bundle relies on per-provider alias names — those
+    // were retired together with `mcp-bridge.ts`.
+    const factories = await buildMcpDirectFactories({
+      bundle: bundle ?? buildInContainerBundle(env.agentPrompt),
+      mcp: mcpClient,
+      runId: AGENT_RUN_ID,
+      emitProvider: (event) => {
+        void teeSink.handle(event as RunEvent);
+      },
+      emit: (event) => {
+        void teeSink.handle(event as RunEvent);
+      },
+    });
+    extensionFactories.push(...factories);
   } catch (err) {
     await emitError(
-      `Failed to wire provider tools: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to wire MCP-backed tools: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }
 
-// --- 2d. Phase D: wire run_history tool via the sidecar resolver ---
-// Unlike provider tools, `run_history` does NOT depend on the bundle
-// manifest — it is an intrinsic platform capability available to every
-// agent the moment a sidecar is wired. Declaring it alongside provider
-// tools keeps the sidecar-knowledge blast radius localised to this
-// block of the bootstrap.
-
-// When direct-tools mode is on, `buildMcpDirectFactories` already
-// registered run_history alongside provider_call + llm_complete; skip
-// to avoid a duplicate-name registration crash in Pi.
-if (sidecarUrl && !(mcpClient && env.runtimeMcpDirectTools)) {
-  try {
-    if (mcpClient) {
-      extensionFactories.push(
-        buildMcpRunHistoryFactory({
-          mcp: mcpClient,
-          runId: AGENT_RUN_ID,
-          emit: (event) => {
-            void teeSink.handle(event as RunEvent);
-          },
-        }),
-      );
-    } else {
-      extensionFactories.push(
-        buildRunHistoryExtensionFactory({
-          sidecarUrl,
-          runId: AGENT_RUN_ID,
-          workspace: WORKSPACE,
-          emit: (event) => {
-            void teeSink.handle(event as RunEvent);
-          },
-        }),
-      );
-    }
-  } catch (err) {
-    await emitError(
-      `Failed to wire run_history tool: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-}
-
-// --- 2e. Zero-knowledge enforcement ---
-// The sidecar URL is a runtime implementation detail. Now that every
-// capability that needs it has been wired through typed tools, remove
-// the env var so the Pi bash extension cannot leak it via `echo
-// $SIDECAR_URL` or similar — the contract ("agent never sees the
-// sidecar") is enforced, not documented. Safe: no downstream consumer
-// in this process reads SIDECAR_URL past this point.
+// --- 2d. Zero-knowledge enforcement ---
+// The sidecar URL is a runtime implementation detail. Now that the
+// MCP client owns the only path to the sidecar, remove the env var
+// so the Pi bash extension cannot leak it via `echo $SIDECAR_URL` or
+// similar. Safe: no downstream consumer in this process reads
+// SIDECAR_URL past this point.
 delete process.env.SIDECAR_URL;
 
 // --- 3. Model + system prompt from env ---
@@ -426,51 +397,7 @@ const context: ExecutionContext = {
 // --- 5. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
 // PiRunner needs a Bundle; when no agent-package.afps was present, the
 // platform pre-installed files directly so we hand it a minimal stub
-// whose content is never re-consumed.
-
-import {
-  BUNDLE_FORMAT_VERSION,
-  bundleIntegrity,
-  computeRecordEntries,
-  recordIntegrity,
-  serializeRecord,
-  type Bundle,
-  type PackageIdentity,
-} from "@appstrate/afps-runtime/bundle";
-
-function buildInContainerBundle(prompt: string): Bundle {
-  const encoder = new TextEncoder();
-  const manifestBytes = encoder.encode(
-    JSON.stringify({ name: "@appstrate/in-container", version: "0.0.0", type: "agent" }),
-  );
-  const promptBytes = encoder.encode(prompt);
-  const files = new Map<string, Uint8Array>([
-    ["manifest.json", manifestBytes],
-    ["prompt.md", promptBytes],
-  ]);
-  const recordBody = serializeRecord(computeRecordEntries(files));
-  const integrity = recordIntegrity(recordBody);
-  const identity = "@appstrate/in-container@0.0.0" as PackageIdentity;
-  return {
-    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
-    root: identity,
-    packages: new Map([
-      [
-        identity,
-        {
-          identity,
-          manifest: { name: "@appstrate/in-container", version: "0.0.0", type: "agent" },
-          files,
-          integrity,
-        },
-      ],
-    ]),
-    integrity: bundleIntegrity(
-      new Map([[identity, { path: "packages/@appstrate/in-container/0.0.0/", integrity }]]),
-    ),
-  };
-}
-
+// (built via the same helper used in Phase C).
 const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 
 // --- 6. Signal runtime readiness ---

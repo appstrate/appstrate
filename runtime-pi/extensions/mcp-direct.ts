@@ -1,42 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Direct MCP tool surface for new agent bundles (Phase 5 §D5.3 of #276).
+ * Direct MCP tool surface (the only LLM-facing surface).
  *
- * Two LLM-facing surfaces share the same MCP plumbing — pick whichever
- * matches the bundle's prompt vocabulary:
- *
- * - `mcp-bridge.ts` (legacy / D5.2 alias) — registers one Pi tool per
- *   declared provider as `<slug>_call`, internally calling
- *   `provider_call({ providerId: slug, … })`. Existing bundles refer
- *   to `appstrate_gmail_call`; this path keeps them working.
- * - `mcp-direct.ts` (this file, new / D5.3) — registers the MCP tool
- *   names verbatim. The LLM sees `provider_call({ providerId, … })`,
- *   `run_history(…)`, and `llm_complete(…)` exactly as the sidecar's
- *   `tools/list` advertises them. Matches the MCP ecosystem
- *   convention — Appstrate becomes indistinguishable (LLM-side) from
- *   any other MCP host.
- *
- * Both paths use the same {@link AppstrateMcpClient}; only the Pi-tool
- * registration shape differs. The toggle is the `RUNTIME_MCP_DIRECT_TOOLS`
- * env flag plumbed through `runtime-pi/env.ts`. Default OFF until Phase 6.
+ * Registers `provider_call`, `run_history`, and `llm_complete` as
+ * Pi-SDK tools, each forwarding to the sidecar's MCP `tools/call`
+ * endpoint via {@link AppstrateMcpClient}. The LLM sees the canonical
+ * MCP names verbatim — Appstrate is indistinguishable (LLM-side) from
+ * any other MCP host.
  *
  * What this module deliberately does NOT do:
  *   - Sniff `tools/list` and re-derive the input schema. The schemas
  *     here are pinned to the sidecar's `mountMcp(...)` advertisement
  *     so a divergence between Pi tools and MCP tools is a one-line fix
  *     here, not silent re-validation drift.
- *   - Build the system prompt. Per D5.1 we ship a 3-line capability
- *     prompt fragment via {@link DIRECT_TOOL_PROMPT}; the bundle owner
+ *   - Build the system prompt. We ship a 3-line capability prompt
+ *     fragment via {@link DIRECT_TOOL_PROMPT}; the bundle owner
  *     decides whether to splice it in.
  */
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
 import { readProviderRefs, type ProviderEventEmitter } from "@appstrate/runner-pi";
-import { callToolResultToPi } from "./mcp-result.ts";
+
+// ─── MCP CallToolResult → Pi AgentToolResult adapter ──────────────────
+// Folded in from the prior `./mcp-result.ts` module (single consumer
+// after the alias layer was retired). Pi's `AgentToolResult.content`
+// accepts only `text` and `image` blocks; MCP can also return
+// `resource_link` and inline `resource` blocks, which we render as
+// text pointers ("[resource <uri>]") so the LLM still sees the URI
+// and can request the resource via `resources/read` if it cares.
+
+type PiToolContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+interface PiToolResult {
+  content: PiToolContent[];
+  details: undefined;
+}
+
+function callToolResultToPi(result: CallToolResult): PiToolResult {
+  const content: PiToolContent[] = result.content.map((c) => {
+    if (c.type === "text") return { type: "text", text: c.text };
+    if (c.type === "image") return { type: "image", data: c.data, mimeType: c.mimeType };
+    if (c.type === "resource_link") {
+      return {
+        type: "text",
+        text: `[resource ${c.uri}${c.name ? ` (${c.name})` : ""}]`,
+      };
+    }
+    if (c.type === "resource") {
+      const inner = c.resource;
+      return {
+        type: "text",
+        text: `[resource ${inner.uri}${"text" in inner && inner.text ? `\n${inner.text}` : ""}]`,
+      };
+    }
+    return {
+      type: "text",
+      text: `[unknown content type: ${(c as { type: string }).type}]`,
+    };
+  });
+  return { content, details: undefined };
+}
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 const RUN_HISTORY_TOOL_NAME = "run_history";
