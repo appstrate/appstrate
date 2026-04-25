@@ -67,10 +67,10 @@
  */
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
-import { user as userTable } from "@appstrate/db/schema";
+import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -785,6 +785,141 @@ export async function revokeAllFamiliesForUser(userId: string): Promise<{ revoke
     .set({ revokedAt: new Date(), revokedReason: "user_revoked_all" })
     .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
   return { revokedCount: heads.length };
+}
+
+// ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
+
+/**
+ * Admin-facing variant of {@link CliSessionListEntry}. Carries the
+ * owning member's identity in addition to the session metadata so the
+ * Members tab can render "X's MacBook · last used 3 min ago" without
+ * the dashboard performing a second per-row lookup.
+ */
+export interface AdminCliSessionListEntry extends CliSessionListEntry {
+  userId: string;
+  userEmail: string | null;
+  userName: string | null;
+}
+
+/**
+ * List every active CLI session held by a member of `orgId`. Admin/owner
+ * route visibility — gated by the route layer, not this service.
+ *
+ * Implementation: join `cli_refresh_tokens` heads to `org_members`, then
+ * left-join to `user` for name/email enrichment. Rows are scoped to the
+ * org's roster the moment the query runs — a member who left the org
+ * yesterday no longer appears here, even though their head row remains
+ * present (cascade is on `user`, not `org_members`).
+ *
+ * The shape MIRRORS the user-facing list rather than diverging into a
+ * new contract — admins get the same per-device columns plus owner
+ * identity, so the Members tab can reuse the icon/UA-categorization
+ * helpers built for the personal Devices page.
+ */
+export async function listSessionsForOrg(orgId: string): Promise<AdminCliSessionListEntry[]> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      familyId: cliRefreshToken.familyId,
+      deviceName: cliRefreshToken.deviceName,
+      userAgent: cliRefreshToken.userAgent,
+      createdIp: cliRefreshToken.createdIp,
+      lastUsedIp: cliRefreshToken.lastUsedIp,
+      lastUsedAt: cliRefreshToken.lastUsedAt,
+      createdAt: cliRefreshToken.createdAt,
+      expiresAt: cliRefreshToken.expiresAt,
+      userId: cliRefreshToken.userId,
+      userEmail: userTable.email,
+      userName: userTable.name,
+    })
+    .from(cliRefreshToken)
+    .innerJoin(organizationMembers, eq(organizationMembers.userId, cliRefreshToken.userId))
+    .leftJoin(userTable, eq(userTable.id, cliRefreshToken.userId))
+    .where(
+      and(
+        eq(organizationMembers.orgId, orgId),
+        isNull(cliRefreshToken.parentId),
+        isNull(cliRefreshToken.revokedAt),
+      ),
+    );
+  return rows
+    .filter((r) => r.expiresAt > now)
+    .map((r) => ({
+      familyId: r.familyId,
+      deviceName: r.deviceName,
+      userAgent: r.userAgent,
+      createdIp: r.createdIp,
+      lastUsedIp: r.lastUsedIp,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      current: false,
+      userId: r.userId,
+      userEmail: r.userEmail,
+      userName: r.userName,
+    }))
+    .sort((a, b) => {
+      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
+      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
+      return bTs - aTs;
+    });
+}
+
+/**
+ * Revoke a CLI session on behalf of an org admin. The family must belong
+ * to a CURRENT member of `orgId` — a session whose owner has since left
+ * the org is invisible to admins of that org and cannot be revoked
+ * through this surface (the user themselves still can via the Phase 2
+ * personal endpoints).
+ *
+ * Returns `false` when the family is unknown, doesn't belong to a member
+ * of `orgId`, or is already fully revoked. Reason `org_admin_revoked` is
+ * distinct from the personal `user_revoked` so the audit log can
+ * separate "the user signed their own device out" from "an org admin
+ * forced a member's device out".
+ *
+ * The two-query shape (lookup head → revoke family) is deliberate: a
+ * single UPDATE with the membership join would silently skip the
+ * "already revoked" case without surfacing it to the caller, and we
+ * want the boolean discriminator for the route layer.
+ */
+export async function revokeFamilyForOrgAdmin(params: {
+  orgId: string;
+  familyId: string;
+}): Promise<boolean> {
+  const { orgId, familyId } = params;
+  const [head] = await db
+    .select({
+      userId: cliRefreshToken.userId,
+      revokedAt: cliRefreshToken.revokedAt,
+    })
+    .from(cliRefreshToken)
+    .innerJoin(organizationMembers, eq(organizationMembers.userId, cliRefreshToken.userId))
+    .where(
+      and(
+        eq(cliRefreshToken.familyId, familyId),
+        isNull(cliRefreshToken.parentId),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!head) return false;
+  if (head.revokedAt) return false;
+  await revokeFamily(familyId, "org_admin_revoked");
+  return true;
+}
+
+/**
+ * Test-only export — covers a regression around membership scoping.
+ * Production callers always go through {@link listSessionsForOrg} or
+ * {@link revokeFamilyForOrgAdmin}.
+ */
+export async function _orgMembersUserIdsForTesting(orgId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(inArray(organizationMembers.orgId, [orgId]));
+  return rows.map((r) => r.userId);
 }
 
 async function revokeFamily(familyId: string, reason: string): Promise<void> {

@@ -32,14 +32,17 @@ import { z } from "zod";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
-// Register `oauth-clients` as a module-owned RBAC resource. OAuth client
-// registration / rotation / deletion are admin-tier operations that only
-// matter when this module is loaded — baking them into the core static
-// catalog would leave dead scope strings in every OSS deployment that
-// doesn't expose an OIDC surface.
+// Register module-owned RBAC resources. OAuth client registration /
+// rotation / deletion is admin-tier — bakes the surface into the OIDC
+// admin tooling. CLI sessions covers the Phase 3 admin oversight from
+// issue #251 (read = list every member's active CLI sessions, delete =
+// force a member's device out from the dashboard). Declaring them here
+// instead of in core's static catalog means a deployment that disables
+// the OIDC module ships with zero dead scope strings.
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
     "oauth-clients": "read" | "write" | "delete";
+    "cli-sessions": "read" | "delete";
   }
 }
 import { logger } from "../../lib/logger.ts";
@@ -280,6 +283,20 @@ const oidcModule: AppstrateModule = {
       actions: ["read", "write", "delete"],
       grantTo: ["owner", "admin"],
       apiKeyGrantable: true,
+    },
+    // Issue #251 Phase 3 — admin oversight of org members' CLI sessions.
+    // Owner + admin only; explicitly NOT API-key-grantable (a compromised
+    // key with this scope could sign every member of the org out, which
+    // would be a much wider blast radius than the key holder's intent).
+    // The user-facing personal endpoints under
+    // `/api/auth/cli/sessions/*` are independently reachable by any
+    // member regardless of this scope — those use cookie auth and an
+    // ownership check, not RBAC.
+    {
+      resource: "cli-sessions",
+      actions: ["read", "delete"],
+      grantTo: ["owner", "admin"],
+      apiKeyGrantable: false,
     },
   ],
 

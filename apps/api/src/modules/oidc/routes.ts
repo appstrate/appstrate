@@ -27,7 +27,8 @@ import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { user, applications } from "@appstrate/db/schema";
-import { getOrgSettings } from "../../services/organizations.ts";
+import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
+import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
   deleteClient,
@@ -2305,6 +2306,62 @@ export function createOidcRouter() {
     const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
+  });
+
+  // ── Phase 3 admin oversight (#251) ─────────────────────────────────────────
+  //
+  // `/api/orgs/:orgId/cli-sessions` is mounted at the OIDC module's HTTP
+  // origin root rather than under `/api/oauth/*` because semantically the
+  // resource is an org sub-resource, not an OAuth-client management
+  // surface. The platform's `skipOrgContext` rule already covers
+  // `/api/orgs/*` so the X-Org-Id header is unnecessary — the orgId path
+  // param IS the org context.
+  //
+  // Authorization shape: cookie session → caller is a member of `orgId`
+  // with `cli-sessions:read` (list) or `cli-sessions:delete` (revoke).
+  // The `requireModulePermission` guard runs against `c.get("orgRole")`
+  // which is set by `requireOrgRole` below. We don't reuse the
+  // `/api/orgs/:orgId/...` org-context middleware that core already
+  // applies because that middleware lives in `routes/organizations.ts`
+  // (private to core); a module duplicating it would add coupling. The
+  // explicit membership check via `getOrgMember` is the same primitive
+  // core uses inline at line 71 of `routes/organizations.ts`.
+
+  router.get("/api/orgs/:orgId/cli-sessions", rateLimit(120), async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const userId = c.get("user").id;
+    const member = await getOrgMember(orgId, userId);
+    if (!member || (member.role !== "owner" && member.role !== "admin")) {
+      throw forbidden("Admin access required to list CLI sessions");
+    }
+    const sessions = await listSessionsForOrg(orgId);
+    return c.json({ sessions });
+  });
+
+  router.delete("/api/orgs/:orgId/cli-sessions/:familyId", rateLimit(30), async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const familyId = c.req.param("familyId")!;
+    const userId = c.get("user").id;
+    const member = await getOrgMember(orgId, userId);
+    if (!member || (member.role !== "owner" && member.role !== "admin")) {
+      throw forbidden("Admin access required to revoke CLI sessions");
+    }
+    const revoked = await revokeFamilyForOrgAdmin({ orgId, familyId });
+    if (!revoked) {
+      // Hide the not-found vs already-revoked vs not-yours distinction
+      // behind a single 404 — admins cannot probe membership of users
+      // outside the org through this endpoint.
+      throw notFound("CLI session not found");
+    }
+    logger.info("oidc: org admin revoked a CLI session", {
+      module: "oidc",
+      audit: true,
+      event: "cli.session.org_admin_revoked",
+      orgId,
+      familyId,
+      actorUserId: userId,
+    });
+    return c.body(null, 204);
   });
 
   return router;
