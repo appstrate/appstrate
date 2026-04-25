@@ -270,6 +270,7 @@ const expectedEndpoints = [
 
   // Internal
   "GET /internal/run-history",
+  "GET /internal/memories",
   "GET /internal/credentials/{scope}/{name}",
   "POST /internal/credentials/{scope}/{name}/refresh",
   "POST /internal/connections/report-auth-failure",

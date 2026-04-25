@@ -13,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getCheckpoint, listMemories, scopeFromActor } from "./state/index.ts";
+import { getCheckpoint, listPinnedMemories, scopeFromActor } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
@@ -103,7 +103,9 @@ export async function buildRunContext(params: {
       : agent.source !== "system"
         ? getLatestVersionInfo(agent.id).catch(() => null)
         : null,
-    listMemories(agent.id, applicationId, persistenceScope),
+    // Only pinned memories enter the prompt; archive memories load via the
+    // `recall_memory` tool on demand. See ADR-012.
+    listPinnedMemories(agent.id, applicationId, persistenceScope),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};

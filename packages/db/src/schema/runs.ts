@@ -211,22 +211,27 @@ export const runLogs = pgTable(
 
 /**
  * Unified agent persistence — one row per piece of cross-run state the agent
- * chooses to keep, regardless of its shape. Single store where `scope` is a
- * first-class dimension.
+ * chooses to keep, regardless of its shape. The shape collapses two
+ * orthogonal dimensions instead of an enum (ADR-012):
  *
- * - `kind = 'checkpoint'` — one row per `(package, app, actor)`, upserted
- *   last-write-wins. Used for tactical carry-over like pagination cursors
- *   or "last synced at".
- * - `kind = 'memory'`     — append-only list, bounded at 100 per
- *   `(package, app, actor)` with content capped at 2000 chars. Used for
- *   durable facts — user preferences, API quirks, workflow patterns.
+ * - `key` — nullable string. When set, the row is upsert-by-key (single
+ *   slot per `(package, app, actor, key)`); when null, the row is append-
+ *   only. Today the only named slot is `'checkpoint'`; archive memories
+ *   leave `key` null.
+ * - `pinned` — when true, the row is rendered into the agent's system
+ *   prompt on every run. When false, the row only surfaces if the agent
+ *   calls `recall_memory`. Checkpoints are pinned by default; memories
+ *   default to false.
  *
- * The actor columns mirror the `runs` convention: `actor_type ∈
- * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type = 'shared'`.
- * Headless applications serving many end-users get per-actor isolation by
- * default; OSS single-tenant stacks can opt into shared rows explicitly.
+ * Mapping from the legacy `kind` enum (pre-0011):
+ *   `kind='checkpoint'` ≡ `key='checkpoint'`, `pinned=true`.
+ *   `kind='memory'`     ≡ `key IS NULL`,      `pinned=false`.
  *
- * See `docs/adr/ADR-011-checkpoint-unification.md`.
+ * Actor columns mirror the `runs` convention: `actor_type ∈
+ * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.
+ *
+ * See `docs/adr/ADR-011-checkpoint-unification.md` and
+ * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 export const packagePersistence = pgTable(
   "package_persistence",
@@ -241,7 +246,8 @@ export const packagePersistence = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull().$type<"checkpoint" | "memory">(),
+    key: text("key"),
+    pinned: boolean("pinned").notNull().default(false),
     actorType: text("actor_type").notNull().$type<"user" | "end_user" | "shared">(),
     actorId: text("actor_id"),
     content: jsonb("content").notNull(),
@@ -252,33 +258,30 @@ export const packagePersistence = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    // Upsert target: at most one checkpoint per (package, app, actor).
-    // We index on `COALESCE(actor_id, '__shared__')` rather than the raw
-    // column so the shared bucket (NULL actor_id) compares-equal to
-    // itself: Postgres + PGlite both treat NULLs as DISTINCT by default,
-    // so without the coalesce two `shared` checkpoints for the same
-    // (package, app) would both be inserted. The coalesce works on both
-    // engines, unlike `NULLS NOT DISTINCT` which is Postgres 15+ only.
-    uniqueIndex("pkp_checkpoint_unique")
+    // Upsert target for named slots. The partial WHERE keeps archive rows
+    // (`key IS NULL`) out of the index entirely. COALESCE on actor_id is
+    // load-bearing across PG and PGlite — see migration 0011 for context.
+    uniqueIndex("pkp_key_unique")
       .on(
         table.packageId,
         table.applicationId,
         table.actorType,
         sql`(COALESCE(${table.actorId}, '__shared__'))`,
+        table.key,
       )
-      .where(sql`kind = 'checkpoint'`),
-    // Primary read path: getCheckpoint / listMemories.
+      .where(sql`key IS NOT NULL`),
+    // Primary read paths: getCheckpoint / listMemories / listPinned /
+    // recall_memory all narrow on (package, app, actor) first.
     index("pkp_lookup").on(
       table.packageId,
       table.applicationId,
-      table.kind,
       table.actorType,
       table.actorId,
+      table.key,
+      table.pinned,
     ),
     index("pkp_org").on(table.orgId),
-    check("pkp_kind_valid", sql`kind IN ('checkpoint', 'memory')`),
     check("pkp_actor_type_valid", sql`actor_type IN ('user', 'end_user', 'shared')`),
-    // actor_id NULL iff actor_type = 'shared'.
     check(
       "pkp_actor_id_shape",
       sql`(actor_type = 'shared' AND actor_id IS NULL) OR (actor_type <> 'shared' AND actor_id IS NOT NULL)`,

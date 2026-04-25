@@ -51,6 +51,76 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/memories": {
+    get: {
+      operationId: "recallMemories",
+      tags: ["Internal"],
+      summary: "Recall archive memories",
+      description:
+        "Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "q",
+          in: "query",
+          description:
+            "Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories.",
+          schema: { type: "string" },
+        },
+        {
+          name: "limit",
+          in: "query",
+          description: "Max number of memories to return (1-50, default 10).",
+          schema: { type: "integer", default: 10 },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Recalled memories",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["memories"],
+                properties: {
+                  memories: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["id", "content", "createdAt", "actorType"],
+                      properties: {
+                        id: { type: "integer" },
+                        content: {},
+                        createdAt: { type: "string", format: "date-time" },
+                        actorType: {
+                          type: "string",
+                          enum: ["user", "end_user", "shared"],
+                        },
+                        actorId: { type: ["string", "null"] },
+                      },
+                    },
+                  },
+                },
+              },
+              example: {
+                memories: [
+                  {
+                    id: 42,
+                    content: "User prefers Python over JS for data tasks",
+                    createdAt: "2026-04-20T10:00:00Z",
+                    actorType: "user",
+                    actorId: "usr_abc",
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/internal/credentials/{scope}/{name}": {
     get: {
       operationId: "getProviderCredentials",

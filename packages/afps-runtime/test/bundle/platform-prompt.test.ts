@@ -200,7 +200,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("`set_checkpoint` tool");
   });
 
-  it("renders the Memory section with stored memories", () => {
+  it("renders the Memory section with pinned memories listed", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx({
@@ -211,11 +211,23 @@ describe("renderPlatformPrompt", () => {
       }),
     });
     expect(out).toContain("## Memory");
+    expect(out).toContain("Pinned memories");
     expect(out).toContain("- fact one");
     expect(out).toContain("- fact two");
     expect(out).toContain("`add_memory` tool");
+    expect(out).toContain("recall_memory");
     // Memory section should mention scope-default behaviour.
     expect(out).toMatch(/scope.*"shared"/);
+  });
+
+  it("always emits the Memory section (with archive hint) even when nothing is pinned", () => {
+    // Per ADR-012 the agent always needs to know `recall_memory` exists,
+    // including when no memory is pinned to the prompt yet — otherwise
+    // the LLM has no way to discover it should search the archive.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).toContain("## Memory");
+    expect(out).toContain("No memories are currently pinned");
+    expect(out).toContain("recall_memory");
   });
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {

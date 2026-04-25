@@ -405,10 +405,14 @@ describe("buildEnrichedPrompt — memories", () => {
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("omits memory section when no memories", () => {
+  it("emits memory section even with no memories — surfaces the recall_memory tool to the agent", () => {
+    // ADR-012: the section is always emitted so the LLM discovers
+    // `recall_memory` exists, even before any memory has been pinned.
     const ctx = contextWithSystemTools({ memories: [] });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Memory");
+    expect(prompt).toContain("## Memory");
+    expect(prompt).toContain("No memories are currently pinned");
+    expect(prompt).toContain("recall_memory");
   });
 
   it("includes memories regardless of available tools", () => {

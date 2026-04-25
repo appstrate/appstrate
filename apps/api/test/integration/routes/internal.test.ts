@@ -312,6 +312,161 @@ describe("Internal API", () => {
     });
   });
 
+  // ─── GET /internal/memories ─────────────────────────────────
+
+  describe("GET /internal/memories", () => {
+    it("returns 401 without token", async () => {
+      const res = await app.request("/internal/memories");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns archive memories visible to the run's actor (most recent first)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      // Two archive memories scoped to the running user's actor.
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["archived fact A", "archived fact B"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        memories: { content: string; createdAt: string }[];
+      };
+      expect(body.memories).toHaveLength(2);
+      // ORDER BY createdAt DESC — most recent first.
+      expect(body.memories[0]!.content).toBe("archived fact B");
+      expect(body.memories[1]!.content).toBe("archived fact A");
+    });
+
+    it("excludes pinned memories — they are already in the prompt", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["pinned-only"],
+        runningRunId,
+        { pinned: true },
+      );
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["archive-only"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      expect(body.memories).toHaveLength(1);
+      expect(body.memories[0]!.content).toBe("archive-only");
+    });
+
+    it("filters by `q` substring (case-insensitive)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["User prefers Python", "User likes coffee", "API quirk: 429 on /v1/x"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories?q=python", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      expect(body.memories).toHaveLength(1);
+      expect(body.memories[0]!.content).toBe("User prefers Python");
+    });
+
+    it("respects the `limit` query (capped at 50)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      const contents = Array.from({ length: 12 }, (_, i) => `mem-${i}`);
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        contents,
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories?limit=3", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: unknown[] };
+      expect(body.memories).toHaveLength(3);
+    });
+
+    it("does not leak across actors — the running user does not see another end-user's archive", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: `ext_${Date.now()}_recall`,
+      });
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "end_user", id: eu.id },
+        ["secret end-user memory"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      for (const m of body.memories) {
+        expect(m.content).not.toBe("secret end-user memory");
+      }
+    });
+
+    it("returns 400 when `q` exceeds the per-entry content cap", async () => {
+      const oversized = "a".repeat(2001);
+      const res = await app.request(`/internal/memories?q=${oversized}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("treats an empty `q=` as no filter", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["entry"],
+        runningRunId,
+      );
+      const res = await app.request("/internal/memories?q=", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: unknown[] };
+      expect(body.memories).toHaveLength(1);
+    });
+  });
+
   // ─── GET /internal/credentials/:scope/:name ──────────────────
 
   describe("GET /internal/credentials/:scope/:name", () => {

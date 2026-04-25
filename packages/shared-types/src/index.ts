@@ -363,6 +363,12 @@ export interface AgentMemoryItem {
   actorType?: PersistenceActorType;
   /** Actor identifier. NULL when `actorType === "shared"`. */
   actorId?: string | null;
+  /**
+   * When true, this memory is rendered into the system prompt on every
+   * run (working set). When false, it lives in the archive and is only
+   * reachable via the `recall_memory` tool. See ADR-012.
+   */
+  pinned?: boolean;
   createdAt: string | null;
 }
 

@@ -329,21 +329,31 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   }
 
   // --- Memory ---
+  // Two tiers (ADR-012):
+  //   - Pinned memories (rendered here)  → working set, always visible.
+  //   - Archive memories (NOT rendered) → reachable via `recall_memory`.
+  // We always emit the section so the agent knows the archive exists,
+  // even when no memories are pinned yet.
+  sections.push("## Memory\n");
   if (context.memories && context.memories.length > 0) {
-    sections.push("## Memory\n");
-    sections.push("This agent has accumulated the following memories from previous runs:\n");
+    sections.push("Pinned memories (always visible across runs):\n");
     for (const mem of context.memories) {
       const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
       sections.push(`- ${mem.content}${date}`);
     }
-    sections.push(
-      "\nTo add new memories, use the `add_memory` tool. " +
-        "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
-        'By default memories are scoped to the current actor; pass `scope: "shared"` ' +
-        "to make a memory app-wide (visible to every actor of this app). " +
-        "Use `set_checkpoint` for structured data needed for the next run.\n",
-    );
+    sections.push("");
+  } else {
+    sections.push("No memories are currently pinned to this prompt.\n");
   }
+  sections.push(
+    "To save a new memory, use the `add_memory` tool — it goes to the **archive** by " +
+      "default (not visible in this prompt on future runs). " +
+      "To search the archive, call `recall_memory({ q?, limit? })`: pass `q` to filter by " +
+      "case-insensitive substring, omit it for the most recent entries. " +
+      'By default memories are scoped to the current actor; pass `scope: "shared"` on ' +
+      "`add_memory` to make a memory app-wide. Use `set_checkpoint` for the " +
+      "single carry-over slot needed by the next run.\n",
+  );
 
   // --- Output format ---
   // Rendered LAST so the constraint is freshly in the LLM's context when

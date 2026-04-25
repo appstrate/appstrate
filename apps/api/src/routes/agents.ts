@@ -326,6 +326,7 @@ export function createAgentsRouter() {
               runId: m.runId,
               actorType: m.actorType,
               actorId: m.actorId,
+              pinned: m.pinned,
               createdAt: m.createdAt?.toISOString() ?? null,
             }))
           : undefined,

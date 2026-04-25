@@ -14,6 +14,13 @@ import {
   RUN_HISTORY_FIELDS,
   type RunHistoryField,
 } from "../services/state/index.ts";
+import {
+  recallMemories,
+  RECALL_LIMIT_DEFAULT,
+  RECALL_LIMIT_MAX,
+  scopeFromActor,
+  MAX_MEMORY_CONTENT,
+} from "../services/state/package-persistence.ts";
 import { getPackage } from "../services/agent-service.ts";
 import {
   resolveCredentialsForProxy,
@@ -189,6 +196,55 @@ export function createInternalRouter() {
       return c.json({ runs: recentRuns });
     } catch (err) {
       logger.error("Failed to fetch run history", {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw internalError();
+    }
+  });
+
+  // GET /internal/memories — backs the agent-facing `recall_memory` MCP
+  // tool. Returns archive (pinned=false) memories visible to the run's
+  // actor, optionally filtered by an ILIKE substring match. Pinned
+  // memories are NOT returned here — they're already in the system prompt.
+  router.get("/memories", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+
+    const queryRaw = c.req.query("q");
+    const query = queryRaw && queryRaw.trim().length > 0 ? queryRaw.trim() : undefined;
+    if (query !== undefined && query.length > MAX_MEMORY_CONTENT) {
+      throw invalidRequest(`Query too long (max ${MAX_MEMORY_CONTENT} chars).`, "q");
+    }
+
+    const limitParam = c.req.query("limit");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(RECALL_LIMIT_MAX)
+      .catch(RECALL_LIMIT_DEFAULT)
+      .parse(limitParam ?? RECALL_LIMIT_DEFAULT);
+
+    try {
+      const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
+      const memories = await recallMemories(
+        run.packageId,
+        run.applicationId,
+        scopeFromActor(actor),
+        { ...(query !== undefined ? { query } : {}), limit },
+      );
+
+      return c.json({
+        memories: memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          createdAt: m.createdAt.toISOString(),
+          actorType: m.actorType,
+          actorId: m.actorId,
+        })),
+      });
+    } catch (err) {
+      logger.error("Failed to recall memories", {
         runId,
         error: err instanceof Error ? err.message : String(err),
       });

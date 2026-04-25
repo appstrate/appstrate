@@ -1,27 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified persistence service — one store for both agent primitives
- * (`checkpoint` overwrite-latest + `memory` append-list) with scope
- * (user / end_user / shared) as a first-class dimension.
+ * Unified persistence service — one store covering both agent primitives:
  *
- * See `docs/adr/ADR-011-checkpoint-unification.md` for the design.
+ * - Checkpoints   = `key='checkpoint'`, `pinned=true`     (single slot, upsert)
+ * - Pinned memos  = `key IS NULL`,      `pinned=true`     (rendered in prompt)
+ * - Archive memos = `key IS NULL`,      `pinned=false`    (recall_memory only)
  *
- * Storage-layer vocabulary note: the `actor_type` column uses `"user"`
- * (matching the `@afps-spec/schema` wire format), while the in-process
- * `Actor` type (`@appstrate/connect`) uses `"member"` for dashboard users.
- * This module speaks `Actor` at its public boundary and translates at
- * the DB boundary — callers never see `"user"` vs `"member"` divergence.
+ * `key`/`pinned` are orthogonal storage attributes; the agent-facing AFPS
+ * tools (`set_checkpoint`, `add_memory`) wrap them so external runners
+ * never see this column shape.
+ *
+ * Storage-vocabulary note: `actor_type='user'` matches the `@afps-spec/schema`
+ * wire format, while the in-process `Actor` type (`@appstrate/connect`) uses
+ * `'member'` for dashboard users. This module speaks `Actor` at its public
+ * boundary and translates at the DB boundary.
+ *
+ * See `docs/adr/ADR-011-checkpoint-unification.md` and
+ * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 
-import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 
-// Per-entry char cap and per-scope row cap.
+// Per-entry char cap and per-scope row cap (archive memories only;
+// pinned/checkpoint paths cap differently because they are bounded by
+// design — at most one checkpoint, and pinned memories are written by
+// admins or future tooling, not by agent loops).
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_SCOPE = 100;
+
+/** Storage key used by the `set_checkpoint` shortcut. */
+const CHECKPOINT_KEY = "checkpoint";
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
@@ -40,6 +52,7 @@ export interface Memory {
   content: unknown;
   runId: string | null;
   createdAt: Date;
+  pinned: boolean;
   actorType: "user" | "end_user" | "shared";
   actorId: string | null;
 }
@@ -71,8 +84,6 @@ function storageActor(scope: PersistenceScope): {
  * scope. Encapsulates the `shared` ↔ `(actor_type, actor_id)` translation
  * so every read/write path uses the exact same predicate (a divergence
  * here would silently leak rows across actors).
- *
- * Returns a Drizzle SQL expression suitable for `and(...)` composition.
  */
 function buildScopeFilter(scope: PersistenceScope) {
   const { actorType, actorId } = storageActor(scope);
@@ -82,10 +93,25 @@ function buildScopeFilter(scope: PersistenceScope) {
 }
 
 /**
+ * Visibility filter: shared rows always visible + actor-specific rows for
+ * this exact actor. Used by every read path that must NOT leak across
+ * actors. Pure scheduler/system runs (`scope.type === 'shared'`) collapse
+ * to the shared bucket only.
+ */
+function buildVisibilityFilter(scope: PersistenceScope) {
+  const { actorType, actorId } = storageActor(scope);
+  if (actorType === "shared") {
+    return and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId));
+  }
+  return or(
+    and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId)),
+    and(eq(packagePersistence.actorType, actorType), eq(packagePersistence.actorId, actorId!)),
+  );
+}
+
+/**
  * Narrow an `Actor` (platform convention) into a `PersistenceScope`. Passing
- * `null` is the "scheduled / system run" path — maps to `shared`. This is the
- * adapter every caller should use: `Actor` flows through the app; scope stays
- * internal to the storage layer.
+ * `null` is the "scheduled / system run" path — maps to `shared`.
  */
 export function scopeFromActor(actor: Actor | null): PersistenceScope {
   if (!actor) return { type: "shared" };
@@ -109,7 +135,6 @@ export async function getCheckpoint(
 ): Promise<unknown | null> {
   const { actorType, actorId } = storageActor(scope);
 
-  // Primary: actor-specific row.
   if (actorType !== "shared") {
     const [row] = await db
       .select({ content: packagePersistence.content })
@@ -118,7 +143,7 @@ export async function getCheckpoint(
         and(
           eq(packagePersistence.packageId, packageId),
           eq(packagePersistence.applicationId, applicationId),
-          eq(packagePersistence.kind, "checkpoint"),
+          eq(packagePersistence.key, CHECKPOINT_KEY),
           eq(packagePersistence.actorType, actorType),
           eq(packagePersistence.actorId, actorId!),
         ),
@@ -127,7 +152,6 @@ export async function getCheckpoint(
     if (row) return row.content ?? null;
   }
 
-  // Fallback: shared checkpoint.
   const [shared] = await db
     .select({ content: packagePersistence.content })
     .from(packagePersistence)
@@ -135,7 +159,7 @@ export async function getCheckpoint(
       and(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "checkpoint"),
+        eq(packagePersistence.key, CHECKPOINT_KEY),
         eq(packagePersistence.actorType, "shared"),
         isNull(packagePersistence.actorId),
       ),
@@ -146,15 +170,10 @@ export async function getCheckpoint(
 
 /**
  * Overwrite the checkpoint for a given scope. Targets the partial unique
- * index `pkp_checkpoint_unique` (WHERE kind='checkpoint') whose key is
- * `(package_id, application_id, actor_type, COALESCE(actor_id, '__shared__'))`.
- * The COALESCE replaces a Postgres-15-only `NULLS NOT DISTINCT` clause so
- * the same migration runs cleanly on PGlite (Tier 0).
- *
- * We hand-roll the SQL because drizzle's `onConflictDoUpdate` does not
- * support specifying the predicate of a partial unique index, nor an
- * expression-based conflict target. The `ON CONFLICT` columns/expression
- * here MUST match the index definition byte-for-byte.
+ * index `pkp_key_unique` (WHERE key IS NOT NULL). Hand-rolled SQL because
+ * Drizzle's `onConflictDoUpdate` doesn't support specifying an
+ * expression-based conflict target, and the `ON CONFLICT` columns must
+ * match the index byte-for-byte.
  */
 export async function upsertCheckpoint(
   packageId: string,
@@ -165,20 +184,14 @@ export async function upsertCheckpoint(
   runId: string | null,
 ): Promise<void> {
   const { actorType, actorId } = storageActor(scope);
-  // jsonb expects valid JSON — sql.identifier paths aren't enough; we
-  // bind via Drizzle's parameterised sql. Timestamps go through `NOW()`
-  // because the `postgres.js` driver does not bind native `Date` objects
-  // for raw `db.execute(sql\`…\`)` queries (no column-type metadata to
-  // serialise against), and the column's `DEFAULT NOW()` is what every
-  // other path uses anyway.
   const contentJson = sql`${JSON.stringify(content ?? null)}::jsonb`;
 
   await db.execute(sql`
     INSERT INTO ${packagePersistence}
-      (package_id, application_id, org_id, kind, actor_type, actor_id, content, run_id, created_at, updated_at)
+      (package_id, application_id, org_id, key, pinned, actor_type, actor_id, content, run_id, created_at, updated_at)
     VALUES
-      (${packageId}, ${applicationId}, ${orgId}, 'checkpoint', ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
-    ON CONFLICT (package_id, application_id, actor_type, (COALESCE(actor_id, '__shared__'))) WHERE kind = 'checkpoint'
+      (${packageId}, ${applicationId}, ${orgId}, ${CHECKPOINT_KEY}, true, ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
+    ON CONFLICT (package_id, application_id, actor_type, (COALESCE(actor_id, '__shared__')), key) WHERE key IS NOT NULL
     DO UPDATE SET
       content    = EXCLUDED.content,
       run_id     = EXCLUDED.run_id,
@@ -186,7 +199,7 @@ export async function upsertCheckpoint(
   `);
 }
 
-/** Delete a single checkpoint by id, scoped to (package, app). Returns true if a row was deleted. */
+/** Delete a single checkpoint row by id, scoped to (package, app). */
 export async function deleteCheckpointById(
   id: number,
   packageId: string,
@@ -199,14 +212,14 @@ export async function deleteCheckpointById(
         eq(packagePersistence.id, id),
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "checkpoint"),
+        eq(packagePersistence.key, CHECKPOINT_KEY),
       ),
     )
     .returning({ id: packagePersistence.id });
   return deleted.length > 0;
 }
 
-/** Delete the checkpoint row for a specific scope. Returns true if a row was deleted. */
+/** Delete the checkpoint row for a specific scope. */
 export async function deleteCheckpoint(
   packageId: string,
   applicationId: string,
@@ -218,7 +231,7 @@ export async function deleteCheckpoint(
       and(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "checkpoint"),
+        eq(packagePersistence.key, CHECKPOINT_KEY),
         buildScopeFilter(scope),
       ),
     )
@@ -226,90 +239,16 @@ export async function deleteCheckpoint(
   return deleted.length > 0;
 }
 
-// --- Memories ---------------------------------------------------------------
-
 /**
- * Read the memory list visible to a scope — union of shared rows + rows
- * scoped to this exact actor, sorted createdAt ASC for prompt stability
- * (oldest first).
- */
-export async function listMemories(
-  packageId: string,
-  applicationId: string,
-  scope: PersistenceScope,
-  runId?: string,
-): Promise<Memory[]> {
-  const { actorType, actorId } = storageActor(scope);
-
-  // Shared rows are always visible; actor-specific rows only for this actor.
-  const scopeFilter =
-    actorType === "shared"
-      ? // Scheduled / system runs see `shared` only. They never read another
-        // actor's memories — cross-actor leakage is prevented here.
-        and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
-      : or(
-          and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId)),
-          and(
-            eq(packagePersistence.actorType, actorType),
-            eq(packagePersistence.actorId, actorId!),
-          ),
-        );
-
-  const rows = await db
-    .select({
-      id: packagePersistence.id,
-      content: packagePersistence.content,
-      runId: packagePersistence.runId,
-      createdAt: packagePersistence.createdAt,
-      actorType: packagePersistence.actorType,
-      actorId: packagePersistence.actorId,
-    })
-    .from(packagePersistence)
-    .where(
-      and(
-        eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "memory"),
-        scopeFilter!,
-        ...(runId ? [eq(packagePersistence.runId, runId)] : []),
-      ),
-    )
-    .orderBy(asc(packagePersistence.createdAt));
-
-  return rows as Memory[];
-}
-
-/**
- * List every checkpoint row for an agent.
- *
- * Scoping mirrors {@link listMemories}: `shared` rows are always visible,
- * actor-specific rows only when they match the caller's scope. Passing
- * `scope: undefined` means "no filter" — admin paths can use that to inspect
- * checkpoints across every actor.
- *
- * Sorted by `updatedAt DESC` so the most recently checkpointed scope shows
- * up first in admin listings.
+ * List every checkpoint row for an agent. Passing `scope: undefined` skips
+ * the visibility filter — admin paths use that to inspect checkpoints
+ * across every actor.
  */
 export async function listCheckpoints(
   packageId: string,
   applicationId: string,
   scope?: PersistenceScope,
 ): Promise<CheckpointRow[]> {
-  let scopeFilter;
-  if (scope) {
-    const { actorType, actorId } = storageActor(scope);
-    scopeFilter =
-      actorType === "shared"
-        ? and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId))
-        : or(
-            and(eq(packagePersistence.actorType, "shared"), isNull(packagePersistence.actorId)),
-            and(
-              eq(packagePersistence.actorType, actorType),
-              eq(packagePersistence.actorId, actorId!),
-            ),
-          );
-  }
-
   const rows = await db
     .select({
       id: packagePersistence.id,
@@ -325,8 +264,8 @@ export async function listCheckpoints(
       and(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "checkpoint"),
-        ...(scopeFilter ? [scopeFilter] : []),
+        eq(packagePersistence.key, CHECKPOINT_KEY),
+        ...(scope ? [buildVisibilityFilter(scope)!] : []),
       ),
     )
     .orderBy(desc(packagePersistence.updatedAt));
@@ -334,10 +273,144 @@ export async function listCheckpoints(
   return rows as CheckpointRow[];
 }
 
+// --- Memories ---------------------------------------------------------------
+
 /**
- * Append memories for a scope, bounded at {@link MAX_MEMORIES_PER_SCOPE}
- * per `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
- * characters per entry. Returns the count actually inserted.
+ * Read every memory visible to a scope. Includes both pinned + archive
+ * rows — the UI tab uses this to show all memories regardless of
+ * visibility tier. The agent's prompt path uses {@link listPinnedMemories}
+ * instead.
+ */
+export async function listMemories(
+  packageId: string,
+  applicationId: string,
+  scope: PersistenceScope,
+  runId?: string,
+): Promise<Memory[]> {
+  const rows = await db
+    .select({
+      id: packagePersistence.id,
+      content: packagePersistence.content,
+      runId: packagePersistence.runId,
+      createdAt: packagePersistence.createdAt,
+      pinned: packagePersistence.pinned,
+      actorType: packagePersistence.actorType,
+      actorId: packagePersistence.actorId,
+    })
+    .from(packagePersistence)
+    .where(
+      and(
+        eq(packagePersistence.packageId, packageId),
+        eq(packagePersistence.applicationId, applicationId),
+        isNull(packagePersistence.key),
+        buildVisibilityFilter(scope)!,
+        ...(runId ? [eq(packagePersistence.runId, runId)] : []),
+      ),
+    )
+    .orderBy(asc(packagePersistence.createdAt));
+
+  return rows as Memory[];
+}
+
+/**
+ * Pinned memories — always rendered into the agent's system prompt.
+ * Today no agent path writes these (default pinned=false on add_memory);
+ * the function exists so the prompt builder reads from a single,
+ * intentional source instead of slicing `listMemories`.
+ */
+export async function listPinnedMemories(
+  packageId: string,
+  applicationId: string,
+  scope: PersistenceScope,
+): Promise<Memory[]> {
+  const rows = await db
+    .select({
+      id: packagePersistence.id,
+      content: packagePersistence.content,
+      runId: packagePersistence.runId,
+      createdAt: packagePersistence.createdAt,
+      pinned: packagePersistence.pinned,
+      actorType: packagePersistence.actorType,
+      actorId: packagePersistence.actorId,
+    })
+    .from(packagePersistence)
+    .where(
+      and(
+        eq(packagePersistence.packageId, packageId),
+        eq(packagePersistence.applicationId, applicationId),
+        isNull(packagePersistence.key),
+        eq(packagePersistence.pinned, true),
+        buildVisibilityFilter(scope)!,
+      ),
+    )
+    .orderBy(asc(packagePersistence.createdAt));
+
+  return rows as Memory[];
+}
+
+/**
+ * Archive recall — backs the agent-facing `recall_memory` MCP tool.
+ *
+ * Returns archive memories (`pinned=false`) visible to the scope, optionally
+ * narrowed by an ILIKE substring match on text content. This is intentionally
+ * a flat substring search, not vector retrieval — see ADR-012 for why we
+ * draw the line here. JSON content (non-string) is excluded from `query`
+ * filtering since the index isn't text-typed; pass no query to get all
+ * archive rows.
+ *
+ * Sorted `createdAt DESC` so the agent sees the most recent learnings
+ * first; capped at `RECALL_LIMIT_MAX` (50) to bound the prompt-injection
+ * cost when an agent passes a runaway limit.
+ */
+export const RECALL_LIMIT_DEFAULT = 10;
+export const RECALL_LIMIT_MAX = 50;
+
+export async function recallMemories(
+  packageId: string,
+  applicationId: string,
+  scope: PersistenceScope,
+  opts: { query?: string; limit?: number } = {},
+): Promise<Memory[]> {
+  const limit = Math.max(1, Math.min(opts.limit ?? RECALL_LIMIT_DEFAULT, RECALL_LIMIT_MAX));
+
+  const conditions = [
+    eq(packagePersistence.packageId, packageId),
+    eq(packagePersistence.applicationId, applicationId),
+    isNull(packagePersistence.key),
+    eq(packagePersistence.pinned, false),
+    buildVisibilityFilter(scope)!,
+  ];
+  if (opts.query && opts.query.trim().length > 0) {
+    // jsonb stringified for ILIKE: matches both string and structured
+    // content without a separate index. Cheap on the modest row counts
+    // we cap memories at; replace with FTS / pgvector if cardinality grows.
+    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${opts.query.trim()}%`));
+  }
+
+  const rows = await db
+    .select({
+      id: packagePersistence.id,
+      content: packagePersistence.content,
+      runId: packagePersistence.runId,
+      createdAt: packagePersistence.createdAt,
+      pinned: packagePersistence.pinned,
+      actorType: packagePersistence.actorType,
+      actorId: packagePersistence.actorId,
+    })
+    .from(packagePersistence)
+    .where(and(...conditions))
+    .orderBy(desc(packagePersistence.createdAt), desc(packagePersistence.id))
+    .limit(limit);
+
+  return rows as Memory[];
+}
+
+/**
+ * Append memories for a scope. Defaults to `pinned=false` (archive tier);
+ * the AFPS `add_memory` tool has no pinning parameter so every agent-
+ * written memory lands in the archive. Bounded at
+ * {@link MAX_MEMORIES_PER_SCOPE} per `(package, app, scope)` and trimmed
+ * to {@link MAX_MEMORY_CONTENT} characters per entry.
  */
 export async function addMemories(
   packageId: string,
@@ -346,8 +419,10 @@ export async function addMemories(
   scope: PersistenceScope,
   contents: unknown[],
   runId: string | null,
+  opts: { pinned?: boolean } = {},
 ): Promise<number> {
   if (contents.length === 0) return 0;
+  const pinned = opts.pinned ?? false;
 
   const { actorType, actorId } = storageActor(scope);
 
@@ -358,7 +433,7 @@ export async function addMemories(
       and(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "memory"),
+        isNull(packagePersistence.key),
         buildScopeFilter(scope),
       ),
     );
@@ -370,7 +445,8 @@ export async function addMemories(
     packageId,
     applicationId,
     orgId,
-    kind: "memory" as const,
+    key: null,
+    pinned,
     actorType,
     actorId,
     content:
@@ -389,7 +465,7 @@ export async function addMemories(
   return inserted.length;
 }
 
-/** Delete a single memory by id, scoped to (package, app). Returns true if a row was deleted. */
+/** Delete a single memory by id, scoped to (package, app). */
 export async function deleteMemory(
   id: number,
   packageId: string,
@@ -402,7 +478,7 @@ export async function deleteMemory(
         eq(packagePersistence.id, id),
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.kind, "memory"),
+        isNull(packagePersistence.key),
       ),
     )
     .returning({ id: packagePersistence.id });
@@ -422,7 +498,7 @@ export async function deleteAllMemories(
   const baseWhere = and(
     eq(packagePersistence.packageId, packageId),
     eq(packagePersistence.applicationId, applicationId),
-    eq(packagePersistence.kind, "memory"),
+    isNull(packagePersistence.key),
     ...(scope ? [buildScopeFilter(scope)] : []),
   );
 
