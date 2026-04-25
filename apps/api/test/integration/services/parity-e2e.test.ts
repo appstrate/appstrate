@@ -19,7 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
+import { AggregatingEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
@@ -46,7 +46,7 @@ describe("Parity E2E — full adapter stack", () => {
     runId = run.id;
   });
 
-  it("inline executor loop → AppstrateEventSink produces the same RunResult as reduceEvents", async () => {
+  it("inline executor loop → AggregatingEventSink produces the same RunResult as reduceEvents", async () => {
     const script: RunEvent[] = [
       {
         type: "appstrate.progress",
@@ -67,7 +67,7 @@ describe("Parity E2E — full adapter stack", () => {
       { type: "report.appended", timestamp: Date.now(), runId, content: "work done" },
     ];
 
-    const sink = new AppstrateEventSink({
+    const sink = new AggregatingEventSink({
       scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       runId,
     });
@@ -86,11 +86,13 @@ describe("Parity E2E — full adapter stack", () => {
     // external runtime consumer would get from reducing the same event stream.
     expect(sink.result).toEqual(result);
 
-    // Sink aggregate projects the runtime snapshot into DB-friendly shapes.
-    expect(sink.current.output).toEqual({ deliverable: "shipped" });
-    expect(sink.current.state).toEqual({ counter: 7 });
-    expect(sink.current.memories).toEqual(["learned A", "learned B"]);
-    expect(sink.current.report).toBe("work done");
+    // Live snapshot exposes the runtime reducer's RunResult directly —
+    // no platform projection.
+    const snap = sink.snapshot();
+    expect(snap.output).toEqual({ deliverable: "shipped" });
+    expect(snap.state).toEqual({ counter: 7 });
+    expect(snap.memories).toEqual([{ content: "learned A" }, { content: "learned B" }]);
+    expect(snap.report).toBe("work done");
 
     // DB side-effect: run_logs received one row per observable event
     // (output + report + progress).

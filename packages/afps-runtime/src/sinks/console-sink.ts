@@ -69,8 +69,14 @@ export class ConsoleSink implements EventSink {
           return `${seq} → ${canonical.message}`;
         case "appstrate.error":
           return `${seq} ✗ ${canonical.message}`;
-        case "appstrate.metric":
-          return `${seq} ⊘ metric: ${truncate(safeStringify(canonical.data ?? {}), 200)}`;
+        case "appstrate.metric": {
+          const summary = {
+            ...(canonical.usage !== undefined ? { usage: canonical.usage } : {}),
+            ...(canonical.cost !== undefined ? { cost: canonical.cost } : {}),
+            ...(canonical.durationMs !== undefined ? { durationMs: canonical.durationMs } : {}),
+          };
+          return `${seq} ⊘ metric: ${truncate(safeStringify(summary), 200)}`;
+        }
         default: {
           const _exhaustive: never = canonical;
           void _exhaustive;

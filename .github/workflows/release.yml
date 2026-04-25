@@ -173,8 +173,13 @@ jobs:
       - name: Compile CLI binary
         working-directory: apps/cli
         run: |
+          # `--define '__APPSTRATE_INSTALL_SOURCE__="curl"'` stamps the
+          # binary as the curl-channel artefact at build time. See
+          # `src/lib/install-source.ts` and issue #249. Source/dev builds
+          # leave the identifier undefined and resolve to "unknown".
           bun build --compile \
             --target=${{ matrix.target }} \
+            --define '__APPSTRATE_INSTALL_SOURCE__="curl"' \
             src/cli.ts \
             --outfile=${{ matrix.asset }}
 

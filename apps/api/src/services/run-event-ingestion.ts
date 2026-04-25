@@ -33,10 +33,9 @@ import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
-  AppstrateEventSink,
-  appendRunnerLedgerRow,
-  sumRunnerCost,
-  SYNTHESISED_RUNNER_LEDGER_SEQUENCE,
+  PersistingEventSink,
+  hasRunnerLedgerRow,
+  writeRunnerLedgerRow,
 } from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import { addPackageMemories } from "./state/package-memories.ts";
@@ -269,18 +268,18 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   const resultToPersist =
     Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;
 
-  // 4b. Synthesise the runner-source ledger row from `result.cost` when
-  //     the `appstrate.metric` event never landed (e.g. process exited
-  //     before the fire-and-forget POST resolved). Idempotent: if the
-  //     metric did land first, the runner ledger sum is already non-zero
-  //     and we skip — its real row already accounts for the cost. The
-  //     synthetic row uses `SYNTHESISED_RUNNER_LEDGER_SEQUENCE` (= 0) so
-  //     it cannot collide with real metric sequences (≥ 1).
+  // 4b. Write the runner-source ledger row from `result.cost` when the
+  //     `appstrate.metric` event never landed (e.g. process exited
+  //     before the fire-and-forget POST resolved). The metric handler
+  //     and this fallback both target the same partial unique index
+  //     (run_id WHERE source='runner'); whichever lands first owns the
+  //     row, the other is a no-op via ON CONFLICT DO NOTHING. The
+  //     pre-check avoids an insert attempt when we already know the
+  //     row is there.
   if (typeof result.cost === "number" && result.cost > 0) {
-    const existing = await sumRunnerCost(run.id);
-    if (existing === 0) {
-      await appendRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-        sequence: SYNTHESISED_RUNNER_LEDGER_SEQUENCE,
+    const alreadyWritten = await hasRunnerLedgerRow(run.id);
+    if (!alreadyWritten) {
+      await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
         cost: result.cost,
         usage: result.usage ?? null,
       });
@@ -470,15 +469,12 @@ async function persistEventAndAdvance(
 ): Promise<void> {
   // Dispatch first; advance the counter only on success so a crashing handler
   // lets the same event retry (deduped via replay cache if already acked).
-  const sink = new AppstrateEventSink({
+  const sink = new PersistingEventSink({
     scope: { orgId: run.orgId, applicationId: run.applicationId },
     runId: run.id,
-    // Ingestion never reads `sink.current` / `sink.result` — the reducer
-    // would be built and thrown away for every event. Skip it.
-    persistOnly: true,
-    // Carry the envelope sequence so runner-source ledger rows can dedup
-    // on `(run_id, sequence)` under envelope replay.
-    sequence,
+    // The metric event handler is one of the two writers of the
+    // runner-source ledger row (the other is the finalize fallback).
+    writeLedger: true,
   });
   await sink.handle(event);
 

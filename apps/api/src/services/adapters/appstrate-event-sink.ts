@@ -1,18 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} — composition of the runtime
- * reducer (source of truth for canonical AFPS aggregation) with a
- * platform write-through that persists `run_logs`, snapshots token
- * usage onto the run row, and appends cost to the unified `llm_usage`
- * ledger.
+ * Appstrate-backed {@link EventSink} implementations — composition of
+ * the runtime reducer (source of truth for canonical AFPS aggregation)
+ * with a platform write-through that persists `run_logs`, snapshots
+ * token usage onto the run row, and appends cost to the unified
+ * `llm_usage` ledger.
  *
- * Event routing:
+ * Two flavours, no flags:
  *
- *   AFPS canonical (reserved domains) → reducer snapshot:
+ *   {@link PersistingEventSink} — fan-out only. Used by the ingestion
+ *     hot path: each request rebuilds one sink, calls `handle()`, and
+ *     drops it. No reducer is constructed, no in-memory state is kept.
+ *
+ *   {@link AggregatingEventSink} — long-lived sink for parity tests
+ *     and in-process runners that read back `snapshot()` / `result`
+ *     between events. Wraps {@link PersistingEventSink} and feeds the
+ *     same events into a runtime reducer + token/cost accumulators.
+ *
+ * Splitting the two eliminates the previous `persistOnly` flag whose
+ * `current` getter threw — every method on every public surface is now
+ * total. Liskov substitution: an `AggregatingEventSink` is a
+ * `PersistingEventSink` with extra read-back capabilities, never less.
+ *
+ * Event routing (identical for both sinks):
+ *
+ *   AFPS canonical (reserved domains) → reducer snapshot (aggregating only):
  *     memory.added / state.set / output.emitted / report.appended / log.written
  *
- *   Platform write-through (always, independent of reducer):
+ *   Platform write-through (always, both sinks):
  *     output.emitted  → run_logs (result/output)
  *     report.appended → run_logs (result/report)
  *     log.written     → run_logs (progress/progress) with level
@@ -24,13 +40,9 @@
  *                         + llm_usage ledger row (source="runner")
  *
  * `runs.cost` is NEVER written here — it is the cached aggregate written
- * exactly once by `finalizeRun`. This sink is the single writer of the
- * `llm_usage` runner rows and the single reader/writer of
+ * exactly once by `finalizeRun`. These sinks are the single writer of
+ * the `llm_usage` runner rows and the single reader/writer of
  * `runs.tokenUsage`.
- *
- * The sink performs NO status update, NO webhook dispatch, and NO
- * post-run metadata collection — those remain the route handler's
- * responsibility.
  */
 
 import { createReducerSink, type ReducerSinkHandle } from "@appstrate/afps-runtime/sinks";
@@ -38,7 +50,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import type { AppScope } from "../../lib/scope.ts";
@@ -46,72 +58,60 @@ import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import type { TokenUsage } from "./types.ts";
 
-/**
- * Platform-facing projection of the runtime {@link RunResult} + the
- * platform-specific accumulators. Shapes match the DB persistence
- * expectations (memories as `string[]`, state/output as plain objects,
- * report as string, never null).
- */
-export interface AggregatedRunState {
-  /** Latest `output.emitted` object payload (replaces previous). Non-object payloads project to `{}`. */
-  output: Record<string, unknown>;
-  /** Last object `state.set` payload. `null` if never set or set to non-object. */
-  state: Record<string, unknown> | null;
-  /** All `memory.added` contents projected from the reducer, in arrival order. */
-  memories: string[];
-  /** Concatenated `report.appended` contents (runtime-canonical `\n` separator). */
-  report: string;
-  /** Accumulated token usage from `appstrate.metric` events. */
-  usage: TokenUsage;
-  /** Accumulated cost (USD) from `appstrate.metric` events. */
-  cost: number;
-  /** Most recent `appstrate.error.message`; drives the run's failure reason. */
-  lastAdapterError: string | null;
-}
-
-export interface AppstrateEventSinkOptions {
+export interface PersistingEventSinkOptions {
   scope: AppScope;
   runId: string;
   /**
-   * When `true`, skips the in-memory AFPS reducer entirely. The ingestion
-   * route re-instantiates the sink per event and never reads `current` /
-   * `result`, so the reducer is dead work on the hot path. Long-lived
-   * callers (parity tests, in-process runners) leave this unset to keep
-   * reading the canonical snapshot.
+   * When `true`, `appstrate.metric` events write a runner-source row to
+   * the `llm_usage` ledger. At most one runner row per run; concurrent
+   * writers race via ON CONFLICT DO NOTHING. The ingestion path turns
+   * this on; long-lived in-process runners (parity tests) leave it off
+   * — they go through {@link AggregatingEventSink} which never enables
+   * ledger writes.
    */
-  persistOnly?: boolean;
-  /**
-   * Envelope sequence for the single event this sink instance will handle.
-   * Required only in `persistOnly` mode because the ledger dedup key is
-   * `(run_id, source='runner', sequence)`. Long-lived sinks (parity tests,
-   * in-process runners) never hit the ledger so they omit it.
-   */
-  sequence?: number;
+  writeLedger?: boolean;
 }
 
-export class AppstrateEventSink implements EventSink {
-  readonly runId: string;
-  private readonly scope: AppScope;
-  private readonly reducer: ReducerSinkHandle | null;
-  private readonly usage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
-  private accumulatedCost = 0;
-  private lastAdapterError: string | null = null;
-  private finalResult: RunResult | null = null;
-  private readonly sequence: number | undefined;
+export type AggregatingEventSinkOptions = Pick<PersistingEventSinkOptions, "scope" | "runId">;
 
-  constructor(opts: AppstrateEventSinkOptions) {
+/**
+ * Persists each {@link RunEvent} to `run_logs` + (for `appstrate.metric`)
+ * to `runs.tokenUsage` + the `llm_usage` ledger.
+ *
+ * Stateless across events: a fresh instance is built per ingested
+ * envelope by the route handler. Calls to this sink are total —
+ * no method ever throws because of an unsupported mode.
+ */
+export class PersistingEventSink implements EventSink {
+  readonly runId: string;
+  protected readonly scope: AppScope;
+  protected lastAdapterError: string | null = null;
+  private readonly writeLedger: boolean;
+
+  constructor(opts: PersistingEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
-    this.reducer = opts.persistOnly ? null : createReducerSink();
-    this.sequence = opts.sequence;
+    this.writeLedger = opts.writeLedger ?? false;
   }
 
   async handle(event: RunEvent): Promise<void> {
-    // Delegate canonical events to the runtime reducer (skipped in
-    // persist-only mode — ingestion fan-out doesn't need the snapshot).
-    if (this.reducer) await this.reducer.sink.handle(event);
+    await this.persist(event);
+  }
 
-    // Platform write-through + metrics accumulation.
+  async finalize(_result: RunResult): Promise<void> {
+    // Persistence-only sink — finalize is the route handler's job.
+    // The interface contract requires the method, so we no-op.
+  }
+
+  /**
+   * Last `appstrate.error.message` observed during the lifetime of this
+   * sink instance. Per-instance — short-lived in the ingestion path.
+   */
+  get lastError(): string | null {
+    return this.lastAdapterError;
+  }
+
+  protected async persist(event: RunEvent): Promise<void> {
     switch (event.type) {
       case "output.emitted": {
         await appendRunLog(
@@ -181,67 +181,87 @@ export class AppstrateEventSink implements EventSink {
         const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
         const cost = typeof event.cost === "number" ? event.cost : null;
 
-        // In-memory accumulators feed `sink.current` for long-lived sinks
-        // (parity tests, in-process runners). Skip in persistOnly mode
-        // where `sink.current` throws.
-        if (this.reducer) {
-          if (usage) accumulateUsage(this.usage, usage);
-          if (cost !== null) this.accumulatedCost += cost;
-        }
-
-        // Persistence — always, regardless of mode. Token usage is a
-        // running-total snapshot on the run row; cost is appended to the
-        // `llm_usage` ledger so finalize can aggregate it. Ledger writes
-        // only happen in the ingestion path (persistOnly sink carries a
-        // sequence); long-lived sinks keep the in-memory accumulators
-        // above and nothing else.
+        // Token usage is a running-total snapshot on the run row.
         if (usage) {
           await updateRun(this.scope, this.runId, {
             tokenUsage: usage as unknown as Record<string, unknown>,
           });
         }
-        if (this.sequence !== undefined) {
-          await appendRunnerLedgerRow(this.scope, this.runId, {
-            sequence: this.sequence,
-            cost,
-            usage,
-          });
+        // Ledger row — only the ingestion path opts in. Concurrent
+        // writers race via ON CONFLICT DO NOTHING.
+        if (this.writeLedger) {
+          await writeRunnerLedgerRow(this.scope, this.runId, { cost, usage });
         }
         break;
       }
 
       default:
-        // memory.added / state.set / third-party — reducer-only, no run_logs row.
+        // memory.added / state.set / third-party — no run_logs row.
         break;
     }
   }
+}
 
-  async finalize(result: RunResult): Promise<void> {
-    if (this.reducer) await this.reducer.sink.finalize(result);
+/**
+ * Long-lived sink that wraps {@link PersistingEventSink} with an
+ * additional in-memory reducer + token/cost accumulators. Use when a
+ * caller needs to read `snapshot()` / `result` / `usage` / `cost`
+ * between events (parity tests, in-process runners). The ingestion
+ * path does not need this — it builds a fresh persisting sink per
+ * event.
+ */
+export class AggregatingEventSink extends PersistingEventSink {
+  private readonly reducer: ReducerSinkHandle;
+  private readonly accumulatedUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+  private accumulatedCost = 0;
+  private finalResult: RunResult | null = null;
+
+  constructor(opts: AggregatingEventSinkOptions) {
+    // Aggregating sinks never write the ledger — they are never on the
+    // ingestion hot path. Pass `writeLedger: false` explicitly so the
+    // base class's metric handler skips the ledger write.
+    super({ ...opts, writeLedger: false });
+    this.reducer = createReducerSink();
+  }
+
+  override async handle(event: RunEvent): Promise<void> {
+    // 1. Feed the runtime reducer so `snapshot()` reflects every event.
+    await this.reducer.sink.handle(event);
+
+    // 2. Accumulate platform-specific running totals from metric events.
+    if (event.type === "appstrate.metric") {
+      const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
+      const cost = typeof event.cost === "number" ? event.cost : null;
+      if (usage) accumulateUsage(this.accumulatedUsage, usage);
+      if (cost !== null) this.accumulatedCost += cost;
+    }
+
+    // 3. Run the persistence write-through (delegates to base).
+    await super.handle(event);
+  }
+
+  override async finalize(result: RunResult): Promise<void> {
+    await this.reducer.sink.finalize(result);
     this.finalResult = result;
   }
 
   /**
-   * Platform-facing projection of the runtime snapshot + platform accumulators.
-   * Safe to read at any point during or after a run.
-   *
-   * Throws when the sink was created with `persistOnly: true` — that
-   * mode is reserved for fan-out-only consumers that never read back.
+   * Live snapshot of the runtime reducer — memories, state, output,
+   * report, logs. The native {@link RunResult} shape, no platform
+   * projection. Total: never throws.
    */
-  get current(): Readonly<AggregatedRunState> {
-    if (!this.reducer) {
-      throw new Error("AppstrateEventSink.current is unavailable in persistOnly mode");
-    }
-    const snapshot = this.reducer.snapshot();
-    return {
-      output: isPlainObject(snapshot.output) ? snapshot.output : {},
-      state: isPlainObject(snapshot.state) ? snapshot.state : null,
-      memories: snapshot.memories.map((m) => m.content),
-      report: snapshot.report ?? "",
-      usage: this.usage,
-      cost: this.accumulatedCost,
-      lastAdapterError: this.lastAdapterError,
-    };
+  snapshot(): RunResult {
+    return this.reducer.snapshot();
+  }
+
+  /** Accumulated token usage across all `appstrate.metric` events. */
+  get usage(): Readonly<TokenUsage> {
+    return this.accumulatedUsage;
+  }
+
+  /** Accumulated cost (USD) across all `appstrate.metric` events. */
+  get cost(): number {
+    return this.accumulatedCost;
   }
 
   /** Canonical {@link RunResult} — `null` until `finalize` has been called. */
@@ -258,41 +278,21 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
 }
 
 /**
- * Synthetic sequence reserved for the finalize-time ledger write — real
- * `appstrate.metric` events use sequence ≥ 1 (HttpSink's counter starts
- * at 1), so the unique key (run_id, source, sequence) cannot collide.
- * Co-owned by `run-event-ingestion.ts` which falls back to this writer
- * when the metric POST is aborted by `process.exit()`.
- */
-export const SYNTHESISED_RUNNER_LEDGER_SEQUENCE = 0;
-
-/**
- * Append one runner-source row to the `llm_usage` ledger.
+ * Write the runner-source row for a run to the `llm_usage` ledger.
  *
- * Runners emit running totals, not deltas. The per-event delta is derived
- * from `(running_total − previously_persisted_total)` so `SUM(ledger)`
- * stays equal to the final running total regardless of how many metric
- * events a run produces (one today; multi-turn agents tomorrow).
- *
- * Concurrency: the read-then-insert is wrapped in a transaction with a
- * per-run `pg_advisory_xact_lock(hashtext(run_id))` so two concurrent
- * metric events for the same run cannot both read the same prior SUM and
- * over-count the delta. The lock is keyed on the run id alone; concurrent
- * writes for OTHER runs are unaffected. Lock is released automatically
- * when the transaction commits or rolls back.
- *
- * Dedup on `(run_id, sequence)` makes envelope replay a no-op — the
- * ingestion route guarantees the sequence is monotonic per run.
+ * The metric event carries the runner's full LLM cost + token usage for
+ * the run. At most one runner row per run — concurrent writers (the
+ * `appstrate.metric` event handler and the finalize-time fallback)
+ * race via the partial unique index `uq_llm_usage_runner_run_id`;
+ * whichever lands first wins, the other no-ops.
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.
- * Errors are logged; correctness is self-healing because the next
- * metric event carries the full running total.
+ * Errors are logged.
  */
-export async function appendRunnerLedgerRow(
+export async function writeRunnerLedgerRow(
   scope: AppScope,
   runId: string,
   row: {
-    sequence: number;
     cost: number | null;
     usage: TokenUsage | null;
   },
@@ -302,62 +302,46 @@ export async function appendRunnerLedgerRow(
   if (row.cost === null && !row.usage) return;
 
   try {
-    await db.transaction(async (tx) => {
-      // Per-run advisory lock — serialises concurrent metric inserts for
-      // THIS run, leaves all other runs unaffected. Auto-released on
-      // commit / rollback.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${runId}))`);
-
-      const [prior] = await tx
-        .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })
-        .from(llmUsage)
-        .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
-      const existing = Number(prior?.total ?? 0);
-      const delta = Math.max(0, (row.cost ?? 0) - existing);
-
-      await tx
-        .insert(llmUsage)
-        .values({
-          source: "runner",
-          orgId: scope.orgId,
-          runId,
-          sequence: row.sequence,
-          inputTokens: row.usage?.input_tokens ?? 0,
-          outputTokens: row.usage?.output_tokens ?? 0,
-          cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
-          cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
-          costUsd: delta,
-        })
-        .onConflictDoNothing();
-    });
+    await db
+      .insert(llmUsage)
+      .values({
+        source: "runner",
+        orgId: scope.orgId,
+        runId,
+        inputTokens: row.usage?.input_tokens ?? 0,
+        outputTokens: row.usage?.output_tokens ?? 0,
+        cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
+        cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
+        costUsd: row.cost ?? 0,
+      })
+      .onConflictDoNothing();
   } catch (err) {
-    logger.error("Failed to append runner ledger row", {
+    logger.error("Failed to write runner ledger row", {
       runId,
-      sequence: row.sequence,
       error: err instanceof Error ? err.message : String(err),
     });
   }
 }
 
 /**
- * SUM of runner-source cost_usd persisted so far for this run.
- * Read-only — safe to call without a lock for post-finalize snapshots.
- * Do NOT use to compute deltas in concurrent writers; use the
- * transactional read inside {@link appendRunnerLedgerRow} instead.
+ * Whether a runner-source row has already been persisted for this run.
+ * Used by the finalize-time fallback to decide whether to synthesise the
+ * row or trust the metric event handler that already ran.
  */
-export async function sumRunnerCost(runId: string): Promise<number> {
+export async function hasRunnerLedgerRow(runId: string): Promise<boolean> {
   try {
     const [row] = await db
-      .select({ total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)` })
+      .select({ id: llmUsage.id })
       .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
-    return Number(row?.total ?? 0);
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")))
+      .limit(1);
+    return row !== undefined;
   } catch (err) {
-    logger.warn("Failed to read prior runner ledger; treating delta as running total", {
+    logger.warn("Failed to read runner ledger; assuming row absent", {
       runId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return 0;
+    return false;
   }
 }
 
