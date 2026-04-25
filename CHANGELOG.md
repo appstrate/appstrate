@@ -26,6 +26,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     bootstrap admin email (Tier ≥ 1, fresh installs only); non-interactive
     via `APPSTRATE_BOOTSTRAP_OWNER_EMAIL=… curl|bash` for IaC. When set,
     the closed-mode trio is written into the generated `.env`.
+  - Post-install action note: when bootstrap is configured, the installer
+    prints the exact `<APP_URL>/register` link the operator must open.
+  - `RegisterPage` reads `AUTH_BOOTSTRAP_OWNER_EMAIL` from `__APP_CONFIG__`
+    and pre-fills + locks the email field, plus a banner explaining why,
+    so the operator only has to pick a password (typo-proof bootstrap).
   - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)

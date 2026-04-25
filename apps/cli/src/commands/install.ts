@@ -104,6 +104,31 @@ function appUrlForPort(port: number): string {
   return port === 80 ? "http://localhost" : `http://localhost:${port}`;
 }
 
+/**
+ * Print the closed-mode follow-up note (issue #228) so the user knows
+ * exactly where to go next when bootstrap was configured. The dashboard
+ * pre-fills + locks the email field via `AppConfig.bootstrapOwnerEmail`,
+ * so the only remaining action is "open the URL and pick a password".
+ *
+ * Renders nothing in open mode (no env var written, no friction added).
+ * Called by both Tier 0 and Docker-tier installers right before `outro()`
+ * — the placement matters: clack groups note + outro together, and the
+ * outro dominates the bottom of the terminal so the action stays
+ * immediately visible.
+ */
+export function printBootstrapFollowup(
+  appUrl: string,
+  bootstrap: BootstrapOverrides,
+  note: (message: string, title?: string) => void = clack.note,
+): void {
+  const email = bootstrap.bootstrapOwnerEmail;
+  if (!email) return;
+  note(
+    `Open  ${appUrl}/register\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
+    "Next: create your owner account",
+  );
+}
+
 export async function installCommand(opts: InstallOptions): Promise<void> {
   intro("Appstrate install");
 
@@ -707,6 +732,7 @@ async function installTier0(
   // immediately usable.
   const shouldStart = opts.autoConfirm ? true : await confirm("Start the dev server now?");
   if (!shouldStart) {
+    printBootstrapFollowup(appUrl, opts.bootstrap);
     outro(
       `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen ${appUrl} once it boots.`,
     );
@@ -719,6 +745,7 @@ async function installTier0(
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
   await openBrowser(appUrl);
+  printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
 
@@ -932,6 +959,7 @@ async function installDockerTier(
   );
 
   await openBrowser(appUrl);
+  printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(
     `Appstrate is running at ${appUrl}.\n` +
       `Manage the stack from ${dir}:\n` +

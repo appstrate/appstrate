@@ -7,6 +7,8 @@
   "login.signup": "Créer un compte",
   "login.noAccount": "Pas encore de compte ?",
   "login.signupDisabled": "Cette instance Appstrate est sur invitation uniquement.",
+  "login.bootstrapTitle": "Création du compte administrateur",
+  "login.bootstrapBody": "Cette instance est configurée pour bootstrap avec {{email}}. Choisissez un mot de passe pour finaliser la création de votre compte propriétaire.",
   "login.hasAccount": "Déjà un compte ?",
   "login.error": "Une erreur est survenue",
   "login.or": "Ou",

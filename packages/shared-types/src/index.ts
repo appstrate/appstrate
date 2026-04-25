@@ -61,6 +61,15 @@ export interface AppConfig {
     terms?: string;
     privacy?: string;
   };
+  /**
+   * AUTH_BOOTSTRAP_OWNER_EMAIL surfaced for the SPA so `RegisterForm` can
+   * pre-fill and lock the email field on the bootstrap signup. The value
+   * is the same admin contact that any visitor would discover by
+   * submitting `/register` and reading the rejection message, so exposing
+   * it does not widen the threat surface — but it removes the only path
+   * to a typo on the bootstrap account.
+   */
+  bootstrapOwnerEmail?: string;
   trustedOrigins: string[];
 }
 

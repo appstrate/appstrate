@@ -137,16 +137,31 @@ curl -fsSL https://get.appstrate.dev | bash
 Same result, no prompt. The env vars are read by the installer and
 written into the generated `.env`.
 
-After install, sign up once with that email through the dashboard — the
-root org is auto-provisioned and you're owner. Done.
+After install, the CLI prints the exact next step:
+
+```
+┌  Next: create your owner account
+│
+│  Open  http://localhost:3000/register
+│  Sign up as  admin@acme.com  (the form is pre-filled and locked)
+│  Pick any password — the org "Acme" is created automatically.
+│
+└
+```
+
+Open the URL — `/register` is rendered with the email field already
+filled in and disabled (so a typo can't diverge you from the configured
+bootstrap account). Pick a password, submit, you're owner. Done.
 
 > **How signup works in closed mode.** The signup link is hidden from
 > `/login` (no public discoverability) but `/register` itself stays
-> mounted. The bootstrap owner navigates to `/register` directly,
-> submits the form with the configured email, and the server-side gate
-> lets that specific email through. Any other email submitted on the
-> same form is rejected with a `signup_disabled` error surfaced inline.
-> Google/GitHub/SMTP also work and skip the form entirely if configured.
+> mounted. When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the SPA pre-fills
+> and locks the email field via `__APP_CONFIG__.bootstrapOwnerEmail` so
+> the bootstrap owner can't accidentally submit a different email. The
+> server-side gate is the real authority: any other email submitted on
+> the same form is rejected with a `signup_disabled` error surfaced
+> inline. Google/GitHub/SMTP also work and skip the form entirely if
+> configured.
 
 ### Recipe 1 — public SaaS (default)
 

@@ -4,13 +4,18 @@ import { getEnv } from "@appstrate/env";
 import { applyModuleFeatures } from "./modules/module-loader.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
-const env = getEnv();
-
 // Platform config — computed once at boot, injected into SPA HTML.
 // Base config uses OSS defaults. Modules contribute feature flags at boot.
+//
+// `getEnv()` is called lazily here rather than captured at module load so
+// tests can swap env vars + `_resetCacheForTesting()` and re-invoke
+// `buildAppConfig()` deterministically. Production hits the cached
+// `getEnv()` after first call, so there's no measurable cost.
 export function buildAppConfig(): AppConfig {
+  const env = getEnv();
   const legalTerms = env.LEGAL_TERMS_URL;
   const legalPrivacy = env.LEGAL_PRIVACY_URL;
+  const bootstrapEmail = env.AUTH_BOOTSTRAP_OWNER_EMAIL;
   return {
     features: {
       // Core platform flags only — derived from env vars owned by core.
@@ -22,8 +27,9 @@ export function buildAppConfig(): AppConfig {
       // Self-hosting closed mode (issue #228) — flags exposed so the SPA
       // can hide signup affordances and route org-less users away from
       // /onboarding/create when the platform is locked down. Sensitive
-      // companions (PLATFORM_ADMIN_EMAILS, ALLOWED_SIGNUP_DOMAINS,
-      // BOOTSTRAP_OWNER_EMAIL) deliberately stay server-side.
+      // companions (PLATFORM_ADMIN_EMAILS, ALLOWED_SIGNUP_DOMAINS) stay
+      // server-side; BOOTSTRAP_OWNER_EMAIL is surfaced separately below
+      // so RegisterForm can pre-fill + lock the email field.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       orgCreationDisabled: env.AUTH_DISABLE_ORG_CREATION,
     },
@@ -35,6 +41,7 @@ export function buildAppConfig(): AppConfig {
           },
         }
       : {}),
+    ...(bootstrapEmail ? { bootstrapOwnerEmail: bootstrapEmail } : {}),
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
