@@ -29,8 +29,9 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { readProviderRefs, type ProviderEventEmitter } from "@appstrate/runner-pi";
+import { callToolResultToPi } from "./mcp-result.ts";
 
 const RUN_HISTORY_TOOL_NAME = "run_history";
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
@@ -52,42 +53,10 @@ function providerToolName(rawSlug: string): string {
   return `${slug}_call`;
 }
 
-/** Coerce an MCP `CallToolResult` to the Pi `AgentToolResult` shape. */
-function callToolResultToPi(result: CallToolResult): {
-  content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  >;
-  details: undefined;
-} {
-  const content = result.content.map((c) => {
-    if (c.type === "text") return { type: "text" as const, text: c.text };
-    if (c.type === "image") return { type: "image" as const, data: c.data, mimeType: c.mimeType };
-    if (c.type === "resource_link") {
-      return {
-        type: "text" as const,
-        text: `[resource ${c.uri}${c.name ? ` (${c.name})` : ""}]`,
-      };
-    }
-    if (c.type === "resource") {
-      const inner = c.resource;
-      return {
-        type: "text" as const,
-        text: `[resource ${inner.uri}${"text" in inner && inner.text ? `\n${inner.text}` : ""}]`,
-      };
-    }
-    return {
-      type: "text" as const,
-      text: `[unknown content type: ${(c as { type: string }).type}]`,
-    };
-  });
-  return { content, details: undefined };
-}
-
 interface BuildMcpProviderFactoriesOptions {
   bundle: Bundle;
   mcp: AppstrateMcpClient;
   runId: string;
-  workspace: string;
   emitProvider: ProviderEventEmitter;
 }
 

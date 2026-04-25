@@ -251,8 +251,11 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 // unchanged — this is a client-surface migration only.
 
 const sidecarUrl = env.sidecarUrl;
+// Empty stub used as a final fallback by `runner.run({ providerResolver })`.
+// The real `SidecarProviderResolver` is constructed lazily only when the
+// legacy non-MCP path runs, since the two MCP paths bypass the resolver
+// entirely (provider routing happens in MCP `tools/call` instead).
 let providerResolver: ProviderResolver = { resolve: async () => [] };
-const workspaceForProviders = WORKSPACE;
 
 // Phase 2 of #276 — MCP-backed wiring is opt-in via RUNTIME_MCP_CLIENT.
 // When the flag is set, both provider tools and run_history route
@@ -277,7 +280,6 @@ if (sidecarUrl && env.runtimeMcpClient) {
 
 if (bundle && sidecarUrl) {
   try {
-    providerResolver = new SidecarProviderResolver({ sidecarUrl });
     if (mcpClient && env.runtimeMcpDirectTools) {
       // Phase 5 §D5.3 — LLM sees `provider_call`, `run_history`,
       // `llm_complete` directly. The single factory call covers all
@@ -299,18 +301,19 @@ if (bundle && sidecarUrl) {
         bundle,
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
-        workspace: workspaceForProviders,
         emitProvider: (event) => {
           void teeSink.handle(event as RunEvent);
         },
       });
       extensionFactories.push(...factories);
     } else {
+      // Legacy path — only here do we need the sidecar resolver.
+      providerResolver = new SidecarProviderResolver({ sidecarUrl });
       const providerFactories = await buildProviderExtensionFactories({
         bundle,
         providerResolver,
         runId: AGENT_RUN_ID,
-        workspace: workspaceForProviders,
+        workspace: WORKSPACE,
         emitProvider: (event) => {
           // Route provider lifecycle events through the tee sink so the
           // platform observes each call structurally AND the aggregate

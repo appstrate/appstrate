@@ -159,7 +159,6 @@ describe("buildMcpProviderFactories", () => {
         bundle: makeBundleWithProviders({}),
         mcp,
         runId: "run-1",
-        workspace: "/tmp",
         emitProvider: () => {},
       });
       expect(factories).toEqual([]);
@@ -178,7 +177,6 @@ describe("buildMcpProviderFactories", () => {
         }),
         mcp,
         runId: "run-1",
-        workspace: "/tmp",
         emitProvider: () => {},
       });
       const captured: CapturedTool[] = [];
@@ -200,7 +198,6 @@ describe("buildMcpProviderFactories", () => {
         bundle: makeBundleWithProviders({ "@appstrate/gmail": "^1.0.0" }),
         mcp,
         runId: "run-1",
-        workspace: "/tmp",
         emitProvider: () => {},
       });
       const captured: CapturedTool[] = [];
@@ -241,7 +238,6 @@ describe("buildMcpProviderFactories", () => {
         bundle: makeBundleWithProviders({ "@appstrate/gmail": "^1.0.0" }),
         mcp,
         runId: "run-1",
-        workspace: "/tmp",
         emitProvider: (e) => events.push(e as { type: string }),
       });
       const captured: CapturedTool[] = [];
@@ -282,7 +278,6 @@ describe("buildMcpProviderFactories", () => {
         bundle: makeBundleWithProviders({ "@appstrate/gmail": "^1.0.0" }),
         mcp,
         runId: "run-1",
-        workspace: "/tmp",
         emitProvider: (e) => events.push(e as { type: string }),
       });
       const captured: CapturedTool[] = [];
@@ -321,7 +316,6 @@ describe("buildMcpProviderFactories", () => {
           bundle: makeBundleWithProviders({ "@appstrate/gmail": "^1.0.0" }),
           mcp,
           runId: "run-1",
-          workspace: "/tmp",
           emitProvider: () => {},
         });
       } catch (err) {
