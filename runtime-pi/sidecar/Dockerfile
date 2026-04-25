@@ -62,12 +62,17 @@ COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 
 # Sidecar sources.
-COPY runtime-pi/sidecar/server.ts        \
-     runtime-pi/sidecar/app.ts           \
-     runtime-pi/sidecar/helpers.ts       \
-     runtime-pi/sidecar/forward-proxy.ts \
-     runtime-pi/sidecar/ssrf.ts          \
-     runtime-pi/sidecar/mcp.ts           \
+COPY runtime-pi/sidecar/server.ts           \
+     runtime-pi/sidecar/app.ts              \
+     runtime-pi/sidecar/helpers.ts          \
+     runtime-pi/sidecar/forward-proxy.ts    \
+     runtime-pi/sidecar/ssrf.ts             \
+     runtime-pi/sidecar/mcp.ts              \
+     runtime-pi/sidecar/mcp-host.ts         \
+     runtime-pi/sidecar/blob-store.ts       \
+     runtime-pi/sidecar/credential-proxy.ts \
+     runtime-pi/sidecar/deprecation.ts      \
+     runtime-pi/sidecar/roots.ts            \
      runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
