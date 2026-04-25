@@ -53,6 +53,7 @@ import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpProviderFactories, buildMcpRunHistoryFactory } from "./extensions/mcp-bridge.ts";
+import { buildMcpDirectFactories } from "./extensions/mcp-direct.ts";
 
 // Captured as early as possible so the "runtime ready in {N}ms" signal
 // reflects the full bootloader cost (bundle extract, providers wiring,
@@ -277,7 +278,23 @@ if (sidecarUrl && env.runtimeMcpClient) {
 if (bundle && sidecarUrl) {
   try {
     providerResolver = new SidecarProviderResolver({ sidecarUrl });
-    if (mcpClient) {
+    if (mcpClient && env.runtimeMcpDirectTools) {
+      // Phase 5 §D5.3 — LLM sees `provider_call`, `run_history`,
+      // `llm_complete` directly. The single factory call covers all
+      // three tools, so the run_history block below short-circuits.
+      const factories = await buildMcpDirectFactories({
+        bundle,
+        mcp: mcpClient,
+        runId: AGENT_RUN_ID,
+        emitProvider: (event) => {
+          void teeSink.handle(event as RunEvent);
+        },
+        emit: (event) => {
+          void teeSink.handle(event as RunEvent);
+        },
+      });
+      extensionFactories.push(...factories);
+    } else if (mcpClient) {
       const factories = await buildMcpProviderFactories({
         bundle,
         mcp: mcpClient,
@@ -318,7 +335,10 @@ if (bundle && sidecarUrl) {
 // tools keeps the sidecar-knowledge blast radius localised to this
 // block of the bootstrap.
 
-if (sidecarUrl) {
+// When direct-tools mode is on, `buildMcpDirectFactories` already
+// registered run_history alongside provider_call + llm_complete; skip
+// to avoid a duplicate-name registration crash in Pi.
+if (sidecarUrl && !(mcpClient && env.runtimeMcpDirectTools)) {
   try {
     if (mcpClient) {
       extensionFactories.push(

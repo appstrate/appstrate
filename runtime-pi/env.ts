@@ -75,6 +75,19 @@ export interface RuntimeEnv {
    * avoid minting a separate secret.
    */
   runToken?: string;
+  /**
+   * Phase 5 §D5.3 of #276 feature flag. Implies `runtimeMcpClient`.
+   * When `true`, the LLM sees the standard MCP tool names directly
+   * (`provider_call`, `run_history`, `llm_complete`) instead of the
+   * legacy per-provider `appstrate_<slug>_call` aliases. Bundles
+   * shipping the new ≤3-line capability prompt opt in here; bundles
+   * with the legacy per-provider prompt vocabulary leave it off and
+   * keep using the alias layer in `mcp-bridge.ts` (D5.2).
+   *
+   * Default OFF — the alias layer is the safe path until existing
+   * bundles ship updated prompts. Removed entirely in Phase 6.
+   */
+  runtimeMcpDirectTools: boolean;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -299,5 +312,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     traceparent: source.TRACEPARENT || undefined,
     runtimeMcpClient: source.RUNTIME_MCP_CLIENT === "1" || source.RUNTIME_MCP_CLIENT === "true",
     runToken: source.RUN_TOKEN || undefined,
+    runtimeMcpDirectTools:
+      source.RUNTIME_MCP_DIRECT_TOOLS === "1" || source.RUNTIME_MCP_DIRECT_TOOLS === "true",
   };
 }

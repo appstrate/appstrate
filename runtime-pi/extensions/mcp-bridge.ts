@@ -1,28 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MCP-backed equivalents of {@link buildProviderExtensionFactories} and
- * {@link buildRunHistoryExtensionFactory} (Phase 2 of #276).
+ * MCP-backed legacy alias layer (Phase 5 §D5.2 of #276).
  *
- * Drop-in replacements: the LLM still sees `appstrate_<slug>_call` and
- * `run_history` Pi tools (Phase 5 retires that surface). Internally,
- * each Pi tool now invokes a single MCP `tools/call` against the
- * sidecar's `/mcp` endpoint instead of bespoke HTTP routes — same
- * outcome, one wire format.
+ * The LLM still sees `appstrate_<slug>_call` and `run_history` Pi
+ * tools — same surface as the pre-MCP runtime. Internally each Pi
+ * tool now invokes a single MCP `tools/call` against the sidecar's
+ * `/mcp` endpoint instead of bespoke HTTP routes.
  *
- * What changes versus `provider-bridge`:
- *   - The HTTP hop is `/mcp` (Streamable HTTP, JSON-RPC) instead of
- *     `/proxy` (custom REST headers).
- *   - The provider tool name advertised on `tools/list` is the generic
- *     `provider_call`; we wrap it per-provider in a Pi extension whose
- *     `name` matches the legacy `<slug>_call` convention so the LLM-
- *     facing surface is identical.
- *   - Cancellation is propagated via the Pi `signal` parameter into the
- *     MCP `callTool` call — the SDK forwards it as `notifications/cancelled`.
+ * Two MCP-backed paths share the same {@link AppstrateMcpClient}:
  *
- * Why mirror the legacy surface verbatim: this phase is architectural
- * plumbing. We validate end-to-end MCP wiring before changing the LLM-
- * facing tool names. Phase 5 swaps the LLM to MCP names directly.
+ * - `mcp-bridge.ts` (this file, the legacy alias) — keeps existing
+ *   bundles working unchanged. Their prompts reference
+ *   `appstrate_gmail_call(...)`; this file maps each call to
+ *   `provider_call({ providerId: "gmail", ... })` at the Pi-tool layer.
+ *   Removed in Phase 6 along with all other 1.x compat shims.
+ * - `mcp-direct.ts` (D5.3) — registers MCP tool names verbatim
+ *   (`provider_call`, `run_history`, `llm_complete`). Bundles
+ *   shipping the new ≤3-line capability prompt opt in via
+ *   `RUNTIME_MCP_DIRECT_TOOLS=1`.
+ *
+ * Why mirror the legacy surface verbatim: existing AFPS bundles are
+ * the soak vehicle. Migrating the wire format underneath without
+ * changing the LLM-facing names lets us validate the MCP path with
+ * production traffic before any prompt rewrite ships.
  */
 
 import { Type } from "@mariozechner/pi-ai";
