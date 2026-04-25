@@ -86,6 +86,33 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain(".pi/providers/@appstrate/gmail/PROVIDER.md");
   });
 
+  it("documents binary upload/download contract when providers are connected", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      providers: [
+        {
+          id: "@appstrate/gmail",
+          displayName: "Gmail",
+          authMode: "oauth2",
+          authorizedUris: ["https://gmail.googleapis.com/**"],
+        },
+      ],
+    });
+    // Binary contract guidance must appear so the LLM picks fromFile / toFile
+    // over base64-stuffing large payloads into tool args.
+    expect(out).toContain("fromFile");
+    expect(out).toContain("toFile");
+    expect(out).toContain("body.kind");
+  });
+
+  it("omits the binary upload/download contract when no providers are connected", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("fromFile");
+    expect(out).not.toContain("toFile");
+    expect(out).not.toContain("## Connected Providers");
+  });
+
   it("shows 'all public URLs' when allowAllUris is true", () => {
     const out = renderPlatformPrompt({
       template: "T",

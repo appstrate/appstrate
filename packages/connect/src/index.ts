@@ -30,7 +30,7 @@ export {
 } from "./registry.ts";
 
 // OAuth2
-export { initiateOAuth, handleOAuthCallback } from "./oauth.ts";
+export { initiateOAuth, handleOAuthCallback, OAuthCallbackError } from "./oauth.ts";
 export type { InitiateOAuthResult, OAuthCallbackResult } from "./oauth.ts";
 
 // OAuth1
@@ -39,6 +39,10 @@ export type { OAuth1CallbackResult } from "./oauth1.ts";
 
 // Token refresh
 export { RefreshError } from "./token-refresh.ts";
+
+// Token error classification (shared by callback + refresh paths)
+export { parseTokenErrorResponse } from "./token-utils.ts";
+export type { TokenErrorKind, TokenErrorClassification } from "./token-utils.ts";
 
 // Credentials
 export {

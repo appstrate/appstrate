@@ -8,6 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Self-hosting closed mode (#228)** — env-driven invitation-only deployments.
+  - `AUTH_DISABLE_SIGNUP=true` blocks new account creation; pending
+    invitations and platform admins still pass through (resolves the
+    Infisical-style "invitation breaks when signup is disabled" pitfall).
+  - `AUTH_DISABLE_ORG_CREATION=true` restricts `POST /api/orgs` to
+    platform admins; org-less users see a "Waiting for invitation" page.
+  - `AUTH_PLATFORM_ADMIN_EMAILS` declarative allowlist (no UI, no
+    migration, IaC-friendly).
+  - `AUTH_ALLOWED_SIGNUP_DOMAINS` email-domain allowlist with invitation
+    override for external contractors.
+  - `AUTH_BOOTSTRAP_OWNER_EMAIL` (+ `AUTH_BOOTSTRAP_ORG_NAME`) auto-creates
+    the root organization on first signup of the configured email.
+  - `bun apps/api/scripts/bootstrap-org.ts --owner=… --name=…` for explicit
+    ops bootstrap with idempotent JSON output.
+  - `appstrate install` integration: interactive prompt asks for the
+    bootstrap admin email (Tier ≥ 1, fresh installs only); non-interactive
+    via `APPSTRATE_BOOTSTRAP_OWNER_EMAIL=… curl|bash` for IaC. When set,
+    the closed-mode trio is written into the generated `.env`.
+  - Post-install action note: when bootstrap is configured, the installer
+    prints the exact `<APP_URL>/register` link the operator must open.
+  - `RegisterPage` reads `AUTH_BOOTSTRAP_OWNER_EMAIL` from `__APP_CONFIG__`
+    and pre-fills + locks the email field, plus a banner explaining why,
+    so the operator only has to pick a password (typo-proof bootstrap).
+  - After signup, the bootstrap owner is routed through the rest of
+    onboarding (`/onboarding/create` auto-skips since the org already
+    exists, landing on the model-config step) so they can configure
+    their first model, providers, and invite teammates.
+  - The display-name field is also pre-filled (still editable) by
+    deriving a sensible name from the locked email
+    (`john.doe@acme.com` → "John Doe"), so the operator only has to
+    type a password to complete signup.
+  - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)
 - Shared `tsconfig.base.json` with strict settings across all packages

@@ -7,7 +7,7 @@ import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
 import { applicationProviderCredentials, userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
+import { encryptCredentials, decryptCredentials, OAuthCallbackError } from "@appstrate/connect";
 import {
   initiateConnection,
   handleCallback,
@@ -376,6 +376,157 @@ describe("OAuth2 flows", () => {
       await expect(handleCallback("bad-code", state)).rejects.toThrow("Token exchange failed");
     });
 
+    // The two paths that hit the token endpoint (initial callback + refresh) MUST
+    // classify a `400 invalid_grant` as a revocation per RFC 6749 §5.2 — historically
+    // only the refresh path did this, leaving the callback to surface a generic 400
+    // with no actionable signal.
+    it("classifies invalid_grant on the initial callback as a revocation (kind=revoked)", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({
+        error: "invalid_grant",
+        error_description: "Authorization code expired",
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      const cbErr = caught as OAuthCallbackError;
+      expect(cbErr.kind).toBe("revoked");
+      expect(cbErr.providerId).toBe(PROVIDER_ID);
+      expect(cbErr.oauthError).toBe("invalid_grant");
+      expect(cbErr.oauthErrorDescription).toBe("Authorization code expired");
+    });
+
+    it("classifies non-invalid_grant 400 errors as transient", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({ error: "invalid_client" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      expect((caught as OAuthCallbackError).kind).toBe("transient");
+    });
+
+    // Regression: an earlier version concatenated the raw IdP body into
+    // the error message — some IdPs echo the rejected `code` (or other
+    // request fields) back in 400 bodies, so a generic catcher logging
+    // `err.message` would surface them. The body now lives ONLY on the
+    // typed `body` field.
+    it("never leaks the raw IdP body into err.message; preserves it on err.body", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({
+        error: "invalid_grant",
+        error_description: "Authorization code expired",
+        // Some IdPs echo the rejected code or other sensitive request
+        // fields. Synthesise that here to assert it never reaches
+        // err.message.
+        echoed_code: "leaked-secret-AAA-BBB-CCC",
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      let caught: unknown;
+      try {
+        await handleCallback("bad-code", state);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(OAuthCallbackError);
+      const cbErr = caught as OAuthCallbackError;
+
+      // Body is preserved verbatim on the typed field for diagnostics.
+      expect(cbErr.body).toContain("leaked-secret-AAA-BBB-CCC");
+
+      // Message must NOT contain anything the IdP echoed back. The
+      // summary is built from `oauthError` + `oauthErrorDescription`
+      // only, both of which the connection layer treats as
+      // already-classified strings.
+      expect(cbErr.message).not.toContain("leaked-secret-AAA-BBB-CCC");
+      expect(cbErr.message).toContain("invalid_grant");
+      expect(cbErr.message).toContain("Authorization code expired");
+    });
+
+    // Regression: PKCE state used to linger in Redis for the full
+    // 10-minute TTL on a `revoked` callback failure even though the
+    // auth code was already dead at the IdP. Hygiene: delete the row
+    // on revoked outcomes (we keep it on `transient` so retry of the
+    // same code stays possible for transient 5xx).
+    it("deletes the OAuth state row on a revoked callback failure", async () => {
+      mockServer.setTokenStatus(400);
+      mockServer.setTokenResponse({ error: "invalid_grant" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      // State row exists pre-callback.
+      const before = await oauthStateStore.get(state);
+      expect(before).not.toBeNull();
+
+      try {
+        await handleCallback("bad-code", state);
+      } catch {
+        /* expected revoked */
+      }
+
+      // State row reaped after a revoked outcome.
+      const after = await oauthStateStore.get(state);
+      expect(after).toBeNull();
+    });
+
+    it("preserves the OAuth state row on a transient callback failure", async () => {
+      mockServer.setTokenStatus(500);
+      mockServer.setTokenResponse({ error: "server_error" });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+
+      try {
+        await handleCallback("bad-code", state);
+      } catch {
+        /* expected transient */
+      }
+
+      // Row preserved so a retry of the same code (for genuine 5xx)
+      // remains possible within the TTL window.
+      const after = await oauthStateStore.get(state);
+      expect(after).not.toBeNull();
+    });
+
     it("throws when token response has no access_token", async () => {
       mockServer.setTokenResponse({ token_type: "Bearer" });
 
@@ -427,6 +578,61 @@ describe("OAuth2 flows", () => {
 
       // scopesGranted reflects what the token endpoint returned, not what was requested
       expect(result.scopesGranted).toEqual(["read"]);
+      // The provider granted "read" but we requested ["read", "write"] →
+      // shortfall surfaces "write".
+      expect(result.scopeShortfall).toEqual(["write"]);
+    });
+
+    it("flags the saved connection with needsReconnection on scope shortfall", async () => {
+      mockServer.setTokenResponse({
+        access_token: "token",
+        refresh_token: "refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "read", // only "read" granted, but ["read","write"] requested
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+      await handleCallback("mock-code", state);
+
+      const [conn] = await db
+        .select()
+        .from(userProviderConnections)
+        .where(eq(userProviderConnections.profileId, profileId));
+      expect(conn).toBeDefined();
+      expect(conn!.needsReconnection).toBe(true);
+      expect(conn!.scopesGranted).toEqual(["read"]);
+    });
+
+    it("does NOT flag needsReconnection on scope creep (provider over-grant)", async () => {
+      mockServer.setTokenResponse({
+        access_token: "token",
+        refresh_token: "refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "read write admin", // extra "admin" beyond the requested set
+      });
+
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+      const result = await handleCallback("mock-code", state);
+      expect(result.scopeCreep).toEqual(["admin"]);
+      expect(result.scopeShortfall).toEqual([]);
+
+      const [conn] = await db
+        .select()
+        .from(userProviderConnections)
+        .where(eq(userProviderConnections.profileId, profileId));
+      expect(conn!.needsReconnection).toBe(false);
     });
   });
 

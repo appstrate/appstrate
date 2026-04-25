@@ -231,14 +231,30 @@ for (const moduleDir of moduleDirs) {
 // cast needed at this layer. Subsequent `getTestApp({ modules })` calls
 // reuse this singleton so strategy tests and E2E OAuth flow tests see a
 // coherent auth surface with no double-initialization cost.
-const { collectModuleContributions } =
+const { collectModuleContributions, emitEvent } =
   await import("../../apps/api/src/lib/modules/module-loader.ts");
-const { createAuth } = await import("../../packages/db/src/auth.ts");
+const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
 const contributions = collectModuleContributions(importedModules);
 createAuth(
   contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
   contributions.drizzleSchemas,
 );
+
+// Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
+// after-hook does the same provisioning under test as it does in prod.
+// Without this, the bootstrap test would only ever see the org row — the
+// default app + hello-world agent + onOrgCreate emit (issue #228) would
+// never run in CI, and any regression in that wiring would slip past us.
+const { createDefaultApplication } = await import("../../apps/api/src/services/applications.ts");
+const { provisionDefaultAgentForOrg } =
+  await import("../../apps/api/src/services/default-agent.ts");
+setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
+  await emitEvent("onOrgCreate", orgId, userEmail);
+  const defaultApp = await createDefaultApplication(orgId, userId).catch(() => null);
+  if (defaultApp) {
+    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch(() => {});
+  }
+});
 
 // ─── Global auto-reset for RBAC audit handler ─────────────────
 // `setPermissionDenialHandler` writes a module-level singleton inside

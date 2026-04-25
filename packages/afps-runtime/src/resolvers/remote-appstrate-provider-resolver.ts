@@ -5,8 +5,10 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
-  resolveBodyStream,
+  resolveBodyForFetch,
   serializeFetchResponse,
+  applyTransportHeaders,
+  isReproducibleBody,
   type ProviderCallFn,
   type ProviderMeta,
 } from "./provider-tool.ts";
@@ -55,6 +57,7 @@ export interface RemoteAppstrateProviderResolverOptions {
  * long-lived Appstrate deployment — no copy-pasting tokens into a local
  * creds.json every time they refresh.
  */
+
 export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly instance: string;
   private readonly apiKey: string;
@@ -89,8 +92,16 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   }
 
   private buildCall(ref: ProviderRef, _meta: ProviderMeta): ProviderCallFn {
-    return async (req) => {
-      const bodyBytes = await resolveBodyStream(req.body, { allowFromFile: true });
+    return async (req, ctx) => {
+      // Resolve the request body with streaming support (mirrors sidecar).
+      // `allowStreaming: true` opts large `{ fromFile }` references
+      // (> STREAMING_THRESHOLD = 1 MB) into the stream path so they are
+      // piped to the credential-proxy without being read into memory first.
+      const resolved = await resolveBodyForFetch(req.body, {
+        allowFromFile: true,
+        allowStreaming: true,
+        workspace: ctx.workspace,
+      });
       // The platform's `/api/credential-proxy/proxy` route owns upstream
       // credential injection server-side (mirror of the sidecar). The
       // agent only writes `X-Target` / `X-Provider` + the API-key
@@ -99,7 +110,10 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       // provider manifest. The inbound `Authorization` is consumed by
       // api-key auth and stripped before reaching upstream, so there
       // is no collision.
-      const headers: Record<string, string> = {
+      // Clone the base headers before the first applyTransportHeaders call
+      // so we can re-apply fresh transport headers for the retry path with
+      // the retry body's actual size — avoiding stale Content-Length values.
+      const baseHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
@@ -111,12 +125,94 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
         ...(req.headers ?? {}),
       };
 
-      const res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, {
+      const wantsFile = typeof req.responseMode?.toFile === "string";
+      const isStreamingBody = resolved.kind === "stream";
+
+      // Apply transport headers (streaming + response mode hints).
+      // Mirrors sidecar-provider-resolver.ts exactly via the shared helper.
+      const headers = applyTransportHeaders(
+        { ...baseHeaders },
+        {
+          wantsFile,
+          isStreamingBody,
+          bodySize: isStreamingBody ? resolved.size : undefined,
+          maxInlineBytes: req.responseMode?.maxInlineBytes,
+        },
+      );
+
+      // For multipart bodies, forward the Content-Type (including boundary)
+      // computed during serialization. Bun/fetch would normally compute it
+      // from a FormData body, but we serialize to bytes upfront so we must
+      // set it explicitly.
+      if (resolved.kind === "bytes" && resolved.contentType) {
+        headers["Content-Type"] = resolved.contentType;
+      }
+
+      // Streaming uploads need duplex: "half" — required by the
+      // fetch spec when the body is a ReadableStream.
+      const init: RequestInit & Record<string, unknown> = {
         method: req.method,
         headers,
-        body: bodyBytes,
+        signal: ctx.signal,
+      };
+      if (isStreamingBody) {
+        init.body = resolved.stream;
+        init.duplex = "half";
+      } else {
+        init.body = resolved.bytes;
+      }
+
+      let res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, init);
+
+      // When the credential-proxy refreshed credentials server-side on a
+      // streaming 401 it cannot replay the body — it sets X-Auth-Refreshed:
+      // true and returns the 401. If our body is reproducible we retry once.
+      if (
+        res.status === 401 &&
+        res.headers.get("x-auth-refreshed") === "true" &&
+        isReproducibleBody(req.body)
+      ) {
+        const retryResolved = await resolveBodyForFetch(req.body, {
+          allowFromFile: true,
+          allowStreaming: true,
+          workspace: ctx.workspace,
+        });
+        // Re-apply transport headers from the clean base so Content-Length
+        // reflects the retry body's actual size (not the first attempt's).
+        const retryIsStreamingBody = retryResolved.kind === "stream";
+        const retryHeaders = applyTransportHeaders(
+          { ...baseHeaders },
+          {
+            wantsFile,
+            isStreamingBody: retryIsStreamingBody,
+            bodySize: retryIsStreamingBody ? retryResolved.size : undefined,
+            maxInlineBytes: req.responseMode?.maxInlineBytes,
+          },
+        );
+        if (retryResolved.kind === "bytes" && retryResolved.contentType) {
+          retryHeaders["Content-Type"] = retryResolved.contentType;
+        }
+        const retryInit: RequestInit & Record<string, unknown> = {
+          method: req.method,
+          headers: retryHeaders,
+          signal: ctx.signal,
+        };
+        if (retryIsStreamingBody) {
+          retryInit.body = retryResolved.stream;
+          retryInit.duplex = "half";
+        } else {
+          retryInit.body = retryResolved.bytes;
+        }
+        res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, retryInit);
+      }
+
+      return serializeFetchResponse(res, {
+        workspace: ctx.workspace,
+        toolCallId: ctx.toolCallId,
+        signal: ctx.signal,
+        ...(req.responseMode ? { responseMode: req.responseMode } : {}),
+        ...(wantsFile ? { streaming: true } : {}),
       });
-      return serializeFetchResponse(res);
     };
   }
 }

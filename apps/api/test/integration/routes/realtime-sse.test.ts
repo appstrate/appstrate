@@ -126,6 +126,76 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.data).toBe("");
     });
 
+    // #278 item E — every SSE frame must carry an `id:` field per the HTML SSE
+    // spec. The id format is `${subId}:${monotonic}` so dedup-by-id is safe
+    // even across reconnects (subId is fresh per connection). Server-side
+    // replay via `Last-Event-ID` is NOT implemented; reconnect lands on the
+    // live tail.
+    it("emits a per-stream-monotonic `id:` field with a stable subId prefix", async () => {
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        id: run.id,
+        status: "running",
+        package_id: agentPkg.id,
+      });
+
+      const events = await collectSSEEvents(res.body!, 2, { timeoutMs: 3000 });
+      expect(events.length).toBe(2);
+
+      // Format: `${subId}:${monotonic}`. We don't assert the subId itself
+      // (random per connection) — only that the format holds and the
+      // monotonic suffix increments.
+      const id0 = events[0]!.id!;
+      const id1 = events[1]!.id!;
+      expect(id0).toMatch(/^.+:1$/);
+      expect(id1).toMatch(/^.+:2$/);
+      const [prefix0, suffix0] = id0.split(":");
+      const [prefix1, suffix1] = id1.split(":");
+      // Same connection → same subId prefix.
+      expect(prefix1).toBe(prefix0);
+      // Monotonic strictly-increasing within a connection.
+      expect(Number(suffix1)).toBeGreaterThan(Number(suffix0));
+    });
+
+    // Regression: an earlier implementation reset `nextEventId` to 1 on
+    // every reconnect, so a client doing `if (id === lastSeenId) skip`
+    // would silently drop fresh events because ids "1", "2", "3"
+    // repeated on the second stream. The id format
+    // `${subId}:${monotonic}` makes ids globally unique because subId
+    // is freshly generated per connection. This test asserts that two
+    // back-to-back EventSource connections never collide on `id`.
+    it("emits ids that are unique across reconnects", async () => {
+      const first = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(first.body).not.toBeNull();
+      const firstEvents = await collectSSEEvents(first.body!, 1, { timeoutMs: 3000 });
+      expect(firstEvents.length).toBe(1);
+      // After collectSSEEvents the body reader has been released; we
+      // can't `cancel()` directly without re-locking. Letting the
+      // first stream go out of scope is sufficient — the SSE handler
+      // observes the closed underlying connection on its next write.
+
+      // Reconnect — fresh subscription = fresh subId.
+      const second = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(second.body).not.toBeNull();
+      const secondEvents = await collectSSEEvents(second.body!, 1, { timeoutMs: 3000 });
+      expect(secondEvents.length).toBe(1);
+
+      // The id from the second connection MUST NOT equal any id from
+      // the first — the subId prefix changes per connection, so even
+      // though both streams emit a "first ping" the full id string
+      // differs.
+      expect(secondEvents[0]!.id).not.toBe(firstEvents[0]!.id);
+
+      const [firstPrefix] = firstEvents[0]!.id!.split(":");
+      const [secondPrefix] = secondEvents[0]!.id!.split(":");
+      expect(secondPrefix).not.toBe(firstPrefix);
+    });
+
     it("returns 401 without cookie", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`);
       expect(res.status).toBe(401);

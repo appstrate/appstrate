@@ -182,10 +182,11 @@ describe("CLI run → provider bridge (end-to-end wiring)", () => {
 
       const parsed = JSON.parse(result.content[0]!.text) as {
         status: number;
-        body: { inline?: string };
+        body: { kind: string; text?: string };
       };
       expect(parsed.status).toBe(200);
-      expect(parsed.body.inline).toContain("ok");
+      expect(parsed.body.kind).toBe("text");
+      expect(parsed.body.text).toContain("ok");
 
       // Credential injection happened at the resolver — the upstream fetch
       // saw the header the manifest configured.

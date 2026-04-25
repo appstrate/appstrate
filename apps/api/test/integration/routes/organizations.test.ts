@@ -135,6 +135,62 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(400);
     });
+
+    describe("AUTH_DISABLE_ORG_CREATION (issue #228)", () => {
+      // Each test toggles env on entry, restores on exit. Reset cache so
+      // the per-request `getEnv()` lookup in the route handler picks up
+      // the change without rebuilding the full BA singleton.
+      const SNAPSHOT = {
+        AUTH_DISABLE_ORG_CREATION: process.env.AUTH_DISABLE_ORG_CREATION,
+        AUTH_PLATFORM_ADMIN_EMAILS: process.env.AUTH_PLATFORM_ADMIN_EMAILS,
+      };
+      const reset = async () => {
+        const { _resetCacheForTesting } = await import("@appstrate/env");
+        _resetCacheForTesting();
+      };
+
+      it("blocks non-admin signups from creating an org", async () => {
+        const testUser = await createTestUser({ email: "regular@test.com" });
+        process.env.AUTH_DISABLE_ORG_CREATION = "true";
+        await reset();
+        try {
+          const res = await app.request("/api/orgs", {
+            method: "POST",
+            headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "Blocked Org", slug: "blocked-org" }),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          for (const [k, v] of Object.entries(SNAPSHOT)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+          }
+          await reset();
+        }
+      });
+
+      it("allows platform admins to create orgs even when locked down", async () => {
+        const adminEmail = "admin@example.com";
+        const adminUser = await createTestUser({ email: adminEmail });
+        process.env.AUTH_DISABLE_ORG_CREATION = "true";
+        process.env.AUTH_PLATFORM_ADMIN_EMAILS = adminEmail;
+        await reset();
+        try {
+          const res = await app.request("/api/orgs", {
+            method: "POST",
+            headers: { Cookie: adminUser.cookie, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "Admin Org", slug: "admin-org" }),
+          });
+          expect(res.status).toBe(201);
+        } finally {
+          for (const [k, v] of Object.entries(SNAPSHOT)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+          }
+          await reset();
+        }
+      });
+    });
   });
 
   describe("GET /api/orgs/:orgId (org detail)", () => {

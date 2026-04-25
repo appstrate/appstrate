@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
+import { ProviderCallBody } from "./provider-call-body";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
@@ -191,6 +192,11 @@ export function LogViewer({ entries }: LogViewerProps) {
                   {entry.message}
                   {entry.detail && (
                     <span className="text-muted-foreground ml-2 text-xs">{entry.detail}</span>
+                  )}
+                  {expanded && entry.providerCallBody && (
+                    <div className="mt-2 mr-2 ml-4">
+                      <ProviderCallBody body={entry.providerCallBody} />
+                    </div>
                   )}
                 </div>
               </div>

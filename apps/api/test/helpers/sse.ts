@@ -10,6 +10,13 @@
 export interface SSEEvent {
   event: string;
   data: string;
+  /**
+   * Monotonic event id emitted by the server. Per HTML SSE spec, browsers
+   * send the most recent id back as `Last-Event-ID` on automatic reconnect
+   * so the server can resume the stream. Optional in the test parser
+   * because pre-existing fixtures predate id support.
+   */
+  id?: string;
 }
 
 /**
@@ -40,17 +47,20 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
 
         let event = "";
         let data = "";
+        let id: string | undefined;
 
         for (const line of frame.split("\n")) {
           if (line.startsWith("event:")) {
             event = line.slice("event:".length).trim();
           } else if (line.startsWith("data:")) {
             data = line.slice("data:".length).trim();
+          } else if (line.startsWith("id:")) {
+            id = line.slice("id:".length).trim();
           }
         }
 
         if (event) {
-          yield { event, data };
+          yield { event, data, ...(id !== undefined ? { id } : {}) };
         }
       }
     }
@@ -101,17 +111,20 @@ export async function collectSSEEvents(
 
         let event = "";
         let data = "";
+        let id: string | undefined;
 
         for (const line of frame.split("\n")) {
           if (line.startsWith("event:")) {
             event = line.slice("event:".length).trim();
           } else if (line.startsWith("data:")) {
             data = line.slice("data:".length).trim();
+          } else if (line.startsWith("id:")) {
+            id = line.slice("id:".length).trim();
           }
         }
 
         if (event && !ignoreEvents.includes(event)) {
-          events.push({ event, data });
+          events.push({ event, data, ...(id !== undefined ? { id } : {}) });
           if (events.length >= count) return;
         }
       }

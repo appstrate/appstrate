@@ -26,7 +26,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import type { TokenUsage } from "./run-result.ts";
+import type { RunError, TokenUsage } from "./run-result.ts";
 
 interface BaseEnvelope {
   timestamp: number;
@@ -125,6 +125,64 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
   durationMs?: number;
 }
 
+/**
+ * `run.started` — runtime crossed from `pending` to `running`.
+ *
+ * Emitted exactly once per run, on the first event POST that establishes
+ * proof-of-life. Useful for webhook subscribers and audit log sinks that
+ * want a discrete "starting work" signal instead of inferring it from the
+ * absence of terminal events.
+ *
+ * Vocabulary note: terminal variants are `run.success` / `run.timeout`
+ * (not `run.succeeded` / `run.timedout`) to align with `RunResult.status`,
+ * the `runs.status` enum, and the existing webhook event names — the
+ * reducer's terminal status comes from those columns, not a parallel set
+ * of -ed names.
+ */
+export interface RunStartedEvent extends BaseEnvelope {
+  type: "run.started";
+  /** Runner topology — `"platform"` (in-container Pi runner) or `"remote"` (CLI / GitHub Action). */
+  runnerKind?: "platform" | "remote";
+  /** Free-form runner identifier (e.g. `"appstrate-cli@0.4.0"`, `"github-action"`). */
+  runnerName?: string;
+}
+
+interface BaseRunCompletedEvent extends BaseEnvelope {
+  /** Wall-clock duration of the run in milliseconds. */
+  durationMs?: number;
+}
+
+/** `run.success` — terminal: run completed with `status: "success"`. */
+export interface RunSucceededEvent extends BaseRunCompletedEvent {
+  type: "run.success";
+}
+
+/** `run.failed` — terminal: run completed with `status: "failed"`. */
+export interface RunFailedEvent extends BaseRunCompletedEvent {
+  type: "run.failed";
+  /**
+   * Optional structured error from `RunResult.error`. Full `RunError`
+   * shape (`code`, `message`, `stack`, `context`, `timestamp`) — the
+   * validator (`isCanonicalRunEvent`) accepts the same fields, so a
+   * runner can emit `error: result.error` directly without projection.
+   * Sinks consuming `RunFailedEvent.error` get the same surface as
+   * sinks consuming `RunResult.error`.
+   */
+  error?: RunError;
+}
+
+/** `run.timeout` — terminal: run exceeded its timeout budget. */
+export interface RunTimedOutEvent extends BaseRunCompletedEvent {
+  type: "run.timeout";
+}
+
+/** `run.cancelled` — terminal: run was cancelled by user or scheduler. */
+export interface RunCancelledEvent extends BaseRunCompletedEvent {
+  type: "run.cancelled";
+  /** Free-form reason ("user_cancelled", "shutdown", …). */
+  reason?: string;
+}
+
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
   | MemoryAddedEvent
@@ -134,7 +192,12 @@ export type CanonicalRunEvent =
   | LogWrittenEvent
   | AppstrateProgressEvent
   | AppstrateErrorEvent
-  | AppstrateMetricEvent;
+  | AppstrateMetricEvent
+  | RunStartedEvent
+  | RunSucceededEvent
+  | RunFailedEvent
+  | RunTimedOutEvent
+  | RunCancelledEvent;
 
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
@@ -146,6 +209,11 @@ export const CANONICAL_EVENT_TYPES = [
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
+  "run.started",
+  "run.success",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ] as const satisfies ReadonlyArray<CanonicalRunEvent["type"]>;
 
 const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_TYPES);
@@ -198,6 +266,32 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       }
       if (e.cost !== undefined) {
         if (typeof e.cost !== "number" || !Number.isFinite(e.cost) || e.cost < 0) return false;
+      }
+      return true;
+    }
+    case "run.started":
+      // No required payload — proof-of-life envelope alone is enough.
+      return true;
+    case "run.success":
+    case "run.timeout":
+    case "run.cancelled":
+      return true;
+    case "run.failed": {
+      const e = event as Record<string, unknown>;
+      if (e.error === undefined) return true;
+      if (e.error === null || typeof e.error !== "object" || Array.isArray(e.error)) return false;
+      const err = e.error as Record<string, unknown>;
+      if (typeof err.message !== "string") return false;
+      // Optional structured fields — when present, MUST be the documented type.
+      // Tampered payloads (e.g. `code: 42`) get rejected so callers can fall
+      // back to the open-envelope branch instead of trusting an ill-formed event.
+      if (err.code !== undefined && typeof err.code !== "string") return false;
+      if (err.stack !== undefined && typeof err.stack !== "string") return false;
+      if (err.timestamp !== undefined && typeof err.timestamp !== "string") return false;
+      if (err.context !== undefined) {
+        if (err.context === null || typeof err.context !== "object" || Array.isArray(err.context)) {
+          return false;
+        }
       }
       return true;
     }

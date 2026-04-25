@@ -8,15 +8,23 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
+import {
+  loadModules,
+  getModules,
+  getModuleContributions,
+  emitEvent,
+} from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
   setBeforeSignupHook,
   setAfterSignupHook,
+  setPostBootstrapOrgHook,
   createAuth,
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
+import { createDefaultApplication } from "../services/applications.ts";
+import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -99,6 +107,31 @@ export async function boot(): Promise<void> {
     for (const mod of getModules().values()) {
       const hook = mod.hooks?.afterSignup;
       if (hook) await hook(user, ctx);
+    }
+  });
+  // Self-hosting bootstrap side effects (issue #228). Fires only when
+  // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
+  // create sequence in `routes/organizations.ts` so the bootstrap owner
+  // lands on a usable workspace (default app + hello-world agent) AND so
+  // module listeners on `onOrgCreate` (cloud free-tier, audit, analytics)
+  // observe the org creation. Each side effect catches its own errors —
+  // signup must never fail on a non-fatal provisioning hiccup.
+  setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
+    await emitEvent("onOrgCreate", orgId, userEmail);
+    const defaultApp = await createDefaultApplication(orgId, userId).catch((err) => {
+      logger.warn("Failed to create default application for bootstrap org", {
+        orgId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+    if (defaultApp) {
+      await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch((err) => {
+        logger.warn("Failed to provision default agent for bootstrap org", {
+          orgId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   });
   if (env.S3_BUCKET) {

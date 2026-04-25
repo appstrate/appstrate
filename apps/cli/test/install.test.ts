@@ -28,6 +28,8 @@ import {
   parsePort,
   resolveAppstratePort,
   resolveMinioConsolePort,
+  resolveBootstrapEmail,
+  printBootstrapFollowup,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
 
@@ -1066,3 +1068,164 @@ async function tryHoldSpecificPort(holders: Server[], port: number): Promise<num
     }
   });
 }
+
+describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
+  // Snapshot the env vars we touch so other test files are unaffected.
+  const SNAPSHOT = {
+    APPSTRATE_BOOTSTRAP_OWNER_EMAIL: process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL,
+    APPSTRATE_BOOTSTRAP_ORG_NAME: process.env.APPSTRATE_BOOTSTRAP_ORG_NAME,
+  };
+  afterEach(() => {
+    for (const [k, v] of Object.entries(SNAPSHOT)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("returns the env var when APPSTRATE_BOOTSTRAP_OWNER_EMAIL is set (curl|bash IaC path)", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result).toEqual({ bootstrapOwnerEmail: "admin@acme.com" });
+  });
+
+  it("forwards APPSTRATE_BOOTSTRAP_ORG_NAME when set alongside the email", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
+    process.env.APPSTRATE_BOOTSTRAP_ORG_NAME = "Acme HQ";
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result).toEqual({
+      bootstrapOwnerEmail: "admin@acme.com",
+      bootstrapOrgName: "Acme HQ",
+    });
+  });
+
+  it("env var wins on every tier (Tier 0 IaC pass-through)", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
+    const result = await resolveBootstrapEmail({
+      tier: 0,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result.bootstrapOwnerEmail).toBe("admin@acme.com");
+  });
+
+  it("env var wins on upgrade too (operator can re-impose closed mode declaratively)", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "upgrade",
+      nonInteractive: true,
+    });
+    expect(result.bootstrapOwnerEmail).toBe("admin@acme.com");
+  });
+
+  it("throws when APPSTRATE_BOOTSTRAP_OWNER_EMAIL is malformed (fail-fast at install)", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "not-an-email";
+    await expect(
+      resolveBootstrapEmail({ tier: 3, mode: "fresh", nonInteractive: true }),
+    ).rejects.toThrow(/not a valid email/);
+  });
+
+  it("returns empty (open mode) on non-interactive without env var", async () => {
+    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result).toEqual({});
+  });
+
+  it("returns empty on upgrade without env var (mergeEnv preserves existing .env)", async () => {
+    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "upgrade",
+      nonInteractive: false,
+    });
+    expect(result).toEqual({});
+  });
+
+  it("returns empty on Tier 0 interactive (local dev — closed mode irrelevant)", async () => {
+    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
+    const result = await resolveBootstrapEmail({
+      tier: 0,
+      mode: "fresh",
+      nonInteractive: false,
+    });
+    expect(result).toEqual({});
+  });
+
+  it("trims whitespace from env-var values before validating", async () => {
+    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "  admin@acme.com  ";
+    const result = await resolveBootstrapEmail({
+      tier: 3,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result.bootstrapOwnerEmail).toBe("admin@acme.com");
+  });
+});
+
+describe("printBootstrapFollowup (issue #228) — post-install action", () => {
+  // Captures clack.note's two args via DI so we don't have to spy on stdout.
+  function makeCapture() {
+    const calls: Array<{ message: string; title?: string }> = [];
+    return {
+      calls,
+      note: (message: string, title?: string) => calls.push({ message, title }),
+    };
+  }
+
+  it("renders nothing when bootstrap email is absent (open-mode install)", () => {
+    const cap = makeCapture();
+    printBootstrapFollowup("http://localhost:3000", {}, cap.note);
+    expect(cap.calls).toHaveLength(0);
+  });
+
+  it("renders the action note when bootstrap email is set", () => {
+    const cap = makeCapture();
+    printBootstrapFollowup(
+      "http://localhost:3000",
+      { bootstrapOwnerEmail: "admin@acme.com" },
+      cap.note,
+    );
+    expect(cap.calls).toHaveLength(1);
+    const { message, title } = cap.calls[0]!;
+    expect(title).toContain("create your owner account");
+    expect(message).toContain("http://localhost:3000/register");
+    expect(message).toContain("admin@acme.com");
+    expect(message).toContain("pre-filled and locked");
+    // Default org name surfaces when not provided.
+    expect(message).toContain('"Default"');
+  });
+
+  it("uses the configured bootstrapOrgName when set", () => {
+    const cap = makeCapture();
+    printBootstrapFollowup(
+      "http://localhost:3000",
+      { bootstrapOwnerEmail: "admin@acme.com", bootstrapOrgName: "Acme HQ" },
+      cap.note,
+    );
+    expect(cap.calls[0]!.message).toContain('"Acme HQ"');
+    expect(cap.calls[0]!.message).not.toContain('"Default"');
+  });
+
+  it("respects the appUrl argument verbatim (alternate ports / hosts)", () => {
+    const cap = makeCapture();
+    printBootstrapFollowup(
+      "http://appstrate.acme.com",
+      { bootstrapOwnerEmail: "admin@acme.com" },
+      cap.note,
+    );
+    expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/register");
+    expect(cap.calls[0]!.message).not.toContain("localhost");
+  });
+});

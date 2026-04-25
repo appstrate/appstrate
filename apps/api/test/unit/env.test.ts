@@ -101,3 +101,77 @@ describe("env schema — TRUST_PROXY (C1)", () => {
     restore();
   });
 });
+
+describe("env schema — AUTH_* lockdown vars (issue #228)", () => {
+  // Snapshot the AUTH_* vars so each test starts clean and other suites
+  // don't inherit the bad values we deliberately install here.
+  const AUTH_SNAPSHOT = {
+    AUTH_BOOTSTRAP_OWNER_EMAIL: process.env.AUTH_BOOTSTRAP_OWNER_EMAIL,
+    AUTH_PLATFORM_ADMIN_EMAILS: process.env.AUTH_PLATFORM_ADMIN_EMAILS,
+    AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
+  };
+  function restoreAuth() {
+    for (const [k, v] of Object.entries(AUTH_SNAPSHOT)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    _resetCacheForTesting();
+  }
+  afterAll(() => restoreAuth());
+
+  it("AUTH_BOOTSTRAP_OWNER_EMAIL: empty is allowed (open mode)", () => {
+    delete process.env.AUTH_BOOTSTRAP_OWNER_EMAIL;
+    _resetCacheForTesting();
+    expect(getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL).toBe("");
+    restoreAuth();
+  });
+
+  it("AUTH_BOOTSTRAP_OWNER_EMAIL: valid email passes + lowercases", () => {
+    process.env.AUTH_BOOTSTRAP_OWNER_EMAIL = "Admin@Acme.COM";
+    _resetCacheForTesting();
+    expect(getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL).toBe("admin@acme.com");
+    restoreAuth();
+  });
+
+  it("AUTH_BOOTSTRAP_OWNER_EMAIL: typo without @ is rejected at boot", () => {
+    process.env.AUTH_BOOTSTRAP_OWNER_EMAIL = "admin";
+    _resetCacheForTesting();
+    expect(() => getEnv()).toThrow(/AUTH_BOOTSTRAP_OWNER_EMAIL/);
+    restoreAuth();
+  });
+
+  it("AUTH_PLATFORM_ADMIN_EMAILS: rejects entries without @", () => {
+    process.env.AUTH_PLATFORM_ADMIN_EMAILS = "ops@acme.com,nope";
+    _resetCacheForTesting();
+    expect(() => getEnv()).toThrow(/AUTH_PLATFORM_ADMIN_EMAILS/);
+    restoreAuth();
+  });
+
+  it("AUTH_PLATFORM_ADMIN_EMAILS: well-formed list passes", () => {
+    process.env.AUTH_PLATFORM_ADMIN_EMAILS = "ops@acme.com, admin@foo.io";
+    _resetCacheForTesting();
+    expect(getEnv().AUTH_PLATFORM_ADMIN_EMAILS).toEqual(["ops@acme.com", "admin@foo.io"]);
+    restoreAuth();
+  });
+
+  it("AUTH_ALLOWED_SIGNUP_DOMAINS: rejects malformed entries (whitespace)", () => {
+    process.env.AUTH_ALLOWED_SIGNUP_DOMAINS = "acme . com";
+    _resetCacheForTesting();
+    expect(() => getEnv()).toThrow(/AUTH_ALLOWED_SIGNUP_DOMAINS/);
+    restoreAuth();
+  });
+
+  it("AUTH_ALLOWED_SIGNUP_DOMAINS: rejects single-label hostnames", () => {
+    process.env.AUTH_ALLOWED_SIGNUP_DOMAINS = "acme";
+    _resetCacheForTesting();
+    expect(() => getEnv()).toThrow(/AUTH_ALLOWED_SIGNUP_DOMAINS/);
+    restoreAuth();
+  });
+
+  it("AUTH_ALLOWED_SIGNUP_DOMAINS: well-formed list passes + strips '@'", () => {
+    process.env.AUTH_ALLOWED_SIGNUP_DOMAINS = "acme.com,@foo.io";
+    _resetCacheForTesting();
+    expect(getEnv().AUTH_ALLOWED_SIGNUP_DOMAINS).toEqual(["acme.com", "foo.io"]);
+    restoreAuth();
+  });
+});

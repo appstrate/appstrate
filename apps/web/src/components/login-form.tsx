@@ -80,14 +80,19 @@ export function LoginForm({
         />
       </Link>
       <div className="text-muted-foreground text-center text-sm">
-        {switchAuthSlot ?? (
-          <>
-            {t("login.noAccount")}{" "}
-            <Link to="/register" className="hover:text-primary underline underline-offset-4">
-              {t("login.signup")}
-            </Link>
-          </>
-        )}
+        {switchAuthSlot ??
+          (features.signupDisabled ? (
+            // Closed-mode self-host (issue #228) — no public registration.
+            // Existing accounts and invitees still sign in normally above.
+            <span>{t("login.signupDisabled")}</span>
+          ) : (
+            <>
+              {t("login.noAccount")}{" "}
+              <Link to="/register" className="hover:text-primary underline underline-offset-4">
+                {t("login.signup")}
+              </Link>
+            </>
+          ))}
       </div>
     </div>
   );
