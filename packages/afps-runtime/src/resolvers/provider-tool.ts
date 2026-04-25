@@ -811,16 +811,26 @@ async function buildMultipartBytes(
  * are not accepted. Throws {@link ResolverError} on invalid input or
  * when the decoded size exceeds `maxSize`.
  */
-function decodeBase64Body(fromBytes: string, encoding: string, maxSize: number): Uint8Array {
+function decodeBase64Body(
+  fromBytes: string,
+  encoding: string,
+  maxSize: number,
+): Uint8Array<ArrayBuffer> {
   if (encoding !== "base64") {
     throw new ResolverError("RESOLVER_BODY_INVALID", `Unsupported fromBytes encoding: ${encoding}`);
   }
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(fromBytes)) {
     throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes");
   }
-  let decoded: Uint8Array;
+  let decoded: Uint8Array<ArrayBuffer>;
   try {
-    decoded = Uint8Array.from(Buffer.from(fromBytes, "base64"));
+    // `new Uint8Array(arrayLike)` allocates a fresh ArrayBuffer (vs
+    // `Uint8Array.from(Buffer)` whose buffer type widens to
+    // ArrayBufferLike under TS 5.7+, which DOM-aware consumers like
+    // `apps/web` reject when passed to `new Blob([...])`).
+    const buf = Buffer.from(fromBytes, "base64");
+    decoded = new Uint8Array(buf.byteLength);
+    decoded.set(buf);
   } catch (err) {
     throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", {
       cause: err,
