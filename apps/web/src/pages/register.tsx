@@ -48,7 +48,15 @@ export function RegisterPage() {
               {t("login.bootstrapBody", { email: bootstrapOwnerEmail })}
             </p>
           </div>
-          <RegisterForm fixedEmail={bootstrapOwnerEmail} />
+          {/*
+           * Route the bootstrap owner through the rest of the onboarding
+           * flow so they can configure their first model, providers, and
+           * invite teammates. The org is already created by the
+           * after-hook, so `/onboarding/create` auto-skips to the next
+           * active step (currently `/onboarding/model` in OSS) — see
+           * `create-step.tsx` "skip to next step" effect.
+           */}
+          <RegisterForm fixedEmail={bootstrapOwnerEmail} redirectAfterSignup="/onboarding/create" />
         </div>
       ) : (
         <RegisterForm />

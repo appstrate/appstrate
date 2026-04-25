@@ -151,7 +151,10 @@ After install, the CLI prints the exact next step:
 
 Open the URL — `/register` is rendered with the email field already
 filled in and disabled (so a typo can't diverge you from the configured
-bootstrap account). Pick a password, submit, you're owner. Done.
+bootstrap account). Pick a password, submit. The org is created
+synchronously by the signup after-hook, then you're routed through the
+rest of the onboarding (configure your first model, connect providers,
+invite teammates). Done.
 
 > **How signup works in closed mode.** The signup link is hidden from
 > `/login` (no public discoverability) but `/register` itself stays

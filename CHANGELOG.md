@@ -31,6 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `RegisterPage` reads `AUTH_BOOTSTRAP_OWNER_EMAIL` from `__APP_CONFIG__`
     and pre-fills + locks the email field, plus a banner explaining why,
     so the operator only has to pick a password (typo-proof bootstrap).
+  - After signup, the bootstrap owner is routed through the rest of
+    onboarding (`/onboarding/create` auto-skips since the org already
+    exists, landing on the model-config step) so they can configure
+    their first model, providers, and invite teammates.
   - Full guide in `examples/self-hosting/AUTH_MODES.md`.
 - Health check for main application container in Docker Compose
 - Named Docker networks with data tier isolation (`appstrate-data`, `appstrate-public`)

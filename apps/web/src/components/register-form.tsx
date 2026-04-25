@@ -32,6 +32,14 @@ interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
   footer?: ReactNode | null;
   switchAuthSlot?: ReactNode;
   socialCallbackURL?: string;
+  /**
+   * Path to navigate to after a successful signup (when no email
+   * verification is required). Defaults to `/`. RegisterPage uses this
+   * to route the closed-mode bootstrap owner through the rest of the
+   * onboarding flow (`/onboarding/create` auto-skips to the next active
+   * step since the bootstrap after-hook already created the org).
+   */
+  redirectAfterSignup?: string;
 }
 
 export function RegisterForm({
@@ -42,6 +50,7 @@ export function RegisterForm({
   footer,
   switchAuthSlot,
   socialCallbackURL,
+  redirectAfterSignup = "/",
   ...props
 }: RegisterFormProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -77,7 +86,7 @@ export function RegisterForm({
         if (result.emailVerificationRequired) {
           navigate("/verify-email", { state: { email: data.email } });
         } else {
-          navigate("/");
+          navigate(redirectAfterSignup);
         }
       }
     } catch (err) {
