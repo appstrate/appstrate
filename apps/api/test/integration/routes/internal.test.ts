@@ -426,6 +426,77 @@ describe("Internal API", () => {
       // Defaults to "access_token" since authMode is basic (not api_key)
       expect(body.credentialFieldName).toBe("access_token");
     });
+
+    it("resolves credentials for inline-run shadow (ephemeral) packages", async () => {
+      // Inline runs (`POST /api/runs/inline`) insert a shadow agent row
+      // with `ephemeral: true`. The default `getPackage()` filter
+      // excludes shadows (so public listings don't expose them); the
+      // credentials route must opt in via `includeEphemeral: true` or
+      // every inline run that calls `provider_call` would 404 with
+      // "Agent not found" before the upstream is ever reached.
+      const providerId = "@internalorg/inline-gmail";
+      await seedPackage({
+        orgId: null,
+        id: providerId,
+        type: "provider",
+        source: "system",
+        draftManifest: {
+          name: providerId,
+          version: "1.0.0",
+          type: "provider",
+          definition: {
+            authMode: "oauth2",
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            authorizedUris: ["https://gmail.googleapis.com/**"],
+          },
+        },
+      });
+
+      const shadowAgent = await seedPackage({
+        id: "@inline/r-test-shadow",
+        orgId: ctx.orgId,
+        ephemeral: true,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@inline/r-test-shadow",
+          version: "0.0.0",
+          type: "agent",
+          dependencies: { providers: { [providerId]: "*" } },
+        },
+      });
+
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Default",
+        isDefault: true,
+      });
+      await seedConnectionForApp(
+        profile.id,
+        providerId,
+        ctx.orgId,
+        ctx.defaultAppId,
+        { access_token: "ya29.shadow-token" },
+        { expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() },
+      );
+
+      const run = await seedRun({
+        packageId: shadowAgent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+        providerProfileIds: { [providerId]: profile.id },
+      });
+
+      const res = await app.request(`/internal/credentials/${providerId}`, {
+        headers: { Authorization: `Bearer ${signRunToken(run.id)}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { credentials: Record<string, string> };
+      expect(body.credentials.access_token).toBe("ya29.shadow-token");
+    });
   });
 
   // ─── POST /internal/credentials/:scope/:name/refresh ─────────
