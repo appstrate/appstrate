@@ -123,6 +123,125 @@ _appstrate_bootstrap() {
   have_shasum() { command -v shasum >/dev/null 2>&1; }
   have_minisign() { command -v minisign >/dev/null 2>&1; }
 
+  # ─── Dual-install pre-check (issue #249, phase 4) ───────────────────────────
+  #
+  # If the user already has `appstrate` on PATH at a DIFFERENT location than
+  # the one we're about to write, the two binaries will silently shadow each
+  # other after the install — the order on $PATH decides which one runs, and
+  # `appstrate self-update` will only ever update one of them. uv, deno, bun,
+  # rustup all surface this case at runtime; nobody surfaces it at install
+  # time. We do, because we have $DEST in hand before we touch the disk.
+  #
+  # Behavior:
+  #   - Same path (re-install over self) → silent no-op, proceed.
+  #   - Different path + interactive TTY → prompt [y/N], abort by default.
+  #   - Different path + CI / non-TTY  → abort with a hint to set
+  #                                       APPSTRATE_FORCE_DUAL=1.
+  #   - APPSTRATE_FORCE_DUAL=1         → bypass the check entirely.
+  #
+  # We do this BEFORE downloading the binary so a user who chose the wrong
+  # install method doesn't burn bandwidth + minisign cycles on something
+  # they're going to abort 10 seconds later.
+  resolve_path() {
+    # POSIX-portable path resolver tolerant of non-existent leaf files.
+    #
+    # Why split dir + basename: BSD `realpath` (macOS default) and GNU
+    # `readlink -f` both fail on a non-existent path, but DEST = the file
+    # we're about to write doesn't exist yet on a fresh install. Resolving
+    # only the parent dir handles every scenario where one or both paths
+    # are missing while still canonicalising symlinks at the directory
+    # level (the common case — e.g. /usr/local/bin → /opt/homebrew/bin
+    # on macOS Homebrew). Symlinks AT the leaf are not resolved, but a
+    # symlink at the binary itself is uncommon and a false-positive
+    # warning on that edge case beats a false-negative dual-install miss.
+    _input="$1"
+    _dir="$(dirname -- "$_input")"
+    _base="$(basename -- "$_input")"
+    if command -v realpath >/dev/null 2>&1; then
+      _real_dir="$(realpath "$_dir" 2>/dev/null || printf '%s' "$_dir")"
+    elif command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+      _real_dir="$(readlink -f "$_dir" 2>/dev/null || printf '%s' "$_dir")"
+    else
+      _real_dir="$_dir"
+    fi
+    printf '%s/%s' "$_real_dir" "$_base"
+  }
+
+  EXISTING_APPSTRATE="$(command -v appstrate 2>/dev/null || true)"
+  if [ -n "$EXISTING_APPSTRATE" ] && [ "${APPSTRATE_FORCE_DUAL:-0}" != "1" ]; then
+    EXISTING_REAL="$(resolve_path "$EXISTING_APPSTRATE")"
+    DEST_REAL="$(resolve_path "$DEST")"
+    # Only act on a TRUE dual-install. Re-running the bootstrap on a machine
+    # that already has the curl-channel binary at $DEST is a normal re-install
+    # — we don't want to nag.
+    if [ "$EXISTING_REAL" != "$DEST_REAL" ]; then
+      EXISTING_VERSION="$("$EXISTING_APPSTRATE" --version 2>/dev/null | head -n 1 || echo "?")"
+      err "Another \`appstrate\` is already on PATH at:"
+      err "    $EXISTING_APPSTRATE  (version: $EXISTING_VERSION)"
+      err ""
+      err "Installing to:"
+      err "    $DEST"
+      err ""
+      err "Two binaries on PATH will silently shadow each other and \`appstrate"
+      err "self-update\` only manages the curl-channel one. Pick a single channel:"
+      err "  • Stay on the existing install: abort this bootstrap and run"
+      err "    its native upgrade command (\`bun update -g appstrate\`, etc)."
+      err "  • Switch to curl: remove the existing binary, then re-run."
+      err "  • Force-install both anyway: APPSTRATE_FORCE_DUAL=1 (not recommended)."
+      err ""
+      err "See https://github.com/appstrate/appstrate/issues/249"
+
+      # Determine interactive vs. non-interactive. `[ -t 0 ]` checks stdin;
+      # when piped from `curl | bash`, stdin is the pipe (NOT a TTY) so we
+      # also try to open /dev/tty for the prompt — same trick rustup uses.
+      _ci_flag="${CI:-}"
+      _is_ci=0
+      case "$_ci_flag" in true | 1 | yes) _is_ci=1 ;; esac
+
+      if [ "$_is_ci" = "1" ]; then
+        err ""
+        err "CI detected — refusing to prompt. Re-run with APPSTRATE_FORCE_DUAL=1"
+        err "if you really want both binaries on this runner."
+        exit 1
+      fi
+
+      _tty=""
+      if [ -t 0 ]; then
+        _tty="stdin"
+      elif [ -r /dev/tty ]; then
+        _tty="/dev/tty"
+      fi
+
+      if [ -z "$_tty" ]; then
+        err ""
+        err "Non-interactive shell detected — refusing to prompt."
+        err "Re-run with APPSTRATE_FORCE_DUAL=1 if intentional."
+        exit 1
+      fi
+
+      printf '\n'
+      printf 'Continue and install the curl-channel binary alongside the existing one? [y/N] '
+      ANSWER=""
+      if [ "$_tty" = "/dev/tty" ]; then
+        IFS= read -r ANSWER </dev/tty || ANSWER=""
+      else
+        IFS= read -r ANSWER || ANSWER=""
+      fi
+      case "$ANSWER" in
+        y | Y | yes | YES) : ;; # proceed
+        *)
+          err ""
+          err "Aborted — no files were written."
+          exit 1
+          ;;
+      esac
+      warn "Proceeding with dual-install at user request."
+    fi
+  elif [ "${APPSTRATE_FORCE_DUAL:-0}" = "1" ] && [ -n "$EXISTING_APPSTRATE" ]; then
+    # User explicitly opted in. Surface the warning so they don't forget.
+    warn "APPSTRATE_FORCE_DUAL=1 set — installing alongside existing $EXISTING_APPSTRATE"
+  fi
+
   # ─── Download + verify ──────────────────────────────────────────────────────
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
