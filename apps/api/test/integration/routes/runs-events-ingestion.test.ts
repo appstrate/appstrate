@@ -483,13 +483,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     });
     expect(res.status).toBe(200);
 
-    // Synthetic row uses sequence=0 (real metric events start at 1).
+    // The finalize fallback writes the single runner row when the
+    // metric event never arrived.
     const ledger = await db
       .select()
       .from(llmUsage)
       .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
     expect(ledger).toHaveLength(1);
-    expect(ledger[0]!.sequence).toBe(0);
     expect(ledger[0]!.costUsd).toBeCloseTo(0.0042, 5);
     expect(ledger[0]!.inputTokens).toBe(200);
     expect(ledger[0]!.outputTokens).toBe(100);
@@ -502,8 +502,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   it("does NOT duplicate the runner ledger row when a metric event already landed", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    // Metric arrives first — the platform persists a runner-source row
-    // at the metric's envelope sequence (1+).
+    // Metric arrives first — the platform persists the single
+    // runner-source row.
     const ev = buildEnvelope(
       runId,
       "appstrate.metric",
@@ -516,9 +516,9 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     );
     expect((await postEvent(runId, ev)).status).toBe(200);
 
-    // Finalize ships the same `cost` in the body. It MUST detect the
-    // existing runner row and skip its own synthesis — otherwise we'd
-    // double-bill the run.
+    // Finalize ships the same `cost` in the body. The partial unique
+    // index on `(run_id) WHERE source='runner'` guarantees a single
+    // runner row regardless of which writer raced first.
     const res = await postFinalize(runId, {
       status: "success",
       output: { ok: true },
@@ -533,7 +533,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       .from(llmUsage)
       .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
     expect(ledger).toHaveLength(1);
-    expect(ledger[0]!.sequence).toBe(1); // the metric event's sequence, not the synth sentinel
     expect(ledger[0]!.costUsd).toBeCloseTo(0.0042, 5);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -566,25 +565,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // Cost-ledger end-to-end regression: before the llm_usage unification,
   // runs.cost was overwritten with null at finalize for platform runs
   // because aggregateRunCost only summed the proxy tables. Now finalize
-  // reads the unified ledger, which includes runner-source rows written
-  // by the sink on each `appstrate.metric` event.
+  // reads the unified ledger, which includes the single runner-source
+  // row written by the sink on the `appstrate.metric` event.
   it("accumulates runner-source cost into runs.cost at finalize", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    // Emit two running-total metric events: 0.001 → 0.003. The ledger
-    // derives deltas (0.001, then 0.002) so the SUM matches the running
-    // total regardless of how many events flow.
-    const ev1 = buildEnvelope(
-      runId,
-      "appstrate.metric",
-      {
-        usage: { input_tokens: 100, output_tokens: 50 },
-        cost: 0.001,
-        timestamp: Date.now(),
-      },
-      1,
-    );
-    const ev2 = buildEnvelope(
+    // Emit one metric event with the runner's final cost + usage.
+    const ev = buildEnvelope(
       runId,
       "appstrate.metric",
       {
@@ -592,19 +579,17 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
         cost: 0.003,
         timestamp: Date.now(),
       },
-      2,
+      1,
     );
-    expect((await postEvent(runId, ev1)).status).toBe(200);
-    expect((await postEvent(runId, ev2)).status).toBe(200);
+    expect((await postEvent(runId, ev)).status).toBe(200);
 
-    // Two runner-source ledger rows, SUM = final running total.
+    // Single runner-source ledger row.
     const ledger = await db
       .select()
       .from(llmUsage)
       .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
-    expect(ledger).toHaveLength(2);
-    const ledgerSum = ledger.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
-    expect(ledgerSum).toBeCloseTo(0.003, 5);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.costUsd).toBeCloseTo(0.003, 5);
 
     // Finalize caches the aggregate into runs.cost.
     const res = await postFinalize(runId, {

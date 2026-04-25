@@ -267,11 +267,8 @@ export const llmUsage = pgTable(
     costUsd: doublePrecision("cost_usd").notNull().default(0),
     durationMs: integer("duration_ms"),
     // Proxy dedup key — one per upstream call minted by the proxy route.
-    // `null` on runner-source rows (they dedup on sequence instead).
+    // Null on runner-source rows (they dedup on run_id instead).
     requestId: text("request_id"),
-    // Runner dedup key — monotonic per-run event sequence from the AFPS
-    // sink protocol. `null` on proxy-source rows.
-    sequence: integer("sequence"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -281,25 +278,23 @@ export const llmUsage = pgTable(
     index("idx_llm_usage_run_id").on(table.runId),
     index("idx_llm_usage_org_created").on(table.orgId, table.createdAt),
     // Proxy-source dedup: request_id is unique across all proxy rows.
-    // Runner-source rows leave request_id NULL and dedup via sequence.
     uniqueIndex("uq_llm_usage_proxy_request_id")
       .on(table.requestId)
       .where(sql`source = 'proxy' AND request_id IS NOT NULL`),
-    // Runner-source dedup: (run_id, sequence) is unique for runner rows.
-    // Proxy-source rows leave sequence NULL.
-    uniqueIndex("uq_llm_usage_runner_run_sequence")
-      .on(table.runId, table.sequence)
-      .where(sql`source = 'runner' AND run_id IS NOT NULL AND sequence IS NOT NULL`),
+    // Runner-source dedup: at most one runner row per run. The metric
+    // event carries a running total; the row is written once by whichever
+    // path lands first (the metric event handler or the finalize-time
+    // fallback). ON CONFLICT DO NOTHING enforces single-write.
+    uniqueIndex("uq_llm_usage_runner_run_id")
+      .on(table.runId)
+      .where(sql`source = 'runner' AND run_id IS NOT NULL`),
     // INSERT invariant: exactly one principal. After FK cleanup (api_key /
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.
     check("llm_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
     // Source-consistency invariants.
     check("llm_usage_proxy_has_request_id", sql`source <> 'proxy' OR request_id IS NOT NULL`),
-    check(
-      "llm_usage_runner_has_sequence",
-      sql`source <> 'runner' OR (run_id IS NOT NULL AND sequence IS NOT NULL)`,
-    ),
+    check("llm_usage_runner_has_run_id", sql`source <> 'runner' OR run_id IS NOT NULL`),
   ],
 );
 
