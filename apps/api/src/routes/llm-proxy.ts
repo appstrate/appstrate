@@ -153,7 +153,7 @@ async function handleProxy(
 
   const started = Date.now();
   try {
-    const { response } = await proxyLlmCall({
+    const response = await proxyLlmCall({
       adapter,
       principal,
       runId,

@@ -6,7 +6,6 @@ import { eq, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
-import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
@@ -400,46 +399,8 @@ export async function getSchedule(id: string, scope?: AppScope): Promise<Enriche
     .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
-  return enrichOneSchedule(schedule, schedule.orgId);
-}
-
-/**
- * Enrich a single schedule with profile info and readiness status.
- * Direct single-row lookups (no batching overhead) — mirrors the shape
- * produced by enrichSchedules() for one row.
- */
-async function enrichOneSchedule(schedule: Schedule, orgId: string): Promise<EnrichedSchedule> {
-  // Load profile + agent in parallel (2 independent queries)
-  const [profileRows, agent] = await Promise.all([
-    db
-      .select()
-      .from(connectionProfilesTable)
-      .where(eq(connectionProfilesTable.id, schedule.connectionProfileId))
-      .limit(1),
-    getPackage(schedule.packageId, orgId),
-  ]);
-
-  const profile = profileRows[0] ?? null;
-
-  let profileName: string | null = null;
-  let profileType: "user" | "app" | null = null;
-  let profileOwnerName: string | null = null;
-  if (profile) {
-    profileName = profile.name;
-    profileType = profile.applicationId ? "app" : "user";
-    if (profile.userId) {
-      const ownerRows = await db
-        .select({ name: userTable.name })
-        .from(userTable)
-        .where(eq(userTable.id, profile.userId))
-        .limit(1);
-      profileOwnerName = ownerRows[0]?.name ?? null;
-    }
-  }
-
-  const readiness = await computeScheduleReadiness(schedule, profile, agent ?? null, orgId);
-
-  return { ...schedule, profileName, profileType, profileOwnerName, readiness };
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId);
+  return enriched ?? null;
 }
 
 /** Compute readiness status for a single schedule based on its profile and agent. */

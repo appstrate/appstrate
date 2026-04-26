@@ -30,10 +30,7 @@ import {
   deleteOrgItem,
   uploadPackageFiles,
   downloadPackageFiles,
-  SKILL_CONFIG,
-  TOOL_CONFIG,
-  AGENT_CONFIG,
-  PROVIDER_CONFIG,
+  CONFIG_BY_TYPE,
   PackageAlreadyExistsError,
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
@@ -339,7 +336,7 @@ interface PackageRouteConfig {
 
 const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
   skill: {
-    cfg: SKILL_CONFIG,
+    cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
@@ -348,7 +345,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     requireContent: true,
   },
   tool: {
-    cfg: TOOL_CONFIG,
+    cfg: CONFIG_BY_TYPE.tool,
     path: "tools",
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "tool",
@@ -358,7 +355,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     jsonBodyCreate: true,
   },
   agent: {
-    cfg: AGENT_CONFIG,
+    cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "agent",
@@ -369,7 +366,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     getHandler: agentDetailHandler,
   },
   provider: {
-    cfg: PROVIDER_CONFIG,
+    cfg: CONFIG_BY_TYPE.provider,
     path: "providers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "provider",

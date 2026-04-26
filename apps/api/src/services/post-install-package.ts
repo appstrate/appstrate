@@ -8,8 +8,7 @@ import {
   updateOrgItem,
   getOrgItem,
   uploadPackageFiles,
-  SKILL_CONFIG,
-  TOOL_CONFIG,
+  CONFIG_BY_TYPE,
   type PackageTypeConfig,
   type CreateItemInput,
 } from "./package-items/index.ts";
@@ -67,7 +66,7 @@ export async function postInstallPackage(params: {
   const version: string = rawVersion;
 
   if (packageType === "skill" || packageType === "tool") {
-    const cfg = packageType === "skill" ? SKILL_CONFIG : TOOL_CONFIG;
+    const cfg = CONFIG_BY_TYPE[packageType];
     const item: CreateItemInput = { id: packageId, content, createdBy: userId };
     await upsertItem(orgId, packageId, item, cfg, manifest);
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);

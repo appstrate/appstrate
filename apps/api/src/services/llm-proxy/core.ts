@@ -49,11 +49,6 @@ export interface ProxyCallInputs {
   maxRequestBytes?: number;
 }
 
-export interface ProxyCallResult {
-  /** Upstream response forwarded to the caller, body intact. */
-  response: Response;
-}
-
 export class LlmProxyUnsupportedModelError extends Error {
   constructor(presetId: string) {
     super(`Model preset "${presetId}" is not enabled for this organization.`);
@@ -74,7 +69,7 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
-export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallResult> {
+export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
   if (inputs.rawBody.byteLength > maxBytes) {
@@ -119,9 +114,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallRe
   if (!upstream.ok) {
     const errorBody = await upstream.text();
     const headers = cloneResponseHeaders(upstream.headers);
-    return {
-      response: new Response(errorBody, { status: upstream.status, headers }),
-    };
+    return new Response(errorBody, { status: upstream.status, headers });
   }
 
   if (isSse && upstream.body) {
@@ -136,12 +129,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallRe
       }),
     );
     const headers = cloneResponseHeaders(upstream.headers);
-    return {
-      response: new Response(clientStream, {
-        status: upstream.status,
-        headers,
-      }),
-    };
+    return new Response(clientStream, {
+      status: upstream.status,
+      headers,
+    });
   }
 
   // Non-streaming JSON. Read once, parse for usage, forward an identical
@@ -155,9 +146,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallRe
     // Upstream advertised a non-JSON content-type but still returned a
     // non-SSE body — forward without metering.
     const headers = cloneResponseHeaders(upstream.headers);
-    return {
-      response: new Response(bodyText, { status: upstream.status, headers }),
-    };
+    return new Response(bodyText, { status: upstream.status, headers });
   }
 
   const usage = inputs.adapter.parseJsonUsage(parsed);
@@ -172,9 +161,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<ProxyCallRe
   }
 
   const headers = cloneResponseHeaders(upstream.headers);
-  return {
-    response: new Response(bodyText, { status: upstream.status, headers }),
-  };
+  return new Response(bodyText, { status: upstream.status, headers });
 }
 
 function extractPresetId(rawBody: Uint8Array): string {

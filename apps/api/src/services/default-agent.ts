@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createOrgItem } from "./package-items/crud.ts";
-import { AGENT_CONFIG } from "./package-items/config.ts";
+import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 import { installPackage } from "./application-packages.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -62,7 +62,7 @@ export async function provisionDefaultAgentForOrg(
         content: HELLO_WORLD_PROMPT,
         createdBy,
       },
-      AGENT_CONFIG,
+      CONFIG_BY_TYPE.agent,
       manifest,
     );
 

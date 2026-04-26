@@ -12,40 +12,12 @@ export interface PackageTypeConfig {
   label: string;
 }
 
-export const SKILL_CONFIG: PackageTypeConfig = {
-  type: "skill",
-  storageFolder: "skills",
-  label: "Skills",
+export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
+  agent: { type: "agent", storageFolder: "agents", label: "Agents" },
+  skill: { type: "skill", storageFolder: "skills", label: "Skills" },
+  tool: { type: "tool", storageFolder: "tools", label: "Tools" },
+  provider: { type: "provider", storageFolder: "providers", label: "Providers" },
 };
-
-export const TOOL_CONFIG: PackageTypeConfig = {
-  type: "tool",
-  storageFolder: "tools",
-  label: "Tools",
-};
-
-export const AGENT_CONFIG: PackageTypeConfig = {
-  type: "agent",
-  storageFolder: "agents",
-  label: "Agents",
-};
-
-export const PROVIDER_CONFIG: PackageTypeConfig = {
-  type: "provider",
-  storageFolder: "providers",
-  label: "Providers",
-};
-
-// ─────────────────────────────────────────────
-// Type → config lookup
-// ─────────────────────────────────────────────
-
-const ALL_CONFIGS: PackageTypeConfig[] = [AGENT_CONFIG, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG];
-
-const CONFIG_BY_TYPE = Object.fromEntries(ALL_CONFIGS.map((c) => [c.type, c])) as Record<
-  PackageType,
-  PackageTypeConfig
->;
 
 /** Resolve the S3 storage folder for a package type (e.g. "tool" → "tools"). */
 export function storageFolderForType(type: PackageType): PackageTypeConfig["storageFolder"] {
