@@ -85,8 +85,41 @@ function initAuth() {
   });
 }
 
-export async function refreshAuth() {
+/**
+ * Thrown by `refreshAuth()` when the resync completed but did not
+ * establish an authenticated user — e.g. `getSession()` returned null
+ * because of a stale Better Auth cookie. Callers that depend on a
+ * session being present after `refreshAuth()` (the OIDC callback, invite
+ * acceptance, post-email-change) can catch this discriminant and show a
+ * meaningful "please sign in again" message instead of navigating into a
+ * silent loop.
+ */
+export class AuthRefreshError extends Error {
+  constructor(
+    public code: "no_session",
+    message: string,
+  ) {
+    super(message);
+    this.name = "AuthRefreshError";
+  }
+}
+
+/**
+ * Resync auth state from the server cookie and assert that a user was
+ * established. Use after any flow that should have left a valid session
+ * behind (OIDC callback, invite accept, email change). On the no-user
+ * path `syncAuth` already best-effort clears the stale cookie via
+ * `signOut()`; this throw lets the caller surface the failure in the UI
+ * rather than silently navigating onwards on a null user.
+ */
+export async function refreshAuth(): Promise<void> {
   await syncAuth();
+  if (!authStore.getState().user) {
+    throw new AuthRefreshError(
+      "no_session",
+      "Authentication did not complete — the session could not be established.",
+    );
+  }
 }
 
 export function useAuth() {

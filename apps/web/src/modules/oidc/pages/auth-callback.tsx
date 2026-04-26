@@ -10,8 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
-import { refreshAuth } from "../../../hooks/use-auth";
-import { authStore } from "../../../stores/auth-store";
+import { refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
 import { Spinner } from "../../../components/spinner";
 
 /**
@@ -42,20 +41,13 @@ export function AuthCallbackPage() {
     (async () => {
       try {
         const { redirectTo } = await handleOidcCallback();
-        // Sync auth state — the BA session cookie is now active
+        // Sync auth state — the BA session cookie is now active.
+        // `refreshAuth` throws `AuthRefreshError` if the resync did not
+        // establish a user (stale cookie, server-side session gone). The
+        // catch below turns that into an inline error rather than letting
+        // us navigate onto a protected page → catch-all → /login → OIDC
+        // re-redirect → back here in a tight loop with no error UI.
         await refreshAuth();
-        // `refreshAuth` swallows server failures and clears the auth
-        // store on its own (the silent-redirect-loop bug used to start
-        // here). Verify the resync actually established a user before
-        // navigating — otherwise `<App>` re-renders unauthenticated,
-        // the catch-all bounces to `/login`, the OIDC flow restarts,
-        // and we are back here in a tight loop with no error UI.
-        if (!authStore.getState().user) {
-          setError(
-            "Authentication did not complete — the session could not be established. Please sign in again.",
-          );
-          return;
-        }
         // Server-rendered pages outside the SPA (e.g. `/activate` for
         // the CLI device-flow consent) need a real browser navigation
         // — React Router's `navigate()` would push history but the SPA
@@ -69,6 +61,12 @@ export function AuthCallbackPage() {
         }
         navigate(redirectTo, { replace: true });
       } catch (err) {
+        if (err instanceof AuthRefreshError && err.code === "no_session") {
+          setError(
+            "Authentication did not complete — the session could not be established. Please sign in again.",
+          );
+          return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
       }
