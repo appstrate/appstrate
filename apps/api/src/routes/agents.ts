@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { listResponse } from "../lib/list-response.ts";
 import {
   getRunningRunCounts,
   listPinnedSlots,
@@ -105,11 +106,7 @@ export function createAgentsRouter() {
       };
     });
 
-    return c.json({
-      object: "list" as const,
-      data: agentList,
-      hasMore: false,
-    });
+    return c.json(listResponse(agentList));
   });
 
   // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)

@@ -8,6 +8,7 @@ import { packages, applicationPackages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   getProfileForActor,
@@ -144,7 +145,7 @@ export function createAppProfilesRouter() {
       .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
       .where(eq(applicationPackages.appProfileId, profileId));
 
-    return c.json({ object: "list" as const, data: rows, hasMore: false });
+    return c.json(listResponse(rows));
   });
 
   // GET /api/app-profiles/:id/bindings — list provider bindings for an app profile

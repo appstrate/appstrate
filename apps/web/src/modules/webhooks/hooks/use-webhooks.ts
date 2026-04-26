@@ -3,7 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
-import { api } from "@/api";
+import { api, apiList } from "@/api";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
 
@@ -31,7 +31,7 @@ export function useWebhooks() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["webhooks", orgId, appId],
-    queryFn: () => api<{ object: "list"; data: WebhookInfo[] }>("/webhooks").then((d) => d.data),
+    queryFn: () => apiList<WebhookInfo>("/webhooks"),
     enabled: !!orgId && !!appId,
   });
 }
@@ -133,10 +133,7 @@ export function useWebhookDeliveries(webhookId: string) {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["webhooks", orgId, appId, webhookId, "deliveries"],
-    queryFn: () =>
-      api<{ object: "list"; data: WebhookDelivery[] }>(`/webhooks/${webhookId}/deliveries`).then(
-        (d) => d.data,
-      ),
+    queryFn: () => apiList<WebhookDelivery>(`/webhooks/${webhookId}/deliveries`),
     enabled: !!orgId && !!appId && !!webhookId,
   });
 }
