@@ -324,6 +324,7 @@ const expectedEndpoints = [
   "GET /api/applications/{appId}/packages/{scope}/{name}",
   "PUT /api/applications/{appId}/packages/{scope}/{name}",
   "DELETE /api/applications/{appId}/packages/{scope}/{name}",
+  "GET /api/applications/{appId}/packages/{scope}/{name}/run-config",
 
   // Application Providers
   "GET /api/applications/{appId}/providers",

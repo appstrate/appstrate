@@ -65,6 +65,12 @@ import { CompositeSink } from "@appstrate/afps-runtime/sinks";
 import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
 import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
 import { fetchBundleForRun, BundleFetchError } from "./run/bundle-fetch.ts";
+import {
+  fetchRunConfigPayload,
+  mergeRunConfig,
+  RunConfigFetchError,
+  type InheritedRunConfig,
+} from "./run/inherit-config.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -98,6 +104,20 @@ export interface RunCommandOptions {
   sinkTtl?: number;
   /** Bypass the local bundle cache when running an agent by package id. */
   noCache?: boolean;
+  /**
+   * Proxy id to associate with the run. For in-process runs this only
+   * surfaces in the reported run record — actual outbound proxying is
+   * handled server-side by the credential proxy. For remote runs the
+   * platform applies the override to the spawned container.
+   */
+  proxy?: string;
+  /**
+   * When true, ignore the per-app `run-config` (config / model / proxy
+   * / versionPin) and rely only on flags + env vars + defaults. Useful
+   * for deterministic CI runs where the application's persisted state
+   * must not drift the run.
+   */
+  noInherit?: boolean;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -117,17 +137,37 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
   const modelSource = parseModelSource(opts.modelSource);
+  const target = parseRunTarget(opts.bundle);
+
+  // Build provider resolver inputs FIRST so preset mode can reuse the
+  // bearer token — they share the same auth surface.
+  const resolverInputs = await buildResolverInputs(mode, opts);
+
+  // ─── 1a. Inherited run-config ────────────────────────────────────
+  // When the user runs an agent by id with a remote provider context,
+  // pull the per-app run-config so flags + env vars cascade over the
+  // same persisted state the dashboard "Run" button uses. Skipped for
+  // path-mode (local file, no platform handle) and for `--no-inherit`
+  // (deterministic CI runs).
+  const inheritedConfig = await maybeFetchRunConfig(target, resolverInputs, opts);
+
+  // Apply inherited model id as the default model when the user did not
+  // pass `--model` and there's no APPSTRATE_MODEL env var. This lets the
+  // CLI reproduce a UI run that selected a specific preset.
+  const llmFlagsWithInheritance: RunCommandOptions =
+    inheritedConfig.modelId && !opts.model && !process.env.APPSTRATE_MODEL_ID
+      ? { ...opts, model: inheritedConfig.modelId }
+      : opts;
 
   // ─── 2. Resolve the LLM (fails fast if no key) ─────────────────────
   //   env    — user-supplied credentials, no Appstrate call
   //   preset — preset id resolved via `/api/models`, LLM traffic routed
   //            through `/api/llm-proxy/<api>/*` with the profile's bearer
-  //
-  // Build provider resolver inputs FIRST so preset mode can reuse the
-  // bearer token — they share the same auth surface.
-  const resolverInputs = await buildResolverInputs(mode, opts);
-
-  const { model, apiKey: llmApiKey } = await resolveLlmConfig(modelSource, opts, resolverInputs);
+  const { model, apiKey: llmApiKey } = await resolveLlmConfig(
+    modelSource,
+    llmFlagsWithInheritance,
+    resolverInputs,
+  );
 
   // ─── 3. Load the bundle ────────────────────────────────────────────
   // Two shapes share this path:
@@ -135,9 +175,13 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   //   - `appstrate run @scope/agent[@spec]` → fetch from the pinned
   //     instance (with deps inlined) and cache locally. Requires a
   //     remote provider mode so we already have the bearer token + appId
-  //     in `resolverInputs`.
-  const target = parseRunTarget(opts.bundle);
-  const bundlePath = await resolveBundlePath(target, opts, resolverInputs);
+  //     in `resolverInputs`. The inherited `versionPin` is applied as
+  //     the spec when the user did not type `@spec` themselves.
+  const bundleTarget =
+    target.kind === "id" && !target.spec && inheritedConfig.versionPin
+      ? { ...target, spec: inheritedConfig.versionPin }
+      : target;
+  const bundlePath = await resolveBundlePath(bundleTarget, opts, resolverInputs);
   const bundle = await readBundleFromFile(bundlePath);
 
   // ─── 3a. Optional: register run + build reporting session ─────────
@@ -152,8 +196,12 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   const providerResolver = buildResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input + config ───────────────────────────────────────
+  // Config priority (high → low): --config flag → inherited app config → {}.
+  // Shallow merge mirrors the dashboard, which lets a user override a
+  // single key on top of the persisted form.
   const input = await resolveInput(opts);
-  const config = opts.config ? safeParseJson(opts.config, "--config") : {};
+  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
+  const config = { ...inheritedConfig.config, ...(flagConfig ?? {}) };
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / providers /
@@ -595,6 +643,48 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
   return inputs && "bearerToken" in inputs ? inputs.instance : "(local)";
 }
 
+/**
+ * Pull the resolved run-config from the pinned instance when running an
+ * agent by id with a remote provider context. Returns a zeroed
+ * inheritance record when the call cannot or should not be made — the
+ * caller treats every field as a no-op merge in that case.
+ */
+async function maybeFetchRunConfig(
+  target: ReturnType<typeof parseRunTarget>,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  opts: RunCommandOptions,
+): Promise<InheritedRunConfig> {
+  const empty: InheritedRunConfig = {
+    config: {},
+    modelId: null,
+    proxyId: null,
+    versionPin: null,
+    requiredProviders: [],
+    inherited: false,
+  };
+  if (opts.noInherit) return empty;
+  if (target.kind !== "id") return empty;
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) return empty;
+
+  const payload = await fetchRunConfigPayload({
+    instance: resolverInputs.instance,
+    bearerToken: resolverInputs.bearerToken,
+    appId: resolverInputs.appId,
+    orgId: resolverInputs.orgId,
+    scope: target.scope,
+    name: target.name,
+  });
+  return mergeRunConfig({
+    inherited: payload,
+    flagConfig: undefined, // merged later in run flow
+    flagModel: opts.model,
+    flagProxy: opts.proxy,
+    hasExplicitSpec: target.spec !== undefined,
+    envModel: process.env.APPSTRATE_MODEL_ID,
+    envProxy: process.env.APPSTRATE_PROXY,
+  });
+}
+
 async function resolveBundlePath(
   target: ReturnType<typeof parseRunTarget>,
   opts: RunCommandOptions,
@@ -652,6 +742,7 @@ export {
   SnapshotError,
   PackageSpecError,
   BundleFetchError,
+  RunConfigFetchError,
 };
 
 /**

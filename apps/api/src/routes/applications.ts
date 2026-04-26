@@ -28,6 +28,7 @@ import {
   listInstalledPackages,
   getInstalledPackage,
   updateInstalledPackage,
+  getResolvedRunConfig,
 } from "../services/application-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -272,6 +273,29 @@ export function createApplicationsRouter() {
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       await uninstallPackage({ orgId, applicationId: appId }, packageId);
       return c.body(null, 204);
+    },
+  );
+
+  // GET /api/applications/:appId/packages/:scope/:name/run-config —
+  // single source of truth for the per-app config, model/proxy override,
+  // version pin, and required-provider list. Consumed by the CLI to
+  // reproduce a UI run without hand-stitching three separate calls.
+  router.get(
+    "/:appId/packages/:scope{@[^/]+}/:name/run-config",
+    requirePermission("agents", "read"),
+    async (c) => {
+      const appId = c.req.param("appId")!;
+      const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+      const resolved = await getResolvedRunConfig(appId, packageId);
+      if (!resolved) {
+        throw new ApiError({
+          status: 404,
+          code: "package_not_installed",
+          title: "Package Not Installed",
+          detail: `Package '${packageId}' is not installed in this application`,
+        });
+      }
+      return c.json(resolved);
     },
   );
 

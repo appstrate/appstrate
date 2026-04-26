@@ -703,6 +703,14 @@ program
     "Requested sink lifetime in seconds (server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS)",
   )
   .option("--no-cache", "Bypass the local bundle cache (id mode only) — always re-fetch")
+  .option(
+    "--proxy <id>",
+    "Proxy id to associate with the run (overrides per-app run-config inheritance)",
+  )
+  .option(
+    "--no-inherit",
+    "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -729,6 +737,11 @@ program
       // explicit-false case as "skip the cache" — `undefined` falls back
       // to the default cache-on-hit behaviour.
       noCache: opts.cache === false,
+      proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+      // Same `--no-X` mapping: commander stores the negated flag at
+      // `opts.inherit === false`. Default (no flag) is `undefined` →
+      // inheritance enabled.
+      noInherit: opts.inherit === false,
     });
   });
 

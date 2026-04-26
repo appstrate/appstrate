@@ -7,10 +7,11 @@
 
 import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages, applications } from "@appstrate/db/schema";
+import { applicationPackages, packages, applications, packageVersions } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "../lib/safe-json.ts";
+import { parseDraftManifest, extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppScope } from "../lib/scope.ts";
 
@@ -258,6 +259,81 @@ export async function getPackageConfig(
 // ---------------------------------------------------------------------------
 // Config Updates
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Resolved run-config — single source of truth for both the UI's per-app
+// agent run and the CLI's `appstrate run @scope/agent` invocation. The
+// CLI reads this endpoint after profile resolution to reproduce the UI
+// run byte-for-byte (same model, proxy, config, version pin) unless the
+// user passed an explicit override flag.
+// ---------------------------------------------------------------------------
+
+export interface ResolvedRunConfig {
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
+  versionPin: string | null;
+  /** Provider ids declared as dependencies on the package's manifest. */
+  requiredProviders: string[];
+}
+
+/**
+ * Resolve the per-application run configuration for `(applicationId,
+ * packageId)`. Returns `null` when no `application_packages` row exists
+ * for the pair — the caller (route or CLI) decides whether that is a
+ * 404 or a "no inheritance, fall back to flags + defaults" signal.
+ *
+ * Provider ids are read from the package's draft manifest (the same
+ * source `requireAgent()` + `resolveManifestProviders` uses for
+ * runtime), keeping the CLI preflight aligned with the actual run
+ * pipeline without duplicating the manifest-walk code.
+ */
+export async function getResolvedRunConfig(
+  applicationId: string,
+  packageId: string,
+): Promise<ResolvedRunConfig | null> {
+  const [row] = await db
+    .select({
+      config: applicationPackages.config,
+      modelId: applicationPackages.modelId,
+      proxyId: applicationPackages.proxyId,
+      versionId: applicationPackages.versionId,
+      draftManifest: packages.draftManifest,
+    })
+    .from(applicationPackages)
+    .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return null;
+
+  let versionPin: string | null = null;
+  if (row.versionId !== null && row.versionId !== undefined) {
+    const [versionRow] = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.id, row.versionId))
+      .limit(1);
+    versionPin = versionRow?.version ?? null;
+  }
+
+  const manifest = parseDraftManifest(row.draftManifest);
+  const { providerIds } = extractDepsFromManifest(manifest);
+
+  return {
+    config: asRecord(row.config),
+    modelId: row.modelId ?? null,
+    proxyId: row.proxyId ?? null,
+    versionPin,
+    requiredProviders: providerIds,
+  };
+}
 
 export async function updateInstalledPackage(
   scope: AppScope,
