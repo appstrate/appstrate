@@ -7,6 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, userProviderConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
@@ -193,7 +194,7 @@ export function createInternalRouter() {
         },
       );
 
-      return c.json({ object: "list" as const, data: recentRuns, hasMore: false });
+      return c.json(listResponse(recentRuns));
     } catch (err) {
       logger.error("Failed to fetch run history", {
         runId,

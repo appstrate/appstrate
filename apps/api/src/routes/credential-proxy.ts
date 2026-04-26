@@ -49,7 +49,13 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
-import { invalidRequest, forbidden, notFound, internalError } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  forbidden,
+  notFound,
+  internalError,
+  payloadTooLarge,
+} from "../lib/errors.ts";
 import {
   proxyCall,
   ProxyAuthorizationError,
@@ -290,7 +296,7 @@ export function createCredentialProxyRouter() {
 
       // Guard: declared Content-Length already exceeds the hard cap.
       if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
-        return c.json({ error: "request body too large" }, 413);
+        throw payloadTooLarge("request body too large");
       }
 
       // Build a combined abort signal for streaming pipes: honours both the

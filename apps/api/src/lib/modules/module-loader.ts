@@ -16,7 +16,6 @@ import {
   type OrgRole,
   type ModulePermissionsSnapshot,
 } from "@appstrate/core/permissions";
-import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
@@ -40,17 +39,14 @@ function getBuiltinModules(): Map<string, string> {
   const here = dirname(fileURLToPath(import.meta.url));
   const modulesDir = resolve(here, "../../modules");
 
-  if (existsSync(modulesDir)) {
-    for (const entry of readdirSync(modulesDir)) {
-      const entryPath = join(modulesDir, entry);
-      try {
-        if (!statSync(entryPath).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const indexPath = join(entryPath, "index.ts");
-      if (existsSync(indexPath)) cache.set(entry, indexPath);
-    }
+  // Walk every `<moduleId>/index.ts` under `modules/` in a single Bun.Glob
+  // pass — implicitly handles missing directory, non-directory entries, and
+  // missing index.ts. Replaces three node:fs sync calls (Bun-native runtime).
+  const glob = new Bun.Glob("*/index.ts");
+  for (const match of glob.scanSync({ cwd: modulesDir, onlyFiles: true })) {
+    const moduleId = match.split("/")[0];
+    if (!moduleId) continue;
+    cache.set(moduleId, join(modulesDir, match));
   }
 
   _builtinCache = cache;

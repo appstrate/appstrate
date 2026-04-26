@@ -100,6 +100,22 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   return apiFetch<T>(`${API_BASE}${path}`, options);
 }
 
+interface ListEnvelope<T> {
+  object: "list";
+  data: T[];
+  hasMore: boolean;
+  total?: number;
+}
+
+/**
+ * Typed reader for Stripe-canonical list responses (`{ object: "list", data, hasMore, total? }`).
+ * Returns the unwrapped `data` array so React Query hooks don't repeat the envelope shape.
+ */
+export async function apiList<T = unknown>(path: string, options: RequestInit = {}): Promise<T[]> {
+  const envelope = await api<ListEnvelope<T>>(path, options);
+  return envelope.data;
+}
+
 export async function uploadFormData<T = unknown>(
   path: string,
   formData: FormData,

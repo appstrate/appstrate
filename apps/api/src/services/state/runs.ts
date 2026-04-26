@@ -28,6 +28,7 @@ import {
 } from "@appstrate/db/schema";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
+import { listResponse, type ListResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runMetadataSchema, runConfigSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
@@ -563,12 +564,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   return deleted.length;
 }
 
-export interface RunListPage {
-  object: "list";
-  data: Record<string, unknown>[];
-  total: number;
-  hasMore: boolean;
-}
+export type RunListPage = ListResponse<Record<string, unknown>> & { total: number };
 
 export async function listRunsWithFilter(
   filter: SQL,
@@ -593,10 +589,8 @@ export async function listRunsWithFilter(
   const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
   const total = countRow?.count ?? 0;
   return {
-    object: "list",
-    data,
+    ...listResponse(data, { hasMore: offset + data.length < total }),
     total,
-    hasMore: offset + data.length < total,
   };
 }
 
@@ -683,10 +677,8 @@ export async function listGlobalRuns(
   const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
   const total = countRow?.count ?? 0;
   return {
-    object: "list",
-    data,
+    ...listResponse(data, { hasMore: offset + data.length < total }),
     total,
-    hasMore: offset + data.length < total,
   };
 }
 

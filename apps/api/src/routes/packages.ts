@@ -11,6 +11,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
+import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
@@ -396,7 +397,7 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     const applicationId = c.get("applicationId");
     const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
     const enriched = await enrichWithCreatorNames(items);
-    return c.json({ object: "list" as const, data: enriched, hasMore: false });
+    return c.json(listResponse(enriched));
   };
 }
 
