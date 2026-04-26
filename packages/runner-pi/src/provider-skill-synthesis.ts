@@ -37,6 +37,15 @@ import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 /** Max name length per Pi's skills loader (`MAX_NAME_LENGTH`). */
 const MAX_SKILL_NAME_LENGTH = 64;
 
+/**
+ * Max description length per Pi's skills loader (`MAX_DESCRIPTION_LENGTH`).
+ * Pi silently drops skills whose description exceeds this — the
+ * `READ this skill before any provider_call(...)` directive is load-bearing,
+ * so when the synthesised description would overflow we drop the optional
+ * `manifest.description` clause first and keep the directive.
+ */
+const MAX_SKILL_DESCRIPTION_LENGTH = 1024;
+
 /** Prefix that disambiguates synthesised provider skills from regular skills. */
 const SKILL_NAME_PREFIX = "provider-";
 
@@ -147,6 +156,23 @@ function escapeYamlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ")}"`;
 }
 
+function buildSkillDescription(
+  displayName: string,
+  manifestDescription: string | undefined,
+  packageId: string,
+): string {
+  const prefix = `${displayName} API.`;
+  const directive = `READ this skill before any provider_call(providerId="${packageId}").`;
+  const middle = manifestDescription ? `${manifestDescription.replace(/\.+\s*$/, "")}.` : "";
+  const full = [prefix, middle, directive].filter(Boolean).join(" ");
+  if (full.length <= MAX_SKILL_DESCRIPTION_LENGTH) return full;
+  // Drop the optional middle clause to preserve the load-bearing directive.
+  const trimmed = `${prefix} ${directive}`;
+  return trimmed.length <= MAX_SKILL_DESCRIPTION_LENGTH
+    ? trimmed
+    : trimmed.slice(0, MAX_SKILL_DESCRIPTION_LENGTH - 1) + "…";
+}
+
 /**
  * Build a `SKILL.md` payload for the given provider package.
  *
@@ -172,10 +198,7 @@ export function synthesizeProviderSkill(pkg: BundlePackage): {
   const authorizedUris = asStringArray(definition.authorizedUris);
   const docsUrl = asString(definition.docsUrl);
 
-  const descriptionParts: string[] = [`${displayName} API.`];
-  if (manifestDescription) descriptionParts.push(`${manifestDescription}.`);
-  descriptionParts.push(`READ this skill before any provider_call(providerId="${packageId}").`);
-  const description = descriptionParts.join(" ");
+  const description = buildSkillDescription(displayName, manifestDescription, packageId);
 
   const lines: string[] = [];
   lines.push("---");

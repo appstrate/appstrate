@@ -150,6 +150,39 @@ describe("synthesizeProviderSkill", () => {
     );
   });
 
+  it("strips a trailing period from manifest.description to avoid '..'", () => {
+    const pkg = makeBundlePackage(
+      "@x/dot",
+      "1.0.0",
+      "provider",
+      {},
+      { name: "Dot", description: "Trailing period.", definition: { authMode: "api_key" } },
+    );
+
+    const text = decode(synthesizeProviderSkill(pkg).content);
+    expect(text).toContain("Trailing period. READ this skill");
+    expect(text).not.toContain("Trailing period.. READ");
+  });
+
+  it("drops the manifest.description clause when the synthesised description exceeds 1024 chars", () => {
+    const longDescription = "x".repeat(2000);
+    const pkg = makeBundlePackage(
+      "@x/long",
+      "1.0.0",
+      "provider",
+      {},
+      { name: "Long", description: longDescription, definition: { authMode: "api_key" } },
+    );
+
+    const text = decode(synthesizeProviderSkill(pkg).content);
+    const match = text.match(/^description: "(.+)"$/m);
+    if (!match) throw new Error("description line not found in synthesised SKILL.md");
+    const description = match[1] ?? "";
+    expect(description.length).toBeLessThanOrEqual(1024);
+    expect(description).toContain("READ this skill before any provider_call");
+    expect(description).not.toContain("xxxxxxxxxx");
+  });
+
   it("falls back to the package id when manifest.name is missing", () => {
     const pkg = makeBundlePackage(
       "@x/anon",
