@@ -5,7 +5,7 @@
  *
  * Strategy:
  *   - Build an in-process MCP server exposing `provider_call`,
- *     `run_history`, and `llm_complete`.
+ *     `run_history`, and `recall_memory`.
  *   - Drive `buildMcpDirectFactories` against it.
  *   - Verify the LLM-facing Pi tools are registered with their canonical
  *     MCP names and dispatch correctly.
@@ -102,7 +102,6 @@ async function makeMockServer(): Promise<MockServer> {
     tool("provider_call", { ok: true }),
     tool("run_history", []),
     tool("recall_memory", { memories: [] }),
-    tool("llm_complete", { id: "ok" }),
   ]);
   const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
   return { pair, mcp, calls };
@@ -137,7 +136,7 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
       const providerCall = captured.find((c) => c.name === "provider_call");
       expect(providerCall).toBeDefined();
       expect(captured.find((c) => c.name === "run_history")).toBeDefined();
-      expect(captured.find((c) => c.name === "llm_complete")).toBeDefined();
+      expect(captured.find((c) => c.name === "recall_memory")).toBeDefined();
 
       // No legacy aliases.
       expect(captured.find((c) => c.name === "appstrate_gmail_call")).toBeUndefined();
@@ -192,12 +191,8 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
       expect(captured.find((c) => c.name === "provider_call")).toBeUndefined();
-      // run_history + recall_memory + llm_complete are always registered.
-      expect(captured.map((c) => c.name).sort()).toEqual([
-        "llm_complete",
-        "recall_memory",
-        "run_history",
-      ]);
+      // run_history + recall_memory are always registered.
+      expect(captured.map((c) => c.name).sort()).toEqual(["recall_memory", "run_history"]);
     } finally {
       await pair.close();
     }
@@ -248,35 +243,6 @@ describe("buildMcpDirectFactories — recall_memory dispatch", () => {
       const recall = captured.find((c) => c.name === "recall_memory");
       await recall!.execute("call-1", { q: "python", limit: 5 });
       expect(calls).toEqual([{ name: "recall_memory", arguments: { q: "python", limit: 5 } }]);
-    } finally {
-      await pair.close();
-    }
-  });
-});
-
-describe("buildMcpDirectFactories — llm_complete dispatch", () => {
-  it("forwards the LLM completion request through MCP", async () => {
-    const { mcp, pair, calls } = await makeMockServer();
-    try {
-      const factories = await buildMcpDirectFactories({
-        bundle: makeBundleWithProviders({}),
-        mcp,
-        runId: "run-1",
-        workspace: TEST_WORKSPACE,
-        emitProvider: () => {},
-        emit: () => {},
-      });
-      const captured: CapturedTool[] = [];
-      const api = makeMockExtensionApi(captured);
-      for (const f of factories) f(api);
-      const llmComplete = captured.find((c) => c.name === "llm_complete");
-      await llmComplete!.execute("call-1", { path: "/v1/messages", body: '{"x":1}' });
-      expect(calls).toEqual([
-        {
-          name: "llm_complete",
-          arguments: { path: "/v1/messages", body: '{"x":1}' },
-        },
-      ]);
     } finally {
       await pair.close();
     }
