@@ -10,6 +10,9 @@
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
 
+import * as fsPromises from "node:fs/promises";
+import * as nodePath from "node:path";
+
 import { z } from "zod";
 import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
@@ -614,11 +617,9 @@ const ABSOLUTE_ALLOWED_ROOTS: readonly string[] = ["/tmp"];
  * start of every {@link resolveSafePath} call.
  */
 async function realpathOrAbs(p: string): Promise<string> {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const abs = path.resolve(p);
+  const abs = nodePath.resolve(p);
   try {
-    return await fs.realpath(abs);
+    return await fsPromises.realpath(abs);
   } catch {
     return abs;
   }
@@ -646,10 +647,10 @@ async function getAllowedRoots(workspace: string): Promise<readonly string[]> {
   return out;
 }
 
-function isUnderAnyRoot(candidate: string, roots: readonly string[], sep: string): boolean {
+function isUnderAnyRoot(candidate: string, roots: readonly string[]): boolean {
   return roots.some((root) => {
     if (candidate === root) return true;
-    const withSep = root.endsWith(sep) ? root : root + sep;
+    const withSep = root.endsWith(nodePath.sep) ? root : root + nodePath.sep;
     return candidate.startsWith(withSep);
   });
 }
@@ -660,43 +661,31 @@ function isUnderAnyRoot(candidate: string, roots: readonly string[], sep: string
  * closest existing ancestor is realpathed and the unresolved suffix is
  * reattached, so write-targets get the same canonical treatment.
  *
- * Returns `viaSymlink: true` when realpath resolved a different path
- * than the lexical candidate — used by the caller for diagnostics only;
- * authorization is decided by {@link isUnderAnyRoot} on `canonical`.
+ * Authorization is decided by {@link isUnderAnyRoot} on the returned
+ * value; symlink-aware diagnostics are computed at the call site by
+ * comparing the result to the lexical candidate.
  */
-async function canonicalizePath(candidate: string): Promise<{
-  canonical: string;
-  viaSymlink: boolean;
-}> {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
+async function canonicalizePath(candidate: string): Promise<string> {
   try {
-    const real = await fs.realpath(candidate);
-    return { canonical: real, viaSymlink: real !== candidate };
+    return await fsPromises.realpath(candidate);
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code !== "ENOENT") throw err;
   }
   // Walk up to the closest existing ancestor, realpath it, reattach
-  // the unresolved suffix.
+  // the unresolved suffix. `path.resolve` has already collapsed `..`
+  // segments in the candidate, so the lexical form is canonical for
+  // ancestors that don't exist either.
   let cursor = candidate;
   let suffix = "";
   while (true) {
-    const parent = path.dirname(cursor);
-    if (parent === cursor) {
-      // Fully synthetic chain (no existing ancestor) — `path.resolve`
-      // has already collapsed `..` segments, so the lexical form is
-      // already canonical for our purposes.
-      return { canonical: candidate, viaSymlink: false };
-    }
-    suffix = path.join(path.basename(cursor), suffix);
+    const parent = nodePath.dirname(cursor);
+    if (parent === cursor) return candidate; // fully synthetic chain
+    suffix = nodePath.join(nodePath.basename(cursor), suffix);
     cursor = parent;
     try {
-      const realParent = await fs.realpath(cursor);
-      return {
-        canonical: path.join(realParent, suffix),
-        viaSymlink: realParent !== cursor,
-      };
+      const realParent = await fsPromises.realpath(cursor);
+      return nodePath.join(realParent, suffix);
     } catch (innerErr) {
       const ie = innerErr as NodeJS.ErrnoException;
       if (ie.code === "ENOENT") continue;
@@ -735,14 +724,14 @@ export async function resolveSafePath(workspace: string, relative: string): Prom
       { workspace, relative },
     );
   }
-  const path = await import("node:path");
   const roots = await getAllowedRoots(workspace);
   const wsRoot = roots[0]!;
-  const candidate = path.isAbsolute(relative)
-    ? path.resolve(relative)
-    : path.resolve(wsRoot, relative);
-  const { canonical, viaSymlink } = await canonicalizePath(candidate);
-  if (!isUnderAnyRoot(canonical, roots, path.sep)) {
+  const candidate = nodePath.isAbsolute(relative)
+    ? nodePath.resolve(relative)
+    : nodePath.resolve(wsRoot, relative);
+  const canonical = await canonicalizePath(candidate);
+  if (!isUnderAnyRoot(canonical, roots)) {
+    const viaSymlink = canonical !== candidate;
     throw new ResolverError(
       "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
       formatOutsideRootsError(relative, canonical, roots, viaSymlink),
@@ -786,9 +775,8 @@ function formatOutsideRootsError(
  */
 async function resolveSafeOutputPath(workspace: string, rel: string): Promise<string> {
   const absPath = await resolveSafePath(workspace, rel);
-  const fs = await import("node:fs/promises");
   try {
-    const stat = await fs.lstat(absPath);
+    const stat = await fsPromises.lstat(absPath);
     if (stat.isSymbolicLink()) {
       throw new ResolverError(
         "RESOLVER_PATH_SYMLINK_REFUSED",
@@ -824,8 +812,7 @@ export async function resolveSafeFile(
   rel: string,
 ): Promise<{ absPath: string; stat: import("node:fs").Stats }> {
   const absPath = await resolveSafePath(workspace, rel);
-  const fs = await import("node:fs/promises");
-  const stat = await fs.lstat(absPath);
+  const stat = await fsPromises.lstat(absPath);
   if (stat.isSymbolicLink()) {
     throw new ResolverError("RESOLVER_PATH_SYMLINK_REFUSED", `Refusing to follow symlink: ${rel}`, {
       workspace,
