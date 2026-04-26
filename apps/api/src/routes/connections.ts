@@ -7,6 +7,7 @@ import { getItemId } from "./packages.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listActorConnections,
@@ -72,7 +73,7 @@ export function createConnectionsRouter() {
     }
 
     const connections = await listActorConnections(scope, profileId);
-    return c.json({ connections });
+    return c.json(listResponse(connections));
   });
 
   // POST /api/connections/connect/:provider — initiate OAuth or return authUrl

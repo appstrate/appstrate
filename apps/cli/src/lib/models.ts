@@ -39,12 +39,14 @@ export interface ModelPreset {
 }
 
 interface ListResponse {
-  models?: ModelPreset[];
+  object?: "list";
+  data?: ModelPreset[];
+  hasMore?: boolean;
 }
 
 export async function listModelPresets(profileName: string): Promise<ModelPreset[]> {
   const res = await apiFetch<ListResponse>(profileName, "/api/models");
-  return Array.isArray(res.models) ? res.models : [];
+  return Array.isArray(res.data) ? res.data : [];
 }
 
 /**

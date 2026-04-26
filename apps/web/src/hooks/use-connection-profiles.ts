@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
@@ -31,10 +31,7 @@ export function useProfileConnections(profileId: string | null | undefined) {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["profile-connections", orgId, appId, profileId],
-    queryFn: () =>
-      api<{ connections: ConnectionInfo[] }>(`/app-profiles/${profileId}/connections`).then(
-        (r) => r.connections,
-      ),
+    queryFn: () => apiList<ConnectionInfo>(`/app-profiles/${profileId}/connections`),
     enabled: !!profileId && !!appId,
     staleTime: 30_000,
   });
@@ -49,8 +46,7 @@ export function useConnectionProfiles() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["connection-profiles", orgId],
-    queryFn: () =>
-      api<{ profiles: ProfileWithConnections[] }>("/connection-profiles").then((r) => r.profiles),
+    queryFn: () => apiList<ProfileWithConnections>("/connection-profiles"),
   });
 }
 
@@ -59,7 +55,7 @@ export function useAllUserConnections() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["user-connections", orgId, appId],
-    queryFn: () => api<{ providers: UserConnectionProviderGroup[] }>("/app-profiles/connections"),
+    queryFn: () => apiList<UserConnectionProviderGroup>("/app-profiles/connections"),
     enabled: !!appId,
   });
 }
@@ -124,8 +120,7 @@ export function useAppProfiles() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["app-connection-profiles", orgId, appId],
-    queryFn: () =>
-      api<{ profiles: AppProfileWithBindings[] }>("/app-profiles").then((r) => r.profiles),
+    queryFn: () => apiList<AppProfileWithBindings>("/app-profiles"),
   });
 }
 
@@ -208,9 +203,7 @@ export function useAppProfileAgents(profileId: string | undefined) {
   return useQuery({
     queryKey: ["app-profile-agents", orgId, appId, profileId],
     queryFn: () =>
-      api<{ object: "list"; data: { id: string; displayName: string }[]; hasMore: boolean }>(
-        `/app-profiles/${profileId}/agents`,
-      ).then((r) => r.data),
+      apiList<{ id: string; displayName: string }>(`/app-profiles/${profileId}/agents`),
     enabled: !!profileId,
     staleTime: 30_000,
   });

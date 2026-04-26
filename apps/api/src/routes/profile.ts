@@ -8,6 +8,7 @@ import { profiles, user as userTable, organizationMembers } from "@appstrate/db/
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { forbidden, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
 export const profileUpdateSchema = z.object({
@@ -103,7 +104,7 @@ profileRouter.post("/profiles/batch", async (c) => {
   const body = await c.req.json();
   const data = parseBody(batchLookupSchema, body);
   const ids = data.ids.filter(Boolean);
-  if (ids.length === 0) return c.json({ profiles: [] });
+  if (ids.length === 0) return c.json(listResponse([]));
 
   const rows = await db
     .select({ id: profiles.id, displayName: profiles.displayName })
@@ -111,7 +112,7 @@ profileRouter.post("/profiles/batch", async (c) => {
     .innerJoin(organizationMembers, eq(profiles.id, organizationMembers.userId))
     .where(scopedWhere(organizationMembers, { orgId, extra: [inArray(profiles.id, ids)] }));
 
-  return c.json({ profiles: rows });
+  return c.json(listResponse(rows));
 });
 
 export default profileRouter;

@@ -29,15 +29,20 @@ export const connectionsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  connections: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ConnectionStatus" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                connections: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     provider: "@appstrate/gmail",
                     status: "connected",

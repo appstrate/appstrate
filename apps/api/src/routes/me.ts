@@ -30,6 +30,7 @@ import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { listOrgModels } from "../services/org-models.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { unauthorized } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -55,11 +56,11 @@ router.get("/orgs", async (c) => {
     // that single id and return a one-element list so the SPA org picker
     // has a stable shape across auth methods.
     const orgId = c.get("orgId");
-    if (!orgId) return c.json({ orgs: [] });
+    if (!orgId) return c.json(listResponse([]));
     const org = await getOrgById(orgId);
-    if (!org) return c.json({ orgs: [] });
-    return c.json({
-      orgs: [
+    if (!org) return c.json(listResponse([]));
+    return c.json(
+      listResponse([
         {
           id: org.id,
           name: org.name,
@@ -69,8 +70,8 @@ router.get("/orgs", async (c) => {
           role: "end_user" as const,
           createdAt: org.createdAt,
         },
-      ],
-    });
+      ]),
+    );
   }
 
   const user = c.get("user");
@@ -82,15 +83,17 @@ router.get("/orgs", async (c) => {
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
 
-  return c.json({
-    orgs: orgs.map((o) => ({
-      id: o.id,
-      name: o.name,
-      slug: o.slug,
-      role: o.role,
-      createdAt: o.createdAt,
-    })),
-  });
+  return c.json(
+    listResponse(
+      orgs.map((o) => ({
+        id: o.id,
+        name: o.name,
+        slug: o.slug,
+        role: o.role,
+        createdAt: o.createdAt,
+      })),
+    ),
+  );
 });
 
 /**
@@ -109,7 +112,7 @@ router.get("/orgs", async (c) => {
 router.get("/models", requirePermission("models", "read"), async (c) => {
   const orgId = c.get("orgId");
   const models = await listOrgModels(orgId);
-  return c.json({ models });
+  return c.json(listResponse(models));
 });
 
 export default router;

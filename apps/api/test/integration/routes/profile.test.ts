@@ -117,8 +117,8 @@ describe("Profile API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toBeArray();
-      expect(body.profiles).toHaveLength(1);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(1);
     });
 
     it("does not return profiles for users outside the org", async () => {
@@ -132,7 +132,7 @@ describe("Profile API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toHaveLength(0);
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns empty for unknown IDs", async () => {
@@ -144,7 +144,7 @@ describe("Profile API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toHaveLength(0);
+      expect(body.data).toHaveLength(0);
     });
   });
 

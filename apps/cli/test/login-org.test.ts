@@ -141,7 +141,7 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     listOrgs: () =>
-      new Response(JSON.stringify({ organizations: [] }), {
+      new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -239,9 +239,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_only", name: "Solo", slug: "solo", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_only", name: "Solo", slug: "solo", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -263,7 +263,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
+            object: "list",
+            hasMore: false,
+            data: [
               { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
               { id: "org_2", name: "Beta", slug: "beta", role: "member", createdAt: "t" },
             ],
@@ -324,7 +326,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
+            object: "list",
+            hasMore: false,
+            data: [
               { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
               { id: "org_2", name: "Beta", slug: "beta", role: "member", createdAt: "t" },
             ],
@@ -353,7 +357,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
+            object: "list",
+            hasMore: false,
+            data: [
               { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
               { id: "org_2", name: "Beta", slug: "beta", role: "member", createdAt: "t" },
             ],
@@ -376,9 +382,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -401,7 +407,9 @@ describe("login org-pin branch", () => {
     installDefaultResponders({
       listOrgs: () => {
         listCalled = true;
-        return new Response(JSON.stringify({ organizations: [] }), { status: 200 });
+        return new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
+          status: 200,
+        });
       },
       createOrg: (body) => {
         createBody = body;
@@ -434,7 +442,9 @@ describe("login org-pin branch", () => {
     installDefaultResponders({
       listOrgs: () => {
         orgsCalled = true;
-        return new Response(JSON.stringify({ organizations: [] }), { status: 200 });
+        return new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
+          status: 200,
+        });
       },
     });
 
@@ -496,7 +506,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
+            object: "list",
+            hasMore: false,
+            data: [
               { id: "org_first", name: "First", slug: "first", role: "owner", createdAt: "t" },
             ],
           }),
@@ -523,9 +535,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_A", name: "Alpha", slug: "alpha", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_A", name: "Alpha", slug: "alpha", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -561,9 +573,9 @@ describe("login org-pin branch", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_only", name: "Solo", slug: "solo", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_only", name: "Solo", slug: "solo", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -598,7 +610,9 @@ describe("login app-pin cascade", () => {
   const oneOrg = () =>
     new Response(
       JSON.stringify({
-        organizations: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
+        object: "list",
+        hasMore: false,
+        data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -676,9 +690,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -700,9 +714,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -733,9 +747,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -765,9 +779,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -843,9 +857,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -869,9 +883,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -893,9 +907,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [
-              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
-            ],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -912,7 +926,9 @@ describe("login app-pin cascade", () => {
       listOrgs: () =>
         new Response(
           JSON.stringify({
-            organizations: [{ id: "org_A", name: "A", slug: "a", role: "owner", createdAt: "t" }],
+            object: "list",
+            hasMore: false,
+            data: [{ id: "org_A", name: "A", slug: "a", role: "owner", createdAt: "t" }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),

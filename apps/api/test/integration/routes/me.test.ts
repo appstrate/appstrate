@@ -43,10 +43,10 @@ describe("Me API (/api/me)", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        orgs: Array<{ id: string; name: string; slug: string; role: string }>;
+        data: Array<{ id: string; name: string; slug: string; role: string }>;
       };
-      expect(body.orgs).toBeArray();
-      const found = body.orgs.find((o) => o.id === ctx.orgId);
+      expect(body.data).toBeArray();
+      const found = body.data.find((o) => o.id === ctx.orgId);
       expect(found).toBeDefined();
       expect(found?.name).toBe("Acme");
       expect(found?.role).toBe("owner");
@@ -62,8 +62,8 @@ describe("Me API (/api/me)", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { orgs: Array<{ id: string }> };
-      const ids = body.orgs.map((o) => o.id);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      const ids = body.data.map((o) => o.id);
       expect(ids).toContain(orgA.id);
       expect(ids).toContain(orgB.id);
     });
@@ -76,8 +76,8 @@ describe("Me API (/api/me)", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { orgs: unknown[] };
-      expect(body.orgs).toEqual([]);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toEqual([]);
     });
 
     it("API key sees ONLY its bound org even when the creator belongs to many", async () => {
@@ -97,10 +97,10 @@ describe("Me API (/api/me)", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { orgs: Array<{ id: string; slug: string }> };
-      expect(body.orgs).toHaveLength(1);
-      expect(body.orgs[0]?.id).toBe(ctx.orgId);
-      expect(body.orgs[0]?.slug).toBe("bound-org");
+      const body = (await res.json()) as { data: Array<{ id: string; slug: string }> };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]?.id).toBe(ctx.orgId);
+      expect(body.data[0]?.slug).toBe("bound-org");
     });
 
     it("returns 401 without authentication", async () => {
@@ -124,8 +124,8 @@ describe("Me API (/api/me)", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { models: unknown[] };
-      expect(body.models).toBeArray();
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toBeArray();
     });
 
     it("works with API key auth (org pinned by the key)", async () => {
@@ -141,8 +141,8 @@ describe("Me API (/api/me)", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { models: unknown[] };
-      expect(body.models).toBeArray();
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toBeArray();
     });
 
     it("rejects API keys without `models:read` scope with 403", async () => {
@@ -173,11 +173,11 @@ describe("Me API (/api/me)", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        models: Array<Record<string, unknown>>;
+        data: Array<Record<string, unknown>>;
       };
       // Catalog DTO must never include `apiKey` — that field is reserved
       // for `models.load()` (single-model resolution from PlatformServices).
-      for (const m of body.models) {
+      for (const m of body.data) {
         expect(m.apiKey).toBeUndefined();
       }
     });

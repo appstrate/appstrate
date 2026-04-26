@@ -23,16 +23,21 @@ export const providersPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  providers: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ProviderConfig" },
                   },
+                  hasMore: { type: "boolean" },
                   callbackUrl: { type: "string" },
                 },
               },
               example: {
-                providers: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "@appstrate/gmail",
                     displayName: "Gmail",

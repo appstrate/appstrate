@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import {
   listProfiles,
   createProfile,
@@ -24,7 +25,7 @@ export function createConnectionProfilesRouter() {
   router.get("/", async (c) => {
     const actor = getActor(c);
     const profiles = await listProfiles(actor);
-    return c.json({ profiles });
+    return c.json(listResponse(profiles));
   });
 
   // POST /api/connection-profiles — create a new profile

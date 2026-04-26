@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { api } from "../api";
+import { apiList } from "../api";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
 import { useAutoSelect } from "./use-auto-select";
@@ -24,10 +24,7 @@ export function useOrg() {
 
   const { data: orgs = [], isLoading } = useQuery({
     queryKey: ["orgs"],
-    queryFn: async () => {
-      const data = await api<{ organizations: OrganizationWithRole[] }>("/orgs");
-      return data.organizations;
-    },
+    queryFn: () => apiList<OrganizationWithRole>("/orgs"),
   });
 
   const setOrgId = useCallback((id: string) => orgStore.getState().setId(id), []);

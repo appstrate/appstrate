@@ -2337,7 +2337,7 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.req.param("orgId")!;
       const sessions = await listSessionsForOrg(orgId);
-      return c.json({ sessions });
+      return c.json(listResponse(sessions));
     },
   );
 

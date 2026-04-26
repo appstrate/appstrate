@@ -93,10 +93,10 @@ describe("Application-scoped connection isolation", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { connections: Record<string, unknown>[] };
-      expect(body.connections).toHaveLength(1);
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data).toHaveLength(1);
 
-      const conn = body.connections[0]!;
+      const conn = body.data[0]!;
       expect(conn.credentialsEncrypted).toBeUndefined();
       expect(conn.providerCredentialId).toBeUndefined();
       expect(conn.expiresAt).toBeUndefined();

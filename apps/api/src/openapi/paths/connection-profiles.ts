@@ -19,8 +19,10 @@ export const connectionProfilesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  profiles: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -34,10 +36,13 @@ export const connectionProfilesPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                profiles: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "550e8400-e29b-41d4-a716-446655440010",
                     name: "Default",

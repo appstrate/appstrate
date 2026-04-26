@@ -1020,9 +1020,10 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["sessions"],
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  sessions: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -1045,6 +1046,7 @@ export const oidcPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },
