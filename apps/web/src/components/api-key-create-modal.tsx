@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { Modal } from "./modal";
+import { RevealedSecret } from "./revealed-secret";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -71,7 +71,6 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdScopes, setCreatedScopes] = useState<string[]>([]);
   const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
-  const { copied, copy } = useCopyToClipboard();
 
   const {
     register,
@@ -120,10 +119,6 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
   const onSubmit = handleSubmit(onFormSubmit);
 
-  const handleCopy = () => {
-    if (createdKey) copy(createdKey);
-  };
-
   // ── Success state ──
   if (createdKey) {
     const summary =
@@ -134,20 +129,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
     return (
       <Modal open={open} onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
-        <p className="text-warning bg-warning/10 rounded-md px-3 py-2 text-sm">
-          {t("apiKeys.createdWarning")}
-        </p>
-        <div className="border-border bg-muted/50 mt-3 flex items-center gap-2 rounded-md border px-3 py-2">
-          <code className="text-foreground flex-1 font-mono text-xs break-all">{createdKey}</code>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-primary shrink-0 text-xs hover:underline"
-            onClick={handleCopy}
-          >
-            {copied ? t("btn.copied") : t("btn.copy")}
-          </Button>
-        </div>
+        <RevealedSecret secret={createdKey} warning={t("apiKeys.createdWarning")} />
 
         {/* Scopes granted */}
         <div className="border-border mt-4 border-t pt-3">
