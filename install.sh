@@ -77,12 +77,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-alpha.69` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-alpha.70` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-alpha.69"
+  _DEFAULT_VERSION="v1.0.0-alpha.70"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
