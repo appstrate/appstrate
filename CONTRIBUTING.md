@@ -80,7 +80,7 @@ bun run build-sidecar    # sidecar proxy image
 | `bun run setup`                | One-command dev bootstrap (first time)              |
 | `bun run dev`                  | Start API + web (turbo, hot-reload)                 |
 | `bun run check`                | TypeScript + ESLint + Prettier + OpenAPI validation |
-| `bun test`                     | All tests (~1000) — requires Docker                 |
+| `bun test`                     | All tests (~4500) — requires Docker                 |
 | `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                       |
 | `bun run build`                | Build frontend + shared packages                    |
 | `bun run db:migrate`           | Apply database migrations                           |

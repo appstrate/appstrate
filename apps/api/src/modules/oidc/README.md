@@ -163,6 +163,20 @@ The OAuth 2.1 / OIDC protocol endpoints themselves (`/api/auth/oauth2/authorize`
 
 `oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
+### Authorized devices — CLI sessions (PR #269)
+
+The OIDC module also owns the lifecycle of CLI refresh-token families that back `appstrate login` (RFC 8628 device flow handled by `auth/cli-plugin.ts`). Five endpoints sit on top of the head-of-family metadata captured on `cli_refresh_tokens` (`device_name`, `user_agent`, `created_ip`, `last_used_ip`, `last_used_at`). UA / device_name are captured at issuance only — never re-captured at refresh — so the row remains a stable identity for the device.
+
+| Method | Path                                      | Auth        | Permission            | Purpose                                                                                                           |
+| ------ | ----------------------------------------- | ----------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/auth/cli/sessions`                  | cookie only | —                     | List the user's own active CLI sessions (device label, last-used IP, last-used at). Backs the Devices page.       |
+| POST   | `/api/auth/cli/sessions/revoke`           | cookie only | —                     | Revoke a single family by `{ familyId }`. Reason: `user_revoked`.                                                 |
+| POST   | `/api/auth/cli/sessions/revoke-all`       | cookie only | —                     | Revoke every CLI session belonging to the user. Backing for `appstrate logout --all`. Reason: `user_revoked_all`. |
+| GET    | `/api/orgs/:orgId/cli-sessions`           | session/key | `cli-sessions:read`   | Org-admin oversight: every active CLI session belonging to a current member of `orgId`.                           |
+| DELETE | `/api/orgs/:orgId/cli-sessions/:familyId` | session/key | `cli-sessions:delete` | Org-admin revocation. Reason: `org_admin_revoked`.                                                                |
+
+The user-facing routes are **cookie-only by design** — a leaked API key (or a compromised stamping flow) must not be able to sign every device out at once. The org-scoped admin routes accept cookie or API key, gated by the `cli-sessions: read | delete` resource the module contributes via `permissionsContribution()` (granted to owner + admin by default; not API-key-grantable, not end-user-grantable).
+
 ## Auth strategy contributed
 
 A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix, per Phase 0 discipline rule). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `applications.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.

@@ -4,11 +4,11 @@
 
 ## For AI coding agents controlling an Appstrate instance
 
-The `appstrate` CLI is the canonical control plane. It authenticates via RFC 8628 device flow, stores tokens in the OS keyring, and ships a `curl`-compatible `api` subcommand plus an `openapi` explorer — so agents discover endpoints on demand without loading 191 route schemas into context.
+The `appstrate` CLI is the canonical control plane. It authenticates via RFC 8628 device flow, stores tokens in the OS keyring, and ships a `curl`-compatible `api` subcommand plus an `openapi` explorer — so agents discover endpoints on demand without loading 258 route schemas into context. Inside a run, the agent itself talks to the platform exclusively through MCP (`provider_call`, `run_history`, `llm_complete`, `recall_memory`) — never raw HTTP.
 
 - [CLI agent quickstart](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md): zero-to-first-run recipe, rules of engagement, curl → appstrate api mapping
-- [Full CLI reference](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md): every flag, exit codes, write-out variables, profile management
-- [OpenAPI spec](https://appstrate.dev/api/openapi.json): 191 endpoints, fully dereferenced — fetch with `appstrate openapi export` instead of curl to stay authenticated
+- [Full CLI reference](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md): every flag, exit codes, write-out variables, profile management, `appstrate self-update` + `appstrate doctor`
+- [OpenAPI spec](https://appstrate.dev/api/openapi.json): 258 endpoints, fully dereferenced — fetch with `appstrate openapi export` instead of curl to stay authenticated
 - [Interactive API docs](https://appstrate.dev/api/docs): Swagger UI for human exploration
 
 ## For contributors building on Appstrate

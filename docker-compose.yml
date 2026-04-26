@@ -196,6 +196,41 @@ services:
       # ── Legal (optional) ──
       - LEGAL_TERMS_URL=${LEGAL_TERMS_URL:-}
       - LEGAL_PRIVACY_URL=${LEGAL_PRIVACY_URL:-}
+      # ── Auth lockdown (optional, see examples/self-hosting/AUTH_MODES.md) ──
+      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-false}
+      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-false}
+      - AUTH_PLATFORM_ADMIN_EMAILS=${AUTH_PLATFORM_ADMIN_EMAILS:-}
+      - AUTH_ALLOWED_SIGNUP_DOMAINS=${AUTH_ALLOWED_SIGNUP_DOMAINS:-}
+      - AUTH_BOOTSTRAP_OWNER_EMAIL=${AUTH_BOOTSTRAP_OWNER_EMAIL:-}
+      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-Default}
+      # ── Auth secret rotation (optional) ──
+      - BETTER_AUTH_ACTIVE_KID=${BETTER_AUTH_ACTIVE_KID:-k1}
+      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-{}}
+      # ── Credential encryption rotation (optional) ──
+      - CONNECTION_ENCRYPTION_KEY_ID=${CONNECTION_ENCRYPTION_KEY_ID:-k1}
+      - CONNECTION_ENCRYPTION_KEYS=${CONNECTION_ENCRYPTION_KEYS:-{}}
+      # ── AFPS bundle signing (optional) ──
+      - AFPS_TRUST_ROOT=${AFPS_TRUST_ROOT:-[]}
+      - AFPS_SIGNATURE_POLICY=${AFPS_SIGNATURE_POLICY:-off}
+      # ── Sidecar capacity caps (optional, hard ceiling 100 MB) ──
+      - SIDECAR_MAX_REQUEST_BODY_BYTES=${SIDECAR_MAX_REQUEST_BODY_BYTES:-10485760}
+      - SIDECAR_MAX_MCP_ENVELOPE_BYTES=${SIDECAR_MAX_MCP_ENVELOPE_BYTES:-16777216}
+      # ── Remote runner protocol (optional) ──
+      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS=${REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS:-7200}
+      - REMOTE_RUN_SINK_MAX_TTL_SECONDS=${REMOTE_RUN_SINK_MAX_TTL_SECONDS:-86400}
+      - REMOTE_RUN_REPLAY_WINDOW_SECONDS=${REMOTE_RUN_REPLAY_WINDOW_SECONDS:-600}
+      - REMOTE_RUN_BUFFER_FLUSH_MS=${REMOTE_RUN_BUFFER_FLUSH_MS:-5000}
+      - REMOTE_RUN_EVENT_LIMITS=${REMOTE_RUN_EVENT_LIMITS:-{}}
+      # ── Run liveness watchdog (optional, ratio: stall ≥ 3 × heartbeat) ──
+      - RUN_HEARTBEAT_INTERVAL_SECONDS=${RUN_HEARTBEAT_INTERVAL_SECONDS:-30}
+      - RUN_STALL_THRESHOLD_SECONDS=${RUN_STALL_THRESHOLD_SECONDS:-120}
+      - RUN_WATCHDOG_INTERVAL_SECONDS=${RUN_WATCHDOG_INTERVAL_SECONDS:-30}
+      # ── Run limits (optional, see docs/specs/INLINE_RUNS.md) ──
+      - PLATFORM_RUN_LIMITS=${PLATFORM_RUN_LIMITS:-{}}
+      - INLINE_RUN_LIMITS=${INLINE_RUN_LIMITS:-{}}
+      # ── Misc ──
+      - API_BODY_LIMIT_BYTES=${API_BODY_LIMIT_BYTES:-10485760}
+      - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:

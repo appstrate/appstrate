@@ -15,13 +15,14 @@ The sidecar's external HTTP surface is intentionally small:
 
 ## MCP tools
 
-The `/mcp` endpoint advertises three first-party tools, all backed by `executeProviderCall` and the platform's per-run-token internal endpoints:
+The `/mcp` endpoint advertises four first-party tools, all backed by the platform's per-run-token internal endpoints:
 
 | Tool            | Purpose                                                                                                                                                                                                                   |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                                          |
 | `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                                                     |
 | `llm_complete`  | LLM-as-a-tool for sub-agent workflows. The agent's primary completions go over the HTTP `/llm/*` route consumed by the Pi SDK; `llm_complete` is for tool-call paths where the agent itself wants to invoke a completion. |
+| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013).                        |
 
 Third-party MCP servers can be mounted alongside the first-party tools via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
 

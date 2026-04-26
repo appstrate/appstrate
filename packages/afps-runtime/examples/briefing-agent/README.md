@@ -100,9 +100,10 @@ bun apps/cli/src/cli.ts run $E/agent.afps \
   memories from `snapshot.json`; `{{^checkpoint}}…{{/checkpoint}}` would trigger
   if `checkpoint` were absent (it isn't, so the `{{#checkpoint}}…{{/checkpoint}}`
   branch fires instead).
-- **Event reducer** — run produces `memories=1` (one `add_memory`
-  event), `checkpoint=set` (last-write-wins), `output=set` (merge-patch of
-  two partial outputs), `report=set` (final summary), `logs=2`.
+- **Event reducer** — run produces `memories=1` (one `memory.added`
+  event emitted by the `note()` tool), `checkpoint=set` (last-write-wins,
+  emitted as `pinned.set` with `key="checkpoint"`), `output=set`
+  (replace-on-emit), `report=set` (final summary), `logs=2`.
 - **Signature round-trip** — `verify` checks the `signature.sig`
   against the `trust-root.json` pinned to the Ed25519 public key in
   `key.json`.
