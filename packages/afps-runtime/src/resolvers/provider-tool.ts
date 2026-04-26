@@ -749,8 +749,12 @@ function formatOutsideRootsError(
 ): string {
   const extraRoots = roots.slice(1).join(", ");
   const suffix = extraRoots ? ` or an absolute path under ${extraRoots}` : "";
+  // Generic "path" rather than "fromFile" — this same resolver gates
+  // `{ fromFile }` uploads, `responseMode.toFile` writes, and multipart
+  // file parts. The structured `details` payload carries the call-site
+  // context for callers that need to distinguish.
   return (
-    `fromFile ${viaSymlink ? "resolves through a symlink to a target" : "resolved"} outside the allowed roots.\n` +
+    `path ${viaSymlink ? "resolves through a symlink to a target" : "resolved"} outside the allowed roots.\n` +
     `  got:      ${JSON.stringify(relative)}\n` +
     `  resolved: ${resolved}\n` +
     `  allowed:  ${roots.join(", ")}\n` +
