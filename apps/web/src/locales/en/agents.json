@@ -354,6 +354,8 @@
   "detail.tabConfiguration": "Default settings",
   "detail.tabConfigurationHint": "These settings apply to every run. Override them per-run via the CLI, the API, or a schedule.",
   "exec.rerun": "Re-run",
+  "run.modal.profileBadge": "Connections:",
+  "run.modal.profileChange": "change",
   "run.modal.modelInherit": "Inherit (no default)",
   "run.modal.modelInheritWithDefault": "Inherit ({{name}})",
   "run.modal.proxyInherit": "Inherit (no default)",

@@ -354,6 +354,8 @@
   "detail.tabConfiguration": "Paramètres par défaut",
   "detail.tabConfigurationHint": "Ces paramètres s'appliquent à chaque run. Surchargeables par run via le CLI, l'API, ou une planification.",
   "exec.rerun": "Relancer",
+  "run.modal.profileBadge": "Connexions :",
+  "run.modal.profileChange": "modifier",
   "run.modal.modelInherit": "Hériter (aucun défaut)",
   "run.modal.modelInheritWithDefault": "Hériter ({{name}})",
   "run.modal.proxyInherit": "Hériter (aucun défaut)",
