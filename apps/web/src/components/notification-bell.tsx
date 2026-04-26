@@ -124,7 +124,7 @@ export function NotificationBell() {
     for (const f of agents) agentNameMap.set(f.id, f.displayName);
   }
 
-  const unreadRuns = runsData?.runs.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
+  const unreadRuns = runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
 
   const handleClick = (runId: string) => {
     markRead.mutate(runId);

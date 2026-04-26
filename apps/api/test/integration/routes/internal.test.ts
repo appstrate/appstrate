@@ -94,9 +94,9 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: unknown[] };
-      expect(body.runs).toBeArray();
-      expect(body.runs).toHaveLength(0);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns recent runs for the same agent and user", async () => {
@@ -123,9 +123,9 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: Record<string, unknown>[] };
-      expect(body.runs).toBeArray();
-      expect(body.runs.length).toBe(2);
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBe(2);
     });
 
     it("respects the limit query parameter", async () => {
@@ -146,8 +146,8 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: unknown[] };
-      expect(body.runs).toHaveLength(2);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toHaveLength(2);
     });
 
     it("clamps limit to valid range (min 1, max 50)", async () => {
@@ -171,8 +171,8 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: { id: string }[] };
-      const ids = body.runs.map((e) => e.id);
+      const body = (await res.json()) as { data: { id: string }[] };
+      const ids = body.data.map((e) => e.id);
       expect(ids).not.toContain(runningRunId);
     });
 
@@ -198,8 +198,8 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: unknown[] };
-      expect(body.runs).toHaveLength(0);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toHaveLength(0);
     });
 
     it("accepts fields=checkpoint,result and returns the canonical `checkpoint` key", async () => {
@@ -218,9 +218,9 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: Record<string, unknown>[] };
-      expect(body.runs).toHaveLength(1);
-      const entry = body.runs[0]!;
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data).toHaveLength(1);
+      const entry = body.data[0]!;
       expect(entry.checkpoint).toEqual({ key: "value" });
       expect(entry.result).toEqual({ output: "done" });
       // Legacy key never leaks back out — response speaks the new vocabulary.
@@ -269,11 +269,11 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: Record<string, unknown>[] };
-      expect(body.runs).toHaveLength(1);
-      expect(body.runs[0]!.checkpoint).toEqual({ key: "v" });
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]!.checkpoint).toEqual({ key: "v" });
       // No `result` because we defaulted to `checkpoint` only.
-      expect(body.runs[0]!.result).toBeUndefined();
+      expect(body.data[0]!.result).toBeUndefined();
     });
 
     it("does not return checkpoints from a different end-user (actor isolation)", async () => {
@@ -302,10 +302,10 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: Record<string, unknown>[] };
+      const body = (await res.json()) as { data: Record<string, unknown>[] };
       // No `secret` checkpoint may leak through — the end-user run is
       // a different actor than the running run's dashboard-user actor.
-      for (const r of body.runs) {
+      for (const r of body.data) {
         const cp = r.checkpoint as Record<string, unknown> | null;
         if (cp) expect(cp.secret).toBeUndefined();
       }

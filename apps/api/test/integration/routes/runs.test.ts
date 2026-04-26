@@ -126,8 +126,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.runs).toBeArray();
-      expect(body.runs).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
     });
 
@@ -151,8 +151,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.runs.length).toBeGreaterThanOrEqual(1);
-      const found = body.runs.find((e: { id: string }) => e.id === run.id);
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      const found = body.data.find((e: { id: string }) => e.id === run.id);
       expect(found).toBeDefined();
     });
 
@@ -523,7 +523,7 @@ describe("Runs API", () => {
       });
       expect(listRes.status).toBe(200);
       const listBody = (await listRes.json()) as any;
-      const runIds = listBody.runs.map((r: any) => r.id);
+      const runIds = listBody.data.map((r: any) => r.id);
       expect(runIds).toContain(appBRun.id);
     });
   });
@@ -680,12 +680,12 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.runs).toHaveLength(1);
-      expect(body.runs[0].dashboardUserName).toBeString();
-      expect(body.runs[0].dashboardUserName).toBeTruthy();
-      expect(body.runs[0].endUserName).toBeNull();
-      expect(body.runs[0].apiKeyName).toBeNull();
-      expect(body.runs[0].scheduleName).toBeNull();
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].dashboardUserName).toBeString();
+      expect(body.data[0].dashboardUserName).toBeTruthy();
+      expect(body.data[0].endUserName).toBeNull();
+      expect(body.data[0].apiKeyName).toBeNull();
+      expect(body.data[0].scheduleName).toBeNull();
     });
   });
 });

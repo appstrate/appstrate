@@ -15,6 +15,7 @@
 
 import type { Context, Next } from "hono";
 import { parseTraceparent } from "@appstrate/afps-runtime/transport";
+import { runWithTraceContext } from "@appstrate/core/logger";
 import type { AppEnv } from "../types/index.ts";
 
 /**
@@ -35,7 +36,22 @@ export function requestId() {
       c.set("traceId", trace.traceId);
     }
 
-    await next();
+    // Bind the trace context on the async chain so every pino log line
+    // emitted while serving this request carries `trace_id` / `span_id`
+    // / `trace_flags` per OTel log-correlation conventions. Outside the
+    // trace scope (no inbound traceparent), the mixin is a no-op.
+    if (trace) {
+      await runWithTraceContext(
+        {
+          traceId: trace.traceId,
+          spanId: trace.spanId,
+          traceFlags: trace.flags,
+        },
+        () => next(),
+      );
+    } else {
+      await next();
+    }
 
     c.header("Request-Id", id);
     if (trace && inbound) {

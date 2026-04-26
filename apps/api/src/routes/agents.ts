@@ -105,7 +105,11 @@ export function createAgentsRouter() {
       };
     });
 
-    return c.json({ agents: agentList });
+    return c.json({
+      object: "list" as const,
+      data: agentList,
+      hasMore: false,
+    });
   });
 
   // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)

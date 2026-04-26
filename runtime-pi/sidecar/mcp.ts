@@ -448,7 +448,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       name: "run_history",
       description:
         "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
-        "most recent past runs (current run excluded). Returns JSON. " +
+        'most recent past runs (current run excluded). Returns JSON `{ object: "list", data: [...], hasMore }`. ' +
         "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
       inputSchema: {
         type: "object",

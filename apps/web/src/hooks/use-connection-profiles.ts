@@ -208,9 +208,9 @@ export function useAppProfileAgents(profileId: string | undefined) {
   return useQuery({
     queryKey: ["app-profile-agents", orgId, appId, profileId],
     queryFn: () =>
-      api<{ agents: { id: string; displayName: string }[] }>(
+      api<{ object: "list"; data: { id: string; displayName: string }[]; hasMore: boolean }>(
         `/app-profiles/${profileId}/agents`,
-      ).then((r) => r.agents),
+      ).then((r) => r.data),
     enabled: !!profileId,
     staleTime: 30_000,
   });

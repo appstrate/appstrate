@@ -37,6 +37,7 @@ import { applicationProviderCredentials, packages } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import { hasActualCredentials } from "../lib/provider-config.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
@@ -107,6 +108,12 @@ export function createApplicationsRouter() {
 
     try {
       const app = await createApplication(orgId, data, user.id);
+      await recordAuditFromContext(c, {
+        action: "application.created",
+        resourceType: "application",
+        resourceId: app.id,
+        after: { name: app.name },
+      });
       return c.json({ object: "application", ...app }, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -149,6 +156,12 @@ export function createApplicationsRouter() {
 
     try {
       const app = await updateApplication(orgId, appId, data);
+      await recordAuditFromContext(c, {
+        action: "application.updated",
+        resourceType: "application",
+        resourceId: app.id,
+        after: data as unknown as Record<string, unknown>,
+      });
       return c.json({ object: "application", ...app });
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -167,6 +180,11 @@ export function createApplicationsRouter() {
 
     try {
       await deleteApplication(orgId, appId);
+      await recordAuditFromContext(c, {
+        action: "application.deleted",
+        resourceType: "application",
+        resourceId: appId,
+      });
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;

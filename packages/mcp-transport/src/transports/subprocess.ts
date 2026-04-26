@@ -17,6 +17,11 @@
  * interface verbatim — it can be passed to `client.connect(transport)`
  * exactly like `StdioClientTransport`.
  *
+ * Runtime: this implementation uses `Bun.spawn`, matching the
+ * Bun-everywhere repo standard. Bun.spawn returns a Subprocess with
+ * `stdout` / `stderr` exposed as `ReadableStream<Uint8Array>` and
+ * `stdin` as a `FileSink`; we drive each via async iteration.
+ *
  * What it does NOT do (deferred to deployment-side hardening):
  *   - cgroup attachment (Linux-only, requires the runtime to be built
  *     into a container image with cgroup tooling). The transport
@@ -30,7 +35,6 @@
  * boring-but-correct part.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
 import type {
   Transport,
   TransportSendOptions,
@@ -104,6 +108,17 @@ export class SubprocessTransportError extends Error {
   override readonly name = "SubprocessTransportError";
 }
 
+/** Minimal shape of `Bun.spawn` we rely on — typed locally so the file
+ * compiles outside `tsconfig.types: ["bun-types"]` consumers. */
+interface BunSubprocessLike {
+  readonly stdin: { write(data: string | Uint8Array): number; end(): void };
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  readonly killed: boolean;
+  kill(signal?: number | string): void;
+}
+
 /**
  * Stdio-based MCP transport. Spawn the subprocess at `start()`,
  * forward each stdout JSON-RPC line as a parsed message via
@@ -116,7 +131,7 @@ export class SubprocessTransport implements Transport {
   onmessage?: (message: JSONRPCMessage) => void;
 
   private readonly options: SubprocessTransportOptions;
-  private child?: ChildProcess;
+  private child?: BunSubprocessLike;
   private stdoutBuffer = "";
   private stderrBuffer = "";
   private readonly stdoutLimiter: RateLimiter;
@@ -158,33 +173,94 @@ export class SubprocessTransport implements Transport {
     if (this.child) {
       throw new SubprocessTransportError("Transport already started");
     }
-    const child = spawn(this.options.command, this.options.args ?? [], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: this.buildEnv(),
+    // Bun.spawn signature — typed via globalThis to avoid pulling in
+    // bun-types as a hard import dep for downstream consumers.
+    const bunSpawn = (
+      globalThis as unknown as {
+        Bun?: {
+          spawn: (
+            cmd: string[],
+            opts: {
+              stdin: "pipe";
+              stdout: "pipe";
+              stderr: "pipe";
+              cwd?: string;
+              env: Record<string, string>;
+              onExit?: (
+                _proc: BunSubprocessLike,
+                exitCode: number | null,
+                signalCode: number | null,
+                error: Error | null,
+              ) => void;
+            },
+          ) => BunSubprocessLike;
+        };
+      }
+    ).Bun?.spawn;
+    if (!bunSpawn) {
+      throw new SubprocessTransportError(
+        "Bun.spawn is not available — SubprocessTransport requires Bun >= 1.3.9",
+      );
+    }
+    const child = bunSpawn([this.options.command, ...(this.options.args ?? [])], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
-      // Detach false (default) so the parent's TERM also reaches the
-      // child. We rely on close() for orderly shutdown.
+      env: this.buildEnv(),
+      onExit: (_proc, exitCode, signalCode, error) => {
+        if (this.closed) return;
+        this.closed = true;
+        if (error) {
+          this.onerror?.(error);
+        } else {
+          const reason =
+            exitCode !== null
+              ? `subprocess exited with code ${exitCode}`
+              : `subprocess killed by signal ${signalCode}`;
+          this.onerror?.(new SubprocessTransportError(reason));
+        }
+        this.onclose?.();
+      },
     });
     this.child = child;
 
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => this.handleStdout(chunk));
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => this.handleStderr(chunk));
-    child.on("error", (err) => this.onerror?.(err));
-    child.on("exit", (code, signal) => {
-      if (this.closed) return;
-      this.closed = true;
-      const reason =
-        code !== null
-          ? `subprocess exited with code ${code}`
-          : `subprocess killed by signal ${signal}`;
-      this.onerror?.(new SubprocessTransportError(reason));
-      this.onclose?.();
-    });
+    // Drive stdout / stderr async — the read loops resolve when the
+    // streams close (which happens when the subprocess exits).
+    void this.readStream(child.stdout, (chunk) => this.handleStdout(chunk));
+    void this.readStream(child.stderr, (chunk) => this.handleStderr(chunk));
 
     // The SDK protocol layer awaits start() — we resolve immediately.
     // First message arrives via onmessage when the subprocess emits.
+  }
+
+  private async readStream(
+    stream: ReadableStream<Uint8Array>,
+    onChunk: (chunk: string) => void,
+  ): Promise<void> {
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) {
+          onChunk(decoder.decode(value, { stream: true }));
+        }
+      }
+      // Final flush in case the stream ended mid-codepoint.
+      const tail = decoder.decode();
+      if (tail.length > 0) onChunk(tail);
+    } catch {
+      // Reader was cancelled or the subprocess crashed mid-stream;
+      // the onExit handler is the source of truth for closure.
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private handleStdout(chunk: string): void {
@@ -244,19 +320,14 @@ export class SubprocessTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage, _options?: TransportSendOptions): Promise<void> {
-    if (!this.child || !this.child.stdin) {
+    if (!this.child) {
       throw new SubprocessTransportError("Transport not started");
     }
     if (this.closed) {
       throw new SubprocessTransportError("Transport closed");
     }
     const line = `${JSON.stringify(message)}\n`;
-    return new Promise<void>((resolve, reject) => {
-      this.child!.stdin!.write(line, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    this.child.stdin.write(line);
   }
 
   async close(): Promise<void> {
@@ -269,14 +340,12 @@ export class SubprocessTransport implements Transport {
     const child = this.child;
     const grace = this.options.killTimeoutMs ?? 1000;
     try {
-      child.stdin?.end();
+      child.stdin.end();
     } catch {
       // ignore
     }
     if (!child.killed) child.kill("SIGTERM");
-    const exitPromise = new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-    });
+    const exitPromise = child.exited.then(() => undefined);
     const timeoutPromise = new Promise<"timeout">((resolve) => {
       const t = setTimeout(() => resolve("timeout"), grace);
       void exitPromise.then(() => clearTimeout(t));

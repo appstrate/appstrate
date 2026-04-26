@@ -214,7 +214,7 @@ describe("POST /mcp — tools/call run_history", () => {
   it("delegates to the platform's /internal/run-history and returns the upstream JSON", async () => {
     const fetchFn = mock(
       async () =>
-        new Response('{"runs":[{"id":"r1"}]}', {
+        new Response('{"object":"list","data":[{"id":"r1"}],"hasMore":false}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -228,7 +228,7 @@ describe("POST /mcp — tools/call run_history", () => {
     expect(res.status).toBe(200);
     const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
     expect(result.isError).toBeUndefined();
-    expect(result.content[0]!.text).toBe('{"runs":[{"id":"r1"}]}');
+    expect(result.content[0]!.text).toBe('{"object":"list","data":[{"id":"r1"}],"hasMore":false}');
 
     // Verifies the `limit` and `fields` arguments propagated as query
     // parameters into the underlying platform call.

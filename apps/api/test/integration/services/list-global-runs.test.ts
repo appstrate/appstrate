@@ -67,7 +67,7 @@ describe("listGlobalRuns", () => {
 
   it("returns empty list when no runs exist", async () => {
     const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    expect(result.runs).toEqual([]);
+    expect(result.data).toEqual([]);
     expect(result.total).toBe(0);
   });
 
@@ -78,7 +78,7 @@ describe("listGlobalRuns", () => {
     const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     expect(result.total).toBe(2);
 
-    const byId = Object.fromEntries(result.runs.map((r) => [r.id, r]));
+    const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
     expect(byId[inline.id]?.packageEphemeral).toBe(true);
     expect(byId[pkg.id]?.packageEphemeral).toBe(false);
   });
@@ -93,7 +93,7 @@ describe("listGlobalRuns", () => {
       { kind: "inline" },
     );
     expect(result.total).toBe(2);
-    for (const run of result.runs) {
+    for (const run of result.data) {
       expect(run.packageEphemeral).toBe(true);
     }
   });
@@ -108,7 +108,7 @@ describe("listGlobalRuns", () => {
       { kind: "package" },
     );
     expect(result.total).toBe(2);
-    for (const run of result.runs) {
+    for (const run of result.data) {
       expect(run.packageEphemeral).toBe(false);
     }
   });
@@ -133,7 +133,7 @@ describe("listGlobalRuns", () => {
       { status: "failed" },
     );
     expect(result.total).toBe(1);
-    expect(result.runs[0]?.status).toBe("failed");
+    expect(result.data[0]?.status).toBe("failed");
   });
 
   it("filters by startDate / endDate", async () => {
@@ -155,13 +155,13 @@ describe("listGlobalRuns", () => {
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { startDate: new Date("2024-01-01") },
     );
-    expect(since2024.runs.map((r) => r.id)).toEqual([recent.id]);
+    expect(since2024.data.map((r) => r.id)).toEqual([recent.id]);
 
     const until2023 = await listGlobalRuns(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { endDate: new Date("2023-01-01") },
     );
-    expect(until2023.runs.map((r) => r.id)).toEqual([old.id]);
+    expect(until2023.data.map((r) => r.id)).toEqual([old.id]);
   });
 
   it("respects the applicationId filter (cross-app isolation)", async () => {
@@ -189,14 +189,14 @@ describe("listGlobalRuns", () => {
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { limit: 2, offset: 0 },
     );
-    expect(page1.runs).toHaveLength(2);
+    expect(page1.data).toHaveLength(2);
     expect(page1.total).toBe(5);
 
     const page2 = await listGlobalRuns(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { limit: 2, offset: 2 },
     );
-    expect(page2.runs).toHaveLength(2);
-    expect(page2.runs[0]?.id).not.toBe(page1.runs[0]?.id);
+    expect(page2.data).toHaveLength(2);
+    expect(page2.data[0]?.id).not.toBe(page1.data[0]?.id);
   });
 });

@@ -33,8 +33,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents).toBeArray();
-      expect(body.agents).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns agents owned by the org", async () => {
@@ -54,7 +54,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const agent = body.agents.find((f: { id: string }) => f.id === "@pkgorg/list-agent");
+      const agent = body.data.find((f: { id: string }) => f.id === "@pkgorg/list-agent");
       expect(agent).toBeDefined();
     });
 
@@ -72,7 +72,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.agents.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
+      const leaked = body.data.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
       expect(leaked).toBeUndefined();
     });
 
@@ -94,7 +94,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.skills).toBeArray();
+      expect(body.object).toBe("list");
+      expect(body.data).toBeArray();
     });
 
     it("returns seeded skill", async () => {
@@ -122,7 +123,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const skill = body.skills.find((s: { id: string }) => s.id === "@pkgorg/my-skill");
+      const skill = body.data.find((s: { id: string }) => s.id === "@pkgorg/my-skill");
       expect(skill).toBeDefined();
     });
 
@@ -864,8 +865,8 @@ describe("Packages API", () => {
       });
       expect(res1.status).toBe(200);
       const body1 = (await res1.json()) as any;
-      const myAgent = body1.agents.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
-      const theirAgent = body1.agents.find(
+      const myAgent = body1.data.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
+      const theirAgent = body1.data.find(
         (f: { id: string }) => f.id === "@isolatedorg/their-agent",
       );
       expect(myAgent).toBeDefined();
@@ -877,10 +878,10 @@ describe("Packages API", () => {
       });
       expect(res2.status).toBe(200);
       const body2 = (await res2.json()) as any;
-      const theirAgent2 = body2.agents.find(
+      const theirAgent2 = body2.data.find(
         (f: { id: string }) => f.id === "@isolatedorg/their-agent",
       );
-      const myAgent2 = body2.agents.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
+      const myAgent2 = body2.data.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
       expect(theirAgent2).toBeDefined();
       expect(myAgent2).toBeUndefined();
     });

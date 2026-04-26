@@ -335,7 +335,7 @@ function ScheduleHistory({
     limit: 20,
     offset: 0,
   });
-  const firstExec = data?.runs?.[0];
+  const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
   const lastStartedAt = firstExec?.startedAt;

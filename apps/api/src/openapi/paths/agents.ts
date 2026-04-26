@@ -27,15 +27,20 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  agents: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/AgentListItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                agents: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "@acme/email-sorter",
                     displayName: "Email Sorter",

@@ -28,7 +28,7 @@ const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
 );
 
 function withByteCap(maxBytes: number) {
-  return (value: Record<string, unknown>, ctx: z.RefinementCtx) => {
+  return (value: unknown, ctx: z.RefinementCtx): void => {
     const size = Buffer.byteLength(JSON.stringify(value), "utf8");
     if (size > maxBytes) {
       ctx.addIssue({
@@ -53,3 +53,13 @@ export const runConfigSchema = z
 export const runLogDataSchema = z
   .record(z.string(), jsonValueSchema)
   .superRefine(withByteCap(32 * KB));
+
+/**
+ * `package_persistence.content` — checkpoint / pinned-slot / memory
+ * payload. Memories may be a plain string (the AFPS `note` tool path);
+ * checkpoints + pinned slots are typically structured objects / arrays.
+ * Validated as any JSON-safe value capped at 64 KB per row — large
+ * enough for rich agent state, small enough that a runaway writer
+ * cannot single-handedly poison a workspace.
+ */
+export const packagePersistenceContentSchema = jsonValueSchema.superRefine(withByteCap(64 * KB));

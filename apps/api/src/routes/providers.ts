@@ -20,6 +20,7 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import {
+  authModeEnum,
   getDefaultAdminCredentialSchema,
   validateProviderCredentialKeys,
 } from "@appstrate/core/validation";
@@ -120,7 +121,7 @@ const baseProviderSchema = z.object({
   version: z.string().optional(),
   description: z.string().optional(),
   author: z.string().optional(),
-  authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom"]),
+  authMode: authModeEnum,
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
   authorizationUrl: z.string().optional(),

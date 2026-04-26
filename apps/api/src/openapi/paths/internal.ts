@@ -30,12 +30,17 @@ export const internalPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  runs: { type: "array", items: { type: "object" } },
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: { type: "object" } },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                runs: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "run_cm9abc123",
                     status: "success",

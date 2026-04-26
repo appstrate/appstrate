@@ -16,6 +16,7 @@
 
 import { decrypt } from "@appstrate/connect";
 import { verify } from "@appstrate/afps-runtime/events";
+import { getEnv } from "@appstrate/env";
 import { ApiError, gone } from "@appstrate/core/api-errors";
 import type { RunSinkContext } from "../types/run-sink.ts";
 
@@ -85,6 +86,7 @@ export function verifyRunSignatureHeaders(input: {
     timestampSec,
     body: input.body,
     secret,
+    toleranceSec: getEnv().WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
   });
 
   if (!result.ok) {

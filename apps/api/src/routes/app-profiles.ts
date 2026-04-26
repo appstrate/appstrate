@@ -144,7 +144,7 @@ export function createAppProfilesRouter() {
       .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
       .where(eq(applicationPackages.appProfileId, profileId));
 
-    return c.json({ agents: rows });
+    return c.json({ object: "list" as const, data: rows, hasMore: false });
   });
 
   // GET /api/app-profiles/:id/bindings — list provider bindings for an app profile

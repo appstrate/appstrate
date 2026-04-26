@@ -58,8 +58,8 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
   it("GET /api/agents does not include inline shadows", async () => {
     const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { agents: { id: string }[] };
-    const ids = body.agents.map((a) => a.id);
+    const body = (await res.json()) as { data: { id: string }[] };
+    const ids = body.data.map((a) => a.id);
     expect(ids).toContain("@ephemfilter/real-agent");
     for (const id of ids) {
       expect(id.startsWith("@inline/")).toBe(false);

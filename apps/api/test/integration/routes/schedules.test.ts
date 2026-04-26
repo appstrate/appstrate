@@ -327,9 +327,9 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.runs).toBeArray();
-      expect(body.runs.length).toBeGreaterThanOrEqual(1);
-      expect(body.runs[0].scheduleId).toBe(schedule.id);
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data[0].scheduleId).toBe(schedule.id);
       expect(body.total).toBeGreaterThanOrEqual(1);
     });
 
@@ -350,8 +350,8 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.runs).toBeArray();
-      expect(body.runs).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
     });
   });

@@ -414,15 +414,20 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  skills: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgPackageItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                skills: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "@acme/summarize",
                     name: "Summarize",
@@ -928,11 +933,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  tools: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgPackageItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },
@@ -1416,11 +1424,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  agents: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgPackageItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },
@@ -1976,11 +1987,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  providers: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgPackageItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

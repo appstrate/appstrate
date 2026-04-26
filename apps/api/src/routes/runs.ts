@@ -28,6 +28,7 @@ import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { ApiError, notFound, conflict } from "../lib/errors.ts";
+import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -391,6 +392,7 @@ export function createRunsRouter() {
       offset,
       endUserId: endUser?.id,
     });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
   });
 

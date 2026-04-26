@@ -20,6 +20,7 @@ import { applications } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
 import {
   createWebhook,
   listWebhooks,
@@ -146,6 +147,12 @@ export function createWebhooksRouter() {
               enabled: data.enabled,
             },
       );
+      await recordAuditFromContext(c, {
+        action: "webhook.created",
+        resourceType: "webhook",
+        resourceId: result.id,
+        after: { url: data.url, events: data.events, level: data.level },
+      });
       return c.json(result, 201);
     },
   );
@@ -199,6 +206,12 @@ export function createWebhooksRouter() {
       const data = parseBody(updateWebhookSchema, body);
 
       const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
+      await recordAuditFromContext(c, {
+        action: "webhook.updated",
+        resourceType: "webhook",
+        resourceId: c.req.param("id")!,
+        after: data as unknown as Record<string, unknown>,
+      });
       return c.json(result);
     },
   );
@@ -209,7 +222,13 @@ export function createWebhooksRouter() {
     rateLimit(10),
     requireModulePermission("webhooks", "delete"),
     async (c) => {
-      await deleteWebhook(webhookScope(c), c.req.param("id")!);
+      const id = c.req.param("id")!;
+      await deleteWebhook(webhookScope(c), id);
+      await recordAuditFromContext(c, {
+        action: "webhook.deleted",
+        resourceType: "webhook",
+        resourceId: id,
+      });
       return c.body(null, 204);
     },
   );
@@ -240,7 +259,13 @@ export function createWebhooksRouter() {
     rateLimit(5),
     requireModulePermission("webhooks", "write"),
     async (c) => {
-      const result = await rotateSecret(webhookScope(c), c.req.param("id")!);
+      const id = c.req.param("id")!;
+      const result = await rotateSecret(webhookScope(c), id);
+      await recordAuditFromContext(c, {
+        action: "webhook.secret_rotated",
+        resourceType: "webhook",
+        resourceId: id,
+      });
       return c.json(result);
     },
   );

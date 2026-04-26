@@ -262,11 +262,11 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: unknown[];
+        data: unknown[];
         total: number;
       };
-      expect(body.runs).toBeArray();
-      expect(body.runs).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
     });
 
@@ -297,11 +297,11 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: { id: string; status: string }[];
+        data: { id: string; status: string }[];
         total: number;
       };
-      expect(body.runs).toBeArray();
-      expect(body.runs).toHaveLength(2);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(2);
       expect(body.total).toBe(2);
     });
 
@@ -335,10 +335,10 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: unknown[];
+        data: unknown[];
         total: number;
       };
-      expect(body.runs).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
       expect(body.total).toBe(2);
     });
 
@@ -372,12 +372,12 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: { dashboardUserId: string }[];
+        data: { dashboardUserId: string }[];
         total: number;
       };
-      expect(body.runs).toHaveLength(1);
+      expect(body.data).toHaveLength(1);
       expect(body.total).toBe(1);
-      expect(body.runs[0]!.dashboardUserId).toBe(ctx.user.id);
+      expect(body.data[0]!.dashboardUserId).toBe(ctx.user.id);
     });
 
     it("respects limit parameter", async () => {
@@ -402,10 +402,10 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: unknown[];
+        data: unknown[];
         total: number;
       };
-      expect(body.runs).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
       expect(body.total).toBe(5);
     });
 
@@ -431,10 +431,10 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: unknown[];
+        data: unknown[];
         total: number;
       };
-      expect(body.runs).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
       expect(body.total).toBe(5);
     });
 
@@ -460,10 +460,10 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: unknown[];
+        data: unknown[];
         total: number;
       };
-      expect(body.runs).toHaveLength(0);
+      expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
     });
 

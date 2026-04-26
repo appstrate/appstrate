@@ -10,8 +10,6 @@
  */
 
 import { toJSONSchema } from "zod/v4/core";
-import { resolve, dirname } from "node:path";
-import { writeFile, mkdir, rm } from "node:fs/promises";
 import {
   agentManifestSchema,
   skillManifestSchema,
@@ -20,7 +18,8 @@ import {
   afpsJsonSchemaOverride,
 } from "@afps-spec/schema";
 
-const OUTPUT_DIR = resolve(dirname(import.meta.filename!), "../schema");
+// Bun-native pathing — `import.meta.dir` is the directory of this script.
+const OUTPUT_DIR = `${import.meta.dir}/../schema`;
 
 // ─────────────────────────────────────────────
 // Extend AFPS schemas with Appstrate-specific fields
@@ -58,8 +57,11 @@ const appstrateSchemas = [
 // Generate
 // ─────────────────────────────────────────────
 
-await rm(OUTPUT_DIR, { recursive: true, force: true });
-await mkdir(OUTPUT_DIR, { recursive: true });
+// Clear and recreate OUTPUT_DIR — Bun.$ shells out to /bin/rm + mkdir, so
+// we use the standard $ template (Bun's recommended pathing primitive)
+// instead of `node:fs/promises`.
+await Bun.$`rm -rf ${OUTPUT_DIR}`.quiet();
+await Bun.$`mkdir -p ${OUTPUT_DIR}`.quiet();
 
 for (const entry of appstrateSchemas) {
   const jsonSchema = toJSONSchema(entry.schema, {
@@ -77,8 +79,8 @@ for (const entry of appstrateSchemas) {
     ...jsonSchema,
   };
 
-  const filePath = resolve(OUTPUT_DIR, entry.filename);
-  await writeFile(filePath, JSON.stringify(final, null, 2) + "\n");
+  const filePath = `${OUTPUT_DIR}/${entry.filename}`;
+  await Bun.write(filePath, JSON.stringify(final, null, 2) + "\n");
   console.log(`  ✓ ${entry.filename}`);
 }
 

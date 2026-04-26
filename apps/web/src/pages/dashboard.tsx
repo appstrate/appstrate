@@ -33,7 +33,7 @@ export function DashboardPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const runs = runsData?.runs ?? [];
+  const runs = runsData?.data ?? [];
 
   // No runs → redirect to agents page
   if (runs.length === 0) {

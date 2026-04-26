@@ -467,17 +467,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "agents": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentListItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "agents": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "@acme/email-sorter",
                       "displayName": "Email Sorter",
@@ -1958,7 +1968,11 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runs": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/Run"
@@ -1966,9 +1980,12 @@
                     },
                     "total": {
                       "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   },
-                  "required": ["runs", "total"]
+                  "required": ["object", "data", "total", "hasMore"]
                 }
               }
             }
@@ -2405,9 +2422,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["runs", "total"],
+                  "required": ["object", "data", "total", "hasMore"],
                   "properties": {
-                    "runs": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/Run"
@@ -2415,6 +2436,9 @@
                     },
                     "total": {
                       "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -2987,12 +3011,14 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `checkpoint`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
                 "properties": {
                   "memories": {
                     "type": "array"
                   },
-                  "checkpoint": {},
+                  "pinned": {
+                    "type": "object"
+                  },
                   "output": {},
                   "report": {
                     "type": ["string", "null"]
@@ -3809,7 +3835,11 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runs": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/Run"
@@ -3817,9 +3847,12 @@
                     },
                     "total": {
                       "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   },
-                  "required": ["runs", "total"]
+                  "required": ["object", "data", "total", "hasMore"]
                 }
               }
             }
@@ -6956,8 +6989,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "agents": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -6970,6 +7008,9 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -8870,17 +8911,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "runs": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "runs": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "run_cm9abc123",
                       "status": "success",
@@ -10056,17 +10107,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "skills": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgPackageItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "skills": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "@acme/summarize",
                       "name": "Summarize",
@@ -10836,12 +10897,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "tools": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgPackageItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -11598,12 +11667,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "agents": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgPackageItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -12455,12 +12532,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "providers": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgPackageItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }

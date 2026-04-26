@@ -7,8 +7,10 @@ import { useCurrentApplicationId } from "./use-current-application";
 import type { Run } from "@appstrate/shared-types";
 
 interface PaginatedResult {
-  runs: Run[];
+  object: "list";
+  data: Run[];
   total: number;
+  hasMore: boolean;
 }
 
 export type RunKindFilter = "all" | "package" | "inline";
