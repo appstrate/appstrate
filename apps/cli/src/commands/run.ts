@@ -61,7 +61,8 @@ import {
   type ReportContext,
   type ReportSession,
 } from "./run/report.ts";
-import { CompositeSink } from "@appstrate/afps-runtime/sinks";
+import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
+import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
 
 export interface RunCommandOptions {
@@ -222,17 +223,36 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
+  // SIGINT (Ctrl-C) and SIGTERM (docker stop / kubectl delete / supervisor kill)
+  // both cancel the run cooperatively. The handlers only flip the
+  // AbortController — the actual notification to the platform is sent
+  // from the `finally` below as an explicit finalize POST, so the
+  // server stops the run immediately instead of waiting for the
+  // heartbeat watchdog (~60s).
   const controller = new AbortController();
-  const onSigint = () => {
-    if (!opts.json) process.stderr.write("\n^C cancelling...\n");
-    controller.abort(new Error("user cancelled"));
+  const onCancel = (signalName: string) => () => {
+    if (!opts.json) process.stderr.write(`\n${signalName} cancelling...\n`);
+    controller.abort(new Error(`user cancelled (${signalName})`));
   };
+  const onSigint = onCancel("^C");
+  const onSigterm = onCancel("SIGTERM");
   process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
 
   // ─── 9. Run ───────────────────────────────────────────────────────
   const consoleSink = createConsoleSink({ json: opts.json, outputPath: opts.output });
-  const sink = reportSession
-    ? new CompositeSink([consoleSink, reportSession.httpSink])
+  // Track whether finalize was already sent to the HttpSink so the
+  // CLI's safety-net finalize in the `finally` doesn't double-post.
+  // PiRunner finalises itself on success and on non-abort errors, but
+  // explicitly does NOT on cancellation — and any throw during setup
+  // (provider extension build, runtime-ready emit, …) bypasses
+  // PiRunner entirely. Without this safety net the run sits open
+  // until the watchdog times out.
+  const trackedHttpSink = reportSession
+    ? wrapHttpSinkWithFinalizeTracker(reportSession.httpSink)
+    : null;
+  const sink = trackedHttpSink
+    ? new CompositeSink([consoleSink, trackedHttpSink.sink])
     : consoleSink;
   if (!opts.json) {
     const reportNote = reportSession
@@ -308,6 +328,29 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    // Safety-net finalize: notify the platform immediately on cancel
+    // or setup-time failure. Cheap (single signed POST), idempotent
+    // (server CAS on `sink_closed_at IS NULL`), and turns a 60-second
+    // watchdog wait into an instant transition. Best-effort — if it
+    // fails, the watchdog still backs us up.
+    if (trackedHttpSink && !trackedHttpSink.wasFinalized()) {
+      const aborted = controller.signal.aborted;
+      const result: RunResult = emptyRunResult();
+      result.status = aborted ? "cancelled" : "failed";
+      result.error = {
+        message: aborted
+          ? "Runner cancelled by user (CLI received signal)."
+          : "Runner exited before completion (CLI bootstrap or teardown error).",
+      };
+      await trackedHttpSink.sink.finalize(result).catch((err) => {
+        if (!opts.json) {
+          process.stderr.write(
+            `warn: finalize on cancel failed: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      });
+    }
     restoreOutputSchema();
     await prepared.cleanup().catch(() => {});
     await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
@@ -316,6 +359,33 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   if (controller.signal.aborted) {
     process.exit(130);
   }
+}
+
+/**
+ * Wrap a finalize-capable EventSink so the caller can tell whether
+ * `finalize` has been invoked (by the runner, mid-run). The CLI uses
+ * this to avoid double-finalizing from its `finally` safety net.
+ */
+interface TrackedHttpSink {
+  sink: HttpSink;
+  wasFinalized(): boolean;
+}
+
+function wrapHttpSinkWithFinalizeTracker(inner: HttpSink): TrackedHttpSink {
+  let finalized = false;
+  // Replace the original `finalize` in place rather than building a
+  // wrapper class — HttpSink is concrete and CompositeSink expects a
+  // structural EventSink. Patching the bound method preserves identity
+  // so any other code holding the reference still observes the flag.
+  const originalFinalize = inner.finalize.bind(inner);
+  inner.finalize = async (result) => {
+    finalized = true;
+    await originalFinalize(result);
+  };
+  return {
+    sink: inner,
+    wasFinalized: () => finalized,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -612,4 +682,14 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
+}
+
+/**
+ * Test-only access to the finalize-tracker wrapper. Exercised by
+ * `apps/cli/test/run-finalize-tracker.test.ts` to assert the
+ * cancel-path safety net (PR: detect runner cancellation immediately
+ * rather than waiting for the heartbeat watchdog).
+ */
+export function _wrapHttpSinkWithFinalizeTrackerForTesting(inner: HttpSink): TrackedHttpSink {
+  return wrapHttpSinkWithFinalizeTracker(inner);
 }
