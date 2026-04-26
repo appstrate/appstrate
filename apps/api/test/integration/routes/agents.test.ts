@@ -625,11 +625,11 @@ describe("Agents API", () => {
       expect(body.pinned).toHaveLength(2);
       const actorTypes = body.pinned.map((c) => c.actorType).sort();
       expect(actorTypes).toEqual(["shared", "user"]);
-      // Every row is the legacy `checkpoint` slot here.
+      // Every row is the `checkpoint` slot here.
       expect(body.pinned.every((c) => c.key === "checkpoint")).toBe(true);
     });
 
-    it("returns Letta-style named pinned slots alongside the legacy checkpoint", async () => {
+    it("returns Letta-style named pinned slots alongside the checkpoint slot", async () => {
       await seedInstalledAgent({
         id: "@myorg/persist-named-pin",
         orgId: ctx.orgId,
@@ -637,7 +637,7 @@ describe("Agents API", () => {
         appId: ctx.defaultAppId,
       });
 
-      // Mix of keys: legacy `checkpoint` + Letta-style `persona` + `goals`
+      // Mix of keys: `checkpoint` + Letta-style `persona` + `goals`
       await upsertPinned(
         "@myorg/persist-named-pin",
         ctx.defaultAppId,

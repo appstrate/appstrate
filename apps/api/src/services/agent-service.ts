@@ -3,12 +3,11 @@
 import { eq, and, count, sql, or, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import { extractDepsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 
 interface DbPackageRow {
@@ -32,7 +31,7 @@ function mapDependencies(
   return depRefs
     .filter((d) => d.type === type)
     .map((d) => {
-      const m = asRecord(d.draftManifest) as Partial<Manifest>;
+      const m = parseDraftManifest(d.draftManifest);
       return {
         id: d.dependencyId,
         version: versionMap[d.dependencyId] ?? "*",
@@ -70,7 +69,7 @@ async function resolveDepRefs(
   manifest: unknown,
   orgId: string,
 ): Promise<NonNullable<DbPackageRow["depRefs"]>> {
-  const m = asRecord(manifest) as Partial<Manifest>;
+  const m = parseDraftManifest(manifest);
   const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
   const allDepIds = [...skillIds, ...toolIds, ...providerIds];
   if (allDepIds.length === 0) return [];

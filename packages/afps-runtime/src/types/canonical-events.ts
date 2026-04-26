@@ -67,7 +67,7 @@ export interface MemoryAddedEvent extends BaseEnvelope {
  * Upsert-by-key into a named pinned slot. Last-write-wins per `(scope,
  * key)`. Pinned content is rendered into the system prompt on every run.
  *
- * The legacy `checkpoint` carry-over slot is just one valid key —
+ * The `checkpoint` carry-over slot is just one valid key —
  * `key === "checkpoint"`. Other keys (e.g. `"persona"`, `"goals"`) are
  * accepted and persisted but have no special semantics in the runtime
  * reducer beyond being aggregated under {@link RunResult.pinned}.
@@ -78,7 +78,7 @@ export interface MemoryAddedEvent extends BaseEnvelope {
  */
 export interface PinnedSetEvent extends BaseEnvelope {
   type: "pinned.set";
-  /** Pinned slot identifier — `"checkpoint"` is reserved for the legacy carry-over. */
+  /** Pinned slot identifier — `"checkpoint"` is reserved for the carry-over slot. */
   key: string;
   /** Arbitrary JSON value stored under the pinned slot. */
   content: unknown;

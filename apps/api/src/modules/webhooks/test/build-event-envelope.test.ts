@@ -8,7 +8,7 @@ describe("buildEventEnvelope", () => {
     const { eventId, payload } = buildEventEnvelope({
       eventType: "run.success",
       run: {
-        id: "exec_123",
+        id: "run_123",
         status: "success",
         result: "output data",
         input: "input data",
@@ -29,7 +29,7 @@ describe("buildEventEnvelope", () => {
   it("strips result and input in summary mode", () => {
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: { id: "exec_123", status: "success", result: "output", input: "input" },
+      run: { id: "run_123", status: "success", result: "output", input: "input" },
       payloadMode: "summary",
     });
 

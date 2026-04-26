@@ -376,7 +376,7 @@ export interface AgentPinnedSlotItem {
   id: number;
   /**
    * Slot key (Letta-style label). The reserved key `"checkpoint"` is the
-   * legacy carry-over slot; other keys (`"persona"`, `"goals"`, …) are
+   * carry-over slot snapshotted onto runs.checkpoint; other keys (`"persona"`, `"goals"`, …) are
    * first-class named pinned blocks. See ADR-013.
    */
   key: string;

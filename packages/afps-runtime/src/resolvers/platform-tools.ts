@@ -85,7 +85,7 @@ export const pinTool: Tool = {
   name: "pin",
   description:
     "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per `(scope, key)` — the most recent call fully replaces the previous value. " +
-    'Use `key: "checkpoint"` for the legacy carry-over checkpoint; other keys (e.g. "persona", "goals") are accepted and persisted as named pinned blocks. ' +
+    'Use `key: "checkpoint"` for the carry-over slot snapshotted onto runs.checkpoint; other keys (e.g. "persona", "goals") are accepted and persisted as named pinned blocks. ' +
     'By default the slot is scoped to the current actor (the user or end-user that triggered the run); pass scope: "shared" for an app-wide slot shared across all actors.',
   parameters: {
     type: "object",

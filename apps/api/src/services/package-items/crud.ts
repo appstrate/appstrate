@@ -6,7 +6,7 @@ import { applicationPackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
-import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
@@ -15,6 +15,7 @@ import {
   getPackageDisplayName,
   notEphemeralFilter,
 } from "../../lib/package-helpers.ts";
+import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 
@@ -56,7 +57,7 @@ async function findDependentPackages(
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of orgPkgs) {
     if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
-    const m = asRecord(pkg.draftManifest) as Partial<Manifest>;
+    const m = parseDraftManifest(pkg.draftManifest);
     const deps = extractDependencies(m);
     for (const dep of deps) {
       if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
@@ -224,7 +225,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
     .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
   for (const pkg of allOrgPkgs) {
     if (!pkg.draftManifest) continue;
-    const deps = extractDependencies(asRecord(pkg.draftManifest) as Partial<Manifest>);
+    const deps = extractDependencies(parseDraftManifest(pkg.draftManifest));
     for (const dep of deps) {
       const depId = buildPackageId(dep.depScope, dep.depName);
       countMap.set(depId, (countMap.get(depId) ?? 0) + 1);
@@ -232,7 +233,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
   }
 
   return data.map((row) => {
-    const m = asRecord(row.draftManifest) as Partial<Manifest>;
+    const m = parseDraftManifest(row.draftManifest);
     return {
       id: row.id,
       orgId: row.orgId,
@@ -266,7 +267,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
 
   const dependents = await findDependentPackages(orgId, itemId);
 
-  const m = asRecord(data.draftManifest) as Partial<Manifest>;
+  const m = parseDraftManifest(data.draftManifest);
   return {
     id: data.id,
     orgId: data.orgId,

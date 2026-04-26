@@ -25,7 +25,7 @@ export interface MemoryPanelProps {
 
 /**
  * Unified memory view (ADR-013): pinned slots (always-in-prompt blocks
- * including the legacy `checkpoint`) on top, archive memories below.
+ * including `checkpoint`) on top, archive memories below.
  * Mirrors the Letta ADE pattern of one inspector with two tiers visible
  * side by side.
  */

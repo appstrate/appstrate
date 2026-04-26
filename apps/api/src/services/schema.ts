@@ -3,13 +3,25 @@
 import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { normalizeConfigForValidation } from "../lib/agent-readiness-utils.ts";
 
 // --- AJV runtime validation ---
 //
 // Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
 // client- and server-side validation agree. See packages/core/src/ajv.ts.
 const ajv = createAjv({ coerceTypes: true });
+
+// AJV with coerceTypes coerces null → "" for strings, which incorrectly passes
+// `required` checks. Strip empty/null values so AJV sees them as missing.
+function stripEmptyRequired(
+  data: Record<string, unknown>,
+  required: string[],
+): Record<string, unknown> {
+  const cleaned = { ...data };
+  for (const key of required) {
+    if (cleaned[key] === "" || cleaned[key] === null) delete cleaned[key];
+  }
+  return cleaned;
+}
 
 // --- Section C: Validation functions ---
 
@@ -65,7 +77,7 @@ function runValidate(
 
   if (kind === "config") {
     // Treat empty strings as missing for required fields (aligned with frontend validation)
-    effectiveData = normalizeConfigForValidation(effectiveData, schema.required ?? []);
+    effectiveData = stripEmptyRequired(effectiveData, schema.required ?? []);
   } else if (kind === "input") {
     // Exclude file fields from AJV validation. File inputs are resolved from
     // `upload://upl_xxx` URIs by the input parser BEFORE this runs; the
@@ -84,7 +96,7 @@ function runValidate(
       properties: nonFileProps,
       ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
     };
-    effectiveData = normalizeConfigForValidation(effectiveData, nonFileRequired);
+    effectiveData = stripEmptyRequired(effectiveData, nonFileRequired);
   } else {
     // output: allow extra fields (state, tokenUsage, etc.)
     effectiveSchema = { ...schema, additionalProperties: true } as JSONSchemaObject & {

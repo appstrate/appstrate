@@ -6,6 +6,11 @@ import { asRecord } from "./safe-json.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
+/** Narrow a JSONB-stored manifest column (`unknown`) to the typed shape. */
+export function parseDraftManifest(value: unknown): Partial<Manifest> {
+  return asRecord(value) as Partial<Manifest>;
+}
+
 /** Extract skill, tool, and provider IDs from a manifest's dependencies section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {
   const dependencies = asRecord(manifest.dependencies);
