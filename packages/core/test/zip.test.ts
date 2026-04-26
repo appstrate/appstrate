@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   parsePackageZip,
   PackageZipError,
@@ -91,7 +91,7 @@ export default function(pi) {
 // ─────────────────────────────────────────────
 
 describe("parsePackageZip", () => {
-  test("valid agent ZIP", () => {
+  it("valid agent ZIP", () => {
     const zip = makeZip({
       "manifest.json": validAgentManifest(),
       "prompt.md": "# My prompt\nDo something useful.",
@@ -102,7 +102,7 @@ describe("parsePackageZip", () => {
     expect(result.manifest.name).toBe("@test/my-agent");
   });
 
-  test("valid skill ZIP", () => {
+  it("valid skill ZIP", () => {
     const zip = makeZip({
       "manifest.json": validSkillManifest(),
       "SKILL.md": validSkillContent,
@@ -112,7 +112,7 @@ describe("parsePackageZip", () => {
     expect(result.content).toContain("my-skill");
   });
 
-  test("valid tool ZIP", () => {
+  it("valid tool ZIP", () => {
     const zip = makeZip({
       "manifest.json": validToolManifest(),
       "tool.ts": validToolSource,
@@ -122,7 +122,7 @@ describe("parsePackageZip", () => {
     expect(result.content).toContain("registerTool");
   });
 
-  test("valid provider ZIP (manifest-only)", () => {
+  it("valid provider ZIP (manifest-only)", () => {
     const zip = makeZip({
       "manifest.json": validProviderManifest(),
     });
@@ -132,7 +132,7 @@ describe("parsePackageZip", () => {
     expect(result.manifest.name).toBe("@test/my-provider");
   });
 
-  test("valid provider ZIP with PROVIDER.md", () => {
+  it("valid provider ZIP with PROVIDER.md", () => {
     const providerDoc = "# My Provider API\n\nBase URL: https://api.example.com\n";
     const zip = makeZip({
       "manifest.json": validProviderManifest(),
@@ -144,7 +144,7 @@ describe("parsePackageZip", () => {
     expect(result.manifest.name).toBe("@test/my-provider");
   });
 
-  test("ZIP too large", () => {
+  it("ZIP too large", () => {
     const zip = makeZip({ "manifest.json": validAgentManifest(), "prompt.md": "x" });
     expect(() => parsePackageZip(zip, 1)).toThrow(PackageZipError);
     try {
@@ -154,7 +154,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("missing manifest.json", () => {
+  it("missing manifest.json", () => {
     const zip = makeZip({ "prompt.md": "hello" });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -164,7 +164,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("invalid manifest JSON", () => {
+  it("invalid manifest JSON", () => {
     const zip = makeZip({ "manifest.json": "not json{{{" });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -174,7 +174,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("manifest validation failure", () => {
+  it("manifest validation failure", () => {
     const zip = makeZip({
       "manifest.json": JSON.stringify({ type: "skill" }),
       "SKILL.md": validSkillContent,
@@ -187,7 +187,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("agent missing prompt.md", () => {
+  it("agent missing prompt.md", () => {
     const zip = makeZip({ "manifest.json": validAgentManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -197,7 +197,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("skill missing SKILL.md", () => {
+  it("skill missing SKILL.md", () => {
     const zip = makeZip({ "manifest.json": validSkillManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -207,7 +207,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("tool missing entrypoint file", () => {
+  it("tool missing entrypoint file", () => {
     const zip = makeZip({ "manifest.json": validToolManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -217,7 +217,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("parsePackageZip returns raw manifest without Zod defaults", () => {
+  it("parsePackageZip returns raw manifest without Zod defaults", () => {
     // Manifest with required fields only — NO optional defaults
     const manifest = {
       name: "@test/raw-roundtrip",
@@ -253,7 +253,7 @@ describe("parsePackageZip", () => {
 // ─────────────────────────────────────────────
 
 describe("zipArtifact / unzipArtifact roundtrip", () => {
-  test("roundtrip preserves content", () => {
+  it("roundtrip preserves content", () => {
     const entries = {
       "a.txt": new TextEncoder().encode("hello"),
       "dir/b.txt": new TextEncoder().encode("world"),
@@ -271,7 +271,7 @@ describe("zipArtifact / unzipArtifact roundtrip", () => {
 // ─────────────────────────────────────────────
 
 describe("unzipArtifact sanitization", () => {
-  test("filters out path traversal entries (../)", () => {
+  it("filters out path traversal entries (../)", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "../etc/passwd": new TextEncoder().encode("malicious"),
@@ -285,7 +285,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["dir/../../secret"]).toBeUndefined();
   });
 
-  test("filters out absolute path entries", () => {
+  it("filters out absolute path entries", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "/etc/passwd": new TextEncoder().encode("malicious"),
@@ -297,7 +297,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["/etc/passwd"]).toBeUndefined();
   });
 
-  test("filters out __MACOSX entries", () => {
+  it("filters out __MACOSX entries", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "__MACOSX/._safe.txt": new TextEncoder().encode("metadata"),
@@ -309,7 +309,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["__MACOSX/._safe.txt"]).toBeUndefined();
   });
 
-  test("allows filenames with consecutive dots (not path traversal)", () => {
+  it("allows filenames with consecutive dots (not path traversal)", () => {
     const entries = {
       "file..txt": new TextEncoder().encode("ok1"),
       "notes...md": new TextEncoder().encode("ok2"),
@@ -323,7 +323,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["dir/file..backup.txt"]).toBeDefined();
   });
 
-  test("filters out bare .. entry", () => {
+  it("filters out bare .. entry", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "..": new TextEncoder().encode("malicious"),
@@ -335,7 +335,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files[".."]).toBeUndefined();
   });
 
-  test("filters out trailing dir/.. entry", () => {
+  it("filters out trailing dir/.. entry", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "dir/..": new TextEncoder().encode("malicious"),
@@ -347,7 +347,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["dir/.."]).toBeUndefined();
   });
 
-  test("filters out backslash entries", () => {
+  it("filters out backslash entries", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "dir\\file.txt": new TextEncoder().encode("malicious"),
@@ -361,7 +361,7 @@ describe("unzipArtifact sanitization", () => {
     expect(files["..\\etc\\passwd"]).toBeUndefined();
   });
 
-  test("filters out null byte entries", () => {
+  it("filters out null byte entries", () => {
     const entries = {
       "safe.txt": new TextEncoder().encode("ok"),
       "evil\0.txt": new TextEncoder().encode("malicious"),
@@ -379,7 +379,7 @@ describe("unzipArtifact sanitization", () => {
 // ─────────────────────────────────────────────
 
 describe("zip bomb protection", () => {
-  test("rejects ZIP with decompressed size exceeding limit", () => {
+  it("rejects ZIP with decompressed size exceeding limit", () => {
     // Create a ZIP with a large repeated payload
     const bigContent = new Uint8Array(51 * 1024 * 1024); // 51 MB
     bigContent.fill(65); // 'A'
@@ -404,7 +404,7 @@ describe("zip bomb protection", () => {
 // ─────────────────────────────────────────────
 
 describe("tool entrypoint detection", () => {
-  test("folder-wrapped tool ZIP is parsed correctly", () => {
+  it("folder-wrapped tool ZIP is parsed correctly", () => {
     const zip = makeZip({
       "wrapper/manifest.json": validToolManifest(),
       "wrapper/tool.ts": validToolSource,
@@ -414,7 +414,7 @@ describe("tool entrypoint detection", () => {
     expect(result.content).toContain("registerTool");
   });
 
-  test("ignores .d.ts files for tool detection", () => {
+  it("ignores .d.ts files for tool detection", () => {
     const zip = makeZip({
       "manifest.json": validToolManifest(),
       "types.d.ts": "declare module 'foo';",
@@ -430,7 +430,7 @@ describe("tool entrypoint detection", () => {
 // ─────────────────────────────────────────────
 
 describe("wrapper folder stripping (parsePackageZip)", () => {
-  test("wrapped agent ZIP", () => {
+  it("wrapped agent ZIP", () => {
     const zip = makeZip({
       "my-agent/manifest.json": validAgentManifest(),
       "my-agent/prompt.md": "# My prompt\nDo something useful.",
@@ -440,7 +440,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.content).toContain("My prompt");
   });
 
-  test("wrapped skill ZIP", () => {
+  it("wrapped skill ZIP", () => {
     const zip = makeZip({
       "my-skill/manifest.json": validSkillManifest(),
       "my-skill/SKILL.md": validSkillContent,
@@ -450,7 +450,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.content).toContain("my-skill");
   });
 
-  test("wrapped provider ZIP with PROVIDER.md", () => {
+  it("wrapped provider ZIP with PROVIDER.md", () => {
     const providerDoc = "# My Provider\n\nBase URL: https://api.example.com\n";
     const zip = makeZip({
       "my-provider/manifest.json": validProviderManifest(),
@@ -461,7 +461,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.content).toBe(providerDoc);
   });
 
-  test("wrapped provider ZIP (manifest-only)", () => {
+  it("wrapped provider ZIP (manifest-only)", () => {
     const zip = makeZip({
       "my-provider/manifest.json": validProviderManifest(),
     });
@@ -469,7 +469,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.type).toBe("provider");
   });
 
-  test("mixed top-level entries (root + folder) — no stripping", () => {
+  it("mixed top-level entries (root + folder) — no stripping", () => {
     const zip = makeZip({
       "folder/manifest.json": validAgentManifest(),
       "stray-file.txt": "hello",
@@ -482,7 +482,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     }
   });
 
-  test("multiple top-level folders — no stripping", () => {
+  it("multiple top-level folders — no stripping", () => {
     const zip = makeZip({
       "folder-a/manifest.json": validAgentManifest(),
       "folder-b/prompt.md": "# Prompt",
@@ -495,7 +495,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     }
   });
 
-  test("nested folders inside wrapper are preserved", () => {
+  it("nested folders inside wrapper are preserved", () => {
     const toolManifest = JSON.stringify({
       name: "@test/my-tool",
       version: "1.0.0",
@@ -519,7 +519,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.files["wrapper/lib/tool.ts"]).toBeUndefined();
   });
 
-  test("returned files have stripped keys", () => {
+  it("returned files have stripped keys", () => {
     const zip = makeZip({
       "wrapper/manifest.json": validAgentManifest(),
       "wrapper/prompt.md": "# Prompt",
@@ -531,7 +531,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     expect(result.files["wrapper/prompt.md"]).toBeUndefined();
   });
 
-  test("double wrapper (two levels) — not stripped to root", () => {
+  it("double wrapper (two levels) — not stripped to root", () => {
     const zip = makeZip({
       "a/b/manifest.json": validAgentManifest(),
       "a/b/prompt.md": "# Prompt",
@@ -553,24 +553,24 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
 describe("stripWrapperPrefix", () => {
   const enc = (s: string) => new TextEncoder().encode(s);
 
-  test("empty record returns empty", () => {
+  it("empty record returns empty", () => {
     expect(stripWrapperPrefix({})).toEqual({});
   });
 
-  test("root-level file — no stripping", () => {
+  it("root-level file — no stripping", () => {
     const files = { "file.txt": enc("ok") };
     const result = stripWrapperPrefix(files);
     expect(result["file.txt"]).toBeDefined();
   });
 
-  test("single wrapped file — strips prefix", () => {
+  it("single wrapped file — strips prefix", () => {
     const files = { "dir/file.txt": enc("ok") };
     const result = stripWrapperPrefix(files);
     expect(result["file.txt"]).toBeDefined();
     expect(result["dir/file.txt"]).toBeUndefined();
   });
 
-  test("all same prefix — strips", () => {
+  it("all same prefix — strips", () => {
     const files = {
       "pkg/a.txt": enc("a"),
       "pkg/b.txt": enc("b"),
@@ -580,7 +580,7 @@ describe("stripWrapperPrefix", () => {
     expect(Object.keys(result).sort()).toEqual(["a.txt", "b.txt", "sub/c.txt"]);
   });
 
-  test("multiple prefixes — no stripping", () => {
+  it("multiple prefixes — no stripping", () => {
     const files = {
       "dir-a/a.txt": enc("a"),
       "dir-b/b.txt": enc("b"),
@@ -590,7 +590,7 @@ describe("stripWrapperPrefix", () => {
     expect(result["dir-b/b.txt"]).toBeDefined();
   });
 
-  test("mix of root and folder — no stripping", () => {
+  it("mix of root and folder — no stripping", () => {
     const files = {
       "root.txt": enc("r"),
       "dir/nested.txt": enc("n"),

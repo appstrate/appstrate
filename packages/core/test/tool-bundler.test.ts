@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   bundleTool,
   PI_SDK_EXTERNALS,
@@ -12,7 +12,7 @@ const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
 
 describe("bundleTool", () => {
-  test("inlines local relative imports", async () => {
+  it("inlines local relative imports", async () => {
     const files = {
       "tool.ts": enc(
         `import { greet } from "./helpers.ts";\nexport default () => greet("world");\n`,
@@ -30,7 +30,7 @@ describe("bundleTool", () => {
     expect(text).toContain(`"hello "`);
   });
 
-  test("keeps Pi SDK value imports external", async () => {
+  it("keeps Pi SDK value imports external", async () => {
     // We use only value imports here — TypeScript strips type-only
     // imports before the bundler sees them, so their presence in the
     // output cannot be asserted on a type-only import. Both Pi SDK
@@ -58,7 +58,7 @@ describe("bundleTool", () => {
     expect([...PI_SDK_EXTERNALS]).toEqual(["@mariozechner/pi-ai", "@mariozechner/pi-coding-agent"]);
   });
 
-  test("produces a byte-stable output for identical input", async () => {
+  it("produces a byte-stable output for identical input", async () => {
     const files = {
       "tool.ts": enc(`export default () => 42;\n`),
     };
@@ -69,7 +69,7 @@ describe("bundleTool", () => {
     expect(dec(a.compiled)).toBe(dec(b.compiled));
   });
 
-  test("rejects missing entrypoint", async () => {
+  it("rejects missing entrypoint", async () => {
     const files = { "other.ts": enc("export default () => null;") };
     try {
       await bundleTool({ files, entrypoint: "tool.ts", toolId: "@t/missing" });
@@ -80,7 +80,7 @@ describe("bundleTool", () => {
     }
   });
 
-  test("rejects path-traversal entrypoint", async () => {
+  it("rejects path-traversal entrypoint", async () => {
     const files = { "tool.ts": enc("export default () => null;") };
     try {
       await bundleTool({ files, entrypoint: "../etc/passwd", toolId: "@t/trav" });
@@ -91,7 +91,7 @@ describe("bundleTool", () => {
     }
   });
 
-  test("rejects absolute-path entrypoint", async () => {
+  it("rejects absolute-path entrypoint", async () => {
     const files = { "tool.ts": enc("export default () => null;") };
     try {
       await bundleTool({ files, entrypoint: "/etc/passwd", toolId: "@t/abs" });
@@ -102,7 +102,7 @@ describe("bundleTool", () => {
     }
   });
 
-  test("wraps bundler syntax errors as BUNDLE_FAILED", async () => {
+  it("wraps bundler syntax errors as BUNDLE_FAILED", async () => {
     const files = {
       "tool.ts": enc("export default () => { this is not valid typescript"),
     };
@@ -115,7 +115,7 @@ describe("bundleTool", () => {
     }
   });
 
-  test("TOOL_BUNDLE_MAX_BYTES is 2 MiB", () => {
+  it("TOOL_BUNDLE_MAX_BYTES is 2 MiB", () => {
     expect(TOOL_BUNDLE_MAX_BYTES).toBe(2 * 1024 * 1024);
   });
 });

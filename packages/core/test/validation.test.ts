@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
   extractSkillMeta,
@@ -76,38 +76,38 @@ function validProviderManifest(overrides?: Record<string, unknown>) {
 // ─────────────────────────────────────────────
 
 describe("validateManifest", () => {
-  test("valid agent manifest", () => {
+  it("valid agent manifest", () => {
     const result = validateManifest(validAgentManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.manifest).toBeDefined();
   });
 
-  test("valid skill manifest", () => {
+  it("valid skill manifest", () => {
     const result = validateManifest(validSkillManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  test("valid tool manifest", () => {
+  it("valid tool manifest", () => {
     const result = validateManifest(validToolManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  test("invalid manifest — missing name", () => {
+  it("invalid manifest — missing name", () => {
     const result = validateManifest(validSkillManifest({ name: undefined }));
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  test("invalid manifest — missing version", () => {
+  it("invalid manifest — missing version", () => {
     const result = validateManifest(validSkillManifest({ version: undefined }));
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  test("missing type field surfaces all base-schema errors", () => {
+  it("missing type field surfaces all base-schema errors", () => {
     // Without a `type`, validateManifest falls through to the base schema and
     // lets Zod aggregate every missing/invalid field in one pass, instead of
     // short-circuiting on `type` alone.
@@ -117,7 +117,7 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.startsWith("type:"))).toBe(true);
   });
 
-  test("empty manifest surfaces every missing base field at once", () => {
+  it("empty manifest surfaces every missing base field at once", () => {
     // The base `manifestSchema` requires name/version/type. Without `type`,
     // dispatch falls through to the base schema and Zod emits all three
     // missing-field errors together instead of stopping on `type`.
@@ -129,7 +129,7 @@ describe("validateManifest", () => {
     expect(fields).toContain("version");
   });
 
-  test("invalid scoped name format", () => {
+  it("invalid scoped name format", () => {
     const result = validateManifest(validSkillManifest({ name: "bad-name" }));
     expect(result.valid).toBe(false);
     expect(
@@ -137,7 +137,7 @@ describe("validateManifest", () => {
     ).toBe(true);
   });
 
-  test("slug-only name (without scope) is rejected", () => {
+  it("slug-only name (without scope) is rejected", () => {
     const result = validateManifest(validSkillManifest({ name: "my-skill" }));
     expect(result.valid).toBe(false);
     expect(
@@ -145,13 +145,13 @@ describe("validateManifest", () => {
     ).toBe(true);
   });
 
-  test("invalid semver version", () => {
+  it("invalid semver version", () => {
     const result = validateManifest(validSkillManifest({ version: "not-a-version" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("semver"))).toBe(true);
   });
 
-  test("agent manifest valid without optional default fields", () => {
+  it("agent manifest valid without optional default fields", () => {
     // Minimal agent manifest — no dependencies, timeout
     const manifest = {
       name: "@test/minimal",
@@ -173,7 +173,7 @@ describe("validateManifest", () => {
     expect(m.providersConfiguration).toBeUndefined();
   });
 
-  test("agent with dependencies (skills/tools/providers)", () => {
+  it("agent with dependencies (skills/tools/providers)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -192,7 +192,7 @@ describe("validateManifest", () => {
     expect(deps.tools).toEqual({ "@test/ext": ">=0.1.0" });
   });
 
-  test("agent with built-in skill using wildcard version", () => {
+  it("agent with built-in skill using wildcard version", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -203,7 +203,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("old array format for skills in dependencies is rejected", () => {
+  it("old array format for skills in dependencies is rejected", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -214,7 +214,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  test("agent with providersConfiguration", () => {
+  it("agent with providersConfiguration", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -233,14 +233,14 @@ describe("validateManifest", () => {
     expect(cfg["@test/google"]!.scopes).toEqual(["gmail.readonly", "gmail.send"]);
   });
 
-  test("valid provider manifest (oauth2)", () => {
+  it("valid provider manifest (oauth2)", () => {
     const result = validateManifest(validProviderManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.manifest).toBeDefined();
   });
 
-  test("valid provider manifest (api_key)", () => {
+  it("valid provider manifest (api_key)", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -252,7 +252,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("valid provider manifest (basic)", () => {
+  it("valid provider manifest (basic)", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -269,7 +269,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("valid provider manifest (oauth1)", () => {
+  it("valid provider manifest (oauth1)", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -284,7 +284,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("provider oauth2 — missing authorizationUrl", () => {
+  it("provider oauth2 — missing authorizationUrl", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -297,7 +297,7 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("authorizationUrl"))).toBe(true);
   });
 
-  test("provider oauth2 — missing tokenUrl", () => {
+  it("provider oauth2 — missing tokenUrl", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -310,7 +310,7 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("tokenUrl"))).toBe(true);
   });
 
-  test("provider oauth2 — missing oauth2 object", () => {
+  it("provider oauth2 — missing oauth2 object", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: { authMode: "oauth2" },
@@ -320,7 +320,7 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("oauth2"))).toBe(true);
   });
 
-  test("provider oauth1 — missing requestTokenUrl", () => {
+  it("provider oauth1 — missing requestTokenUrl", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -333,7 +333,7 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("requestTokenUrl"))).toBe(true);
   });
 
-  test("provider api_key — missing credentials", () => {
+  it("provider api_key — missing credentials", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: { authMode: "api_key" },
@@ -343,13 +343,13 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("credentials"))).toBe(true);
   });
 
-  test("provider — missing definition", () => {
+  it("provider — missing definition", () => {
     const { definition: _, ...noDefinition } = validProviderManifest();
     const result = validateManifest(noDefinition);
     expect(result.valid).toBe(false);
   });
 
-  test("provider — invalid authMode", () => {
+  it("provider — invalid authMode", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: { authMode: "invalid_mode" },
@@ -358,7 +358,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  test("provider with setupGuide", () => {
+  it("provider with setupGuide", () => {
     const result = validateManifest(
       validProviderManifest({
         setupGuide: {
@@ -373,7 +373,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("agent with dependencies.providers", () => {
+  it("agent with dependencies.providers", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -386,37 +386,37 @@ describe("validateManifest", () => {
 
   // ─── schemaVersion format validation ───
 
-  test("rejects schemaVersion with patch segment (1.0.0)", () => {
+  it("rejects schemaVersion with patch segment (1.0.0)", () => {
     const result = validateManifest(validAgentManifest({ schemaVersion: "1.0.0" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
   });
 
-  test("rejects schemaVersion without minor segment (1)", () => {
+  it("rejects schemaVersion without minor segment (1)", () => {
     const result = validateManifest(validAgentManifest({ schemaVersion: "1" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
   });
 
-  test("rejects schemaVersion with v prefix (v1.0)", () => {
+  it("rejects schemaVersion with v prefix (v1.0)", () => {
     const result = validateManifest(validAgentManifest({ schemaVersion: "v1.0" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
   });
 
-  test("rejects schemaVersion with wrong major (2.0)", () => {
+  it("rejects schemaVersion with wrong major (2.0)", () => {
     const result = validateManifest(validAgentManifest({ schemaVersion: "2.0" }));
     expect(result.valid).toBe(false);
   });
 
-  test("accepts schemaVersion with higher minor (1.99)", () => {
+  it("accepts schemaVersion with higher minor (1.99)", () => {
     const result = validateManifest(validAgentManifest({ schemaVersion: "1.99" }));
     expect(result.valid).toBe(true);
   });
 
   // ─── Default manifest validation (all package types) ───
 
-  test("default agent manifest (Hello World) is valid", () => {
+  it("default agent manifest (Hello World) is valid", () => {
     // Mirrors HELLO_WORLD_MANIFEST from strate/apps/api/src/services/default-agent.ts
     const manifest = {
       name: "@test-org/hello-world",
@@ -433,7 +433,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("default agent manifest (agent-service fallback) is valid", () => {
+  it("default agent manifest (agent-service fallback) is valid", () => {
     // Mirrors dbRowToLoadedAgent fallback in strate/apps/api/src/services/agent-service.ts
     // author is empty — tolerated by core for local drafts (AFPS requires it for publication)
     const manifest = {
@@ -451,13 +451,13 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("agent manifest without author is accepted (tolerant local editing)", () => {
+  it("agent manifest without author is accepted (tolerant local editing)", () => {
     const { author: _, ...noAuthor } = validAgentManifest();
     const result = validateManifest(noAuthor);
     expect(result.valid).toBe(true);
   });
 
-  test("default agent manifest (frontend defaultFormState) is valid", () => {
+  it("default agent manifest (frontend defaultFormState) is valid", () => {
     // Mirrors assemblePayload output from strate/apps/web/src/components/agent-editor/utils.ts
     const manifest = {
       name: "@test-org/my-agent",
@@ -474,7 +474,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("default skill manifest (content-module-factory) is valid", () => {
+  it("default skill manifest (content-module-factory) is valid", () => {
     // Mirrors makeContentPackageModule("skill") from strate/apps/web
     const manifest = {
       name: "@test-org/my-skill",
@@ -487,7 +487,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("default tool manifest (content-module-factory + createOrgItem enrichment) is valid", () => {
+  it("default tool manifest (content-module-factory + createOrgItem enrichment) is valid", () => {
     // Mirrors makeContentPackageModule("tool") + createOrgItem tool enrichment
     const manifest = {
       name: "@test-org/my-tool",
@@ -506,7 +506,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("default provider manifest (POST /api/providers) is valid", () => {
+  it("default provider manifest (POST /api/providers) is valid", () => {
     // Mirrors the manifest built by strate/apps/api/src/routes/providers.ts
     const manifest = {
       name: "@test-org/my-provider",
@@ -536,7 +536,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("default provider manifest (api_key mode) is valid", () => {
+  it("default provider manifest (api_key mode) is valid", () => {
     const manifest = {
       name: "@test-org/api-provider",
       version: "1.0.0",
@@ -562,7 +562,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("preserves unknown fields at all nesting levels (passthrough)", () => {
+  it("preserves unknown fields at all nesting levels (passthrough)", () => {
     const manifest = {
       ...validAgentManifest(),
       customTopLevel: "preserved",
@@ -600,12 +600,12 @@ describe("validateManifest", () => {
 // ─────────────────────────────────────────────
 
 describe("validateProviderCredentialKeys", () => {
-  test("oauth2 / oauth1 are not constrained (no credentials block)", () => {
+  it("oauth2 / oauth1 are not constrained (no credentials block)", () => {
     expect(validateProviderCredentialKeys({ definition: { authMode: "oauth2" } })).toEqual([]);
     expect(validateProviderCredentialKeys({ definition: { authMode: "oauth1" } })).toEqual([]);
   });
 
-  test("canonical api_key manifest passes", () => {
+  it("canonical api_key manifest passes", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "api_key",
@@ -618,7 +618,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(errors).toEqual([]);
   });
 
-  test("hyphen in schema property key is rejected", () => {
+  it("hyphen in schema property key is rejected", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "api_key",
@@ -634,7 +634,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(schemaErr?.message).toContain("api-key");
   });
 
-  test("fieldName not matching schema properties is rejected", () => {
+  it("fieldName not matching schema properties is rejected", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "api_key",
@@ -648,7 +648,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(fieldErr?.message).toContain("not declared");
   });
 
-  test("fieldName with illegal characters is rejected", () => {
+  it("fieldName with illegal characters is rejected", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "api_key",
@@ -662,11 +662,11 @@ describe("validateProviderCredentialKeys", () => {
     expect(errors[0]?.field).toBe("fieldName");
   });
 
-  test("custom authMode with no credentials block passes (no schema to validate)", () => {
+  it("custom authMode with no credentials block passes (no schema to validate)", () => {
     expect(validateProviderCredentialKeys({ definition: { authMode: "custom" } })).toEqual([]);
   });
 
-  test("custom authMode with empty schema.properties and no fieldName passes", () => {
+  it("custom authMode with empty schema.properties and no fieldName passes", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "custom",
@@ -676,7 +676,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(errors).toEqual([]);
   });
 
-  test("custom authMode with empty schema.properties accepts any canonical fieldName", () => {
+  it("custom authMode with empty schema.properties accepts any canonical fieldName", () => {
     // When no properties are declared, membership check is skipped — the
     // fieldName only needs to satisfy the pattern. Pins intentional leniency.
     const errors = validateProviderCredentialKeys({
@@ -691,7 +691,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(errors).toEqual([]);
   });
 
-  test("custom authMode still rejects non-canonical fieldName even with empty schema", () => {
+  it("custom authMode still rejects non-canonical fieldName even with empty schema", () => {
     const errors = validateProviderCredentialKeys({
       definition: {
         authMode: "custom",
@@ -705,7 +705,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(errors[0]?.field).toBe("fieldName");
   });
 
-  test("validateManifest propagates credential errors for provider manifests", () => {
+  it("validateManifest propagates credential errors for provider manifests", () => {
     const result = validateManifest(
       validProviderManifest({
         definition: {
@@ -719,7 +719,7 @@ describe("validateProviderCredentialKeys", () => {
     expect(result.valid).toBe(false);
   });
 
-  test("CREDENTIAL_KEY_RE sanity", () => {
+  it("CREDENTIAL_KEY_RE sanity", () => {
     expect(CREDENTIAL_KEY_RE.test("api_key")).toBe(true);
     expect(CREDENTIAL_KEY_RE.test("token")).toBe(true);
     expect(CREDENTIAL_KEY_RE.test("api-key")).toBe(false);
@@ -734,7 +734,7 @@ describe("validateProviderCredentialKeys", () => {
 // ─────────────────────────────────────────────
 
 describe("buildProviderDefinitionFromManifest", () => {
-  test("reads nested credentials.fieldName (canonical)", () => {
+  it("reads nested credentials.fieldName (canonical)", () => {
     const resolved = buildProviderDefinitionFromManifest("@test/p", {
       definition: {
         authMode: "api_key",
@@ -750,7 +750,7 @@ describe("buildProviderDefinitionFromManifest", () => {
 // ─────────────────────────────────────────────
 
 describe("extractManifestMetadata", () => {
-  test("full manifest — all metadata extracted", () => {
+  it("full manifest — all metadata extracted", () => {
     const manifest = {
       name: "@test/my-skill",
       version: "1.0.0",
@@ -767,7 +767,7 @@ describe("extractManifestMetadata", () => {
     expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
   });
 
-  test("displayName — extracted when present", () => {
+  it("displayName — extracted when present", () => {
     const manifest = {
       name: "@test/my-agent",
       version: "1.0.0",
@@ -778,7 +778,7 @@ describe("extractManifestMetadata", () => {
     expect(metadata.displayName).toBe("My Custom Agent");
   });
 
-  test("empty manifest — returns empty object", () => {
+  it("empty manifest — returns empty object", () => {
     const metadata = extractManifestMetadata({});
     expect(metadata.description).toBeUndefined();
     expect(metadata.keywords).toBeUndefined();
@@ -787,7 +787,7 @@ describe("extractManifestMetadata", () => {
     expect(metadata.displayName).toBeUndefined();
   });
 
-  test("partial manifest — only defined fields included", () => {
+  it("partial manifest — only defined fields included", () => {
     const manifest = {
       name: "@test/pkg",
       version: "1.0.0",
@@ -807,7 +807,7 @@ describe("extractManifestMetadata", () => {
 // ─────────────────────────────────────────────
 
 describe("extractSkillMeta", () => {
-  test("valid frontmatter", () => {
+  it("valid frontmatter", () => {
     const content = `---
 name: my-skill
 description: A useful skill
@@ -819,7 +819,7 @@ description: A useful skill
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("frontmatter with quoted values", () => {
+  it("frontmatter with quoted values", () => {
     const content = `---
 name: "quoted-name"
 description: 'quoted description'
@@ -829,7 +829,7 @@ description: 'quoted description'
     expect(result.description).toBe("quoted description");
   });
 
-  test("frontmatter without name", () => {
+  it("frontmatter without name", () => {
     const content = `---
 description: A skill without name
 ---`;
@@ -838,7 +838,7 @@ description: A skill without name
     expect(result.warnings.some((w) => w.includes("name"))).toBe(true);
   });
 
-  test("no frontmatter", () => {
+  it("no frontmatter", () => {
     const content = "Just some markdown content";
     const result = extractSkillMeta(content);
     expect(result.name).toBe("");
@@ -866,28 +866,28 @@ export default function(pi: ExtensionAPI) {
   });
 }`;
 
-  test("valid tool source", () => {
+  it("valid tool source", () => {
     const result = validateToolSource(validTool);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("missing export default", () => {
+  it("missing export default", () => {
     const source = `function setup(pi) { pi.registerTool({ execute(_id, p, s) { return { content: [] }; } }); }`;
     const result = validateToolSource(source);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("export default"))).toBe(true);
   });
 
-  test("missing registerTool — warning only", () => {
+  it("missing registerTool — warning only", () => {
     const source = `export default function(pi) { return { content: [{ type: "text", text: "x" }] }; }`;
     const result = validateToolSource(source);
     expect(result.valid).toBe(true);
     expect(result.warnings.some((w) => w.includes("registerTool"))).toBe(true);
   });
 
-  test("execute with single param — error", () => {
+  it("execute with single param — error", () => {
     const source = `
 export default function(pi) {
   pi.registerTool({
@@ -902,7 +902,7 @@ export default function(pi) {
     expect(result.errors.some((e) => e.includes("only one parameter"))).toBe(true);
   });
 
-  test("unbalanced braces — no false positive (brace counting removed)", () => {
+  it("unbalanced braces — no false positive (brace counting removed)", () => {
     const source = `export default function(pi) {
   pi.registerTool({
     name: "t",
@@ -917,7 +917,7 @@ export default function(pi) {
     expect(result.valid).toBe(true);
   });
 
-  test("empty source", () => {
+  it("empty source", () => {
     const result = validateToolSource("   ");
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
@@ -929,7 +929,7 @@ export default function(pi) {
 // ─────────────────────────────────────────────
 
 describe("getDefaultAdminCredentialSchema", () => {
-  test("oauth2 returns clientId/clientSecret schema", () => {
+  it("oauth2 returns clientId/clientSecret schema", () => {
     const schema = getDefaultAdminCredentialSchema("oauth2");
     expect(schema).not.toBeNull();
     expect(schema!.type).toBe("object");
@@ -938,7 +938,7 @@ describe("getDefaultAdminCredentialSchema", () => {
     expect(schema!.required).toEqual(["clientId", "clientSecret"]);
   });
 
-  test("oauth1 returns consumerKey/consumerSecret schema", () => {
+  it("oauth1 returns consumerKey/consumerSecret schema", () => {
     const schema = getDefaultAdminCredentialSchema("oauth1");
     expect(schema).not.toBeNull();
     expect(schema!.properties.consumerKey).toBeDefined();
@@ -946,19 +946,19 @@ describe("getDefaultAdminCredentialSchema", () => {
     expect(schema!.required).toEqual(["consumerKey", "consumerSecret"]);
   });
 
-  test("api_key returns null", () => {
+  it("api_key returns null", () => {
     expect(getDefaultAdminCredentialSchema("api_key")).toBeNull();
   });
 
-  test("basic returns null", () => {
+  it("basic returns null", () => {
     expect(getDefaultAdminCredentialSchema("basic")).toBeNull();
   });
 
-  test("custom returns null", () => {
+  it("custom returns null", () => {
     expect(getDefaultAdminCredentialSchema("custom")).toBeNull();
   });
 
-  test("unknown mode returns null", () => {
+  it("unknown mode returns null", () => {
     expect(getDefaultAdminCredentialSchema("whatever")).toBeNull();
   });
 });

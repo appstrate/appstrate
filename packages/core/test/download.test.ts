@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   computeIntegrity,
   verifyArtifactIntegrity,
@@ -8,7 +8,7 @@ import {
 } from "../src/integrity.ts";
 
 describe("verifyArtifactIntegrity", () => {
-  test("returns valid: true when integrity matches", () => {
+  it("returns valid: true when integrity matches", () => {
     const data = new TextEncoder().encode("hello world");
     const integrity = computeIntegrity(data);
     const result = verifyArtifactIntegrity(data, integrity);
@@ -16,7 +16,7 @@ describe("verifyArtifactIntegrity", () => {
     expect(result.computed).toBe(integrity);
   });
 
-  test("returns valid: false when integrity does not match", () => {
+  it("returns valid: false when integrity does not match", () => {
     const data = new TextEncoder().encode("hello world");
     const result = verifyArtifactIntegrity(data, "sha256-WRONG");
     expect(result.valid).toBe(false);
@@ -24,7 +24,7 @@ describe("verifyArtifactIntegrity", () => {
     expect(result.computed).not.toBe("sha256-WRONG");
   });
 
-  test("computed field always contains the actual hash", () => {
+  it("computed field always contains the actual hash", () => {
     const data = new TextEncoder().encode("test");
     const expected = computeIntegrity(data);
     const result = verifyArtifactIntegrity(data, "sha256-bogus");
@@ -33,7 +33,7 @@ describe("verifyArtifactIntegrity", () => {
 });
 
 describe("buildDownloadHeaders", () => {
-  test("includes Content-Type, X-Integrity, and Content-Disposition", () => {
+  it("includes Content-Type, X-Integrity, and Content-Disposition", () => {
     const headers = buildDownloadHeaders({
       integrity: "sha256-abc123",
       yanked: false,
@@ -47,7 +47,7 @@ describe("buildDownloadHeaders", () => {
     expect(headers["X-Yanked"]).toBeUndefined();
   });
 
-  test("includes X-Yanked when yanked is true", () => {
+  it("includes X-Yanked when yanked is true", () => {
     const headers = buildDownloadHeaders({
       integrity: "sha256-abc123",
       yanked: true,
@@ -59,7 +59,7 @@ describe("buildDownloadHeaders", () => {
     expect(headers["Content-Disposition"]).toBe('attachment; filename="org-pkg-2.0.0.afps"');
   });
 
-  test("does not include X-Yanked when yanked is false", () => {
+  it("does not include X-Yanked when yanked is false", () => {
     const headers = buildDownloadHeaders({
       integrity: "sha256-xyz",
       yanked: false,

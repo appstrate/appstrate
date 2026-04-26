@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import {
   requireModulePermission,
   requireCorePermission,
@@ -30,7 +30,7 @@ function makeContext(perms: Set<string> | undefined | null): {
 }
 
 describe("requireModulePermission", () => {
-  test("calls next() when the required permission is present", async () => {
+  it("calls next() when the required permission is present", async () => {
     const middleware = requireModulePermission("tasks", "read");
     const c = makeContext(new Set(["tasks:read", "tasks:write"]));
     let called = false;
@@ -40,7 +40,7 @@ describe("requireModulePermission", () => {
     expect(called).toBe(true);
   });
 
-  test("throws when the required permission is missing", async () => {
+  it("throws when the required permission is missing", async () => {
     const middleware = requireModulePermission("tasks", "write");
     const c = makeContext(new Set(["tasks:read"]));
     await expect(middleware(c, async () => {})).rejects.toThrow(
@@ -48,13 +48,13 @@ describe("requireModulePermission", () => {
     );
   });
 
-  test("throws when the permissions Set is undefined", async () => {
+  it("throws when the permissions Set is undefined", async () => {
     const middleware = requireModulePermission("tasks", "read");
     const c = makeContext(undefined);
     await expect(middleware(c, async () => {})).rejects.toThrow(/tasks:read required/);
   });
 
-  test("throws when c.get returns a non-Set value (defensive against bad pipeline state)", async () => {
+  it("throws when c.get returns a non-Set value (defensive against bad pipeline state)", async () => {
     const middleware = requireModulePermission("tasks", "read");
     const c = {
       get(_key: string) {
@@ -64,7 +64,7 @@ describe("requireModulePermission", () => {
     await expect(middleware(c as never, async () => {})).rejects.toThrow(/tasks:read required/);
   });
 
-  test("does not call next() on denial", async () => {
+  it("does not call next() on denial", async () => {
     const middleware = requireModulePermission("tasks", "write");
     const c = makeContext(new Set([]));
     let called = false;
@@ -85,7 +85,7 @@ describe("requireCorePermission", () => {
   // a future "let's unify the two helpers" refactor can't silently change
   // the throw shape consumers depend on.
 
-  test("calls next() when the required core permission is present", async () => {
+  it("calls next() when the required core permission is present", async () => {
     const middleware = requireCorePermission("agents", "run");
     const c = makeContext(new Set(["agents:run", "agents:read"]));
     let called = false;
@@ -95,7 +95,7 @@ describe("requireCorePermission", () => {
     expect(called).toBe(true);
   });
 
-  test("throws when the required core permission is missing", async () => {
+  it("throws when the required core permission is missing", async () => {
     const middleware = requireCorePermission("agents", "run");
     const c = makeContext(new Set(["agents:read"]));
     await expect(middleware(c, async () => {})).rejects.toThrow(
@@ -103,13 +103,13 @@ describe("requireCorePermission", () => {
     );
   });
 
-  test("throws when the permissions Set is undefined", async () => {
+  it("throws when the permissions Set is undefined", async () => {
     const middleware = requireCorePermission("runs", "cancel");
     const c = makeContext(undefined);
     await expect(middleware(c, async () => {})).rejects.toThrow(/runs:cancel required/);
   });
 
-  test("does not call next() on denial", async () => {
+  it("does not call next() on denial", async () => {
     const middleware = requireCorePermission("agents", "delete");
     const c = makeContext(new Set([]));
     let called = false;
@@ -135,7 +135,7 @@ describe("setPermissionDenialHandler — fault isolation", () => {
     setPermissionDenialHandler(null);
   });
 
-  test("throwing audit handler is swallowed; the middleware still throws Insufficient permissions", async () => {
+  it("throwing audit handler is swallowed; the middleware still throws Insufficient permissions", async () => {
     setPermissionDenialHandler(() => {
       throw new Error("audit sink down");
     });
@@ -146,7 +146,7 @@ describe("setPermissionDenialHandler — fault isolation", () => {
     );
   });
 
-  test("handler is invoked exactly once per denial with the required permission", async () => {
+  it("handler is invoked exactly once per denial with the required permission", async () => {
     const calls: string[] = [];
     setPermissionDenialHandler((ctx) => {
       calls.push(ctx.required);
@@ -157,7 +157,7 @@ describe("setPermissionDenialHandler — fault isolation", () => {
     expect(calls).toEqual(["agents:delete"]);
   });
 
-  test("handler is NOT invoked when the permission is granted", async () => {
+  it("handler is NOT invoked when the permission is granted", async () => {
     let invoked = false;
     setPermissionDenialHandler(() => {
       invoked = true;
@@ -180,7 +180,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
   // resource that core doesn't actually own (false positive blocking
   // legitimate modules). Both are silent failures without this test.
 
-  test("every keyof CoreResources is in CORE_RESOURCE_NAMES", () => {
+  it("every keyof CoreResources is in CORE_RESOURCE_NAMES", () => {
     // Materialize the interface keys via a typed dictionary literal —
     // adding a resource to CoreResources without listing it here
     // is a TS error, so this catches drift in BOTH directions in one
@@ -212,7 +212,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
     }
   });
 
-  test("CORE_RESOURCE_NAMES has no extra entries beyond the interface", () => {
+  it("CORE_RESOURCE_NAMES has no extra entries beyond the interface", () => {
     const allCoreResources: Record<keyof CoreResources, true> = {
       org: true,
       members: true,
