@@ -523,7 +523,7 @@ describe("Runs API", () => {
       });
       expect(listRes.status).toBe(200);
       const listBody = (await listRes.json()) as any;
-      const runIds = listBody.runs.map((r: any) => r.id);
+      const runIds = listBody.data.map((r: any) => r.id);
       expect(runIds).toContain(appBRun.id);
     });
   });

@@ -89,10 +89,10 @@ describe("Multi-tenancy isolation", () => {
 
       expect(resA.status).toBe(200);
       expect(resB.status).toBe(200);
-      const bodyA = (await resA.json()) as { agents: { id: string }[] };
-      const bodyB = (await resB.json()) as { agents: { id: string }[] };
-      const idsA = bodyA.agents.map((i) => i.id);
-      const idsB = bodyB.agents.map((i) => i.id);
+      const bodyA = (await resA.json()) as { object: "list"; data: { id: string }[] };
+      const bodyB = (await resB.json()) as { object: "list"; data: { id: string }[] };
+      const idsA = bodyA.data.map((i) => i.id);
+      const idsB = bodyB.data.map((i) => i.id);
       expect(idsA).toContain("@org-a/agent-1");
       expect(idsA).not.toContain("@org-b/agent-1");
       expect(idsB).toContain("@org-b/agent-1");
@@ -170,8 +170,8 @@ describe("Multi-tenancy isolation", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runs: unknown[] };
-      expect(body.runs).toHaveLength(0);
+      const body = (await res.json()) as { object: "list"; data: unknown[] };
+      expect(body.data).toHaveLength(0);
     });
   });
 

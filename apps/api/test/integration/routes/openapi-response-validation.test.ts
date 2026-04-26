@@ -82,9 +82,9 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      // Verify the shape matches what we expect structurally
-      expect(body).toHaveProperty("agents");
-      expect((body as any).agents).toBeArray();
+      expect(body).toHaveProperty("object", "list");
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
     });
   });
 
