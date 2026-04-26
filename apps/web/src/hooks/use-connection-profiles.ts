@@ -176,6 +176,48 @@ export function useUnbindAppProvider() {
   });
 }
 
+// ─── Per-(member, application) sticky default profile ────
+
+/**
+ * The current member's pinned default connection profile for the
+ * active application. Sits between the explicit per-run override and
+ * the application's shared default in the credential proxy's resolution
+ * cascade — see `apps/api/src/routes/credential-proxy.ts:resolveProfileId`.
+ *
+ * Key includes orgId + appId so a user with multiple memberships sees
+ * the right pin per (org, app) without manual cache busts on org switch.
+ */
+export function useMyApplicationProfile() {
+  const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: ["my-application-profile", orgId, appId],
+    queryFn: () => api<{ profileId: string | null }>("/me/application-profile"),
+    enabled: !!appId,
+  });
+}
+
+export function useSetMyApplicationProfile() {
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: async (profileId: string | null) => {
+      if (profileId === null) {
+        return api("/me/application-profile", { method: "DELETE" });
+      }
+      return api("/me/application-profile", {
+        method: "PUT",
+        body: JSON.stringify({ profileId }),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-application-profile", orgId, appId] });
+    },
+    onError: onMutationError,
+  });
+}
+
 // ─── Agent App Profile Override ───────────────────────────
 
 export function useSetAgentAppProfile(packageId: string) {

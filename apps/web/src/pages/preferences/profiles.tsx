@@ -12,6 +12,7 @@ import {
 } from "../../hooks/use-connection-profiles";
 import { LoadingState, ErrorState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { MyApplicationProfileSection } from "../../components/my-application-profile-section";
 
 export function PreferencesProfilesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -38,6 +39,8 @@ export function PreferencesProfilesPage() {
 
   return (
     <>
+      <MyApplicationProfileSection />
+
       <div className="text-muted-foreground mb-4 text-sm font-medium">{t("profiles.title")}</div>
 
       <div className="border-border bg-card mb-4 rounded-lg border p-5">

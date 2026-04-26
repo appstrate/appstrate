@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -170,7 +171,19 @@ function AppProfileSection({ packageId }: { packageId: string }) {
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("detail.configSectionAppProfile")}</h3>
-      <p className="text-muted-foreground text-xs">{t("detail.configAppProfileHint")}</p>
+      <p className="text-muted-foreground text-xs">
+        <Trans
+          i18nKey="agents:detail.configAppProfileHint"
+          components={{
+            link: (
+              <Link
+                to="/preferences/profiles"
+                className="text-primary underline-offset-2 hover:underline"
+              />
+            ),
+          }}
+        />
+      </p>
       <Select
         value={currentAppProfileId ?? "__none__"}
         onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
