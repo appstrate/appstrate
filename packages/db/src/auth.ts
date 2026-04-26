@@ -550,7 +550,10 @@ function buildAuth(
 
     baseURL: env.APP_URL,
     basePath: "/api/auth",
-    secret: env.BETTER_AUTH_SECRET,
+    // Resolve the secret through the kid map so a deployment that has
+    // already populated `BETTER_AUTH_SECRETS` for cookie rotation feeds
+    // Better Auth the active secret (not the legacy single-value var).
+    secret: env.BETTER_AUTH_SECRETS[env.BETTER_AUTH_ACTIVE_KID] ?? env.BETTER_AUTH_SECRET,
 
     plugins: [...basePlugins, ...extraPlugins],
 
