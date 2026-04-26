@@ -27,7 +27,6 @@ export interface ReduceOptions {
 export function emptyRunResult(): RunResult {
   return {
     memories: [],
-    checkpoint: null,
     output: null,
     report: null,
     logs: [],
@@ -63,13 +62,6 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
       };
       if (canonical.scope !== undefined) slot.scope = canonical.scope;
       result.pinned[canonical.key] = slot;
-      // Mirror into the legacy top-level `checkpoint` field so existing
-      // consumers (run row, prompt builder, ingestion finalize) keep
-      // working without branching on `pinned["checkpoint"]`.
-      if (canonical.key === "checkpoint") {
-        result.checkpoint = canonical.content ?? null;
-        if (canonical.scope !== undefined) result.checkpointScope = canonical.scope;
-      }
       return;
     }
     case "output.emitted":

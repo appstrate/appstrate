@@ -73,7 +73,7 @@ describe("ConsoleSink", () => {
   it("writes a summary on finalize", async () => {
     await sink.finalize({
       memories: [{ content: "a" }, { content: "b" }],
-      checkpoint: { foo: 1 },
+      pinned: { checkpoint: { content: { foo: 1 } } },
       output: { done: true },
       report: "# Done",
       logs: [{ level: "info", message: "ok", timestamp: 0 }],
@@ -88,7 +88,6 @@ describe("ConsoleSink", () => {
   it("surfaces errors in the summary", async () => {
     await sink.finalize({
       memories: [],
-      checkpoint: null,
       output: null,
       report: null,
       logs: [],

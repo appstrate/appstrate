@@ -130,76 +130,14 @@ describe("encryption — keyring resolution during rotation", () => {
   });
 });
 
-describe("encryption — backward compatibility with v0 (legacy unprefixed)", () => {
-  function buildV0Blob(plaintext: string, keyB64: string): string {
-    const key = Buffer.from(keyB64, "base64");
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return Buffer.concat([iv, tag, enc]).toString("base64");
-  }
-
-  it("decrypts legacy raw-base64 blobs with the active key", () => {
-    const v0Blob = buildV0Blob("legacy payload", PRIMARY_KEY_B64);
-    expect(v0Blob.startsWith("v1:")).toBe(false);
-
-    expect(decrypt(v0Blob)).toBe("legacy payload");
+describe("encryption — envelope format guard", () => {
+  it("rejects a non-v1 ciphertext", () => {
+    const rawBase64 = randomBytes(32).toString("base64");
+    expect(() => decrypt(rawBase64)).toThrow(/expected 'v1:' prefix/);
   });
 
-  it("re-encrypts a v0 blob into a v1 envelope (in-place rotation primitive)", () => {
-    const v0Blob = buildV0Blob("payload", PRIMARY_KEY_B64);
-
-    const plaintext = decrypt(v0Blob);
-    const reEncrypted = encrypt(plaintext);
-    expect(reEncrypted.startsWith("v1:k1:")).toBe(true);
-    expect(decrypt(reEncrypted)).toBe(plaintext);
-  });
-
-  it("decrypts a v0 blob after rotation when the original key is retired", () => {
-    // Regression: pre-fix, decrypt() always used keyring.activeKid for v0
-    // blobs, so the moment a new key was promoted active, every existing v0
-    // blob became undecryptable — even with the original key still present in
-    // CONNECTION_ENCRYPTION_KEYS — until the v0→v1 sweep finished. The fix
-    // tries every key in the keyring for v0 blobs. AES-GCM tag verification
-    // makes that safe: a wrong key cannot succeed by chance.
-
-    // Build a v0 blob under the current primary key (kid = "k1").
-    const v0Blob = buildV0Blob("retired-era payload", PRIMARY_KEY_B64);
-
-    // Rotate: promote a new primary, retain the old key in the retired map.
-    setRotationEnv({
-      CONNECTION_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
-      CONNECTION_ENCRYPTION_KEY_ID: "k2",
-      CONNECTION_ENCRYPTION_KEYS: JSON.stringify({ k1: PRIMARY_KEY_B64 }),
-    });
-
-    expect(decrypt(v0Blob)).toBe("retired-era payload");
-  });
-
-  it("throws a clear error when no keyring key can decrypt a v0 blob", () => {
-    // Build a v0 blob under a key that is *not* in the keyring at decrypt time.
-    const orphanKey = randomBytes(32).toString("base64");
-    const v0Blob = buildV0Blob("orphan payload", orphanKey);
-
-    // Default keyring only knows PRIMARY_KEY_B64 under kid "k1" — neither the
-    // active key nor any retired key matches the blob's actual key.
-    expect(() => decrypt(v0Blob)).toThrow(/Failed to decrypt v0/);
-  });
-
-  it("does not fall back to the v0 multi-key path for v1 envelopes", () => {
-    // Sanity: the v1 fast path uses the embedded kid only, never the
-    // try-every-key fallback. A v1 envelope with an unknown kid must error
-    // with "No encryption key registered" (kid lookup miss), not with the
-    // v0 fallback message — proving the two paths stay isolated.
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", Buffer.from(PRIMARY_KEY_B64, "base64"), iv);
-    const enc = Buffer.concat([cipher.update("x", "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    const packed = Buffer.concat([iv, tag, enc]).toString("base64");
-    const forged = `v1:unknown:${packed}`;
-
-    expect(() => decrypt(forged)).toThrow(/No encryption key registered/);
+  it("rejects a v1 envelope with no kid separator", () => {
+    expect(() => decrypt("v1:abcdef")).toThrow(/missing kid separator/);
   });
 
   it("v1 blobs still resolve via their explicit kid after rotation (no regression)", () => {
@@ -214,10 +152,7 @@ describe("encryption — backward compatibility with v0 (legacy unprefixed)", ()
       CONNECTION_ENCRYPTION_KEYS: JSON.stringify({ k1: PRIMARY_KEY_B64 }),
     });
 
-    // The v1 path looks up k1 directly via the embedded kid, not via the
-    // v0 try-every-key loop. This guarantees the active path stays a single
-    // AES-GCM verification, with no measurable timing dependency on the
-    // number of retired keys.
+    // The v1 path looks up k1 directly via the embedded kid.
     expect(decrypt(v1Blob)).toBe("explicit-kid payload");
   });
 });

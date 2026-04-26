@@ -29,7 +29,7 @@ describe("createReducerSink", () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("pinned.set", { key: "checkpoint", content: { a: 1 } }));
     await sink.handle(event("pinned.set", { key: "checkpoint", content: { b: 2 } }));
-    expect(snapshot().checkpoint).toEqual({ b: 2 });
+    expect(snapshot().pinned!.checkpoint).toEqual({ content: { b: 2 } });
   });
 
   it("replaces output on each output.emitted event", async () => {

@@ -9,7 +9,6 @@ import { describe, it, expect } from "bun:test";
 import { LocalQueue } from "../../src/infra/queue/local-queue.ts";
 import type { QueueJob } from "../../src/infra/queue/interface.ts";
 
- 
 function createQueue(): any {
   return new LocalQueue<{ v: string }>("test-cron");
 }

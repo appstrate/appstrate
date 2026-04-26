@@ -47,7 +47,7 @@ describe("FileSink", () => {
 
     await sink.finalize({
       memories: [{ content: "hi" }],
-      checkpoint: { n: 1 },
+      pinned: { checkpoint: { content: { n: 1 } } },
       output: null,
       report: null,
       logs: [],
@@ -56,7 +56,7 @@ describe("FileSink", () => {
     const text = await readFile(`${path}.result.json`, "utf8");
     const parsed = JSON.parse(text);
     expect(parsed.memories).toEqual([{ content: "hi" }]);
-    expect(parsed.checkpoint).toEqual({ n: 1 });
+    expect(parsed.pinned).toEqual({ checkpoint: { content: { n: 1 } } });
   });
 
   it("creates parent directories when missing", async () => {

@@ -328,7 +328,11 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
-  const checkpointToPersist = isPlainRecord(result.checkpoint) ? result.checkpoint : null;
+  const checkpointSlot = result.pinned?.[CHECKPOINT_KEY];
+  const checkpointToPersist =
+    checkpointSlot !== undefined && isPlainRecord(checkpointSlot.content)
+      ? checkpointSlot.content
+      : null;
 
   const rowsAffected = await db
     .update(runs)
@@ -424,29 +428,13 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // Unified-persistence pinned-slot write — the single store for the
-  // carry-over checkpoint AND any other named pinned slot the agent
-  // wrote via `pin({ key, content })`. Honors the AFPS 1.4 scope when
-  // the runtime stamped one onto each slot; falls back to the run's
-  // actor scope.
-  if (checkpointToPersist !== null) {
-    const checkpointScope =
-      result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
-    await upsertPinned(
-      run.packageId,
-      run.applicationId,
-      run.orgId,
-      checkpointScope,
-      CHECKPOINT_KEY,
-      checkpointToPersist,
-      run.id,
-    );
-  }
+  // Unified-persistence pinned-slot write — the single store for every
+  // named pinned slot the agent wrote via `pin({ key, content })`,
+  // including the carry-over `"checkpoint"` slot. Honors the AFPS 1.4
+  // scope when the runtime stamped one onto each slot; falls back to
+  // the run's actor scope.
   if (result.pinned) {
     for (const [key, slot] of Object.entries(result.pinned)) {
-      // The "checkpoint" slot is mirrored into `result.checkpoint` and
-      // already persisted above — skip the duplicate write.
-      if (key === CHECKPOINT_KEY) continue;
       const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
       await upsertPinned(
         run.packageId,

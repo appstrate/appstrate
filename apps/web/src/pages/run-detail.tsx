@@ -121,15 +121,6 @@ export function RunDetailPage() {
     defaultTab,
   );
 
-  // Legacy hash redirect: #checkpoint and #memories (split tabs pre-ADR-013)
-  // both fold into the unified #memory tab.
-  useEffect(() => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (hash === "checkpoint" || hash === "memories") {
-      setActiveTab("memory");
-    }
-  }, [setActiveTab]);
-
   // Sub-tab state: report by default if available, otherwise data.
   // Auto-default is derived; user override is tracked separately.
   const autoSubTab = finalReport ? "report" : hasOutput ? "data" : null;

@@ -109,7 +109,7 @@ describe("platform tools — open envelope emission", () => {
 });
 
 describe("pinned.set fold semantics", () => {
-  it("reducer folds pinned.set with key='checkpoint' into result.checkpoint with scope captured", () => {
+  it("reducer folds pinned.set with key='checkpoint' into result.pinned with scope captured", () => {
     const events: RunEvent[] = [
       {
         type: "pinned.set",
@@ -121,8 +121,6 @@ describe("pinned.set fold semantics", () => {
       },
     ];
     const result = reduceEvents(events);
-    expect(result.checkpoint).toEqual({ cursor: "abc" });
-    expect(result.checkpointScope).toBe("shared");
     expect(result.pinned).toEqual({
       checkpoint: { content: { cursor: "abc" }, scope: "shared" },
     });
@@ -147,8 +145,6 @@ describe("pinned.set fold semantics", () => {
       },
     ];
     const result = reduceEvents(events);
-    expect(result.checkpoint).toEqual({ v: 2 });
-    expect(result.checkpointScope).toBe("actor");
     expect(result.pinned!.checkpoint).toEqual({ content: { v: 2 }, scope: "actor" });
   });
 
@@ -171,7 +167,6 @@ describe("pinned.set fold semantics", () => {
       },
     ];
     const result = reduceEvents(events);
-    expect(result.checkpoint).toBeNull();
     expect(result.pinned).toEqual({
       persona: { content: "agent persona" },
       goals: { content: ["g1", "g2"], scope: "shared" },
@@ -206,7 +201,7 @@ describe("reduceEvents", () => {
     ];
     const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "a" }, { content: "b" }]);
-    expect(result.checkpoint).toEqual({ x: 1 });
+    expect(result.pinned!.checkpoint).toEqual({ content: { x: 1 } });
     expect(result.output).toEqual({ b: 2 });
     expect(result.report).toBe("line 1\nline 2");
     expect(result.logs).toHaveLength(1);

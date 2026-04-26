@@ -56,7 +56,6 @@ function progressEvent(message: string, data?: unknown): RunEvent {
 function emptyResult(): RunResult {
   return {
     memories: [],
-    checkpoint: null,
     output: null,
     report: "",
     logs: [],

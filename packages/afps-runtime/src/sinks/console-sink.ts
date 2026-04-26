@@ -45,7 +45,7 @@ export class ConsoleSink implements EventSink {
       `▶ run complete — memories=${result.memories.length} logs=${result.logs.length}` +
       (result.output !== null ? " output=set" : "") +
       (result.report !== null ? " report=set" : "") +
-      (result.checkpoint !== null ? " checkpoint=set" : "") +
+      (result.pinned?.checkpoint !== undefined ? " checkpoint=set" : "") +
       (result.error ? ` ERROR=${result.error.message}` : "");
     this.out.write(summary + "\n");
   }

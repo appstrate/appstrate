@@ -53,12 +53,7 @@ import {
   type InstallMode,
 } from "../lib/install/upgrade.ts";
 import type { EnvVars } from "../lib/install/secrets.ts";
-import {
-  LEGACY_PROJECT_NAME,
-  deriveProjectName,
-  readProjectFile,
-  writeProjectFile,
-} from "../lib/install/project.ts";
+import { deriveProjectName, readProjectFile, writeProjectFile } from "../lib/install/project.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
@@ -155,8 +150,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     // resolution so the resolver can cross-check with `docker compose ls`:
     // a port bound by OUR running stack is safe to skip-preflight, a
     // port bound by anyone else is not. Tier 0 has no compose project.
-    const project =
-      tier === 0 ? undefined : await resolveProjectName(dir, installState.existing.hasCompose);
+    const project = tier === 0 ? undefined : await resolveProjectName(dir);
 
     // Under --yes, soften port conflicts by auto-picking the next free
     // port instead of failing fast. Rationale: the one-liner installer's
@@ -752,14 +746,10 @@ async function installTier0(
 /**
  * Resolve the Compose project name for this install directory.
  *
- * Three cases:
+ * Two cases:
  *   1. `.appstrate/project.json` exists → use the recorded name
  *      (authoritative; never re-derive, never drift).
- *   2. No sidecar but a compose file is already present → legacy
- *      pre-#167 install. Use the fixed `appstrate` name so the upgrade
- *      targets the same containers the user's stack is currently
- *      running under.
- *   3. Fresh install → derive from the absolute dir path (stable +
+ *   2. Fresh install → derive from the absolute dir path (stable +
  *      unique + readable). The caller writes the sidecar on success
  *      so subsequent runs hit case (1).
  *
@@ -767,11 +757,9 @@ async function installTier0(
  */
 export async function resolveProjectName(
   dir: string,
-  hasLegacyCompose: boolean,
-): Promise<{ name: string; origin: "sidecar" | "legacy" | "derived" }> {
+): Promise<{ name: string; origin: "sidecar" | "derived" }> {
   const recorded = await readProjectFile(dir);
   if (recorded) return { name: recorded.projectName, origin: "sidecar" };
-  if (hasLegacyCompose) return { name: LEGACY_PROJECT_NAME, origin: "legacy" };
   return { name: deriveProjectName(dir), origin: "derived" };
 }
 
@@ -827,7 +815,7 @@ async function installDockerTier(
     force: boolean;
     mode: InstallMode;
     existing: ExistingInstall;
-    project: { name: string; origin: "sidecar" | "legacy" | "derived" };
+    project: { name: string; origin: "sidecar" | "derived" };
     autoConfirm: boolean;
     bootstrap: BootstrapOverrides;
   },
@@ -889,9 +877,9 @@ async function installDockerTier(
   }
 
   // Preflight: does another install already claim this project name?
-  // Only meaningful on the derived / legacy paths — a sidecar-recorded
-  // name IS the running project by definition, so the collision check
-  // would just reject the user's own running stack.
+  // Only meaningful on the derived path — a sidecar-recorded name IS
+  // the running project by definition, so the collision check would
+  // just reject the user's own running stack.
   await preflightProjectCollision(dir, project.name, opts.force);
 
   // Backup BEFORE writing so a rollback is possible all the way back

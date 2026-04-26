@@ -418,7 +418,6 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
       run: sinkRun!,
       result: {
         memories: [],
-        checkpoint: null,
         output: null,
         report: null,
         logs: [],

@@ -15,14 +15,6 @@ export function PreferencesLayout() {
         { label: t("nav.orgSection", { ns: "common" }), href: "/" },
         { label: t("preferences.title") },
       ]}
-      legacyHashRedirects={{
-        general: "/preferences/general",
-        appearance: "/preferences/appearance",
-        security: "/preferences/security",
-        connectors: "/preferences/connectors",
-        profiles: "/preferences/profiles",
-        devices: "/preferences/devices",
-      }}
       sections={[
         {
           items: [

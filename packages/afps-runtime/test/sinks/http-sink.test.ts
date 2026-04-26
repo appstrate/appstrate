@@ -69,7 +69,6 @@ const SAMPLE_EVENT: RunEvent = {
 };
 const SAMPLE_RESULT: RunResult = {
   memories: [{ content: "sent via http sink" }],
-  checkpoint: null,
   output: null,
   report: null,
   logs: [],

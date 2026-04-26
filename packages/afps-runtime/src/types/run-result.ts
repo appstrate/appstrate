@@ -15,8 +15,7 @@ export type LogLevel = "info" | "warn" | "error";
  * against the canonical AFPS 1.3 semantics:
  *
  * - `memory.added` events append to `memories`
- * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key);
- *   `key === "checkpoint"` additionally mirrors into the legacy `checkpoint` field
+ * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
  * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
  * - `report.appended` events concatenate into `report` with `\n` separators
  * - `log.written` events append to `logs`
@@ -26,25 +25,11 @@ export type LogLevel = "info" | "warn" | "error";
 export interface RunResult {
   memories: Memory[];
   /**
-   * Aggregated checkpoint payload — the last `pinned.set` value with
-   * `key === "checkpoint"`. Kept as a top-level shorthand because the
-   * checkpoint slot is the most common pinned slot and most ingestion
-   * paths read it directly.
-   */
-  checkpoint: unknown | null;
-  /**
-   * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no
-   * `pinned.set` event with `key === "checkpoint"` was emitted or when
-   * the emitter omitted the field — consumers default to `"actor"`.
-   */
-  checkpointScope?: "actor" | "shared";
-  /**
-   * AFPS 1.5+ named pinned slots — last-write-wins per `key`. The
-   * `checkpoint` key is mirrored into the top-level `checkpoint` field
-   * for backward compatibility, but `pinned["checkpoint"]` is the same
-   * value. Other keys (e.g. `"persona"`, `"goals"`) are persisted as
-   * named pinned rows in `package_persistence` and rendered into the
-   * system prompt on the next run.
+   * Named pinned slots — last-write-wins per `key`. The reserved
+   * `"checkpoint"` key is the carry-over slot read by ingestion +
+   * prompt builder; other keys (`"persona"`, `"goals"`, …) are
+   * persisted as named pinned rows in `package_persistence` and
+   * rendered into the system prompt on the next run.
    */
   pinned?: Record<string, PinnedSlot>;
   output: unknown | null;

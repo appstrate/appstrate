@@ -3,39 +3,22 @@
 /**
  * Compose project-name management for `appstrate install`.
  *
- * Background: the first cut of the CLI hard-coded `name: appstrate` into
- * every compose template, so two installs under different directories
- * shared a single Compose project namespace. Running `appstrate install`
- * a second time silently adopted the first install's running containers,
- * then "recreated" them against a fresh `.env` — in the best case the
- * migrate service failed against the wrong `POSTGRES_PASSWORD`, in the
- * worst case it clobbered production state (#167).
+ * The CLI passes `--project-name <name>` explicitly on every `docker
+ * compose` invocation so the project namespace is under our control:
  *
- * Fix — three pieces:
- *
- *   1. The compose templates no longer carry a top-level `name:`. The
- *      CLI passes `--project-name <name>` explicitly on every `docker
- *      compose` invocation so the project namespace is under our control.
- *
- *   2. `deriveProjectName(dir)` turns the install directory into a
+ *   1. `deriveProjectName(dir)` turns the install directory into a
  *      stable, Compose-legal project name (`appstrate-<slug>-<hash>`).
  *      The hash disambiguates installs that land in sibling directories
  *      with the same basename; the slug keeps the name readable when a
  *      user lists projects with `docker compose ls`.
  *
- *   3. `<dir>/.appstrate/project.json` is written at install time so
+ *   2. `<dir>/.appstrate/project.json` is written at install time so
  *      subsequent runs (`appstrate install` as an upgrade,
  *      uninstall/upgrade helpers we may add later) read the exact name
  *      this dir is bound to — never re-derive, never drift. A user who
  *      renames the install dir will get a fresh project name on the
  *      next upgrade, but that's the right behavior: Compose would have
  *      produced different default-named containers anyway.
- *
- * Backward compat with pre-fix installs: when `<dir>/.appstrate/project.json`
- * is absent but the dir already contains a compose file, the caller
- * treats the project as legacy and falls back to the literal `appstrate`
- * name so `docker compose up` targets the same containers the user's
- * stack was running under. See `resolveProjectName` for the contract.
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -102,9 +85,7 @@ export function projectFilePath(dir: string): string {
 
 /**
  * Read `<dir>/.appstrate/project.json` if present, returning the parsed
- * record. Returns `null` when the file is missing — callers distinguish
- * "first install" (null + no compose file) from "legacy pre-#167 install"
- * (null + compose file present) at a higher layer.
+ * record. Returns `null` when the file is missing.
  *
  * Malformed files (bad JSON, wrong shape, unknown `version`) are treated
  * as missing. That's safer than throwing — the install flow would then
@@ -146,12 +127,3 @@ export async function writeProjectFile(dir: string, projectName: string): Promis
   await writeFile(projectFilePath(dir), `${JSON.stringify(record, null, 2)}\n`);
   return record;
 }
-
-/**
- * Legacy project name — what every pre-#167 install used. Installed
- * stacks that predate the sidecar file still answer to this exact name
- * via `docker compose ls --filter name=appstrate`, so upgrades must
- * keep targeting it. Exported so tests and callers share the constant
- * instead of sprinkling string literals.
- */
-export const LEGACY_PROJECT_NAME = "appstrate";

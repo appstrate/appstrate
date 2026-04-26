@@ -25,7 +25,7 @@
  *   - On `finalize(result)`, merges PiRunner's terminal metadata
  *     (`status` / `error` / `durationMs`) with the tee's aggregate so
  *     the single finalize POST carries the complete shape. Without the
- *     merge, `result.report` / `result.output` / `result.checkpoint` /
+ *     merge, `result.report` / `result.output` / `result.pinned` /
  *     `result.memories` would be empty — PiRunner's internal reducer
  *     only sees session events, not tool-stdout events.
  *
@@ -76,15 +76,12 @@ export function looksLikeRunEvent(value: unknown): value is RunEvent {
  * case) keeps its values when the aggregate is untouched.
  */
 export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResult): RunResult {
-  const checkpointScope = aggregate.checkpointScope ?? runnerResult.checkpointScope;
   const pinned =
     aggregate.pinned !== undefined && Object.keys(aggregate.pinned).length > 0
       ? aggregate.pinned
       : runnerResult.pinned;
   return {
     memories: aggregate.memories.length > 0 ? aggregate.memories : runnerResult.memories,
-    checkpoint: aggregate.checkpoint ?? runnerResult.checkpoint,
-    ...(checkpointScope !== undefined ? { checkpointScope } : {}),
     ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     report: aggregate.report ?? runnerResult.report,

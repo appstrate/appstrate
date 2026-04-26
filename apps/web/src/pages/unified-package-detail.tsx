@@ -261,15 +261,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
   }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
-  // Legacy hash redirect: #memories and #checkpoints (split tabs pre-ADR-013)
-  // both fold into the unified #memory tab.
-  useEffect(() => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (type === "agent" && (hash === "memories" || hash === "checkpoints")) {
-      setTab("memory");
-    }
-  }, [type, setTab]);
-
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
   // ── Loading / Error ──
