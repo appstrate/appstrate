@@ -83,6 +83,7 @@
       "dependencies": {
         "@apidevtools/swagger-parser": "^12.1.0",
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/core": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "@clack/prompts": "^1.2.0",

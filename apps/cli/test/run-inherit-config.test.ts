@@ -10,6 +10,7 @@ import { describe, it, expect } from "bun:test";
 import {
   fetchRunConfigPayload,
   mergeRunConfig,
+  deepMergeConfig,
   RunConfigFetchError,
 } from "../src/commands/run/inherit-config.ts";
 
@@ -173,6 +174,64 @@ describe("mergeRunConfig — priority order", () => {
       hasExplicitSpec: false,
     });
     expect(merged.requiredProviders).toEqual(["@a/p", "@b/p"]);
+  });
+});
+
+describe("deepMergeConfig", () => {
+  it("preserves siblings at every level (no silent nested-key loss)", () => {
+    const merged = deepMergeConfig(
+      { providers: { gmail: { scopes: ["read"] } } },
+      { providers: { slack: { token: "xyz" } } },
+    );
+    expect(merged).toEqual({
+      providers: {
+        gmail: { scopes: ["read"] },
+        slack: { token: "xyz" },
+      },
+    });
+  });
+
+  it("override wins at the leaf for plain values", () => {
+    expect(deepMergeConfig({ a: 1, b: 2 }, { b: 99 })).toEqual({ a: 1, b: 99 });
+  });
+
+  it("arrays are replaced, not concatenated", () => {
+    expect(deepMergeConfig({ tags: ["a", "b"] }, { tags: ["c"] })).toEqual({ tags: ["c"] });
+  });
+
+  it("explicit null clears an inherited leaf", () => {
+    expect(deepMergeConfig({ flag: true }, { flag: null })).toEqual({ flag: null });
+  });
+
+  it("undefined values are skipped (not propagated)", () => {
+    expect(deepMergeConfig({ flag: true }, { flag: undefined })).toEqual({ flag: true });
+  });
+
+  it("undefined override returns a copy of base", () => {
+    const base = { a: 1 };
+    const merged = deepMergeConfig(base, undefined);
+    expect(merged).toEqual({ a: 1 });
+    expect(merged).not.toBe(base);
+  });
+
+  it("mergeRunConfig delegates the config field to deepMergeConfig", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        config: { providers: { gmail: { scopes: ["read"] }, slack: { token: "old" } } },
+        modelId: null,
+        proxyId: null,
+        versionPin: null,
+        requiredProviders: [],
+      },
+      flagConfig: { providers: { slack: { token: "new" } } },
+      hasExplicitSpec: false,
+    });
+    expect(merged.config).toEqual({
+      providers: {
+        gmail: { scopes: ["read"] },
+        slack: { token: "new" },
+      },
+    });
   });
 });
 

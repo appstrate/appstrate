@@ -77,6 +77,8 @@ import {
   ConnectionProfileResolutionError,
 } from "./run/connection-profiles.ts";
 import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
+import { validateConfig } from "@appstrate/core/schema-validation";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -272,13 +274,30 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       : resolverInputsWithProfiles;
   const providerResolver = buildResolver(mode, effectiveResolverInputs);
 
-  // ─── 5. Parse input + config ───────────────────────────────────────
-  // Config priority (high → low): --config flag → inherited app config → {}.
-  // Shallow merge mirrors the dashboard, which lets a user override a
-  // single key on top of the persisted form.
+  // ─── 5. Parse input ────────────────────────────────────────────────
+  // The merged config (deep-merge of `--config` over the inherited
+  // per-app value) is already on `inheritedConfig.config` — see
+  // `mergeRunConfig` in inherit-config.ts for the cascade rules.
   const input = await resolveInput(opts);
-  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
-  const config = { ...inheritedConfig.config, ...(flagConfig ?? {}) };
+  const config = inheritedConfig.config;
+
+  // Validate the merged config against the bundle's manifest schema
+  // BEFORE launching PiRunner. The platform performs the same gate
+  // server-side via @appstrate/core/schema-validation; running the
+  // check here keeps a CLI run from succeeding where the dashboard
+  // would have rejected the same `(config, schema)` pair.
+  const configSchema = readBundleConfigSchema(bundle);
+  if (configSchema) {
+    const result = validateConfig(config, configSchema);
+    if (!result.valid) {
+      const summary = result.errors.map((e) => `  - ${e.field}: ${e.message}`).join("\n");
+      exitWithError(
+        `Resolved config does not match the agent's manifest schema:\n${summary}\n\n` +
+          `Fix the persisted per-app config in the dashboard, or pass a\n` +
+          `corrected --config <json> override.`,
+      );
+    }
+  }
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / providers /
@@ -769,32 +788,44 @@ async function maybeFetchRunConfig(
   resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
   opts: RunCommandOptions,
 ): Promise<InheritedRunConfig> {
-  const empty: InheritedRunConfig = {
-    config: {},
-    modelId: null,
-    proxyId: null,
-    versionPin: null,
-    requiredProviders: [],
-    inherited: false,
-  };
-  if (opts.noInherit) return empty;
-  if (target.kind !== "id") return empty;
-  if (!resolverInputs || !("bearerToken" in resolverInputs)) return empty;
+  // Parse `--config <json>` once so the flag override participates in
+  // the same cascade as inherited / env values. Path-mode and
+  // --no-inherit still benefit from the parsed flag — they just see a
+  // null `inherited`, so the merge collapses to "flagConfig or {}".
+  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
+  const noInherit =
+    opts.noInherit || target.kind !== "id" || !resolverInputs || !("bearerToken" in resolverInputs);
+  if (noInherit) {
+    return mergeRunConfig({
+      inherited: null,
+      flagConfig,
+      flagModel: opts.model,
+      flagProxy: opts.proxy,
+      hasExplicitSpec: target.kind === "id" ? target.spec !== undefined : false,
+      envModel: process.env.APPSTRATE_MODEL_ID,
+      envProxy: process.env.APPSTRATE_PROXY,
+    });
+  }
+
+  // Narrowed by the noInherit short-circuit: target is "id" and
+  // resolverInputs carries a bearerToken.
+  const idTarget = target as Extract<typeof target, { kind: "id" }>;
+  const remoteInputs = resolverInputs as RemoteResolverInputs;
 
   const payload = await fetchRunConfigPayload({
-    instance: resolverInputs.instance,
-    bearerToken: resolverInputs.bearerToken,
-    appId: resolverInputs.appId,
-    orgId: resolverInputs.orgId,
-    scope: target.scope,
-    name: target.name,
+    instance: remoteInputs.instance,
+    bearerToken: remoteInputs.bearerToken,
+    appId: remoteInputs.appId,
+    orgId: remoteInputs.orgId,
+    scope: idTarget.scope,
+    name: idTarget.name,
   });
   return mergeRunConfig({
     inherited: payload,
-    flagConfig: undefined, // merged later in run flow
+    flagConfig,
     flagModel: opts.model,
     flagProxy: opts.proxy,
-    hasExplicitSpec: target.spec !== undefined,
+    hasExplicitSpec: idTarget.spec !== undefined,
     envModel: process.env.APPSTRATE_MODEL_ID,
     envProxy: process.env.APPSTRATE_PROXY,
   });
@@ -873,4 +904,22 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
+}
+
+/**
+ * Pull the AFPS 1.x `config.schema` JSON Schema out of the bundle's
+ * root package manifest. Returns `undefined` when the agent declares
+ * no config schema (so validation is a no-op). Mirrors the unexported
+ * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.
+ */
+export function readBundleConfigSchema(
+  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
+): JSONSchemaObject | undefined {
+  const rootPkg = bundle.packages.get(bundle.root);
+  const manifest = rootPkg?.manifest as Record<string, unknown> | undefined;
+  const section = manifest?.config;
+  if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
+  const schema = (section as Record<string, unknown>).schema;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+  return schema as JSONSchemaObject;
 }

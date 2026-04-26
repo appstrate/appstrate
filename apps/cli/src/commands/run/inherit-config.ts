@@ -110,21 +110,42 @@ export interface MergeRunConfigInputs {
 }
 
 /**
- * Apply the documented merge order. Object configs are shallow-merged —
- * the flag wins on duplicate keys but inherited keys the flag doesn't
- * mention pass through. This matches the dashboard's behaviour where
- * the user can tweak a single field on top of the persisted form.
+ * Apply the documented merge order.
+ *
+ * `modelId` / `proxyId`: first-non-null wins (`flag > env > inherited`).
+ * Mirrors the platform's per-run override precedence on
+ * `POST /api/agents/.../run` where the request body's `modelId` /
+ * `proxyId` win over the value persisted in `application_packages` —
+ * the CLI just adds an `env` rung so `APPSTRATE_MODEL_ID` /
+ * `APPSTRATE_PROXY` keep working in CI.
+ *
+ * `versionPin`: an explicit `@spec` in the package id always wins;
+ * otherwise the per-app pin feeds into the bundle URL. Identical to
+ * the platform's `?version=` query param semantics.
+ *
+ * `config`: deep-merged. `flagConfig` overrides `inherited.config` at
+ * the leaf — siblings at every level are preserved.
+ *
+ *     inherited:  { providers: { gmail: { scopes: ["read"] } } }
+ *     flagConfig: { providers: { slack: { token: "xyz" } } }
+ *     result:     { providers: { gmail: { … }, slack: { … } } }
+ *
+ * A previous shallow merge silently dropped the `gmail` key in that
+ * scenario, which had no UI-side equivalent — the dashboard's
+ * settings form never partial-merges, it edits the persisted record
+ * via a full replace. Deep-merge is the closest fit to the user's
+ * mental model of "override just this leaf" for a one-off CLI run.
+ *
+ * Arrays are replaced wholesale (treated as atomic values). Explicit
+ * `null` clears the inherited leaf; `undefined` is ignored. Pass the
+ * full config (`{}` for empty) when the run-config endpoint is
+ * unreachable — the helper is called for both cases.
  */
 export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig {
   const inherited = inputs.inherited;
-  const config = {
-    ...(inherited?.config ?? {}),
-    ...(inputs.flagConfig ?? {}),
-  };
+  const config = deepMergeConfig(inherited?.config ?? {}, inputs.flagConfig);
   const modelId = inputs.flagModel ?? inputs.envModel ?? inherited?.modelId ?? null;
   const proxyId = inputs.flagProxy ?? inputs.envProxy ?? inherited?.proxyId ?? null;
-  // Version pin only feeds into the bundle URL when the user did NOT
-  // type their own @spec — explicit spec on the CLI always wins.
   const versionPin = inputs.hasExplicitSpec ? null : (inherited?.versionPin ?? null);
   return {
     config,
@@ -134,4 +155,36 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     requiredProviders: inherited?.requiredProviders ?? [],
     inherited: inherited !== null,
   };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Recursive merge of two configs. The override wins at every leaf,
+ * but plain-object children are merged recursively so siblings the
+ * user did not mention pass through. Arrays are replaced (atomic).
+ * `undefined` keys in the override are skipped — to clear an
+ * inherited value, pass an explicit `null`.
+ *
+ * Exported so tests can exercise the merge rules directly without
+ * spinning up the rest of the cascade.
+ */
+export function deepMergeConfig(
+  base: Record<string, unknown>,
+  override: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!override) return { ...base };
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    const baseValue = out[key];
+    if (isPlainObject(value) && isPlainObject(baseValue)) {
+      out[key] = deepMergeConfig(baseValue, value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
 }

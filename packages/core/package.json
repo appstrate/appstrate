@@ -60,6 +60,7 @@
     "./tool-bundler": "./src/tool-bundler.ts",
     "./ssrf": "./src/ssrf.ts",
     "./schemas": "./src/schemas.ts",
+    "./schema-validation": "./src/schema-validation.ts",
     "./form": "./src/form.ts",
     "./module": "./src/module.ts",
     "./permissions": "./src/permissions.ts",
