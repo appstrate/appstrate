@@ -321,7 +321,7 @@ export interface BridgeableSession {
  * Runs here are autonomous (fire-and-forget) so token-level live feedback
  * is speculative UX; the message-level granularity suffices.
  *
- * Structured canonical events (memory.added, checkpoint.set, output.emitted,
+ * Structured canonical events (memory.added, pinned.set, output.emitted,
  * report.appended, log.written) are produced by tool extensions that
  * call an EventSink directly — this bridge handles only the Pi SDK
  * framing, not payload emission.

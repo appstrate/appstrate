@@ -32,7 +32,7 @@ describe("buildCloudEventEnvelope", () => {
   it("mirrors the RunEvent type verbatim (no rewriting)", () => {
     const mappings: readonly string[] = [
       "memory.added",
-      "checkpoint.set",
+      "pinned.set",
       "output.emitted",
       "report.appended",
       "log.written",

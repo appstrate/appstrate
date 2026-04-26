@@ -40,8 +40,9 @@ import {
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
-  upsertCheckpoint,
+  upsertPinned,
   scopeFromActor,
+  CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { getPackage } from "./agent-service.ts";
@@ -423,21 +424,40 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // Unified-persistence checkpoint write — the single store for the
-  // carry-over checkpoint. Skipped when the runner did not emit one.
-  // Honors the AFPS 1.4 scope when the runtime stamped one onto
-  // `RunResult.checkpointScope`; falls back to the run's actor scope.
+  // Unified-persistence pinned-slot write — the single store for the
+  // carry-over checkpoint AND any other named pinned slot the agent
+  // wrote via `pin({ key, content })`. Honors the AFPS 1.4 scope when
+  // the runtime stamped one onto each slot; falls back to the run's
+  // actor scope.
   if (checkpointToPersist !== null) {
     const checkpointScope =
       result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
-    await upsertCheckpoint(
+    await upsertPinned(
       run.packageId,
       run.applicationId,
       run.orgId,
       checkpointScope,
+      CHECKPOINT_KEY,
       checkpointToPersist,
       run.id,
     );
+  }
+  if (result.pinned) {
+    for (const [key, slot] of Object.entries(result.pinned)) {
+      // The "checkpoint" slot is mirrored into `result.checkpoint` and
+      // already persisted above — skip the duplicate write.
+      if (key === CHECKPOINT_KEY) continue;
+      const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+      await upsertPinned(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        slotScope,
+        key,
+        slot.content,
+        run.id,
+      );
+    }
   }
   if (status === "success" && resultToPersist) {
     await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");

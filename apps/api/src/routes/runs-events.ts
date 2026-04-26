@@ -60,10 +60,20 @@ const CloudEventEnvelopeSchema = z
 const RunResultSchema = z
   .object({
     memories: z
-      .array(z.object({ content: z.string() }))
+      .array(z.object({ content: z.string(), scope: z.enum(["actor", "shared"]).optional() }))
       .optional()
       .default([]),
     checkpoint: z.unknown().nullable().optional(),
+    checkpointScope: z.enum(["actor", "shared"]).optional(),
+    pinned: z
+      .record(
+        z.string(),
+        z.object({
+          content: z.unknown(),
+          scope: z.enum(["actor", "shared"]).optional(),
+        }),
+      )
+      .optional(),
     output: z.unknown().nullable().optional(),
     report: z.string().nullable().optional(),
     logs: z
@@ -168,6 +178,8 @@ export function createRunsEventsRouter() {
     const result: RunResult = {
       memories: d.memories,
       checkpoint: d.checkpoint ?? null,
+      ...(d.checkpointScope !== undefined ? { checkpointScope: d.checkpointScope } : {}),
+      ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
       report: d.report ?? null,
       logs: d.logs,

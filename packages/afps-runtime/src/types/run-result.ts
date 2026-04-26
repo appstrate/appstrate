@@ -15,7 +15,8 @@ export type LogLevel = "info" | "warn" | "error";
  * against the canonical AFPS 1.3 semantics:
  *
  * - `memory.added` events append to `memories`
- * - `checkpoint.set` events overwrite `checkpoint` (last-write-wins)
+ * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key);
+ *   `key === "checkpoint"` additionally mirrors into the legacy `checkpoint` field
  * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
  * - `report.appended` events concatenate into `report` with `\n` separators
  * - `log.written` events append to `logs`
@@ -24,14 +25,28 @@ export type LogLevel = "info" | "warn" | "error";
  */
 export interface RunResult {
   memories: Memory[];
-  /** Aggregated checkpoint payload — the last `checkpoint.set` value. */
+  /**
+   * Aggregated checkpoint payload — the last `pinned.set` value with
+   * `key === "checkpoint"`. Kept as a top-level shorthand because the
+   * checkpoint slot is the most common pinned slot and most ingestion
+   * paths read it directly.
+   */
   checkpoint: unknown | null;
   /**
    * AFPS 1.4+ scope of the most recent checkpoint emit. Absent when no
-   * checkpoint event was emitted or when the emitter omitted the field —
-   * consumers default to `"actor"`.
+   * `pinned.set` event with `key === "checkpoint"` was emitted or when
+   * the emitter omitted the field — consumers default to `"actor"`.
    */
   checkpointScope?: "actor" | "shared";
+  /**
+   * AFPS 1.5+ named pinned slots — last-write-wins per `key`. The
+   * `checkpoint` key is mirrored into the top-level `checkpoint` field
+   * for backward compatibility, but `pinned["checkpoint"]` is the same
+   * value. Other keys (e.g. `"persona"`, `"goals"`) are persisted as
+   * named pinned rows in `package_persistence` and rendered into the
+   * system prompt on the next run.
+   */
+  pinned?: Record<string, PinnedSlot>;
   output: unknown | null;
   report: string | null;
   logs: LogEntry[];
@@ -86,6 +101,17 @@ export interface Memory {
    * AFPS 1.4+ scope dimension for the unified persistence store.
    * 1.4 emitters MAY omit the field — consumers default to `"actor"`.
    */
+  scope?: "actor" | "shared";
+}
+
+/**
+ * A single pinned slot — the value carried by one `pinned.set` event.
+ * Aggregated by `RunResult.pinned[key]` so consumers can iterate every
+ * named slot the run wrote without losing the per-slot scope.
+ */
+export interface PinnedSlot {
+  content: unknown;
+  /** AFPS 1.4+ — per-slot persistence scope; defaults to `"actor"`. */
   scope?: "actor" | "shared";
 }
 

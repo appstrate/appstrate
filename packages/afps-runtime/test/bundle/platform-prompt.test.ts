@@ -197,7 +197,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Previous State");
     expect(out).toContain('"cursor": "abc"');
     expect(out).toContain('"count": 12');
-    expect(out).toContain("`set_checkpoint` tool");
+    expect(out).toContain('pin({ key: "checkpoint"');
   });
 
   it("renders the Memory section with pinned memories listed", () => {
@@ -214,8 +214,9 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Pinned memories");
     expect(out).toContain("- fact one");
     expect(out).toContain("- fact two");
-    expect(out).toContain("`add_memory` tool");
+    expect(out).toContain("note({ content })");
     expect(out).toContain("recall_memory");
+    expect(out).toContain("pin({ key, content })");
     // Memory section should mention scope-default behaviour.
     expect(out).toMatch(/scope.*"shared"/);
   });

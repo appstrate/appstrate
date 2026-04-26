@@ -9,7 +9,7 @@ import { seedAgent, seedRun, seedConnectionProfile, seedApplication } from "../.
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { runs } from "@appstrate/db/schema";
-import { addMemories, upsertCheckpoint } from "../../../src/services/state/package-persistence.ts";
+import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 
 const app = getTestApp();
 
@@ -595,19 +595,21 @@ describe("Agents API", () => {
       });
 
       // Two distinct scopes write checkpoints
-      await upsertCheckpoint(
+      await upsertPinned(
         "@myorg/persist-list",
         ctx.defaultAppId,
         ctx.orgId,
         { type: "member", id: ctx.user.id },
+        "checkpoint",
         { step: "user-checkpoint" },
         null,
       );
-      await upsertCheckpoint(
+      await upsertPinned(
         "@myorg/persist-list",
         ctx.defaultAppId,
         ctx.orgId,
         { type: "shared" },
+        "checkpoint",
         { step: "shared-checkpoint" },
         null,
       );
@@ -682,11 +684,12 @@ describe("Agents API", () => {
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
-      await upsertCheckpoint(
+      await upsertPinned(
         "@myorg/persist-del-cp",
         ctx.defaultAppId,
         ctx.orgId,
         { type: "shared" },
+        "checkpoint",
         { step: "x" },
         null,
       );

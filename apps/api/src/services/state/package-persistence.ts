@@ -3,13 +3,14 @@
 /**
  * Unified persistence service — one store covering both agent primitives:
  *
- * - Checkpoints   = `key='checkpoint'`, `pinned=true`     (single slot, upsert)
- * - Pinned memos  = `key IS NULL`,      `pinned=true`     (rendered in prompt)
- * - Archive memos = `key IS NULL`,      `pinned=false`    (recall_memory only)
+ * - Named pinned slots = `key=<key>`,   `pinned=true`   (single slot per key, upsert)
+ *                       — `key='checkpoint'` is the legacy carry-over slot
+ * - Pinned memos        = `key IS NULL`, `pinned=true`   (rendered in prompt)
+ * - Archive memos       = `key IS NULL`, `pinned=false`  (recall_memory only)
  *
  * `key`/`pinned` are orthogonal storage attributes; the agent-facing AFPS
- * tools (`set_checkpoint`, `add_memory`) wrap them so external runners
- * never see this column shape.
+ * tools (`pin`, `note`) wrap them so external runners never see this
+ * column shape.
  *
  * Storage-vocabulary note: `actor_type='user'` matches the `@afps-spec/schema`
  * wire format, while the in-process `Actor` type (`@appstrate/connect`) uses
@@ -32,8 +33,12 @@ import type { Actor } from "../../lib/actor.ts";
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 
-/** Storage key used by the `set_checkpoint` shortcut. */
-const CHECKPOINT_KEY = "checkpoint";
+/** Reserved storage key for the legacy carry-over slot (`pin({ key: "checkpoint" })`). */
+export const CHECKPOINT_KEY = "checkpoint";
+
+/** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
+export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
+export const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
@@ -169,20 +174,37 @@ export async function getCheckpoint(
 }
 
 /**
- * Overwrite the checkpoint for a given scope. Targets the partial unique
- * index `pkp_key_unique` (WHERE key IS NOT NULL). Hand-rolled SQL because
- * Drizzle's `onConflictDoUpdate` doesn't support specifying an
+ * Overwrite the named pinned slot for a given scope. Targets the partial
+ * unique index `pkp_key_unique` (WHERE key IS NOT NULL). Hand-rolled SQL
+ * because Drizzle's `onConflictDoUpdate` doesn't support specifying an
  * expression-based conflict target, and the `ON CONFLICT` columns must
  * match the index byte-for-byte.
+ *
+ * `key` is validated against {@link PINNED_KEY_PATTERN} so a malformed
+ * agent payload fails loud here rather than silently corrupting storage.
+ * `key === "checkpoint"` is the legacy carry-over slot — every other key
+ * is a Letta-style named pinned block.
  */
-export async function upsertCheckpoint(
+export async function upsertPinned(
   packageId: string,
   applicationId: string,
   orgId: string,
   scope: PersistenceScope,
+  key: string,
   content: unknown,
   runId: string | null,
 ): Promise<void> {
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > MAX_PINNED_KEY_LENGTH ||
+    !PINNED_KEY_PATTERN.test(key)
+  ) {
+    throw new Error(
+      `Invalid pinned slot key "${key}" — must match ${PINNED_KEY_PATTERN} and be ≤${MAX_PINNED_KEY_LENGTH} chars`,
+    );
+  }
+
   const { actorType, actorId } = storageActor(scope);
   const contentJson = sql`${JSON.stringify(content ?? null)}::jsonb`;
 
@@ -190,7 +212,7 @@ export async function upsertCheckpoint(
     INSERT INTO ${packagePersistence}
       (package_id, application_id, org_id, key, pinned, actor_type, actor_id, content, run_id, created_at, updated_at)
     VALUES
-      (${packageId}, ${applicationId}, ${orgId}, ${CHECKPOINT_KEY}, true, ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
+      (${packageId}, ${applicationId}, ${orgId}, ${key}, true, ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
     ON CONFLICT (package_id, application_id, actor_type, (COALESCE(actor_id, '__shared__')), key) WHERE key IS NOT NULL
     DO UPDATE SET
       content    = EXCLUDED.content,
@@ -314,9 +336,11 @@ export async function listMemories(
 
 /**
  * Pinned memories — always rendered into the agent's system prompt.
- * Today no agent path writes these (default pinned=false on add_memory);
+ * Today no agent path writes these via `note` (default pinned=false);
  * the function exists so the prompt builder reads from a single,
- * intentional source instead of slicing `listMemories`.
+ * intentional source instead of slicing `listMemories`. Named pinned
+ * slots written by `pin({ key, content })` live in a separate column
+ * shape (`key IS NOT NULL`) and are surfaced via `listCheckpoints`.
  */
 export async function listPinnedMemories(
   packageId: string,
@@ -407,10 +431,10 @@ export async function recallMemories(
 
 /**
  * Append memories for a scope. Defaults to `pinned=false` (archive tier);
- * the AFPS `add_memory` tool has no pinning parameter so every agent-
- * written memory lands in the archive. Bounded at
- * {@link MAX_MEMORIES_PER_SCOPE} per `(package, app, scope)` and trimmed
- * to {@link MAX_MEMORY_CONTENT} characters per entry.
+ * the AFPS `note` tool has no pinning parameter so every agent-written
+ * memory lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE}
+ * per `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
+ * characters per entry.
  */
 export async function addMemories(
   packageId: string,

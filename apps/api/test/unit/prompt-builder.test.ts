@@ -168,11 +168,11 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
       { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
       { id: "@appstrate/output", name: "Output", description: "Return run result" },
       {
-        id: "@appstrate/set-checkpoint",
-        name: "Set Checkpoint",
-        description: "Persist checkpoint",
+        id: "@appstrate/pin",
+        name: "Pin",
+        description: "Upsert a pinned slot",
       },
-      { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+      { id: "@appstrate/note", name: "Note", description: "Append an archive memory" },
     ],
     ...overrides,
   });
@@ -228,18 +228,18 @@ describe("buildEnrichedPrompt — tool documentation", () => {
     const ctx = baseContext({
       availableTools: [
         {
-          id: "@appstrate/set-checkpoint",
-          name: "Set Checkpoint",
-          description: "Persist checkpoint",
+          id: "@appstrate/pin",
+          name: "Pin",
+          description: "Upsert a pinned slot",
         },
-        { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+        { id: "@appstrate/note", name: "Note", description: "Append an archive memory" },
       ],
       toolDocs: [
         {
-          id: "@appstrate/set-checkpoint",
-          content: "## Checkpoint Persistence\n\nUse `set_checkpoint`.",
+          id: "@appstrate/pin",
+          content: "## Checkpoint Persistence\n\nUse `pin({ key, content })`.",
         },
-        { id: "@appstrate/add-memory", content: "## Memory\n\nUse `add_memory`." },
+        { id: "@appstrate/note", content: "## Memory\n\nUse `note({ content })`." },
       ],
     });
     const prompt = buildEnrichedPrompt(ctx);

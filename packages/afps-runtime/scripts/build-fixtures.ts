@@ -78,7 +78,13 @@ const EVENTS = [
     runId: REF_RUN_ID,
     content: "Reference agents are useful for contract tests.",
   },
-  { type: "checkpoint.set", timestamp: 0, runId: REF_RUN_ID, data: { iteration: 1 } },
+  {
+    type: "pinned.set",
+    timestamp: 0,
+    runId: REF_RUN_ID,
+    key: "checkpoint",
+    content: { iteration: 1 },
+  },
   {
     type: "output.emitted",
     timestamp: 0,

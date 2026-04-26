@@ -3,8 +3,8 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  memoryTool,
-  checkpointTool,
+  noteTool,
+  pinTool,
   outputTool,
   reportTool,
   logTool,
@@ -31,9 +31,9 @@ function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
 }
 
 describe("platform tools — open envelope emission", () => {
-  it("memoryTool emits memory.added with content", async () => {
+  it("noteTool emits memory.added with content", async () => {
     const { ctx, events } = makeCtx();
-    await memoryTool.execute({ content: "remember me" }, ctx);
+    await noteTool.execute({ content: "remember me" }, ctx);
     expect(events).toEqual([
       expect.objectContaining({
         type: "memory.added",
@@ -44,25 +44,34 @@ describe("platform tools — open envelope emission", () => {
     ]);
   });
 
-  it("checkpointTool emits checkpoint.set with data + default scope omitted", async () => {
+  it("pinTool emits pinned.set with key + content + default scope omitted", async () => {
     const { ctx, events } = makeCtx();
-    await checkpointTool.execute({ data: { step: 7 } }, ctx);
+    await pinTool.execute({ key: "checkpoint", content: { step: 7 } }, ctx);
     expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe("checkpoint.set");
-    expect(events[0]!.data).toEqual({ step: 7 });
+    expect(events[0]!.type).toBe("pinned.set");
+    expect(events[0]!.key).toBe("checkpoint");
+    expect(events[0]!.content).toEqual({ step: 7 });
     expect(events[0]!.scope).toBeUndefined();
   });
 
-  it("checkpointTool propagates scope when set to 'shared'", async () => {
+  it("pinTool propagates scope when set to 'shared'", async () => {
     const { ctx, events } = makeCtx();
-    await checkpointTool.execute({ data: { cursor: "abc" }, scope: "shared" }, ctx);
-    expect(events[0]!.type).toBe("checkpoint.set");
+    await pinTool.execute({ key: "checkpoint", content: { cursor: "abc" }, scope: "shared" }, ctx);
+    expect(events[0]!.type).toBe("pinned.set");
     expect(events[0]!.scope).toBe("shared");
   });
 
-  it("memoryTool propagates scope when explicitly set", async () => {
+  it("pinTool accepts named slots beyond 'checkpoint'", async () => {
     const { ctx, events } = makeCtx();
-    await memoryTool.execute({ content: "preference: CSV", scope: "actor" }, ctx);
+    await pinTool.execute({ key: "persona", content: "you are a helpful agent" }, ctx);
+    expect(events[0]!.type).toBe("pinned.set");
+    expect(events[0]!.key).toBe("persona");
+    expect(events[0]!.content).toBe("you are a helpful agent");
+  });
+
+  it("noteTool propagates scope when explicitly set", async () => {
+    const { ctx, events } = makeCtx();
+    await noteTool.execute({ content: "preference: CSV", scope: "actor" }, ctx);
     expect(events[0]!.type).toBe("memory.added");
     expect(events[0]!.scope).toBe("actor");
   });
@@ -91,38 +100,82 @@ describe("platform tools — open envelope emission", () => {
 
   it("PLATFORM_TOOLS maps all canonical tool names", () => {
     expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(
-      ["add_memory", "log", "output", "report", "set_checkpoint"].sort(),
+      ["log", "note", "output", "pin", "report"].sort(),
     );
-    expect(PLATFORM_TOOLS.add_memory).toBe(memoryTool);
-    expect(PLATFORM_TOOLS.set_checkpoint).toBe(checkpointTool);
+    expect(PLATFORM_TOOLS.note).toBe(noteTool);
+    expect(PLATFORM_TOOLS.pin).toBe(pinTool);
     expect(PLATFORM_TOOLS.log).toBe(logTool);
   });
 });
 
-describe("checkpoint.set fold semantics", () => {
-  it("reducer folds checkpoint.set into result.checkpoint with scope captured", () => {
+describe("pinned.set fold semantics", () => {
+  it("reducer folds pinned.set with key='checkpoint' into result.checkpoint with scope captured", () => {
     const events: RunEvent[] = [
       {
-        type: "checkpoint.set",
+        type: "pinned.set",
         timestamp: 1,
         runId: "r",
-        data: { cursor: "abc" },
+        key: "checkpoint",
+        content: { cursor: "abc" },
         scope: "shared",
       },
     ];
     const result = reduceEvents(events);
     expect(result.checkpoint).toEqual({ cursor: "abc" });
     expect(result.checkpointScope).toBe("shared");
+    expect(result.pinned).toEqual({
+      checkpoint: { content: { cursor: "abc" }, scope: "shared" },
+    });
   });
 
-  it("reducer last-write-wins across multiple checkpoint.set events", () => {
+  it("reducer last-write-wins across multiple pinned.set events with same key", () => {
     const events: RunEvent[] = [
-      { type: "checkpoint.set", timestamp: 1, runId: "r", data: { v: 1 } },
-      { type: "checkpoint.set", timestamp: 2, runId: "r", data: { v: 2 }, scope: "actor" },
+      {
+        type: "pinned.set",
+        timestamp: 1,
+        runId: "r",
+        key: "checkpoint",
+        content: { v: 1 },
+      },
+      {
+        type: "pinned.set",
+        timestamp: 2,
+        runId: "r",
+        key: "checkpoint",
+        content: { v: 2 },
+        scope: "actor",
+      },
     ];
     const result = reduceEvents(events);
     expect(result.checkpoint).toEqual({ v: 2 });
     expect(result.checkpointScope).toBe("actor");
+    expect(result.pinned!.checkpoint).toEqual({ content: { v: 2 }, scope: "actor" });
+  });
+
+  it("reducer aggregates named slots beyond 'checkpoint' under result.pinned", () => {
+    const events: RunEvent[] = [
+      {
+        type: "pinned.set",
+        timestamp: 1,
+        runId: "r",
+        key: "persona",
+        content: "agent persona",
+      },
+      {
+        type: "pinned.set",
+        timestamp: 2,
+        runId: "r",
+        key: "goals",
+        content: ["g1", "g2"],
+        scope: "shared",
+      },
+    ];
+    const result = reduceEvents(events);
+    expect(result.checkpoint).toBeNull();
+    expect(result.pinned).toEqual({
+      persona: { content: "agent persona" },
+      goals: { content: ["g1", "g2"], scope: "shared" },
+    });
   });
 
   it("reducer captures memory.added scope when present, leaves undefined otherwise", () => {
@@ -144,7 +197,7 @@ describe("reduceEvents", () => {
     const events: RunEvent[] = [
       { ...base, type: "memory.added", timestamp: 1, content: "a" },
       { ...base, type: "memory.added", timestamp: 2, content: "b" },
-      { ...base, type: "checkpoint.set", timestamp: 3, data: { x: 1 } },
+      { ...base, type: "pinned.set", timestamp: 3, key: "checkpoint", content: { x: 1 } },
       { ...base, type: "output.emitted", timestamp: 4, data: { a: 1 } },
       { ...base, type: "output.emitted", timestamp: 5, data: { b: 2 } },
       { ...base, type: "report.appended", timestamp: 6, content: "line 1" },

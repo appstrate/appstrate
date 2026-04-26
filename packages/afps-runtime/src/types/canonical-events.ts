@@ -9,7 +9,7 @@
  * envelope (`type: string` + open index signature) so third-party tools
  * can emit any payload without amending the spec. That openness is
  * correct at the spec layer but defeats TypeScript exhaustiveness in
- * the runtime, where five reserved namespaces (`memory.*`, `checkpoint.*`,
+ * the runtime, where five reserved namespaces (`memory.*`, `pinned.*`,
  * `output.*`, `report.*`, `log.*`) carry stable, runtime-meaningful
  * shapes.
  *
@@ -40,13 +40,16 @@ interface BaseEnvelope {
 }
 
 /**
- * `@afps/memory` — `add_memory()` tool.
+ * `@afps/memory` — `note()` tool (AFPS 1.5+; replaces `add_memory()`).
  *
- * `scope` is the AFPS 1.4 unified-persistence dimension:
+ * Append-only archive write. Reachable from the agent only via the
+ * `recall_memory` tool — never injected into the system prompt.
+ *
+ * `scope` is the unified-persistence dimension:
  * - `"actor"` (default): memory belongs to the run's actor (member or end_user).
  * - `"shared"`: memory is app-wide, visible to every actor.
  *
- * 1.4 emitters MAY omit the field entirely; consumers MUST treat absent
+ * Emitters MAY omit the field entirely; consumers MUST treat absent
  * `scope` as `"actor"` so the fail-safe is per-actor isolation rather
  * than cross-actor leakage.
  */
@@ -58,19 +61,27 @@ export interface MemoryAddedEvent extends BaseEnvelope {
 }
 
 /**
- * `@afps/checkpoint` — `set_checkpoint()` tool (AFPS 1.4+).
+ * `@afps/pin` — `pin(key, content)` tool (AFPS 1.5+; replaces
+ * `set_checkpoint()`).
  *
- * Last-write-wins fold into `RunResult.checkpoint`, carries a `scope`
- * dimension matching the unified persistence store.
+ * Upsert-by-key into a named pinned slot. Last-write-wins per `(scope,
+ * key)`. Pinned content is rendered into the system prompt on every run.
+ *
+ * The legacy `checkpoint` carry-over slot is just one valid key —
+ * `key === "checkpoint"`. Other keys (e.g. `"persona"`, `"goals"`) are
+ * accepted and persisted but have no special semantics in the runtime
+ * reducer beyond being aggregated under {@link RunResult.pinned}.
  *
  * `scope` defaults to `"actor"` (per-run-actor isolation) when omitted.
- * Agents that genuinely want app-wide checkpoints (cron-scheduled jobs,
+ * Agents that genuinely want app-wide pinned slots (cron-scheduled jobs,
  * single-tenant catalogues) opt in by passing `"shared"`.
  */
-export interface CheckpointSetEvent extends BaseEnvelope {
-  type: "checkpoint.set";
-  /** Arbitrary JSON value stored as the actor (or shared) checkpoint. */
-  data: unknown;
+export interface PinnedSetEvent extends BaseEnvelope {
+  type: "pinned.set";
+  /** Pinned slot identifier — `"checkpoint"` is reserved for the legacy carry-over. */
+  key: string;
+  /** Arbitrary JSON value stored under the pinned slot. */
+  content: unknown;
   /** AFPS 1.4+. Defaults to `"actor"` when omitted. */
   scope?: "actor" | "shared";
 }
@@ -186,7 +197,7 @@ export interface RunCancelledEvent extends BaseRunCompletedEvent {
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
   | MemoryAddedEvent
-  | CheckpointSetEvent
+  | PinnedSetEvent
   | OutputEmittedEvent
   | ReportAppendedEvent
   | LogWrittenEvent
@@ -202,7 +213,7 @@ export type CanonicalRunEvent =
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
   "memory.added",
-  "checkpoint.set",
+  "pinned.set",
   "output.emitted",
   "report.appended",
   "log.written",
@@ -237,9 +248,10 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
       return true;
     }
-    case "checkpoint.set": {
+    case "pinned.set": {
       const e = event as Record<string, unknown>;
-      if (!("data" in e)) return false;
+      if (typeof e.key !== "string" || e.key.length === 0) return false;
+      if (!("content" in e)) return false;
       if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
       return true;
     }

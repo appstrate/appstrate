@@ -322,14 +322,14 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("```\n");
     sections.push(
       "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
-        "To update the checkpoint for the next run, use the `set_checkpoint` tool. " +
+        'To update the checkpoint for the next run, call `pin({ key: "checkpoint", content: ... })`. ' +
         "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
         'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
     );
   }
 
   // --- Memory ---
-  // Two tiers (ADR-012):
+  // Two tiers (ADR-012, ADR-013):
   //   - Pinned memories (rendered here)  → working set, always visible.
   //   - Archive memories (NOT rendered) → reachable via `recall_memory`.
   // We always emit the section so the agent knows the archive exists,
@@ -346,13 +346,14 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("No memories are currently pinned to this prompt.\n");
   }
   sections.push(
-    "To save a new memory, use the `add_memory` tool — it goes to the **archive** by " +
-      "default (not visible in this prompt on future runs). " +
+    "To save a new archive memory, call `note({ content })` — it goes to the **archive** " +
+      "(not visible in this prompt on future runs). " +
       "To search the archive, call `recall_memory({ q?, limit? })`: pass `q` to filter by " +
       "case-insensitive substring, omit it for the most recent entries. " +
-      'By default memories are scoped to the current actor; pass `scope: "shared"` on ' +
-      "`add_memory` to make a memory app-wide. Use `set_checkpoint` for the " +
-      "single carry-over slot needed by the next run.\n",
+      'By default notes are scoped to the current actor; pass `scope: "shared"` on `note` ' +
+      "to make it app-wide. Use `pin({ key, content })` to upsert a pinned slot rendered " +
+      'into this prompt on every run — `key: "checkpoint"` for the carry-over checkpoint, ' +
+      'or any other key (e.g. "persona", "goals") for additional pinned blocks.\n',
   );
 
   // --- Output format ---

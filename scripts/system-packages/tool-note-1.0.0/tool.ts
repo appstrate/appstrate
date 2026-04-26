@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Add Memory Tool — Save a discovery or learning as a long-term memory.
+ * Note Tool — Append a discovery or learning to the long-term archive.
  *
- * AFPS 1.4: memories carry an optional `scope` ("actor" | "shared").
- * - "actor" (default) keeps the memory private to the run's actor (the
- *   dashboard user or end-user that triggered the run).
- * - "shared" makes the memory visible to every actor of this app.
+ * AFPS 1.5: replaces `add_memory`. Archive memories are NOT injected
+ * into the system prompt — the agent retrieves them on demand via the
+ * `recall_memory` tool. Use this for insights worth remembering across
+ * runs (e.g. "Gmail API paginates at 100 results", "User prefers CSV
+ * format").
  *
- * Use this for insights worth remembering across runs (e.g. "Gmail API
- * paginates at 100 results", "User prefers CSV format").
+ * Memories carry an optional `scope` ("actor" | "shared"):
+ * - "actor" (default) keeps the note private to the run's actor.
+ * - "shared" makes the note visible to every actor of this app.
  */
 
 import { Type } from "@mariozechner/pi-ai";
@@ -23,19 +25,20 @@ function emit(obj: Record<string, unknown>): void {
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
-    name: "add_memory",
-    label: "Add Memory",
+    name: "note",
+    label: "Note",
     description:
-      "Save a discovery or learning as a long-term memory. Memories persist across all runs. " +
-      "By default memories are scoped to the current actor (the user or end-user that triggered the run); " +
-      'pass scope="shared" for an app-wide memory visible to every actor. ' +
+      "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
+      "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
+      "By default notes are scoped to the current actor (the user or end-user that triggered the run); " +
+      'pass scope="shared" for an app-wide note visible to every actor. ' +
       "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
     parameters: Type.Object({
       content: Type.String({ description: "Memory text to save (max 2000 characters)" }),
       scope: Type.Optional(
         Type.Union([Type.Literal("actor"), Type.Literal("shared")], {
           description:
-            'Persistence scope. "actor" (default) keeps the memory private to the run\'s actor; "shared" makes it app-wide.',
+            'Persistence scope. "actor" (default) keeps the note private to the run\'s actor; "shared" makes it app-wide.',
         }),
       ),
     }),
@@ -46,7 +49,7 @@ export default function (pi: ExtensionAPI) {
       if (scope !== undefined) event.scope = scope;
       emit(event);
       return {
-        content: [{ type: "text", text: "Memory saved" }],
+        content: [{ type: "text", text: "Note saved" }],
         details: { content, ...(scope !== undefined ? { scope } : {}) },
       };
     },

@@ -5,7 +5,7 @@
  * RunEvent → RunResult reducer.
  *
  * Consumes {@link RunEvent}s whose `type` is one of the reserved core
- * domains (`memory.added` / `checkpoint.set` / `output.emitted` /
+ * domains (`memory.added` / `pinned.set` / `output.emitted` /
  * `report.appended` / `log.written`). Events with any other `type` are
  * passed through silently — the sink still sees them, but they do not
  * contribute to the aggregated result.
@@ -39,7 +39,7 @@ export function emptyRunResult(): RunResult {
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
  * Open-envelope `RunEvent`s flow in; the canonical narrower projects
- * the five reserved namespaces (memory / checkpoint / output / report / log)
+ * the five reserved namespaces (memory / pinned / output / report / log)
  * + the runner-internal `appstrate.*` namespace into a discriminated
  * union, so the switch is exhaustively typed. Third-party / unknown
  * events are silently passed through — the sink still sees them, they
@@ -56,10 +56,22 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
       });
       return;
-    case "checkpoint.set":
-      result.checkpoint = canonical.data ?? null;
-      if (canonical.scope !== undefined) result.checkpointScope = canonical.scope;
+    case "pinned.set": {
+      if (result.pinned === undefined) result.pinned = {};
+      const slot: { content: unknown; scope?: "actor" | "shared" } = {
+        content: canonical.content ?? null,
+      };
+      if (canonical.scope !== undefined) slot.scope = canonical.scope;
+      result.pinned[canonical.key] = slot;
+      // Mirror into the legacy top-level `checkpoint` field so existing
+      // consumers (run row, prompt builder, ingestion finalize) keep
+      // working without branching on `pinned["checkpoint"]`.
+      if (canonical.key === "checkpoint") {
+        result.checkpoint = canonical.content ?? null;
+        if (canonical.scope !== undefined) result.checkpointScope = canonical.scope;
+      }
       return;
+    }
     case "output.emitted":
       result.output = canonical.data ?? null;
       return;

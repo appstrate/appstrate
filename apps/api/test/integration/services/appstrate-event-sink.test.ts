@@ -75,16 +75,16 @@ describe("AggregatingEventSink", () => {
     expect(sink.snapshot().memories).toEqual([{ content: "first" }, { content: "second" }]);
   });
 
-  it("stores checkpoint.set as-is when payload is an object", async () => {
+  it("stores pinned.set with key='checkpoint' as-is when payload is an object", async () => {
     const sink = newSink();
-    await sink.handle(event("checkpoint.set", { data: { counter: 42 } }));
+    await sink.handle(event("pinned.set", { key: "checkpoint", content: { counter: 42 } }));
 
     expect(sink.snapshot().checkpoint).toEqual({ counter: 42 });
   });
 
-  it("stores checkpoint.set raw values verbatim (no projection — runtime keeps the payload)", async () => {
+  it("stores pinned.set with key='checkpoint' raw values verbatim (no projection — runtime keeps the payload)", async () => {
     const sink = newSink();
-    await sink.handle(event("checkpoint.set", { data: "just a string" }));
+    await sink.handle(event("pinned.set", { key: "checkpoint", content: "just a string" }));
 
     expect(sink.snapshot().checkpoint).toBe("just a string");
   });

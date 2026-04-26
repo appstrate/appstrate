@@ -45,13 +45,13 @@ describe("ConsoleSink", () => {
   });
 
   it("formats each canonical event kind distinctly", async () => {
-    await sink.handle(event("checkpoint.set", { data: { a: 1 } }));
+    await sink.handle(event("pinned.set", { key: "checkpoint", content: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: "x" }));
     await sink.handle(event("report.appended", { content: "# R" }));
     await sink.handle(event("log.written", { level: "warn", message: "careful" }));
     const lines = buf.output.trim().split("\n");
     expect(lines).toHaveLength(4);
-    expect(lines[0]).toContain("checkpoint");
+    expect(lines[0]).toContain("pinned[checkpoint]");
     expect(lines[1]).toContain("output");
     expect(lines[2]).toContain("report");
     expect(lines[3]).toContain("careful");

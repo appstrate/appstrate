@@ -59,9 +59,9 @@ export class ConsoleSink implements EventSink {
           const scopeTag = canonical.scope ? ` [${canonical.scope}]` : "";
           return `${seq} ✚ memory${scopeTag}: ${truncate(canonical.content, 200)}`;
         }
-        case "checkpoint.set": {
+        case "pinned.set": {
           const scopeTag = canonical.scope ? ` [${canonical.scope}]` : "";
-          return `${seq} ▲ checkpoint${scopeTag}: ${truncate(safeStringify(canonical.data), 200)}`;
+          return `${seq} ▲ pinned[${canonical.key}]${scopeTag}: ${truncate(safeStringify(canonical.content), 200)}`;
         }
         case "output.emitted":
           return `${seq} ◆ output: ${truncate(safeStringify(canonical.data), 200)}`;

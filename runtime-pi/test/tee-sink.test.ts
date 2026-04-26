@@ -270,17 +270,18 @@ describe("attachTeeSink — stdout bridge", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachTeeSink — aggregation via finalize", () => {
-  it("aggregates report.appended + output.emitted + checkpoint.set across session + stdout", async () => {
+  it("aggregates report.appended + output.emitted + pinned.set across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
 
     // Session-style: emit via the tee sink directly (what PiRunner does).
     await tee.sink.handle({
-      type: "checkpoint.set",
+      type: "pinned.set",
       timestamp: 1,
       runId: "r",
-      data: { step: 1 },
+      key: "checkpoint",
+      content: { step: 1 },
     });
 
     // Stdout-style: tool writes a JSON line.
@@ -353,14 +354,14 @@ describe("attachTeeSink — aggregation via finalize", () => {
     tee.restore();
   });
 
-  it("aggregates checkpoint.set (AFPS 1.4) into result.checkpoint with scope captured", async () => {
+  it("aggregates pinned.set with key='checkpoint' (AFPS 1.5) into result.checkpoint with scope captured", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
 
     stdout.write.call(
       null as never,
-      '{"type":"checkpoint.set","data":{"cursor":"abc"},"scope":"shared","timestamp":1}\n',
+      '{"type":"pinned.set","key":"checkpoint","content":{"cursor":"abc"},"scope":"shared","timestamp":1}\n',
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -370,6 +371,26 @@ describe("attachTeeSink — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.checkpoint).toEqual({ cursor: "abc" });
     expect(final.checkpointScope).toBe("shared");
+    tee.restore();
+  });
+
+  it("aggregates pinned.set with arbitrary key (AFPS 1.5) into result.pinned", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
+
+    stdout.write.call(
+      null as never,
+      '{"type":"pinned.set","key":"persona","content":"agent persona","timestamp":1}\n',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
+
+    const final = underlying.finalized!;
+    expect(final.pinned).toEqual({ persona: { content: "agent persona" } });
+    expect(final.checkpoint).toBeNull();
     tee.restore();
   });
 });
