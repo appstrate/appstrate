@@ -189,6 +189,22 @@ export const providerCallRequestSchema = z.object({
 });
 
 /**
+ * JSON schema for `provider_call` arguments — derived once from
+ * `providerCallRequestSchema`. Exported so non-Zod consumers (notably
+ * `@appstrate/runner-pi`'s container-mode dispatcher, which composes its
+ * own parameters object around a `providerId` enum) can paste in the
+ * canonical discriminated body / responseMode shapes without re-deriving
+ * them. Without this, the LLM-facing schema for `body` is `{}` (any) and
+ * models routinely JSON-stringify object bodies — `{ fromFile: "x" }`
+ * arrives as a string, resolveBodyForFetch's file-reading branch never
+ * runs, and the literal `{"fromFile":"x"}` is forwarded upstream as the
+ * request body.
+ */
+export const providerCallRequestJsonSchema: JSONSchema = z.toJSONSchema(providerCallRequestSchema, {
+  target: "draft-7",
+}) as JSONSchema;
+
+/**
  * Runtime projection of the provider manifest — a flat view over the
  * subset of fields that `makeProviderTool` actually consumes. The
  * canonical wire shape nests these fields under `definition.*` per AFPS
@@ -427,14 +443,9 @@ export function makeProviderTool(
       `Pass binary uploads via { fromFile } and route binary downloads via responseMode.toFile — ` +
       `inline bytes are decoded as text and bloat the LLM context.`;
 
-  // Generate the JSON schema from the Zod definition — single source of truth.
-  // target: "draft-7" matches AJV's validator (used for dynamic manifest schemas
-  // elsewhere) and produces the same structural shape as the former hand-written
-  // schema. Post-processing adds "description" fields already carried in the Zod
-  // definitions via .describe().
-  const parameters: JSONSchema = z.toJSONSchema(providerCallRequestSchema, {
-    target: "draft-7",
-  }) as JSONSchema;
+  // Generate the JSON schema from the Zod definition — single source of
+  // truth, computed once at module load via providerCallRequestJsonSchema.
+  const parameters = providerCallRequestJsonSchema;
 
   const emit = opts.emitProviderEvent ?? true;
 

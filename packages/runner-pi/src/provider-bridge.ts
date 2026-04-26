@@ -15,12 +15,24 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import type {
-  ProviderRef,
-  ProviderResolver,
-  Tool as AfpsTool,
-  ToolContext as AfpsToolContext,
+import {
+  providerCallRequestJsonSchema,
+  type ProviderRef,
+  type ProviderResolver,
+  type Tool as AfpsTool,
+  type ToolContext as AfpsToolContext,
 } from "@appstrate/afps-runtime/resolvers";
+
+// Pull body + responseMode JSON schemas from the canonical AFPS source so
+// the LLM-facing schema documents the discriminated body union (string |
+// { fromFile } | { fromBytes } | { multipart }). With `body: {}` the LLM
+// has zero shape guidance and tends to JSON-stringify object bodies —
+// `{ fromFile: "x" }` arrives as a string and the resolver's file-reading
+// branch never runs, so the literal `'{"fromFile":"x"}'` is sent upstream.
+const SCHEMA_PROPERTIES =
+  (providerCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
+const BODY_SCHEMA = SCHEMA_PROPERTIES.body ?? {};
+const RESPONSE_MODE_SCHEMA = SCHEMA_PROPERTIES.responseMode ?? {};
 
 export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
@@ -97,8 +109,8 @@ function makeProviderCallExtension(
             enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
           },
           headers: { type: "object", additionalProperties: { type: "string" } },
-          body: {},
-          responseMode: {},
+          body: BODY_SCHEMA,
+          responseMode: RESPONSE_MODE_SCHEMA,
           substituteBody: { type: "boolean" },
         },
       }),
