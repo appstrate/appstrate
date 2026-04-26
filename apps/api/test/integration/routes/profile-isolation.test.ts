@@ -90,7 +90,7 @@ describe("Multi-org profile isolation", () => {
         headers: authHeaders(ctxB),
       });
       const checkBody = (await checkRes.json()) as any;
-      const stillExists = checkBody.profiles.find((p: { id: string }) => p.id === profileB.id);
+      const stillExists = checkBody.data.find((p: { id: string }) => p.id === profileB.id);
       expect(stillExists).toBeDefined();
     });
 
@@ -233,8 +233,8 @@ describe("Multi-org profile isolation", () => {
       const ownerBody = (await ownerRes.json()) as any;
       const memberBody = (await memberRes.json()) as any;
 
-      const ownerSees = ownerBody.profiles.find((p: { id: string }) => p.id === appProfile.id);
-      const memberSees = memberBody.profiles.find((p: { id: string }) => p.id === appProfile.id);
+      const ownerSees = ownerBody.data.find((p: { id: string }) => p.id === appProfile.id);
+      const memberSees = memberBody.data.find((p: { id: string }) => p.id === appProfile.id);
 
       expect(ownerSees).toBeDefined();
       expect(memberSees).toBeDefined();

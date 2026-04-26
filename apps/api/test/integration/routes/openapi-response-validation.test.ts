@@ -447,8 +447,8 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("models");
-      expect((body as any).models).toBeArray();
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
     });
   });
 
@@ -475,8 +475,8 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("proxies");
-      expect((body as any).proxies).toBeArray();
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
     });
   });
 
@@ -564,8 +564,8 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("profiles");
-      expect((body as any).profiles).toBeArray();
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
     });
   });
 
@@ -592,8 +592,9 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("providers");
-      expect((body as any).providers).toBeArray();
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
+      expect(body).toHaveProperty("callbackUrl");
     });
   });
 

@@ -32,7 +32,7 @@ test.describe("Default app vs custom app access", () => {
     const res = await apiClient.get("/agents");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    const orgAgents = (body.agents ?? []).filter((a: { id: string }) => a.id.startsWith(scope));
+    const orgAgents = (body.data ?? []).filter((a: { id: string }) => a.id.startsWith(scope));
     expect(orgAgents.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -63,7 +63,7 @@ test.describe("Default app vs custom app access", () => {
     const res = await customClient.get("/agents");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    const agentIds = (body.agents ?? []).map((a: { id: string }) => a.id);
+    const agentIds = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(agentIds).toContain(`${scope}/${agent1Name}`);
     expect(agentIds).not.toContain(`${scope}/${agent2Name}`);
     expect(agentIds).not.toContain(`${scope}/${agent3Name}`);
@@ -89,7 +89,7 @@ test.describe("Default app vs custom app access", () => {
     // Before install — not visible
     let res = await customClient.get("/agents");
     let body = await res.json();
-    let ids = (body.agents ?? []).map((a: { id: string }) => a.id);
+    let ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).not.toContain(`${scope}/${agentName}`);
 
     // Install
@@ -98,7 +98,7 @@ test.describe("Default app vs custom app access", () => {
     // After install — visible
     res = await customClient.get("/agents");
     body = await res.json();
-    ids = (body.agents ?? []).map((a: { id: string }) => a.id);
+    ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).toContain(`${scope}/${agentName}`);
   });
 
@@ -124,7 +124,7 @@ test.describe("Default app vs custom app access", () => {
     // Before uninstall — visible
     let res = await customClient.get("/agents");
     let body = await res.json();
-    let ids = (body.agents ?? []).map((a: { id: string }) => a.id);
+    let ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).toContain(`${scope}/${agentName}`);
 
     // Uninstall
@@ -133,7 +133,7 @@ test.describe("Default app vs custom app access", () => {
     // After uninstall — gone
     res = await customClient.get("/agents");
     body = await res.json();
-    ids = (body.agents ?? []).map((a: { id: string }) => a.id);
+    ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).not.toContain(`${scope}/${agentName}`);
   });
 
