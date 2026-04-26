@@ -15,6 +15,7 @@ import {
 } from "../services/state/index.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
+import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -76,7 +77,9 @@ export function createNotificationsRouter() {
 
     // End-users always see only their own runs — same semantic as before.
     if (userFilter === "me" || endUser) {
-      return c.json(await listUserRuns(scope, actor.id, { limit, offset }));
+      const result = await listUserRuns(scope, actor.id, { limit, offset });
+      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      return c.json(result);
     }
 
     const rawKind = c.req.query("kind");
@@ -96,16 +99,16 @@ export function createNotificationsRouter() {
       throw invalidRequest("endDate is not a valid ISO date", "endDate");
     }
 
-    return c.json(
-      await listGlobalRuns(scope, {
-        limit,
-        offset,
-        kind,
-        status,
-        startDate,
-        endDate,
-      }),
-    );
+    const result = await listGlobalRuns(scope, {
+      limit,
+      offset,
+      kind,
+      status,
+      startDate,
+      endDate,
+    });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    return c.json(result);
   });
 
   return router;

@@ -23,6 +23,8 @@ import {
   endUsers,
   apiKeys,
   schedules,
+  runStatusValues,
+  type RunStatus,
 } from "@appstrate/db/schema";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
@@ -616,17 +618,8 @@ export async function listPackageRuns(
  */
 export type GlobalRunKind = "all" | "package" | "inline";
 
-type RunStatus = "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
-const KNOWN_RUN_STATUSES: readonly RunStatus[] = [
-  "pending",
-  "running",
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-];
 function isRunStatus(value: string): value is RunStatus {
-  return (KNOWN_RUN_STATUSES as readonly string[]).includes(value);
+  return (runStatusValues as readonly string[]).includes(value);
 }
 
 export interface ListGlobalRunsOptions {

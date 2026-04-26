@@ -105,7 +105,17 @@ export function createAgentsRouter() {
       };
     });
 
-    return c.json({ agents: agentList });
+    // Emit both the legacy `agents` key (existing dashboard + SDK
+    // consumers) and the canonical Stripe-style envelope (`object` +
+    // `data` + `hasMore`) so generic SDK pagers can stop special-casing
+    // per-resource shapes. The duplication is intentional during the
+    // additive-then-deprecate window — drop `agents` at the next MAJOR.
+    return c.json({
+      agents: agentList,
+      object: "list" as const,
+      data: agentList,
+      hasMore: false,
+    });
   });
 
   // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)

@@ -22,13 +22,14 @@ import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/index.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
   cronExpression: z.string().min(1, "cronExpression is required"),
-  timezone: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
+  timezone: z.string().default("UTC"),
+  input: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const updateScheduleSchema = z.object({
@@ -108,6 +109,16 @@ export function createSchedulesRouter() {
 
       const scope = getAppScope(c);
       const schedule = await createSchedule(scope, agent.id, data.connectionProfileId, data);
+      await recordAuditFromContext(c, {
+        action: "schedule.created",
+        resourceType: "schedule",
+        resourceId: schedule.id,
+        after: {
+          packageId: agent.id,
+          cronExpression: data.cronExpression,
+          timezone: data.timezone,
+        },
+      });
       return c.json(schedule, 201);
     },
   );
@@ -152,6 +163,12 @@ export function createSchedulesRouter() {
     }
 
     const schedule = await updateSchedule(scope, id, data);
+    await recordAuditFromContext(c, {
+      action: "schedule.updated",
+      resourceType: "schedule",
+      resourceId: id,
+      after: data as unknown as Record<string, unknown>,
+    });
     return c.json(schedule);
   });
 
@@ -164,6 +181,11 @@ export function createSchedulesRouter() {
       throw notFound(`Schedule '${id}' not found`);
     }
     await deleteSchedule(scope, id);
+    await recordAuditFromContext(c, {
+      action: "schedule.deleted",
+      resourceType: "schedule",
+      resourceId: id,
+    });
     return c.json({ ok: true });
   });
 

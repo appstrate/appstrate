@@ -17,6 +17,8 @@ import {
   deleteEndUser,
 } from "../services/end-users.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { setCursorLinkHeader } from "../lib/pagination-link.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getAppScope } from "../lib/scope.ts";
 
@@ -66,6 +68,15 @@ export function createEndUsersRouter() {
         externalId: data.externalId ?? undefined,
         metadata: data.metadata,
       });
+      await recordAuditFromContext(c, {
+        action: "end_user.created",
+        resourceType: "end_user",
+        resourceId: created.id,
+        after: {
+          externalId: created.externalId,
+          email: created.email,
+        },
+      });
       return c.json(created, 201);
     },
   );
@@ -89,6 +100,14 @@ export function createEndUsersRouter() {
       limit,
       startingAfter: startingAfter ?? undefined,
       endingBefore: endingBefore ?? undefined,
+    });
+
+    setCursorLinkHeader({
+      c,
+      hasMore: result.hasMore,
+      lastId: result.data[result.data.length - 1]?.id,
+      firstId: result.data[0]?.id,
+      hasPrev: Boolean(endingBefore || startingAfter),
     });
 
     return c.json(result);
@@ -115,6 +134,12 @@ export function createEndUsersRouter() {
       externalId: data.externalId ?? undefined,
       metadata: data.metadata,
     });
+    await recordAuditFromContext(c, {
+      action: "end_user.updated",
+      resourceType: "end_user",
+      resourceId: endUserId,
+      after: data as unknown as Record<string, unknown>,
+    });
     return c.json(result);
   });
 
@@ -124,6 +149,11 @@ export function createEndUsersRouter() {
     const endUserId = c.req.param("id")!;
 
     await deleteEndUser(scope, endUserId);
+    await recordAuditFromContext(c, {
+      action: "end_user.deleted",
+      resourceType: "end_user",
+      resourceId: endUserId,
+    });
     return c.body(null, 204);
   });
 

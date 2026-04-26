@@ -47,11 +47,34 @@ export interface StartSinkHeartbeatOptions {
   /** Event-id generator (testing). Defaults to `crypto.randomUUID`. */
   readonly generateId?: () => string;
   /**
-   * Optional error sink — invoked instead of `console.error` so the
-   * host application can route heartbeat failures through its own
-   * logger. Must never throw.
+   * Optional error sink — invoked instead of the default JSON-line
+   * stderr writer so the host application can route heartbeat
+   * failures through its own logger (e.g. pino in the platform API).
+   * Must never throw.
+   *
+   * The default emits a structured JSON line so platform consumers
+   * that scrape stderr (Docker / Coolify / pino) get parseable
+   * output without runner-pi taking a logger dependency.
    */
   readonly onError?: (err: unknown) => void;
+}
+
+function defaultErrorSink(err: unknown): void {
+  const line = {
+    level: "error" as const,
+    time: Date.now(),
+    component: "sink-heartbeat",
+    msg: err instanceof Error ? err.message : String(err),
+    ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+  };
+  // stderr write — JSON line, pino-compatible enough that downstream
+  // platform consumers parse it without special-casing.
+  try {
+    process.stderr.write(`${JSON.stringify(line)}\n`);
+  } catch {
+    // last-resort fallback if stderr is unavailable
+    console.error("[sink-heartbeat]", err);
+  }
 }
 
 export interface SinkHeartbeatHandle {
@@ -71,7 +94,7 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
   const fetchImpl = opts.fetch ?? fetch;
   const now = opts.now ?? Date.now;
   const generateId = opts.generateId ?? (() => crypto.randomUUID());
-  const onError = opts.onError ?? ((err) => console.error("[sink-heartbeat]", err));
+  const onError = opts.onError ?? defaultErrorSink;
 
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;

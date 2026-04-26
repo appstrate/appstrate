@@ -25,6 +25,22 @@ import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
+import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
+
+/**
+ * Validate any JSON value bound for `package_persistence.content` against
+ * the shared Zod schema (JSON-safe + soft 64 KB cap). Throws on failure
+ * with a path-prefixed message so callers (sidecar tool handlers, route
+ * handlers) bubble a clear `invalidRequest` to the agent. Strings are
+ * passed through unchanged — the AFPS `note` tool stores plain text.
+ */
+function assertValidContent(value: unknown, label: string): void {
+  const parsed = packagePersistenceContentSchema.safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`Invalid ${label} content: ${issue?.message ?? "JSON validation failed"}`);
+  }
+}
 
 // Per-entry char cap and per-scope row cap (archive memories only;
 // pinned/checkpoint paths cap differently because they are bounded by
@@ -205,6 +221,8 @@ export async function upsertPinned(
       `Invalid pinned slot key "${key}" — must match ${PINNED_KEY_PATTERN} and be ≤${MAX_PINNED_KEY_LENGTH} chars`,
     );
   }
+
+  assertValidContent(content, key === CHECKPOINT_KEY ? "checkpoint" : "pinned slot");
 
   const { actorType, actorId } = storageActor(scope);
   const contentJson = sql`${JSON.stringify(content ?? null)}::jsonb`;
@@ -472,20 +490,24 @@ export async function addMemories(
   const available = Math.max(0, MAX_MEMORIES_PER_SCOPE - existing);
   if (available === 0) return 0;
 
-  const toInsert = contents.slice(0, available).map((c) => ({
-    packageId,
-    applicationId,
-    orgId,
-    key: null,
-    pinned,
-    actorType,
-    actorId,
-    content:
+  const toInsert = contents.slice(0, available).map((c) => {
+    const trimmed =
       typeof c === "string"
         ? (c.slice(0, MAX_MEMORY_CONTENT) as unknown as Record<string, unknown>)
-        : (c as Record<string, unknown>),
-    runId,
-  }));
+        : (c as Record<string, unknown>);
+    assertValidContent(trimmed, "memory");
+    return {
+      packageId,
+      applicationId,
+      orgId,
+      key: null,
+      pinned,
+      actorType,
+      actorId,
+      content: trimmed,
+      runId,
+    };
+  });
 
   if (toInsert.length === 0) return 0;
 

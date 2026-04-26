@@ -656,16 +656,43 @@ function buildAuth(
 
     trustedOrigins: env.TRUSTED_ORIGINS,
 
-    ...(env.COOKIE_DOMAIN
-      ? {
-          advanced: {
+    advanced: {
+      // Explicit per-cookie defaults — Better Auth applies these to the
+      // session cookie + every plugin-issued cookie (CSRF, etc.). Pinning
+      // them here removes "what does BA's default do?" from every
+      // security audit.
+      //
+      //   sameSite: "lax"   — allows top-level GET nav with the session
+      //                       (link clicks from email, social cards) but
+      //                       blocks cross-origin form-POSTs that could
+      //                       mount a CSRF amplifier on top of
+      //                       `cors({ credentials: true })`.
+      //   secure:   true    — forbids the cookie from leaving the TLS
+      //                       boundary. Browsers tolerate `Secure` on
+      //                       http://localhost in dev, so this is safe to
+      //                       hard-code on rather than gating on
+      //                       NODE_ENV.
+      //   httpOnly: true    — already BA's default; reasserted for
+      //                       consistency.
+      //   partitioned: true — opt-in to CHIPS so an embedded portal
+      //                       iframe gets its own cookie jar (Chromium /
+      //                       Edge / Firefox 128+); browsers that don't
+      //                       implement CHIPS just ignore the attribute.
+      defaultCookieAttributes: {
+        sameSite: "lax" as const,
+        secure: true,
+        httpOnly: true,
+        partitioned: true,
+      },
+      ...(env.COOKIE_DOMAIN
+        ? {
             crossSubDomainCookies: {
               enabled: true,
               domain: env.COOKIE_DOMAIN,
             },
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
 
     databaseHooks: {
       user: {

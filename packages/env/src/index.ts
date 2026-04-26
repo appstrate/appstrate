@@ -177,6 +177,18 @@ const envSchema = z
     // regardless of gaps.
     REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
 
+    // Standard Webhooks `webhook-timestamp` tolerance window (seconds).
+    // Inbound run-event signatures with a timestamp drifting more than
+    // this from the server clock are rejected. The Standard Webhooks
+    // recommendation is 5 minutes (300s) — exposed here so hardened-clock
+    // environments can tighten and lossy CI receivers can loosen.
+    //
+    // Default 300s; floor enforced by the runtime verifier (`verify()`
+    // in `@appstrate/afps-runtime/events`). Must stay strictly less than
+    // REMOTE_RUN_REPLAY_WINDOW_SECONDS or a replayed event could slip
+    // past the dedup cache between expiries.
+    WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(300),
+
     // Runner liveness — the stall watchdog and the runner-side keep-alive
     // form a single unified detection path across every runner topology
     // (platform container, remote CLI, GitHub Action, …). See
@@ -374,6 +386,11 @@ const envSchema = z
   .refine((env) => !env.S3_BUCKET || env.S3_REGION, {
     message: "S3_REGION is required when S3_BUCKET is set",
     path: ["S3_REGION"],
+  })
+  .refine((env) => env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS < env.REMOTE_RUN_REPLAY_WINDOW_SECONDS, {
+    message:
+      "WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS must be strictly less than REMOTE_RUN_REPLAY_WINDOW_SECONDS so a replayed event cannot slip past the dedup cache between expiries",
+    path: ["WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS"],
   })
   .refine(
     (env) =>

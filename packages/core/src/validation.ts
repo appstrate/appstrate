@@ -114,8 +114,19 @@ export type ToolManifest = z.infer<typeof toolManifestSchema>;
 // Provider manifest schema — extends AFPS (superRefine inherited)
 // ─────────────────────────────────────────────
 
+/**
+ * Provider auth-mode Zod enum, re-exported from `@afps-spec/schema` so
+ * appstrate route validators can reference the canonical AFPS values
+ * without redeclaring the literal array. AFPS v1: `oauth2 | oauth1 |
+ * api_key | basic | custom`.
+ */
+export const authModeEnum = afpsAuthModeEnum;
+
+/** Closed list of valid auth-mode strings — derived from {@link authModeEnum}. */
+export const AUTH_MODES = authModeEnum.options;
+
 /** Auth mode union type derived from the AFPS Zod enum. */
-export type AuthMode = z.infer<typeof afpsAuthModeEnum>;
+export type AuthMode = z.infer<typeof authModeEnum>;
 
 const _setupGuideSchema = afpsSetupGuide;
 
