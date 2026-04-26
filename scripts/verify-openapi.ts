@@ -9,12 +9,19 @@
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
+ * 5. Code subset Spec — statically enumerates router.METHOD() and app.METHOD() calls across
+ *    apps/api/src/routes (per-domain route files) plus apps/api/src/modules (built-in modules)
+ *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
+ *    normalises Hono path syntax, and asserts every code-registered endpoint is documented in
+ *    the OpenAPI spec or in the explicit allowlist.
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
  * The set of modules validated matches `MODULES` (default: all built-in).
  *
  * Usage: bun scripts/verify-openapi.ts
  */
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
@@ -331,12 +338,20 @@ const expectedEndpoints = [
   "POST /api/uploads",
   "PUT /api/uploads/_content",
 
-  // Credential proxy (AFPS 1.3 BYOI)
+  // Credential proxy (AFPS 1.3 BYOI) — registered as router.all() in code,
+  // every verb is documented because upstream provider semantics are method-defined.
+  "GET /api/credential-proxy/proxy",
   "POST /api/credential-proxy/proxy",
+  "PUT /api/credential-proxy/proxy",
+  "PATCH /api/credential-proxy/proxy",
+  "DELETE /api/credential-proxy/proxy",
 
   // LLM proxy (Remote CLI execution — Phase 3)
   "POST /api/llm-proxy/openai-completions/v1/chat/completions",
   "POST /api/llm-proxy/anthropic-messages/v1/messages",
+
+  // Library (consolidated package catalog across an org's applications)
+  "GET /api/library",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's
@@ -757,6 +772,302 @@ if (discrepancies.length === 0) {
     }
     console.log();
   }
+}
+
+// ═══════════════════════════════════════════════════
+// 5. Code ⊆ Spec
+// ═══════════════════════════════════════════════════
+//
+// Static analysis of `router.METHOD(...)` / `app.METHOD(...)` registrations
+// across `apps/api/src/routes/*.ts`, `apps/api/src/modules/*/routes.ts` and
+// `apps/api/src/index.ts`. The mount prefix for each route file is composed
+// from `app.route(prefix, factory)` calls in `index.ts`. Every code-registered
+// endpoint that is neither in the spec nor in the explicit allowlist below is
+// reported as orphan and fails the run.
+//
+// Files registered via runtime config (e.g. `routes/llm-proxy.ts` registers
+// routes inside a config-driven `for` loop) and Better Auth's catchall
+// (`/api/auth/*`, plugin-registered) are skipped and the corresponding
+// endpoints are left to coverage check #1 to keep in sync.
+
+console.log(`\n  5. Code ⊆ Spec`);
+console.log(`  ----------------`);
+
+interface RouteRegistration {
+  verb: string;
+  path: string;
+}
+
+const ROUTE_VERBS = ["get", "post", "put", "patch", "delete", "all", "head", "options"] as const;
+const ROUTE_VERB_PATTERN = ROUTE_VERBS.join("|");
+
+/**
+ * Find the body of a top-level `function`/`export function` declaration by
+ * locating its opening `{` after `name(...)` and brace-counting forward.
+ * Returns the source slice between the matching braces (exclusive), or null
+ * if the function isn't found.
+ */
+function extractFunctionBody(src: string, fnName: string): string | null {
+  const sigPattern = new RegExp(`(?:export\\s+)?function\\s+${fnName}\\s*\\(`, "g");
+  const sig = sigPattern.exec(src);
+  if (!sig) return null;
+  const openIdx = src.indexOf("{", sig.index + sig[0].length);
+  if (openIdx === -1) return null;
+  let depth = 1;
+  let i = openIdx + 1;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    i++;
+  }
+  return depth === 0 ? src.slice(openIdx + 1, i - 1) : null;
+}
+
+/**
+ * Extract all `router.METHOD("path", …)` registrations from a slice of source.
+ */
+function extractRouterRegistrations(slice: string): RouteRegistration[] {
+  const out: RouteRegistration[] = [];
+  const re = new RegExp(`router\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["'\`]([^"'\`]*)["'\`]`, "g");
+  for (const m of slice.matchAll(re)) {
+    out.push({ verb: m[1]!, path: m[2]! });
+  }
+  return out;
+}
+
+/**
+ * Normalise a Hono path to the OpenAPI equivalent.
+ *  - `:id`              → `{id}`
+ *  - `:scope{@[^/]+}`   → `{scope}`  (regex-constrained param)
+ */
+function normaliseHonoPath(path: string): string {
+  return path.replace(/:(\w+)\{[^}]+\}/g, "{$1}").replace(/:(\w+)/g, "{$1}");
+}
+
+/**
+ * Compose a mount prefix and a sub-path safely (handles trailing slashes
+ * and the empty / `/` sub-path).
+ */
+function joinMountPath(prefix: string, sub: string): string {
+  const trimmedPrefix = prefix.replace(/\/+$/, "");
+  if (!sub || sub === "/") return trimmedPrefix || "/";
+  const trimmedSub = sub.startsWith("/") ? sub : "/" + sub;
+  return trimmedPrefix + trimmedSub || "/";
+}
+
+/**
+ * Expand a registration into one or more `"VERB PATH"` entries (handles
+ * `router.all(...)` and `app.all(...)`).
+ */
+function expandRegistration(verb: string, fullPath: string): string[] {
+  if (verb === "all") {
+    return ["GET", "POST", "PUT", "PATCH", "DELETE"].map((v) => `${v} ${fullPath}`);
+  }
+  return [`${verb.toUpperCase()} ${fullPath}`];
+}
+
+const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const indexPath = join(REPO_ROOT, "apps/api/src/index.ts");
+const indexSrc = readFileSync(indexPath, "utf8");
+
+// 1. Build the import map for `./routes/<file>` imports in index.ts
+//    - Named: `import { createXRouter } from "./routes/x.ts"`
+//    - Default: `import xRouter from "./routes/x.ts"`
+const importToFile = new Map<string, string>(); // identifier → relative file path
+for (const m of indexSrc.matchAll(
+  /import\s+\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+)) {
+  const file = m[2]!;
+  for (const raw of m[1]!.split(",")) {
+    const name = raw
+      .trim()
+      .split(/\s+as\s+/)[0]!
+      .trim();
+    if (name) importToFile.set(name, file);
+  }
+}
+for (const m of indexSrc.matchAll(
+  /import\s+(\w+)\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+)) {
+  importToFile.set(m[1]!, m[2]!);
+}
+
+// 2. Track `const x = createXRouter()` aliasing so `app.route(prefix, x)` resolves
+const varToFactory = new Map<string, string>();
+for (const m of indexSrc.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(\w+)\s*\(\s*\)/g)) {
+  varToFactory.set(m[1]!, m[2]!);
+}
+
+// 3. Parse `app.route("PREFIX", expr)` calls — expr is one of:
+//    - `createFooRouter()`           → factory call
+//    - `createFooRouter`             → factory reference (rare)
+//    - `fooRouter`                   → variable bound to either `createFooRouter()` or default import
+type Mount = { prefix: string; file: string; factory: string | "__default__" };
+const mounts: Mount[] = [];
+// Matches both `app.route("/p", fooRouter)` and `app.route("/p", createFooRouter())`.
+// The expression group accepts an identifier optionally followed by `()` — this is
+// narrow enough to capture the trailing `)` of the factory call as part of the
+// expression rather than as the closing paren of `app.route(...)`.
+for (const m of indexSrc.matchAll(
+  /app\.route\(\s*["']([^"']+)["']\s*,\s*(\w+(?:\(\s*\))?)\s*\)/g,
+)) {
+  const prefix = m[1]!;
+  const exprRaw = m[2]!.trim();
+  const isCall = /\(\s*\)$/.test(exprRaw);
+  const ident = exprRaw.replace(/\(\s*\)$/, "").trim();
+
+  // Resolve identifier
+  let factory: string | "__default__" = ident;
+  let file: string | undefined;
+
+  if (isCall) {
+    // direct factory call: ident must be a named import
+    file = importToFile.get(ident);
+    factory = ident;
+  } else {
+    // variable: either an alias of a factory or a default import
+    const aliasedFactory = varToFactory.get(ident);
+    if (aliasedFactory) {
+      file = importToFile.get(aliasedFactory);
+      factory = aliasedFactory;
+    } else {
+      file = importToFile.get(ident);
+      factory = "__default__";
+    }
+  }
+
+  if (file) mounts.push({ prefix, file, factory });
+}
+
+// 4. Discovered code endpoints
+const codeEndpoints = new Set<string>();
+
+// 4a. Direct `app.METHOD("path", ...)` calls in index.ts
+for (const m of indexSrc.matchAll(
+  new RegExp(`app\\.(${ROUTE_VERB_PATTERN})\\s*\\(\\s*["']([^"']+)["']`, "g"),
+)) {
+  const verb = m[1]!;
+  const path = normaliseHonoPath(m[2]!);
+  for (const ep of expandRegistration(verb, path)) codeEndpoints.add(ep);
+}
+
+// 4b. Route files referenced by mounts — parse each factory body or default body
+//     and combine with the mount prefix.
+const SKIP_FILES = new Set<string>([
+  // Routes registered via runtime config (config-driven `for` loop). The
+  // emitted endpoints are already covered by check #1; static analysis can't
+  // see them.
+  "routes/llm-proxy",
+  // packages.ts iterates ROUTE_CONFIGS with template-literal paths
+  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, tools, agents,
+  // providers}). All concrete paths are already enumerated in
+  // expectedEndpoints, so check #1 catches drift on this file.
+  "routes/packages",
+]);
+
+const routeFileCache = new Map<string, string>();
+function readRouteFile(relPath: string): string {
+  const cached = routeFileCache.get(relPath);
+  if (cached !== undefined) return cached;
+  const full = join(REPO_ROOT, "apps/api/src", relPath + ".ts");
+  const src = existsSync(full) ? readFileSync(full, "utf8") : "";
+  routeFileCache.set(relPath, src);
+  return src;
+}
+
+for (const mount of mounts) {
+  if (SKIP_FILES.has(mount.file)) continue;
+  const src = readRouteFile(mount.file);
+  if (!src) continue;
+
+  let scope: string;
+  if (mount.factory === "__default__") {
+    scope = src;
+  } else {
+    const body = extractFunctionBody(src, mount.factory);
+    if (body == null) continue;
+    scope = body;
+  }
+
+  for (const reg of extractRouterRegistrations(scope)) {
+    const fullPath = normaliseHonoPath(joinMountPath(mount.prefix, reg.path));
+    for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+  }
+}
+
+// 4c. Built-in module routes — files at `apps/api/src/modules/<name>/routes.ts`
+//     mounted at `/` (paths are absolute in module routes).
+const modulesDir = join(REPO_ROOT, "apps/api/src/modules");
+if (existsSync(modulesDir)) {
+  for (const name of readdirSync(modulesDir, { withFileTypes: true })) {
+    if (!name.isDirectory()) continue;
+    const routesPath = join(modulesDir, name.name, "routes.ts");
+    if (!existsSync(routesPath)) continue;
+    const src = readFileSync(routesPath, "utf8");
+    for (const reg of extractRouterRegistrations(src)) {
+      const fullPath = normaliseHonoPath(reg.path);
+      for (const ep of expandRegistration(reg.verb, fullPath)) codeEndpoints.add(ep);
+    }
+  }
+}
+
+// 5. Allowlist — endpoints that exist in code by design but are intentionally
+//    NOT documented in the OpenAPI spec.
+const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
+  // OIDC HTML pages — server-rendered CSRF-hardened forms (Post-Redirect-Get),
+  // not API endpoints. Convention across all OIDC implementations.
+  "GET /api/oauth/login",
+  "POST /api/oauth/login",
+  "GET /api/oauth/register",
+  "POST /api/oauth/register",
+  "GET /api/oauth/consent",
+  "POST /api/oauth/consent",
+  "GET /api/oauth/forgot-password",
+  "POST /api/oauth/forgot-password",
+  "GET /api/oauth/reset-password",
+  "POST /api/oauth/reset-password",
+  "GET /api/oauth/magic-link",
+  "POST /api/oauth/magic-link",
+  "GET /api/oauth/magic-link/confirm",
+  "POST /api/oauth/magic-link/confirm",
+  "GET /api/oauth/logout",
+  "POST /api/oauth/logout",
+  "GET /api/oauth/assets/social-sign-in.js",
+  // OIDC device-flow activation pages — server-rendered HTML.
+  "GET /activate",
+  "POST /activate",
+  "POST /activate/approve",
+  "POST /activate/deny",
+  // SPA fallback + unknown-API guard registered directly in index.ts.
+  "GET /api/*",
+  "POST /api/*",
+  "PUT /api/*",
+  "PATCH /api/*",
+  "DELETE /api/*",
+  "GET /*",
+  // Dev-time docs page served as plain text, not part of the JSON API.
+  "GET /llms.txt",
+]);
+
+const orphans = [...codeEndpoints]
+  .filter((ep) => !specEndpoints.has(ep) && !CODE_TO_SPEC_ALLOWLIST.has(ep))
+  .sort();
+
+console.log(
+  `  Code-registered endpoints: ${codeEndpoints.size}  (allowlist: ${CODE_TO_SPEC_ALLOWLIST.size})`,
+);
+
+if (orphans.length === 0) {
+  console.log(`  OK — every code-registered endpoint is documented in the spec.`);
+} else {
+  exitCode = 1;
+  console.log(`\n  Endpoints registered in code but missing from the spec (${orphans.length}):`);
+  for (const ep of orphans) console.log(`    - ${ep}`);
+  console.log(
+    `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
+      `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+  );
 }
 
 // ═══════════════════════════════════════════════════

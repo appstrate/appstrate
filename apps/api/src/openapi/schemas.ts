@@ -1059,4 +1059,40 @@ export const schemas = {
       },
     },
   },
+  LibraryPackageList: {
+    type: "array",
+    description:
+      "Packages of a single type visible to the org. Each entry carries an " +
+      "`installedIn` array listing the caller-org applications where the package " +
+      "is currently installed (empty array = not installed in any of the caller's apps).",
+    items: {
+      type: "object",
+      required: ["id", "type", "source", "name", "description", "installedIn"],
+      properties: {
+        id: { type: "string", description: "Package id (`pkg_…`)." },
+        type: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
+        source: {
+          type: "string",
+          description:
+            "Package origin (e.g. `org` for org-owned packages, `system` for built-in system packages).",
+        },
+        name: {
+          type: "string",
+          description:
+            "Display name from the package draft manifest (`displayName`); falls back to the package id.",
+        },
+        description: {
+          type: "string",
+          description:
+            "Description from the package draft manifest; empty string when not provided.",
+        },
+        installedIn: {
+          type: "array",
+          description:
+            "Application ids (`app_…`) belonging to the caller's org where this package is installed.",
+          items: { type: "string" },
+        },
+      },
+    },
+  },
 } as const;
