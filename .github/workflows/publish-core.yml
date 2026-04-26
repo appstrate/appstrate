@@ -61,6 +61,16 @@ jobs:
             exit 1
           fi
 
+      - name: Check consumer-repo lockstep
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.CONSUMER_LOCKSTEP_TOKEN || secrets.GITHUB_TOKEN }}
+          # `fail` blocks publish if any consumer is >= 2 minors behind.
+          # Set to `warn` for an emergency hotfix that intentionally outpaces
+          # consumers, or `off` to bypass entirely.
+          CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
+        run: bun scripts/check-consumer-versions.ts
+
       - name: Publish to npm
         run: npm publish --access public --provenance
         env:

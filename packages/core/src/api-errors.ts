@@ -183,6 +183,15 @@ export function gone(code: string, detail: string): ApiError {
   });
 }
 
+export function payloadTooLarge(detail: string): ApiError {
+  return new ApiError({
+    status: 413,
+    code: "payload_too_large",
+    title: "Payload Too Large",
+    detail,
+  });
+}
+
 export function internalError(): ApiError {
   return new ApiError({
     status: 500,

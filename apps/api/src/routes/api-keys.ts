@@ -16,6 +16,7 @@ import {
   revokeApiKey,
 } from "../services/api-keys.ts";
 import { getAppScope, getOrgScope } from "../lib/scope.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createApiKeySchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
@@ -76,6 +77,13 @@ export function createApiKeysRouter() {
         scopes: validatedScopes,
       });
 
+      await recordAuditFromContext(c, {
+        action: "api_key.created",
+        resourceType: "api_key",
+        resourceId: id,
+        after: { name, keyPrefix, scopes: validatedScopes, expiresAt },
+      });
+
       return c.json({ id, key: rawKey, keyPrefix, scopes: validatedScopes }, 201);
     } catch (err) {
       logger.error("API key creation failed", {
@@ -99,6 +107,11 @@ export function createApiKeysRouter() {
       if (!revoked) {
         throw notFound("API key not found or already revoked");
       }
+      await recordAuditFromContext(c, {
+        action: "api_key.revoked",
+        resourceType: "api_key",
+        resourceId: keyId,
+      });
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;

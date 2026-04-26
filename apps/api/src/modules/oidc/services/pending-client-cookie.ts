@@ -31,11 +31,11 @@
  * both.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
+import { signAuthHmac, verifyAuthHmac } from "../../../lib/auth-secrets.ts";
 import type { AppEnv } from "../../../types/index.ts";
 
 let insecureCookieWarned = false;
@@ -51,7 +51,7 @@ const COOKIE_MAX_AGE = 10 * 60; // 10 minutes
 export function issuePendingClientCookie(c: Context<AppEnv>, clientId: string): void {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
   const payload = `${clientId}.${exp}`;
-  const sig = signPayload(payload);
+  const sig = signAuthHmac(payload);
   const value = `${payload}.${sig}`;
   const env = getEnv();
   const secure = env.APP_URL.startsWith("https://");
@@ -107,29 +107,15 @@ export function clearPendingClientCookie(c: Context<AppEnv>): void {
 
 // ─── Internals ────────────────────────────────────────────────────────────────
 
-function signPayload(payload: string): string {
-  const env = getEnv();
-  return createHmac("sha256", env.BETTER_AUTH_SECRET)
-    .update(payload)
-    .digest("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
 function parseAndVerify(raw: string): string | null {
   // Format: `<clientId>.<exp>.<sig>`. `clientId` never contains a dot (it
-  // starts with `oauth_` and is base64url), so splitting on `.` gives
-  // exactly 3 parts.
+  // starts with `oauth_` and is base64url) and `sig` is now `<kid>$<hmac>`
+  // — neither contains a dot — so splitting on `.` still yields exactly 3
+  // parts. Legacy un-prefixed signatures are accepted by `verifyAuthHmac`.
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [clientId, expStr, sig] = parts as [string, string, string];
-  const expected = signPayload(`${clientId}.${expStr}`);
-  if (expected.length !== sig.length) return null;
-  // Timing-safe compare — the signature is not secret but we might as well.
-  const a = Buffer.from(expected, "utf8");
-  const b = Buffer.from(sig, "utf8");
-  if (!timingSafeEqual(a, b)) return null;
+  if (!verifyAuthHmac(`${clientId}.${expStr}`, sig)) return null;
   const exp = Number.parseInt(expStr, 10);
   if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
   return clientId;

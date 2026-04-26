@@ -199,7 +199,7 @@ export const runLogs = pgTable(
     level: text("level").notNull().default("debug"),
     event: text("event"),
     message: text("message"),
-    data: jsonb("data"),
+    data: jsonb("data").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

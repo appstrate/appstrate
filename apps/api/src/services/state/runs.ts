@@ -28,10 +28,50 @@ import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
+import { runMetadataSchema, runConfigSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
+
+function parseRunConfig(value: Record<string, unknown> | null | undefined) {
+  if (value == null) return null;
+  const result = runConfigSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidRequest(
+      `Invalid run config: ${result.error.issues[0]?.message ?? "validation failed"}`,
+    );
+  }
+  return result.data;
+}
+
+function parseRunMetadata(value: Record<string, unknown>) {
+  const result = runMetadataSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidRequest(
+      `Invalid run metadata: ${result.error.issues[0]?.message ?? "validation failed"}`,
+    );
+  }
+  return result.data;
+}
+
+/**
+ * Run-log writes are high-volume and best-effort — a malformed `data`
+ * payload should not fail the surrounding event ingestion. Drop the
+ * `data` field on validation failure and log the reason.
+ */
+function safeRunLogData(value: Record<string, unknown> | null) {
+  if (value == null) return null;
+  const result = runLogDataSchema.safeParse(value);
+  if (!result.success) {
+    logger.warn("Dropped invalid run_logs.data payload", {
+      reason: result.error.issues[0]?.message,
+    });
+    return null;
+  }
+  return result.data;
+}
 
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
@@ -169,7 +209,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     runNumber,
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
-    config: params.config ?? null,
+    config: parseRunConfig(params.config),
     runOrigin: params.runOrigin ?? "platform",
     ...(params.sinkSecretEncrypted !== undefined
       ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
@@ -247,7 +287,7 @@ export async function updateRun(
   if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
-  if (updates.metadata !== undefined) set.metadata = updates.metadata;
+  if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
   if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
   try {
@@ -405,7 +445,7 @@ export async function appendRunLog(
         type,
         event,
         message,
-        data,
+        data: safeRunLogData(data),
         level,
       })
       .returning({ id: runLogs.id });
