@@ -282,6 +282,38 @@ describe("fetchBundleForRun — errors", () => {
     });
   });
 
+  it("maps 404 `agent_not_installed_in_app` to package_not_installed_in_app with install hint", async () => {
+    // The bundle route distinguishes "doesn't exist in org" from "exists
+    // in org but not installed in app" via the `code` field on the
+    // problem+json body. The CLI surfaces a different message for each so
+    // users hit "install it" instead of "is the spelling right?".
+    const fetchImpl = stubFetch({
+      status: 404,
+      body: JSON.stringify({
+        type: "about:blank",
+        title: "Agent Not Installed",
+        status: 404,
+        code: "agent_not_installed_in_app",
+        detail: "Agent '@me/x' exists in this organization but is not installed",
+      }),
+    });
+    await expect(
+      fetchBundleForRun({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        appId: "app_test",
+        packageId: "@me/x",
+        spec: undefined,
+        cacheRoot: tmpRoot,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      name: "BundleFetchError",
+      code: "package_not_installed_in_app",
+      hint: expect.stringContaining("/api/applications/app_test/packages"),
+    });
+  });
+
   it("maps 404 with version body to version_not_found", async () => {
     const fetchImpl = stubFetch({
       status: 404,

@@ -223,6 +223,64 @@ describe("Agents API", () => {
     });
   });
 
+  describe("GET /api/agents/:scope/:name/bundle — 404 distinction", () => {
+    // The bundle route deliberately distinguishes "agent doesn't exist in
+    // this org" from "agent exists in org but isn't installed in the
+    // pinned application" — the CLI's run-by-id flow needs to tell the
+    // user whether to fix the spelling or run an install. Pin both
+    // branches so the contract holds across refactors.
+
+    it("returns 404 agent_not_found when the package isn't in the org catalog", async () => {
+      const res = await app.request("/api/agents/@myorg/does-not-exist/bundle", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_not_found");
+    });
+
+    it("returns 404 agent_not_installed_in_app when the package exists in org but is not installed in the pinned app", async () => {
+      // Seed the agent at the org level, but DON'T install it into the app.
+      await seedAgent({
+        id: "@myorg/uninstalled-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/agents/@myorg/uninstalled-agent/bundle", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_not_installed_in_app");
+      // The detail names the application and the install endpoint so the
+      // CLI's hint can quote it back to the user verbatim.
+      expect(body.detail).toContain(ctx.defaultAppId);
+      expect(body.detail).toContain("/api/applications/");
+    });
+
+    it("passes the access gate when the package is installed (subsequent failures are version/artifact, not access)", async () => {
+      // The 200/version-resolution path requires a published artifact in
+      // storage that the seed helpers don't set up. The relevant contract
+      // for *this* gate is that we don't surface `agent_not_installed_in_app`
+      // for an installed package — version-resolution failures throw
+      // `not_found`, a different code.
+      await seedInstalledAgent({
+        id: "@myorg/installed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/installed-agent/bundle", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).not.toBe("agent_not_installed_in_app");
+      expect(body.code).not.toBe("agent_not_found");
+    });
+  });
+
   describe("Multi-tenancy isolation", () => {
     it("isolates run counts per org", async () => {
       await seedInstalledAgent({

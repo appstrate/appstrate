@@ -41,6 +41,7 @@ export class BundleFetchError extends Error {
   constructor(
     public readonly code:
       | "package_not_found"
+      | "package_not_installed_in_app"
       | "version_not_found"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
@@ -112,6 +113,19 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   const res = await fetchFn(url, { headers });
   if (res.status === 404) {
     const text = await safeText(res);
+    // Server-issued problem+json carries a `code` field that distinguishes
+    // the three 404 sub-cases. Parsing it here lets us surface a clearer
+    // hint than the historical "not found — verify the agent is installed"
+    // catch-all (which left users staring at the message wondering whether
+    // their agent existed at all).
+    const errorCode = parseProblemCode(text);
+    if (errorCode === "agent_not_installed_in_app") {
+      throw new BundleFetchError(
+        "package_not_installed_in_app",
+        `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned application`,
+        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/applications/${input.appId}/packages -d '{"packageId":"${input.packageId}"}'`,
+      );
+    }
     if (/version/i.test(text) && input.spec) {
       throw new BundleFetchError(
         "version_not_found",
@@ -122,7 +136,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     throw new BundleFetchError(
       "package_not_found",
       `Package ${input.packageId} not found on ${host}`,
-      "Verify the agent is installed (or system) on the pinned application.",
+      "The agent does not exist in your organization catalog. Check the spelling or run `appstrate org list` to confirm you're pinned to the right org.",
     );
   }
   if (!res.ok) {
@@ -287,4 +301,24 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * Best-effort extraction of the `code` field from an RFC 9457
+ * `application/problem+json` body. Returns null when the body isn't JSON
+ * or the field is missing — callers fall back to the prior
+ * substring-matching heuristics.
+ */
+function parseProblemCode(body: string): string | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const code = (parsed as Record<string, unknown>)["code"];
+      if (typeof code === "string" && code.length > 0) return code;
+    }
+  } catch {
+    // not JSON — fall through
+  }
+  return null;
 }

@@ -19,7 +19,9 @@ import {
   listAccessiblePackages,
   updateInstalledPackage,
   getPackageConfig,
+  hasPackageAccess,
 } from "../services/application-packages.ts";
+import { getPackage } from "../services/agent-service.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -34,7 +36,7 @@ import {
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { z } from "zod";
-import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { buildBundleForAgentExport } from "../services/bundle-assembly.ts";
@@ -464,15 +466,45 @@ export function createAgentsRouter() {
 
   // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
   // (multi-package archive with pinned versions of every transitive dep).
+  //
+  // We deliberately don't use `requireAgent()` here: that middleware folds
+  // "doesn't exist in org" and "exists in org but not installed in app"
+  // into a single opaque 404. The CLI's run-by-id flow needs to tell the
+  // two cases apart so it can prompt the user to install rather than
+  // suggest the package is mistyped. Inline check below distinguishes
+  // them via `agent_not_installed_in_app`.
   router.get(
     "/:scope{@[^/]+}/:name/bundle",
     rateLimit(30),
-    requireAgent(),
     requirePermission("agents", "read"),
     async (c) => {
-      const agent = c.get("agent");
-      const scope = getAppScope(c);
+      const scopeParam = c.req.param("scope")!;
+      const nameParam = c.req.param("name")!;
+      const packageId = `${scopeParam}/${nameParam}`;
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId")!;
       const versionQuery = c.req.query("version") ?? null;
+
+      const agent = await getPackage(packageId, orgId);
+      if (!agent) {
+        throw new ApiError({
+          status: 404,
+          code: "agent_not_found",
+          title: "Agent Not Found",
+          detail: `Agent '${packageId}' not found in this organization`,
+        });
+      }
+      if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+        throw new ApiError({
+          status: 404,
+          code: "agent_not_installed_in_app",
+          title: "Agent Not Installed",
+          detail:
+            `Agent '${packageId}' exists in this organization but is not installed in application '${applicationId}'. ` +
+            `Install it via POST /api/applications/${applicationId}/packages, or pick a different application.`,
+        });
+      }
+      const scope = getAppScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes
