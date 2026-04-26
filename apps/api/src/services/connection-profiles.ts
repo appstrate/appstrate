@@ -443,6 +443,12 @@ export async function getDefaultProfileId(actor: Actor): Promise<string> {
  * Resolve actor profile context for an agent: default profile + per-provider overrides.
  * Used by runs, agent-detail, and internal (sidecar credential proxy) routes.
  *
+ * When `applicationId` is supplied for a member actor, the per-(member, application)
+ * sticky default — if set via `PUT /api/me/application-profile` — wins over the
+ * member's auto-created Default profile, mirroring the cascade in
+ * `credential-proxy.ts:resolveProfileId`. This keeps the dashboard preflight
+ * source field consistent with what the sidecar will actually use at run time.
+ *
  * When actor is null (e.g. sidecar with no user), pass fallbackProfileId to skip
  * ensureDefaultProfile and per-provider overrides.
  */
@@ -450,6 +456,7 @@ export async function resolveActorProfileContext(
   actor: Actor | null,
   packageId: string,
   fallbackProfileId: string | null = null,
+  applicationId?: string,
 ): Promise<{ defaultUserProfileId: string | null; userProviderOverrides: Record<string, string> }> {
   if (!actor) {
     return {
@@ -457,11 +464,16 @@ export async function resolveActorProfileContext(
       userProviderOverrides: {},
     };
   }
-  const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
+  const stickyPromise: Promise<string | null> =
+    actor.type === "member" && applicationId
+      ? getMemberApplicationProfileId(actor.id, applicationId)
+      : Promise.resolve(null);
+  const [sticky, fallback, userProviderOverrides] = await Promise.all([
+    stickyPromise,
     getDefaultProfileId(actor),
     getUserAgentProviderOverrides(actor, packageId),
   ]);
-  return { defaultUserProfileId, userProviderOverrides };
+  return { defaultUserProfileId: sticky ?? fallback, userProviderOverrides };
 }
 
 /**

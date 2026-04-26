@@ -15,6 +15,7 @@ import {
   getDefaultProfileId,
   resolveActorProfileContext,
   setUserAgentProviderOverride,
+  setMemberApplicationProfileId,
 } from "../../../src/services/connection-profiles.ts";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
@@ -312,6 +313,27 @@ describe("Run with provider profiles", () => {
 
       expect(ctx.defaultUserProfileId).toBe(fallbackId);
       expect(ctx.userProviderOverrides).toEqual({});
+    });
+
+    it("sticky default beats auto-created Default when applicationId is supplied", async () => {
+      // Mirrors the credential-proxy.ts:resolveProfileId cascade — sticky wins
+      // over the member's auto-created Default profile so dashboard preflight
+      // stays consistent with what the sidecar actually uses at run time.
+      const work = await seedConnectionProfile({ userId, name: "Work" });
+      const agent = await seedAgent({ id: "@testorg/sticky-agent", orgId, createdBy: userId });
+      await setMemberApplicationProfileId(userId, appId, work.id);
+
+      const ctx = await resolveActorProfileContext(actor, agent.id, null, appId);
+
+      expect(ctx.defaultUserProfileId).toBe(work.id);
+    });
+
+    it("falls back to auto-created Default when no sticky is set", async () => {
+      const agent = await seedAgent({ id: "@testorg/no-sticky", orgId, createdBy: userId });
+
+      const ctx = await resolveActorProfileContext(actor, agent.id, null, appId);
+
+      expect(ctx.defaultUserProfileId).toBe(defaultProfileId);
     });
   });
 

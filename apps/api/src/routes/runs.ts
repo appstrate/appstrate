@@ -279,7 +279,7 @@ export function createRunsRouter() {
       const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
         await Promise.all([
           getAgentAppProfile({ orgId, applicationId: c.get("applicationId")! }, packageId),
-          resolveActorProfileContext(actor, packageId),
+          resolveActorProfileContext(actor, packageId, null, c.get("applicationId")!),
           parseRequestInput(
             c,
             effectiveAgent.manifest.input?.schema

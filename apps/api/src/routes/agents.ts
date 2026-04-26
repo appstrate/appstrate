@@ -453,7 +453,7 @@ export function createAgentsRouter() {
       if (explicitProfileId && explicitProfileId.length > 0) {
         defaultUserProfileId = explicitProfileId;
       } else if (actor) {
-        const ctx = await resolveActorProfileContext(actor, agent.id);
+        const ctx = await resolveActorProfileContext(actor, agent.id, null, applicationId);
         defaultUserProfileId = ctx.defaultUserProfileId;
       }
 

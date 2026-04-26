@@ -164,8 +164,7 @@ function AppProfileSection({ packageId }: { packageId: string }) {
   const { data: appProfiles } = useAppProfiles();
   const { data: detail } = usePackageDetail("agent", packageId);
   const setAgentAppProfile = useSetAgentAppProfile(packageId);
-  if (!appProfiles || appProfiles.length === 0) return null;
-
+  const isEmpty = !appProfiles || appProfiles.length === 0;
   const currentAppProfileId = detail?.agentAppProfileId;
 
   return (
@@ -175,7 +174,7 @@ function AppProfileSection({ packageId }: { packageId: string }) {
         <Trans
           i18nKey="agents:detail.configAppProfileHint"
           components={{
-            link: (
+            pref: (
               <Link
                 to="/preferences/profiles"
                 className="text-primary underline-offset-2 hover:underline"
@@ -184,28 +183,44 @@ function AppProfileSection({ packageId }: { packageId: string }) {
           }}
         />
       </p>
-      <Select
-        value={currentAppProfileId ?? "__none__"}
-        onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
-        disabled={setAgentAppProfile.isPending}
-      >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
-          {appProfiles.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.name}
-              {p.bindingCount > 0 && (
-                <span className="text-muted-foreground ml-1">
-                  ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
-                </span>
-              )}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {isEmpty ? (
+        <p className="text-muted-foreground text-xs">
+          <Trans
+            i18nKey="agents:detail.configAppProfileEmpty"
+            components={{
+              admin: (
+                <Link
+                  to="/org-settings/app/profiles"
+                  className="text-primary underline-offset-2 hover:underline"
+                />
+              ),
+            }}
+          />
+        </p>
+      ) : (
+        <Select
+          value={currentAppProfileId ?? "__none__"}
+          onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
+          disabled={setAgentAppProfile.isPending}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
+            {appProfiles.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+                {p.bindingCount > 0 && (
+                  <span className="text-muted-foreground ml-1">
+                    ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
+                  </span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }
