@@ -19,7 +19,7 @@ import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { resolveSafePath } from "../../src/resolvers/provider-tool.ts";
+import { resolveSafeFile, resolveSafePath } from "../../src/resolvers/provider-tool.ts";
 import { ResolverError } from "../../src/errors.ts";
 
 // Real `/tmp` may not equal `tmpdir()` on macOS (`/var/folders/...`),
@@ -61,7 +61,7 @@ describe("resolveSafePath", () => {
         err = e;
       }
       expect(err).toBeInstanceOf(ResolverError);
-      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_WORKSPACE");
+      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS");
     });
 
     it("rejects empty / non-string paths", async () => {
@@ -122,7 +122,7 @@ describe("resolveSafePath", () => {
         err = e;
       }
       expect(err).toBeInstanceOf(ResolverError);
-      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_WORKSPACE");
+      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS");
     });
 
     it("error message names the offender, resolved path, and allowed roots", async () => {
@@ -159,7 +159,7 @@ describe("resolveSafePath", () => {
         err = e;
       }
       expect(err).toBeInstanceOf(ResolverError);
-      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_WORKSPACE");
+      expect((err as ResolverError).code).toBe("RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS");
       expect((err as ResolverError).message).toContain("symlink");
     });
 
@@ -176,5 +176,36 @@ describe("resolveSafePath", () => {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe("resolveSafeFile", () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = realpathSync(mkdtempSync(join(tmpdir(), "rsf-ws-")));
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("refuses to follow a broken symlink (resolveSafePath ENOENT-walks through it, lstat catches it)", async () => {
+    // A broken symlink (target doesn't exist) realpath-fails with ENOENT,
+    // so resolveSafePath returns the synthetic path. resolveSafeFile's
+    // lstat then sees the symlink itself and refuses — distinct from
+    // RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS, which fires for symlinks
+    // pointing at a target outside the roots.
+    const link = join(workspace, "broken");
+    symlinkSync("/nonexistent-target-xyz", link);
+
+    let err: unknown;
+    try {
+      await resolveSafeFile(workspace, "broken");
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ResolverError);
+    expect((err as ResolverError).code).toBe("RESOLVER_PATH_SYMLINK_REFUSED");
   });
 });

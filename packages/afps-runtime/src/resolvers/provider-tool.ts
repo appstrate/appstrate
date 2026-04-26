@@ -598,18 +598,31 @@ function providerToolName(providerId: string): string {
  * scratch directories the agent can legitimately write to before
  * uploading.
  *
- * `/tmp` is added because every agent that writes a file then uploads
- * it via `provider_call` defaults to `/tmp/output.xlsx` (Python
- * `tempfile`, bash `mktemp`, etc.). The agent container is isolated
+ * `/tmp` is included because every agent that writes a file then
+ * uploads it via `provider_call` defaults to `/tmp/output.xlsx` (Python
+ * `tempfile`, bash `mktemp`, …). The agent container is isolated
  * (per-run, no host bind-mount) and the sidecar — which performs the
  * actual upstream call — has no workspace mount, so the file is read
  * locally by the resolver running inside the agent. There is no
  * exfiltration path beyond what the workspace itself already exposes.
- *
- * Pure-relative paths still resolve under the workspace (unchanged) —
- * adding `/tmp` here only relaxes the absolute-path branch.
  */
 const ABSOLUTE_ALLOWED_ROOTS: readonly string[] = ["/tmp"];
+
+/**
+ * Realpath `p`, falling back to its lexical absolute form if the path
+ * doesn't exist. Used to canonicalize the allowed roots once at the
+ * start of every {@link resolveSafePath} call.
+ */
+async function realpathOrAbs(p: string): Promise<string> {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const abs = path.resolve(p);
+  try {
+    return await fs.realpath(abs);
+  } catch {
+    return abs;
+  }
+}
 
 /**
  * Canonicalize the workspace and {@link ABSOLUTE_ALLOWED_ROOTS} into a
@@ -617,40 +630,79 @@ const ABSOLUTE_ALLOWED_ROOTS: readonly string[] = ["/tmp"];
  * relative paths resolve under it.
  *
  * Realpath is required because on macOS `/tmp` is a symlink to
- * `/private/tmp`; a lexical-only check would treat resolved descendants
- * (which come back through realpath) as outside the allowed root.
+ * `/private/tmp`; a lexical-only comparison would treat resolved
+ * descendants (which come back through realpath) as outside the root.
  */
-async function canonicalizeAllowedRoots(workspace: string): Promise<string[]> {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
+async function getAllowedRoots(workspace: string): Promise<readonly string[]> {
+  const seen = new Set<string>();
   const out: string[] = [];
-  const push = (p: string) => {
-    if (!out.includes(p)) out.push(p);
-  };
-  const wsAbs = path.resolve(workspace);
-  try {
-    push(await fs.realpath(wsAbs));
-  } catch {
-    push(wsAbs);
-  }
-  for (const r of ABSOLUTE_ALLOWED_ROOTS) {
-    const abs = path.resolve(r);
-    try {
-      push(await fs.realpath(abs));
-    } catch {
-      push(abs);
+  for (const r of [workspace, ...ABSOLUTE_ALLOWED_ROOTS]) {
+    const real = await realpathOrAbs(r);
+    if (!seen.has(real)) {
+      seen.add(real);
+      out.push(real);
     }
   }
   return out;
 }
 
 function isUnderAnyRoot(candidate: string, roots: readonly string[], sep: string): boolean {
-  for (const root of roots) {
+  return roots.some((root) => {
     if (candidate === root) return true;
     const withSep = root.endsWith(sep) ? root : root + sep;
-    if (candidate.startsWith(withSep)) return true;
+    return candidate.startsWith(withSep);
+  });
+}
+
+/**
+ * Canonicalize an input path. Existing paths are realpathed end-to-end
+ * (so symlinks land at their true target); for non-existent paths the
+ * closest existing ancestor is realpathed and the unresolved suffix is
+ * reattached, so write-targets get the same canonical treatment.
+ *
+ * Returns `viaSymlink: true` when realpath resolved a different path
+ * than the lexical candidate — used by the caller for diagnostics only;
+ * authorization is decided by {@link isUnderAnyRoot} on `canonical`.
+ */
+async function canonicalizePath(candidate: string): Promise<{
+  canonical: string;
+  viaSymlink: boolean;
+}> {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  try {
+    const real = await fs.realpath(candidate);
+    return { canonical: real, viaSymlink: real !== candidate };
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code !== "ENOENT") throw err;
   }
-  return false;
+  // Walk up to the closest existing ancestor, realpath it, reattach
+  // the unresolved suffix.
+  let cursor = candidate;
+  let suffix = "";
+  while (true) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      // Fully synthetic chain (no existing ancestor) — `path.resolve`
+      // has already collapsed `..` segments, so the lexical form is
+      // already canonical for our purposes.
+      return { canonical: candidate, viaSymlink: false };
+    }
+    suffix = path.join(path.basename(cursor), suffix);
+    cursor = parent;
+    try {
+      const realParent = await fs.realpath(cursor);
+      return {
+        canonical: path.join(realParent, suffix),
+        viaSymlink: realParent !== cursor,
+      };
+    } catch (innerErr) {
+      const ie = innerErr as NodeJS.ErrnoException;
+      if (ie.code === "ENOENT") continue;
+      throw innerErr;
+    }
+  }
 }
 
 /**
@@ -662,11 +714,12 @@ function isUnderAnyRoot(candidate: string, roots: readonly string[], sep: string
  *  - Relative paths (e.g. `"output.xlsx"`) resolve under the workspace.
  *  - Absolute paths (e.g. `"/tmp/output.xlsx"`) are accepted only if
  *    they canonicalize under one of the allowed roots.
- *  - Parent-traversal (`"../etc/passwd"`) and symlink-escape (a path
- *    that exists but realpath-s outside every allowed root) are
- *    rejected in either case.
+ *  - Parent-traversal (`"../etc/passwd"`) is rejected: `path.resolve`
+ *    collapses `..` segments and the result trips the root check.
+ *  - Symlink escape (a path that exists but realpath-s outside every
+ *    allowed root) is rejected.
  *
- * Throws {@link ResolverError} with `RESOLVER_PATH_OUTSIDE_WORKSPACE`
+ * Throws {@link ResolverError} with `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS`
  * (or `RESOLVER_PATH_INVALID`) on violation. The error message names
  * the offending path, the resolved canonical path, and the allowed
  * roots so the agent can self-correct without trial and error.
@@ -683,61 +736,20 @@ export async function resolveSafePath(workspace: string, relative: string): Prom
     );
   }
   const path = await import("node:path");
-  const fs = await import("node:fs/promises");
-  const roots = await canonicalizeAllowedRoots(workspace);
-  const wsAbs = roots[0]!; // workspace is always position 0 — primary root for relative resolution
-  // Resolve the candidate in canonical form. `path.resolve` collapses
-  // any `..` segments before we ever touch the filesystem, so traversal
-  // attempts surface as candidates rooted outside the allowed roots.
+  const roots = await getAllowedRoots(workspace);
+  const wsRoot = roots[0]!;
   const candidate = path.isAbsolute(relative)
     ? path.resolve(relative)
-    : path.resolve(wsAbs, relative);
-  // Realpath-then-check: the canonical form survives macOS-style root
-  // symlinks (`/tmp` → `/private/tmp`) which a lexical-only comparison
-  // against the realpathed `roots` would reject. Symlink escapes still
-  // surface here — realpath of a malicious symlink lands outside every
-  // allowed root and trips `isUnderAnyRoot`.
-  let real: string;
-  let viaSymlink = false;
-  try {
-    real = await fs.realpath(candidate);
-    viaSymlink = real !== candidate;
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException;
-    if (e.code !== "ENOENT") throw err;
-    // ENOENT is fine — caller may be writing a new file. Walk up the
-    // directory chain looking for the closest existing ancestor,
-    // realpath that, and reattach the unresolved suffix.
-    let cursor = candidate;
-    let suffix = "";
-    let resolved: string | undefined;
-    while (true) {
-      const parent = path.dirname(cursor);
-      if (parent === cursor) break; // reached root
-      suffix = path.join(path.basename(cursor), suffix);
-      cursor = parent;
-      try {
-        const realParent = await fs.realpath(cursor);
-        resolved = path.join(realParent, suffix);
-        break;
-      } catch (innerErr) {
-        const ie = innerErr as NodeJS.ErrnoException;
-        if (ie.code === "ENOENT") continue;
-        throw innerErr;
-      }
-    }
-    // Fully synthetic chain (no existing ancestor) — fall back to the
-    // lexical candidate; it has already been collapsed by path.resolve.
-    real = resolved ?? candidate;
-  }
-  if (!isUnderAnyRoot(real, roots, path.sep)) {
+    : path.resolve(wsRoot, relative);
+  const { canonical, viaSymlink } = await canonicalizePath(candidate);
+  if (!isUnderAnyRoot(canonical, roots, path.sep)) {
     throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      formatOutsideRootsError(relative, real, roots, viaSymlink),
-      { workspace, relative, resolved: real, allowedRoots: roots },
+      "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
+      formatOutsideRootsError(relative, canonical, roots, viaSymlink),
+      { workspace, relative, resolved: canonical, allowedRoots: roots, viaSymlink },
     );
   }
-  return real;
+  return canonical;
 }
 
 function formatOutsideRootsError(
@@ -747,28 +759,30 @@ function formatOutsideRootsError(
   viaSymlink: boolean,
 ): string {
   const extraRoots = roots.slice(1).join(", ");
+  const suffix = extraRoots ? ` or an absolute path under ${extraRoots}` : "";
   return (
     `fromFile ${viaSymlink ? "resolves through a symlink to a target" : "resolved"} outside the allowed roots.\n` +
     `  got:      ${JSON.stringify(relative)}\n` +
     `  resolved: ${resolved}\n` +
     `  allowed:  ${roots.join(", ")}\n` +
-    `  hint:     pass a workspace-relative path (e.g. "output.xlsx")${extraRoots ? ` or an absolute path under ${extraRoots}` : ""}.`
+    `  hint:     pass a workspace-relative path (e.g. "output.xlsx")${suffix}.`
   );
 }
 
 /**
- * Resolve a workspace-relative OUTPUT path safely. Delegates workspace
- * rooting and traversal checks to {@link resolveSafePath}. Additionally
- * refuses to write through a pre-existing symlink at the destination —
- * guards against an attacker pre-placing a symlink to redirect writes
- * outside the workspace.
+ * Resolve an OUTPUT path safely. Delegates root-membership and
+ * traversal checks to {@link resolveSafePath}, then refuses to write
+ * through a pre-existing symlink at the destination — guards against an
+ * attacker pre-placing a symlink to redirect writes outside the
+ * destination dir.
  *
- * For a path that does not yet exist, the parent directory is checked.
  * ENOENT on the file itself is fine (we are creating it); any other
- * error is re-thrown.
+ * lstat error is re-thrown.
  *
- * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` on
- * traversal or symlink violation.
+ * Throws {@link ResolverError} with `RESOLVER_PATH_SYMLINK_REFUSED` for
+ * the symlink case, or `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS` /
+ * `RESOLVER_PATH_INVALID` for root violations propagated from
+ * {@link resolveSafePath}.
  */
 async function resolveSafeOutputPath(workspace: string, rel: string): Promise<string> {
   const absPath = await resolveSafePath(workspace, rel);
@@ -777,7 +791,7 @@ async function resolveSafeOutputPath(workspace: string, rel: string): Promise<st
     const stat = await fs.lstat(absPath);
     if (stat.isSymbolicLink()) {
       throw new ResolverError(
-        "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+        "RESOLVER_PATH_SYMLINK_REFUSED",
         `Refusing to write through symlink: ${rel}`,
         { workspace, rel, resolved: absPath },
       );
@@ -792,16 +806,18 @@ async function resolveSafeOutputPath(workspace: string, rel: string): Promise<st
 }
 
 /**
- * Resolve and stat a workspace-relative path in a single step, refusing
- * symlinks at the final path (in addition to the traversal check
- * performed by {@link resolveSafePath}).
+ * Resolve and stat a path in a single step, refusing symlinks at the
+ * final path (in addition to the root-membership check performed by
+ * {@link resolveSafePath}).
  *
- * Using a single helper eliminates the TOCTOU window that would exist if
- * callers independently called `resolveSafePath` then `lstat` — the stat
- * here is of the same resolved path returned by the function.
+ * Using a single helper eliminates the TOCTOU window that would exist
+ * if callers independently called `resolveSafePath` then `lstat` — the
+ * stat here is of the same resolved path returned by the function.
  *
- * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` when
- * the path is a symlink or escapes the workspace.
+ * Throws {@link ResolverError} with `RESOLVER_PATH_SYMLINK_REFUSED` for
+ * the symlink case, or `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS` /
+ * `RESOLVER_PATH_INVALID` for root violations propagated from
+ * {@link resolveSafePath}.
  */
 export async function resolveSafeFile(
   workspace: string,
@@ -811,11 +827,11 @@ export async function resolveSafeFile(
   const fs = await import("node:fs/promises");
   const stat = await fs.lstat(absPath);
   if (stat.isSymbolicLink()) {
-    throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `Refusing to follow symlink: ${rel}`,
-      { workspace, rel, resolved: absPath },
-    );
+    throw new ResolverError("RESOLVER_PATH_SYMLINK_REFUSED", `Refusing to follow symlink: ${rel}`, {
+      workspace,
+      rel,
+      resolved: absPath,
+    });
   }
   return { absPath, stat };
 }
