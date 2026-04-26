@@ -2,11 +2,12 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
+import { caretRange } from "@appstrate/core/semver";
 import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
@@ -18,6 +19,29 @@ export const updateSkillsSchema = z.object({
 export const updateToolsSchema = z.object({
   toolIds: z.array(z.string()).max(50),
 });
+
+/**
+ * Resolve each dep ID to its canonical caret range (`^X.Y.Z`) from the
+ * org/system catalog. IDs whose row is missing or whose draft manifest
+ * carries no version are dropped — better than persisting an
+ * unresolvable wildcard, and `requireMutableAgent` already ensures the
+ * caller intends a fresh deps section.
+ */
+async function resolveCaretRanges(orgId: string, ids: string[]): Promise<Record<string, string>> {
+  if (ids.length === 0) return {};
+  const rows = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(and(inArray(packages.id, ids), orgOrSystemFilter(orgId)));
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    const version = asRecord(row.draftManifest).version;
+    if (typeof version === "string") {
+      result[row.id] = caretRange(version);
+    }
+  }
+  return result;
+}
 
 /** Update a dep section (skills or tools) in the manifest. */
 async function updateManifestDeps(
@@ -35,9 +59,7 @@ async function updateManifestDeps(
 
   const manifest = asRecord(row.draftManifest);
   const deps = asRecord(manifest.dependencies);
-  const updated: Record<string, string> = {};
-  for (const id of ids) updated[id] = "*";
-  deps[depKey] = updated;
+  deps[depKey] = await resolveCaretRanges(orgId, ids);
   manifest.dependencies = deps;
 
   await db

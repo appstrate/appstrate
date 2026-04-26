@@ -153,13 +153,13 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
         providers: providerStatuses,
         skills: agent.skills.map((s) => ({
           id: s.id,
-          version: s.version ?? "*",
+          ...(s.version ? { version: s.version } : {}),
           ...(s.name ? { name: s.name } : {}),
           ...(s.description ? { description: s.description } : {}),
         })),
         tools: agent.tools.map((e) => ({
           id: e.id,
-          version: e.version ?? "*",
+          ...(e.version ? { version: e.version } : {}),
           ...(e.name ? { name: e.name } : {}),
           ...(e.description ? { description: e.description } : {}),
         })),

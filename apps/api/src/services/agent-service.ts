@@ -4,6 +4,7 @@ import { eq, and, count, sql, or, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
+import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -32,9 +33,15 @@ function mapDependencies(
     .filter((d) => d.type === type)
     .map((d) => {
       const m = parseDraftManifest(d.draftManifest);
+      // Manifest's declared range is the source of truth. If the
+      // manifest doesn't carry one for a dep that resolved (data
+      // inconsistency — extractDepsFromManifest reads the same
+      // section), fall back to caret-of-current so we never emit a
+      // bare wildcard. `m.version` is "0.0.0" only for malformed
+      // drafts, in which case the dep wouldn't load at runtime anyway.
       return {
         id: d.dependencyId,
-        version: versionMap[d.dependencyId] ?? "*",
+        version: versionMap[d.dependencyId] ?? caretRange(m.version ?? "0.0.0"),
         name: m.displayName ?? undefined,
         description: m.description ?? undefined,
       };

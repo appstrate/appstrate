@@ -90,8 +90,8 @@ describe("User Agents API", () => {
         .where(eq(packages.id, "@myorg/skills-agent"));
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
-      expect(deps.skills).toEqual({ "@myorg/skill-a": "*" });
-      // Tools should be preserved
+      expect(deps.skills).toEqual({ "@myorg/skill-a": "^1.0.0" });
+      // Tools should be preserved (left untouched by the skills PUT)
       expect(deps.tools).toEqual({ "@appstrate/log": "*" });
     });
 
@@ -185,8 +185,8 @@ describe("User Agents API", () => {
         .where(eq(packages.id, "@myorg/tools-agent"));
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
-      expect(deps.tools).toEqual({ "@myorg/tool-x": "*" });
-      // Skills should be preserved
+      expect(deps.tools).toEqual({ "@myorg/tool-x": "^1.0.0" });
+      // Skills should be preserved (left untouched by the tools PUT)
       expect(deps.skills).toEqual({ "@myorg/existing-skill": "*" });
     });
   });
