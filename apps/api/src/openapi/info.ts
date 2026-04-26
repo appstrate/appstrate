@@ -35,6 +35,11 @@ export const openApiInfo = {
     { name: "Providers", description: "Provider configuration (OAuth2, API key, etc.)" },
     { name: "API Keys", description: "API key management for programmatic access" },
     { name: "Packages", description: "Organization skills, tools, and package management" },
+    {
+      name: "Library",
+      description:
+        "Consolidated package catalog across an organization's applications (UI-oriented).",
+    },
     { name: "Notifications", description: "Run notification management" },
     { name: "Organizations", description: "Organization and member management" },
     { name: "Profile", description: "User profile management" },
