@@ -18,7 +18,9 @@ interface AdminCliSession extends CliSessionDisplay {
 }
 
 interface AdminCliSessionsResponse {
-  sessions: AdminCliSession[];
+  object: "list";
+  data: AdminCliSession[];
+  hasMore: boolean;
 }
 
 function memberLabel(s: AdminCliSession): string {
@@ -51,7 +53,7 @@ export function OrgSettingsCliSessionsPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const sessions = data?.sessions ?? [];
+  const sessions = data?.data ?? [];
 
   return (
     <>
