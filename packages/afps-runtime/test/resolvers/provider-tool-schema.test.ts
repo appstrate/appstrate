@@ -270,6 +270,153 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 });
 
+// ─── Multipart part header-injection guard ────────────────────────────────────
+//
+// `name`, `filename`, and `contentType` on multipart parts land verbatim in
+// part headers (`Content-Disposition`, `Content-Type`). Any CR / LF / NUL
+// byte would either inject extra headers or split the multipart envelope.
+// The schema rejects them at parse time so the transport layer never has
+// to think about it.
+
+describe("providerCallRequestSchema — multipart header-injection guard", () => {
+  const baseRequest = (
+    part: Record<string, unknown>,
+  ): Parameters<typeof providerCallRequestSchema.safeParse>[0] => ({
+    method: "POST",
+    target: "https://api.example.com/x",
+    body: { multipart: [part] },
+  });
+
+  for (const [label, char] of [
+    ["CR", "\r"],
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+    ["NUL", "\0"],
+  ] as const) {
+    it(`rejects ${label} in text part contentType`, () => {
+      const result = providerCallRequestSchema.safeParse(
+        baseRequest({
+          name: "metadata",
+          value: "{}",
+          contentType: `application/json${char}X-Injected: yes`,
+        }),
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it(`rejects ${label} in text part name`, () => {
+      const result = providerCallRequestSchema.safeParse(
+        baseRequest({ name: `field${char}X-Injected`, value: "v" }),
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it(`rejects ${label} in file part filename`, () => {
+      const result = providerCallRequestSchema.safeParse(
+        baseRequest({ name: "f", fromFile: "x.bin", filename: `a${char}b.bin` }),
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it(`rejects ${label} in file part contentType`, () => {
+      const result = providerCallRequestSchema.safeParse(
+        baseRequest({
+          name: "f",
+          fromFile: "x.bin",
+          contentType: `application/octet-stream${char}X-Injected: yes`,
+        }),
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it(`rejects ${label} in bytes part filename`, () => {
+      const result = providerCallRequestSchema.safeParse(
+        baseRequest({
+          name: "b",
+          fromBytes: "aGVsbG8=",
+          encoding: "base64",
+          filename: `evil${char}.bin`,
+        }),
+      );
+      expect(result.success).toBe(false);
+    });
+  }
+});
+
+// ─── Multipart part edge cases ────────────────────────────────────────────────
+
+describe("providerCallRequestSchema — multipart part edge cases", () => {
+  it("accepts empty-string contentType (treated as plain absent value at runtime)", () => {
+    // Empty string is structurally valid (no CR/LF/NUL) — the runtime path
+    // treats falsy `contentType` as "use the default". Documenting the
+    // boundary so a future tightening to `.min(1)` is an explicit decision,
+    // not a silent regression.
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: { multipart: [{ name: "f", value: "v", contentType: "" }] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts Unicode (emoji, CJK) in text part value", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: {
+        multipart: [{ name: "comment", value: "こんにちは 🌸 émoji" }],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts charset variations on contentType (UTF-8, utf-8, lower)", () => {
+    for (const ct of [
+      "application/json",
+      "application/json; charset=UTF-8",
+      "application/json; charset=utf-8",
+      "application/json;charset=UTF-8",
+      "text/plain; charset=ISO-8859-1",
+    ]) {
+      const result = providerCallRequestSchema.safeParse({
+        method: "POST",
+        target: "https://api.example.com/x",
+        body: { multipart: [{ name: "metadata", value: "{}", contentType: ct }] },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("accepts a very long contentType (4 KB) — no built-in length limit", () => {
+    const longCt = "application/json; charset=UTF-8; " + "x=".repeat(2000);
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: { multipart: [{ name: "metadata", value: "{}", contentType: longCt }] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects unknown keys on a text part (.strict() schema)", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: { multipart: [{ name: "f", value: "v", typo: "extra" }] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects unknown keys on a file part (.strict() schema)", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: { multipart: [{ name: "f", fromFile: "x.pdf", encoding: "base64" }] },
+    });
+    // `encoding` is not valid on file parts — only on bytes parts
+    expect(result.success).toBe(false);
+  });
+});
+
 // ─── execute() integration — ResolverError on invalid args ───────────────────
 
 describe("makeProviderTool execute() — validation errors surface as ResolverError", () => {

@@ -83,6 +83,68 @@ const ctxBase = (workspace: string) => ({
   emit: () => {},
 });
 
+/**
+ * One multipart part as it appears on the wire — headers and body
+ * separated. We can't use `Response.formData()` to verify per-part
+ * `Content-Type` because Bun's parser drops it whenever the part lacks a
+ * (non-empty) `filename` — and FormData always emits `filename=""` for
+ * Blob-wrapped text parts, which is exactly the Drive metadata case.
+ */
+interface ParsedPart {
+  name: string;
+  filename?: string;
+  contentType?: string;
+  body: string;
+}
+
+/**
+ * Parse the captured `provider_call` multipart body back into structured
+ * parts. The MCP transport receives the body as base64'd bytes plus a
+ * `Content-Type: multipart/form-data; boundary=…` header; we extract the
+ * boundary from the header, split on it, and walk each chunk's headers
+ * once. Header values are matched case-insensitively so the assertions
+ * do not encode runtime-specific casing (Bun lowercases `charset=utf-8`,
+ * other runtimes preserve the caller's casing).
+ */
+function parseMultipartCapture(captured: Captured): ParsedPart[] {
+  const arg = captured.arguments as {
+    headers?: Record<string, string>;
+    body?: { fromBytes: string; encoding: string };
+  };
+  const ct = arg.headers?.["Content-Type"];
+  if (!ct) throw new Error("captured arguments missing Content-Type header");
+  const boundaryMatch = ct.match(/boundary=([^;]+)/);
+  if (!boundaryMatch) throw new Error(`could not extract boundary from "${ct}"`);
+  const boundary = `--${boundaryMatch[1]!.trim()}`;
+  const wire = Buffer.from(arg.body!.fromBytes, "base64").toString("utf-8");
+  const parts: ParsedPart[] = [];
+  for (const chunk of wire.split(boundary)) {
+    const trimmed = chunk.replace(/^\r\n/, "").replace(/\r\n$/, "");
+    if (!trimmed || trimmed === "--" || trimmed === "--\r\n") continue;
+    const sep = trimmed.indexOf("\r\n\r\n");
+    if (sep < 0) continue;
+    const rawHeaders = trimmed.slice(0, sep);
+    const body = trimmed.slice(sep + 4);
+    const headers = new Map<string, string>();
+    for (const line of rawHeaders.split("\r\n")) {
+      const colon = line.indexOf(":");
+      if (colon < 0) continue;
+      headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+    }
+    const cd = headers.get("content-disposition") ?? "";
+    const name = cd.match(/name="([^"]*)"/)?.[1];
+    if (!name) continue;
+    const filenameMatch = cd.match(/filename="([^"]*)"/);
+    parts.push({
+      name,
+      filename: filenameMatch ? filenameMatch[1] : undefined,
+      contentType: headers.get("content-type"),
+      body,
+    });
+  }
+  return parts;
+}
+
 describe("McpProviderResolver — body forwarding", () => {
   it("forwards a string body verbatim over MCP", async () => {
     const { pair, mcp, captured } = await makeServer({});
@@ -223,7 +285,10 @@ describe("McpProviderResolver — body forwarding", () => {
     // Drive multipart upload requires the metadata part to carry
     // `Content-Type: application/json`. The text part schema accepts an
     // optional `contentType` so callers do not have to base64-encode the
-    // JSON via `fromBytes` just to set the part header.
+    // JSON via `fromBytes` just to set the part header. We assert via the
+    // platform's standard multipart parser (`Response.formData()`) rather
+    // than regex so the test does not encode FormData's serialization
+    // quirks (whitespace, charset case, stub `filename=""` on Blobs…).
     const { pair, mcp, captured } = await makeServer({});
     try {
       const resolver = new McpProviderResolver(mcp);
@@ -256,22 +321,22 @@ describe("McpProviderResolver — body forwarding", () => {
         ctxBase(workspace),
       );
 
-      const arg = captured.arguments as {
-        body?: { fromBytes: string; encoding: string };
-      };
-      const decoded = Buffer.from(arg.body!.fromBytes, "base64").toString("utf-8");
-      // Metadata text part carries the requested JSON content-type instead
-      // of FormData's default `text/plain`. Bun's FormData lowercases the
-      // charset value and adds a stub `filename=""` for Blob-wrapped
-      // values — Drive's resumable upload tolerates both.
-      expect(decoded).toMatch(
-        /name="metadata"[^\r\n]*\r\nContent-Type: application\/json; charset=utf-8/i,
+      const parts = parseMultipartCapture(captured);
+      const metadata = parts.find((p) => p.name === "metadata");
+      const media = parts.find((p) => p.name === "media");
+      expect(metadata).toBeDefined();
+      expect(media).toBeDefined();
+
+      // Drive needs the JSON content-type on metadata. We compare on the
+      // lowercased media-type + parameters tuple so the assertion does not
+      // depend on the runtime's preferred casing of `charset=utf-8`.
+      expect(metadata!.contentType?.toLowerCase()).toBe("application/json; charset=utf-8");
+      expect(metadata!.body).toBe('{"name":"file.xlsx"}');
+      expect(media!.contentType).toBe(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
-      expect(decoded).toContain('{"name":"file.xlsx"}');
-      // File part still carries its own content-type alongside.
-      expect(decoded).toMatch(
-        /name="media"; filename="out\.xlsx"[\s\S]*?Content-Type: application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/,
-      );
+      expect(media!.filename).toBe("out.xlsx");
+      expect(media!.body).toBe("binary-bytes");
     } finally {
       await pair.close();
     }
@@ -279,8 +344,9 @@ describe("McpProviderResolver — body forwarding", () => {
 
   it("omits Content-Type on a multipart text part when contentType is not set", async () => {
     // Backwards-compat: existing callers that pass `{ name, value }` without
-    // contentType continue to get FormData's plain-string serialization (no
-    // explicit `Content-Type` part header — server defaults to `text/plain`).
+    // contentType continue to get FormData's plain-string serialization
+    // (no explicit `Content-Type` part header — server defaults to
+    // `text/plain`). The parser surfaces the value as a string, not a Blob.
     const { pair, mcp, captured } = await makeServer({});
     try {
       const resolver = new McpProviderResolver(mcp);
@@ -299,15 +365,11 @@ describe("McpProviderResolver — body forwarding", () => {
         ctxBase(workspace),
       );
 
-      const arg = captured.arguments as {
-        body?: { fromBytes: string; encoding: string };
-      };
-      const decoded = Buffer.from(arg.body!.fromBytes, "base64").toString("utf-8");
-      // Neither the value nor the surrounding part should carry an
-      // explicit Content-Type when none was requested.
-      const partRegion = decoded.match(/name="field"[\s\S]*?--/);
-      expect(partRegion).not.toBeNull();
-      expect(partRegion![0]).not.toContain("Content-Type:");
+      const parts = parseMultipartCapture(captured);
+      const field = parts.find((p) => p.name === "field");
+      expect(field).toBeDefined();
+      expect(field!.contentType).toBeUndefined();
+      expect(field!.body).toBe("plain");
     } finally {
       await pair.close();
     }
