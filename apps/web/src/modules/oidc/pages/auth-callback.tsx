@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
 import { refreshAuth } from "../../../hooks/use-auth";
+import { authStore } from "../../../stores/auth-store";
 import { Spinner } from "../../../components/spinner";
 
 /**
@@ -43,6 +44,18 @@ export function AuthCallbackPage() {
         const { redirectTo } = await handleOidcCallback();
         // Sync auth state — the BA session cookie is now active
         await refreshAuth();
+        // `refreshAuth` swallows server failures and clears the auth
+        // store on its own (the silent-redirect-loop bug used to start
+        // here). Verify the resync actually established a user before
+        // navigating — otherwise `<App>` re-renders unauthenticated,
+        // the catch-all bounces to `/login`, the OIDC flow restarts,
+        // and we are back here in a tight loop with no error UI.
+        if (!authStore.getState().user) {
+          setError(
+            "Authentication did not complete — the session could not be established. Please sign in again.",
+          );
+          return;
+        }
         // Server-rendered pages outside the SPA (e.g. `/activate` for
         // the CLI device-flow consent) need a real browser navigation
         // — React Router's `navigate()` would push history but the SPA

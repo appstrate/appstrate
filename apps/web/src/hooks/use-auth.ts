@@ -48,12 +48,30 @@ async function syncAuth() {
   if (result.data?.user) {
     const profile = await fetchProfile();
     if (!profile) {
-      await authClient.signOut();
+      await authClient.signOut().catch(() => {});
       clearAuth();
       return;
     }
     setAuthenticatedUser(result.data.user, profile);
   } else {
+    // No active session. The browser may still be carrying a stale BA
+    // cookie (signature invalid after `BETTER_AUTH_SECRET` rotation, session
+    // row gone after a redeploy, partition / domain mismatch from a config
+    // change, …). BA's `/get-session` returns null silently in that case
+    // *without* clearing the bad cookie, so it would keep re-arriving on
+    // every request and the user would bounce between `/login` and
+    // `/auth/callback` forever with no surfaceable error.
+    //
+    // `signOut()` deterministically tells the server to emit
+    // `Set-Cookie: …; Max-Age=0` for every BA cookie it knows about,
+    // matching the original Path/Domain/Partitioned so the browser
+    // actually drops them. The cost is one extra HTTP round-trip on a
+    // cold session-less load — acceptable for the recovery guarantee.
+    await authClient.signOut().catch(() => {
+      // Best-effort: a failing signOut (network blip, already-cleared
+      // cookie) must not strand the user. `clearAuth` below still resets
+      // the SPA store so the login flow restarts cleanly.
+    });
     clearAuth();
   }
 }
