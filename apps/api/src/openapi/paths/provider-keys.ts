@@ -20,15 +20,20 @@ export const providerKeysPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  keys: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgProviderKey" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                keys: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "cm7stu901",
                     label: "OpenAI Production",

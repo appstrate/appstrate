@@ -20,15 +20,20 @@ export const organizationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  organizations: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/Organization" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                organizations: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Acme Corp",

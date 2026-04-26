@@ -73,14 +73,14 @@ export function createAppProfilesRouter() {
     const scope = getAppScope(c);
     const userId = c.get("user").id;
     const profiles = await listAppProfilesWithUserBindings(scope, userId);
-    return c.json({ profiles });
+    return c.json(listResponse(profiles));
   });
 
   // GET /api/app-profiles — list app profiles
   router.get("/", async (c) => {
     const scope = getAppScope(c);
     const profiles = await listAppProfiles(scope);
-    return c.json({ profiles });
+    return c.json(listResponse(profiles));
   });
 
   // POST /api/app-profiles — create an app profile
@@ -240,7 +240,7 @@ export function createAppProfilesRouter() {
     const connections = rawConnections.map(
       ({ credentialsEncrypted: _ce, providerCredentialId: _pc, expiresAt: _ex, ...c }) => c,
     );
-    return c.json({ connections });
+    return c.json(listResponse(connections));
   });
 
   return router;

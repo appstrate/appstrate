@@ -26,12 +26,14 @@ export interface Org {
 }
 
 interface ListResponse {
-  organizations: Org[];
+  object: "list";
+  data: Org[];
+  hasMore: boolean;
 }
 
 export async function listOrgs(profileName: string): Promise<Org[]> {
   const res = await apiFetch<ListResponse>(profileName, "/api/orgs");
-  return Array.isArray(res.organizations) ? res.organizations : [];
+  return Array.isArray(res.data) ? res.data : [];
 }
 
 export interface CreateOrgInput {

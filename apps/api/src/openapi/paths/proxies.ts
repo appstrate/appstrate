@@ -19,15 +19,20 @@ export const proxiesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  proxies: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgProxy" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                proxies: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "cm6pqr678",
                     label: "US Residential Proxy",

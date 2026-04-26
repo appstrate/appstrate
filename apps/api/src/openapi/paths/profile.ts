@@ -114,15 +114,20 @@ export const profilePaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  profiles: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/ProfileBatchItem" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                profiles: [
+                object: "list",
+                hasMore: false,
+                data: [
                   { id: "usr_abc123", displayName: "Alice Martin" },
                   { id: "usr_def456", displayName: "Bob Dupont" },
                 ],

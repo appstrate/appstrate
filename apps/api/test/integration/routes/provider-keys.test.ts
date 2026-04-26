@@ -23,7 +23,7 @@ describe("Provider Keys API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.keys).toBeArray();
+      expect(body.data).toBeArray();
       // May include system provider keys loaded at boot — just verify shape
     });
 
@@ -111,7 +111,7 @@ describe("Provider Keys API", () => {
         headers: authHeaders(ctx),
       });
       const body = (await listRes.json()) as any;
-      const found = body.keys.find((k: { id: string }) => k.id === id);
+      const found = body.data.find((k: { id: string }) => k.id === id);
       expect(found).toBeUndefined();
     });
   });

@@ -292,8 +292,8 @@ describe("Multi-tenancy isolation", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { profiles: { id: string }[] };
-      const returnedIds = body.profiles.map((p) => p.id);
+      const body = (await res.json()) as { data: { id: string }[] };
+      const returnedIds = body.data.map((p) => p.id);
       expect(returnedIds).toContain(orgA.user.id);
       expect(returnedIds).not.toContain(orgB.user.id);
     });

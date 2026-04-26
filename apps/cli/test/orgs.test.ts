@@ -101,9 +101,9 @@ describe("listOrgs", () => {
       expect(url).toBe("https://app.example.com/api/orgs");
       return new Response(
         JSON.stringify({
-          organizations: [
-            { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
-          ],
+          object: "list",
+          hasMore: false,
+          data: [{ id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" }],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -118,7 +118,7 @@ describe("listOrgs", () => {
     await seedAuth();
     installFetch(
       async () =>
-        new Response(JSON.stringify({ organizations: [] }), {
+        new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),

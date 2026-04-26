@@ -160,8 +160,10 @@ export const appProfilesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  profiles: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -181,10 +183,13 @@ export const appProfilesPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                profiles: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     profile: {
                       id: "550e8400-e29b-41d4-a716-446655440030",
@@ -224,8 +229,10 @@ export const appProfilesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  profiles: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -239,10 +246,13 @@ export const appProfilesPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                profiles: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "550e8400-e29b-41d4-a716-446655440030",
                     name: "Shared Production",
@@ -540,8 +550,10 @@ export const appProfilesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  connections: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -556,6 +568,7 @@ export const appProfilesPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

@@ -2,6 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import type { UserConnectionProviderGroup, AvailableProvider } from "@appstrate/shared-types";
+import { listResponse, type ListResponse } from "../../lib/list-response.ts";
 import { eq, inArray } from "drizzle-orm";
 import {
   userProviderConnections,
@@ -75,7 +76,7 @@ export async function getAvailableProvidersWithStatus(
 
 export async function listAllActorConnections(
   actor: Actor,
-): Promise<{ providers: UserConnectionProviderGroup[] }> {
+): Promise<ListResponse<UserConnectionProviderGroup>> {
   // Fetch all actor connections across ALL apps, joining through
   // applicationProviderCredentials → applications to get app context.
   // The preferences page needs to show "Gmail (App A)" vs "Gmail (App B)".
@@ -106,7 +107,7 @@ export async function listAllActorConnections(
       }),
     );
 
-  if (rows.length === 0) return { providers: [] };
+  if (rows.length === 0) return listResponse([]);
 
   // Fetch org names
   const userOrgs =
@@ -195,5 +196,5 @@ export async function listAllActorConnections(
     });
   }
 
-  return { providers };
+  return listResponse(providers);
 }

@@ -35,7 +35,7 @@ describe("Providers API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.providers).toBeArray();
+      expect(body.data).toBeArray();
       expect(body.callbackUrl).toBeString();
     });
 
@@ -79,7 +79,7 @@ describe("Providers API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const found = body.providers.find((p: { id: string }) => p.id === "@provorg/my-provider");
+      const found = body.data.find((p: { id: string }) => p.id === "@provorg/my-provider");
       expect(found).toBeDefined();
     });
 
@@ -104,9 +104,7 @@ describe("Providers API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.providers.find(
-        (p: { id: string }) => p.id === "@otherorg/secret-provider",
-      );
+      const leaked = body.data.find((p: { id: string }) => p.id === "@otherorg/secret-provider");
       expect(leaked).toBeUndefined();
     });
 

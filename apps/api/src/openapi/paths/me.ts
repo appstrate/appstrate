@@ -34,8 +34,10 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  orgs: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -54,10 +56,13 @@ export const mePaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                orgs: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "org_abc123",
                     name: "Acme Corp",
@@ -95,11 +100,14 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  models: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgModel" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel } from "../services/model-registry.ts";
@@ -73,7 +74,7 @@ export function createModelsRouter() {
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
-    return c.json({ models });
+    return c.json(listResponse(models));
   });
 
   // POST /api/models — create a custom model
@@ -153,7 +154,7 @@ export function createModelsRouter() {
       const rawModels = json?.data;
 
       if (!Array.isArray(rawModels)) {
-        return c.json({ models: [] });
+        return c.json(listResponse<unknown>([]));
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,7 +200,7 @@ export function createModelsRouter() {
       // Limit results
       models = models.slice(0, 50);
 
-      return c.json({ models });
+      return c.json(listResponse(models));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       if (err instanceof DOMException && err.name === "TimeoutError") {

@@ -195,7 +195,7 @@ export function PreferencesConnectorsPage() {
   >(null);
 
   const providers = useMemo(
-    () => filterProviders(userConns?.providers, filterProfileId),
+    () => filterProviders(userConns, filterProfileId),
     [userConns, filterProfileId],
   );
 

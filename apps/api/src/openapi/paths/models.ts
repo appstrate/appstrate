@@ -19,15 +19,20 @@ export const modelsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  models: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgModel" },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                models: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "gpt-4o",
                     label: "GPT-4o",
@@ -209,8 +214,10 @@ export const modelsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  models: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -237,10 +244,13 @@ export const modelsPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
               example: {
-                models: [
+                object: "list",
+                hasMore: false,
+                data: [
                   {
                     id: "anthropic/claude-sonnet-4",
                     name: "Claude Sonnet 4",
