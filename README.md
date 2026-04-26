@@ -195,7 +195,7 @@ appstrate/
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
-│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, llm_complete, recall_memory)
+│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, recall_memory)
 │
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint + Zod ↔ spec + Code ⊆ Spec)
 ```
@@ -243,9 +243,9 @@ Agents inside the sandboxed container interact with the platform exclusively thr
 
 - `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy for connected services.
 - `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
-- `llm_complete(...)` — platform-configured LLM passthrough exposed as a tool (sub-agent flows).
+- `recall_memory({ q?, limit? })` — search the agent's archive memories written via the `note(content)` system tool.
 
-The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
+The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
 
 ### API Documentation
 

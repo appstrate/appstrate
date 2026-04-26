@@ -96,7 +96,7 @@ appstrate/
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK (313 MB slim, OCI-labelled)
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents → POST /api/runs/:runId/events
-│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, llm_complete, recall_memory) on /mcp + ALL /llm/* passthrough
+│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, recall_memory) on /mcp + ALL /llm/* passthrough
 │
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
@@ -150,7 +150,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |            │  - Exposes /mcp (JSON-RPC, stateless)       │
      |            │    - provider_call: credential injection    │
      |            │    - run_history                            │
-     |            │    - llm_complete                           │
+     |            │    - recall_memory                          │
      |            │  - ExtraHosts → host.docker.internal        │
      |            ├─────────────────────────────────────────────┤
      |            │  Agent Container (Pi Coding Agent, Bun)     │
@@ -282,13 +282,12 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 
 - **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `runToken`, `platformApiUrl`, `proxyUrl`), then connects it to the run network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
-- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool by `runtime-pi/extensions/mcp-direct.ts`. The agent LLM only ever sees four tools — `provider_call`, `run_history`, `recall_memory`, `llm_complete` — and never sees the sidecar URL.
+- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool by `runtime-pi/extensions/mcp-direct.ts`. The agent LLM only ever sees three tools — `provider_call`, `run_history`, `recall_memory` — and never sees the sidecar URL.
   - `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy. The `providerId` enum is sourced from `dependencies.providers[]` on the bundle manifest. Tool description, schema, and execution are all served by the sidecar's MCP `tools/call` handler, which delegates to `executeProviderCall` (the same pure helper that used to back the retired HTTP `/proxy` route).
   - `run_history({ limit?, fields? })` — recent past-run metadata. Dispatched to the sidecar's MCP handler, which reads from the platform's internal run-history endpoint via the per-run token.
   - `recall_memory({ query?, limit? })` — search the agent's memory archive (rows in `package_persistence` written via the `note(content)` system tool). Same MCP path; scoped to the caller's actor.
-  - `llm_complete(...)` — platform-configured LLM passthrough. Same MCP path; the sidecar holds the LLM provider key, the agent never sees it.
   - **Zero-knowledge enforcement**: after the MCP client connects, `runtime-pi/entrypoint.ts` runs `delete process.env.SIDECAR_URL`, so even the Pi bash extension cannot discover the sidecar's existence. The legacy `curl $SIDECAR_URL/…` bash pattern is fully retired — no prompt path documents it anymore.
-- The sidecar exposes `/mcp` (Streamable HTTP, stateless, per-request transport) as the agent's MCP entrypoint, alongside `/health`, `/configure`, and `ALL /llm/*`. The legacy `/proxy` and `/run-history` HTTP routes were retired with the 2-6 cleanup. `/llm/*` is intentionally kept: the in-container Pi SDK calls `${MODEL_BASE_URL}/v1/chat/completions` and consumes the upstream stream natively, so the placeholder-substituting reverse proxy is load-bearing for primary chat completions. The MCP `llm_complete` tool coexists for sub-agent flows where the agent itself wants to invoke a completion as a tool call.
+- The sidecar exposes `/mcp` (Streamable HTTP, stateless, per-request transport) as the agent's MCP entrypoint, alongside `/health`, `/configure`, and `ALL /llm/*`. The legacy `/proxy` and `/run-history` HTTP routes were retired with the 2-6 cleanup. `/llm/*` is intentionally kept: the in-container Pi SDK calls `${MODEL_BASE_URL}/v1/chat/completions` and consumes the upstream stream natively, so the placeholder-substituting reverse proxy is load-bearing for primary chat completions. There is no MCP-side completion tool — sub-agent flows are handled by spawning a separate run via the platform API (each sub-task = a first-class run with its own logs, status, cost, RBAC scope, providers, and skills).
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `substituteBody: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: agent-supplied `proxyUrl` arg → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
