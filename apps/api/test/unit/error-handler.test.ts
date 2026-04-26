@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
+import { setCookie, deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../../src/types/index.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
@@ -296,6 +297,36 @@ describe("errorHandler middleware", () => {
     const res = await app.request("/test");
     const body = (await res.json()) as any;
     expect(body.type).toBe("https://docs.appstrate.dev/errors/invalid-foo-bar");
+  });
+
+  it("preserves Set-Cookie headers attached before the throw", async () => {
+    // Regression guard: the auth pipeline calls Hono `deleteCookie`/`setCookie`
+    // on the bare context to bury a stale BA cookie, then throws an
+    // ApiError. The error handler builds a fresh Response and used to
+    // discard everything on `c.res` — which silently lost the cookie clear
+    // and let the SPA loop forever between `/login` and `/auth/callback`.
+    const app = createApp();
+    app.get("/test", (c) => {
+      // Two distinct cookies — a real-world auth pipeline would clear
+      // multiple BA cookie names (session_token, session_data, …).
+      deleteCookie(c, "better-auth.session_token", { path: "/" });
+      setCookie(c, "another-cookie", "x", { path: "/", maxAge: 0 });
+      throw unauthorized("Invalid or missing session");
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(401);
+    const native = (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.();
+    const setCookies = native ?? [res.headers.get("set-cookie") ?? ""].filter(Boolean);
+    expect(setCookies.length).toBeGreaterThanOrEqual(2);
+    expect(
+      setCookies.some(
+        (c: string) => /better-auth\.session_token=/i.test(c) && /Max-Age=0/i.test(c),
+      ),
+    ).toBe(true);
+    expect(setCookies.some((c: string) => /another-cookie=/i.test(c) && /Max-Age=0/i.test(c))).toBe(
+      true,
+    );
   });
 
   it("requestId in body matches Request-Id header", async () => {

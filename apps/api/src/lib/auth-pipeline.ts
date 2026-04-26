@@ -28,6 +28,7 @@ import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
+import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
@@ -182,6 +183,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // Fallback: cookie session
     const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
     if (!session?.user) {
+      // Bury the stale BA cookie before bouncing the request. Without this,
+      // a cookie left behind by a redeploy (rotated `BETTER_AUTH_SECRET`,
+      // wiped `session` rows, …) keeps re-arriving on every subsequent
+      // request and the SPA loops between `/login` and `/auth/callback`
+      // with no surfaceable error.
+      clearStaleAuthCookies(c);
       throw unauthorized("Invalid or missing session");
     }
 
