@@ -42,10 +42,16 @@ export const runsPaths = {
                   description:
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
                 },
+                config: {
+                  type: "object",
+                  description:
+                    "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` clears an inherited value, missing keys fall through. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
+                },
               },
             },
             example: {
               input: { message: "Summarize my latest emails" },
+              config: { dryRun: true },
             },
           },
           "multipart/form-data": {

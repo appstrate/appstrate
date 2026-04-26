@@ -64,3 +64,48 @@ export function validateConfig(
   }));
   return { valid: false, errors };
 }
+
+// ---------------------------------------------------------------------------
+// Per-run config override merge
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursive merge of two configs. The override wins at every leaf, but
+ * plain-object children are merged recursively so siblings the caller
+ * did not mention pass through. Arrays are replaced wholesale (treated
+ * as atomic values). `null` in the override clears the inherited leaf;
+ * `undefined` is skipped.
+ *
+ * Single source of truth for both the platform run pipeline (when a
+ * client passes `config` in the run body to override the persisted
+ * `application_packages.config`) and the CLI's local PiRunner path
+ * (which merges `--config <json>` over the same persisted state). The
+ * shared function guarantees byte-identical resolution of the same
+ * `(persisted, override)` pair regardless of who computes the merge —
+ * mirrors the OpenAI Assistants `runs.create { instructions, model,
+ * tools }` and Argo Workflows `submitOptions.parameters` SOTA, where
+ * the merge logic lives once and every client reaches the same answer.
+ *
+ * Pure: never mutates either argument; always returns a new object.
+ */
+export function deepMergeConfig(
+  base: Record<string, unknown>,
+  override: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!override) return { ...base };
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    const baseValue = out[key];
+    if (isPlainObject(value) && isPlainObject(baseValue)) {
+      out[key] = deepMergeConfig(baseValue, value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

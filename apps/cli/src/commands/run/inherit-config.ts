@@ -21,6 +21,9 @@
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
+import { deepMergeConfig } from "@appstrate/core/schema-validation";
+
+export { deepMergeConfig };
 
 /**
  * Wire shape returned by the run-config endpoint. The canonical type
@@ -155,36 +158,4 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     requiredProviders: inherited?.requiredProviders ?? [],
     inherited: inherited !== null,
   };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Recursive merge of two configs. The override wins at every leaf,
- * but plain-object children are merged recursively so siblings the
- * user did not mention pass through. Arrays are replaced (atomic).
- * `undefined` keys in the override are skipped — to clear an
- * inherited value, pass an explicit `null`.
- *
- * Exported so tests can exercise the merge rules directly without
- * spinning up the rest of the cascade.
- */
-export function deepMergeConfig(
-  base: Record<string, unknown>,
-  override: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  if (!override) return { ...base };
-  const out: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(override)) {
-    if (value === undefined) continue;
-    const baseValue = out[key];
-    if (isPlainObject(value) && isPlainObject(baseValue)) {
-      out[key] = deepMergeConfig(baseValue, value);
-    } else {
-      out[key] = value;
-    }
-  }
-  return out;
 }

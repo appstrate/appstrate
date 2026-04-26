@@ -24,6 +24,7 @@ import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
@@ -306,7 +307,16 @@ export function createRunsRouter() {
         uploadedFiles,
         modelId: modelIdOverride,
         proxyId: proxyIdOverride,
+        configOverride,
       } = inputResult;
+
+      // Deep-merge any per-run `config` override on top of the persisted
+      // application config. SOTA pattern (OpenAI Assistants, Argo
+      // Workflows): the merge happens server-side via the same
+      // `deepMergeConfig` shared with the CLI's local-run path, so every
+      // client reaches an identical resolved config for the same
+      // `(persisted, override)` pair.
+      const mergedConfig = configOverride ? deepMergeConfig(config, configOverride) : config;
 
       // Single canonical prefix — `run_` — shared with inline + remote
       // origins. The legacy `exec_` prefix was a platform-only relic from
@@ -330,7 +340,7 @@ export function createRunsRouter() {
         actor,
         input: parsedInput,
         files: fileRefs,
-        config,
+        config: mergedConfig,
         modelId: modelIdOverride ?? preflightModelId,
         proxyId: proxyIdOverride ?? preflightProxyId,
         overrideVersionLabel,

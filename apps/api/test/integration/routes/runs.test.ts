@@ -108,6 +108,26 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("rejects a non-object `config` body field with 400 invalid_request", async () => {
+      // The route accepts an optional `config: Record<string, unknown>`
+      // override that is deep-merged with the persisted per-app
+      // config. Anything that isn't a JSON object (array, string,
+      // number) must be refused before the merge runs — the SOTA
+      // contract (OpenAI Assistants `runs.create`) is "object or
+      // omitted, never any other shape".
+      await seedAgentWithInput();
+
+      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: "a@b.c" }, config: ["not", "an", "object"] }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("config");
+    });
   });
 
   // ─── GET /api/agents/:scope/:name/runs ─────────────────────
