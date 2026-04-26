@@ -30,6 +30,7 @@ import {
   removeUserAgentProviderOverride,
   getUserAgentProviderOverrides,
   getAccessibleProfile,
+  resolveActorProfileContext,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { z } from "zod";
@@ -39,6 +40,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { buildBundleForAgentExport } from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { resolveAgentReadiness } from "../services/agent-readiness.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
@@ -406,6 +408,57 @@ export function createAgentsRouter() {
       }
 
       return c.json({ memoriesDeleted, checkpointDeleted });
+    },
+  );
+
+  // GET /api/agents/:scope/:name/readiness — preflight inspector
+  // Returns the unsatisfied provider list under the given profile context
+  // (default or explicit `connectionProfileId` + per-provider overrides).
+  // Used by the CLI to decide whether to prompt the user to open the
+  // browser and connect missing providers before triggering a run.
+  router.get(
+    "/:scope{@[^/]+}/:name/readiness",
+    requireAgent(),
+    requirePermission("agents", "read"),
+    async (c) => {
+      const agent = c.get("agent");
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+
+      const explicitProfileId = c.req.query("connectionProfileId");
+      const queryEntries = Object.entries(c.req.query());
+      // `providerProfile.<id>=<uuid>` — flatten to a Record<string,string>
+      // for the readiness resolver. Unknown / malformed entries are
+      // ignored; the resolver narrows to known providers anyway.
+      const perProviderOverrides: Record<string, string> = {};
+      for (const [key, value] of queryEntries) {
+        if (!key.startsWith("providerProfile.")) continue;
+        const providerId = key.slice("providerProfile.".length);
+        if (providerId && typeof value === "string" && value.length > 0) {
+          perProviderOverrides[providerId] = value;
+        }
+      }
+
+      // Default profile id: explicit override → actor's default → app
+      // profile. Mirrors the run pipeline's actor → app cascade so the
+      // preflight + run paths agree on the answer.
+      let defaultUserProfileId: string | null = null;
+      if (explicitProfileId && explicitProfileId.length > 0) {
+        defaultUserProfileId = explicitProfileId;
+      } else if (actor) {
+        const ctx = await resolveActorProfileContext(actor, agent.id);
+        defaultUserProfileId = ctx.defaultUserProfileId;
+      }
+
+      const report = await resolveAgentReadiness({
+        agent,
+        applicationId,
+        orgId,
+        defaultUserProfileId,
+        perProviderOverrides,
+      });
+      return c.json(report);
     },
   );
 

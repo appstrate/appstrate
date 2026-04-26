@@ -76,6 +76,7 @@ import {
   resolveConnectionProfileSelection,
   ConnectionProfileResolutionError,
 } from "./run/connection-profiles.ts";
+import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -137,6 +138,10 @@ export interface RunCommandOptions {
    * everything else. Mirrors the dashboard's per-agent override surface.
    */
   providerProfile?: string[];
+  /** Skip the readiness preflight entirely (CI mode). */
+  noPreflight?: boolean;
+  /** Override the preflight polling timeout. Default 5 minutes. */
+  preflightTimeout?: number;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -222,6 +227,39 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       : target;
   const bundlePath = await resolveBundlePath(bundleTarget, opts, resolverInputs);
   const bundle = await readBundleFromFile(bundlePath);
+
+  // ─── 3.5 Preflight readiness ─────────────────────────────────────
+  // Only meaningful when the user is running an agent by id against a
+  // remote instance — in path-mode there's no platform handle, and in
+  // local/none provider modes there are no credentials to be ready
+  // about. The check itself reuses the same dependency-validation
+  // machinery the run pipeline uses, so the answer is in lockstep with
+  // what the run would actually do.
+  if (
+    target.kind === "id" &&
+    resolverInputs &&
+    "bearerToken" in resolverInputs &&
+    !opts.noPreflight
+  ) {
+    await preflightCheck({
+      instance: resolverInputs.instance,
+      bearerToken: resolverInputs.bearerToken,
+      appId: resolverInputs.appId,
+      orgId: resolverInputs.orgId,
+      scope: target.scope,
+      name: target.name,
+      ...(connectionSelection?.connectionProfileId
+        ? { connectionProfileId: connectionSelection.connectionProfileId }
+        : {}),
+      ...(connectionSelection?.providerProfileOverrides &&
+      Object.keys(connectionSelection.providerProfileOverrides).length > 0
+        ? { perProviderOverrides: connectionSelection.providerProfileOverrides }
+        : {}),
+      json: opts.json === true,
+      skip: false,
+      ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
+    });
+  }
 
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, resolverInputs);
@@ -821,6 +859,7 @@ export {
   BundleFetchError,
   RunConfigFetchError,
   ConnectionProfileResolutionError,
+  PreflightAbortError,
 };
 
 /**

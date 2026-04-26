@@ -812,6 +812,83 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/readiness": {
+    get: {
+      operationId: "getAgentReadiness",
+      tags: ["Agents"],
+      summary: "Preflight provider readiness for an agent",
+      description:
+        "Returns `{ ready, missing[] }` describing which provider connections are unsatisfied for this agent under the given profile context. The CLI uses this before triggering a run to decide whether to prompt the user to open the browser and connect missing providers; the dashboard can use it to surface live readiness status. Reuses the same resolution logic the run pipeline applies, so the preflight answer is in lockstep with what the run would actually do.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          in: "query",
+          name: "connectionProfileId",
+          required: false,
+          description:
+            "Override the default profile lookup with an explicit profile UUID. When unset, the route falls back to the caller's actor default (mirrors the run pipeline).",
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Readiness report",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["ready", "missing"],
+                properties: {
+                  ready: { type: "boolean" },
+                  missing: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["providerId", "profileId", "reason", "message"],
+                      properties: {
+                        providerId: { type: "string" },
+                        profileId: { type: ["string", "null"], format: "uuid" },
+                        reason: {
+                          type: "string",
+                          enum: [
+                            "no_connection",
+                            "needs_reconnection",
+                            "scope_insufficient",
+                            "provider_not_enabled",
+                          ],
+                        },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+              example: {
+                ready: false,
+                missing: [
+                  {
+                    providerId: "@afps/gmail",
+                    profileId: "550e8400-e29b-41d4-a716-446655440010",
+                    reason: "no_connection",
+                    message: "Provider '@afps/gmail' is not connected",
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/agents/{scope}/{name}/bundle": {
     get: {
       operationId: "exportAgentBundle",

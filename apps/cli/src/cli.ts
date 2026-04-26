@@ -789,6 +789,15 @@ program
     collect,
     [],
   )
+  .option(
+    "--no-preflight",
+    "Skip the connections-readiness preflight (CI mode; fails fast on missing connections).",
+  )
+  .option(
+    "--preflight-timeout <seconds>",
+    "Maximum seconds to wait for connections during the preflight polling loop (default 300).",
+    parsePreflightTimeout,
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -829,6 +838,10 @@ program
             ? opts.cp
             : undefined,
       providerProfile: Array.isArray(opts.providerProfile) ? opts.providerProfile : undefined,
+      // commander maps `--no-preflight` to `opts.preflight === false`.
+      noPreflight: opts.preflight === false,
+      preflightTimeout:
+        typeof opts.preflightTimeout === "number" ? opts.preflightTimeout : undefined,
     });
   });
 
@@ -842,6 +855,16 @@ function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
   if (typeof raw !== "string") return undefined;
   if (raw === "abort" || raw === "console") return raw;
   throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
+}
+
+function parsePreflightTimeout(raw: unknown): number {
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `Invalid --preflight-timeout "${raw}" (expected a positive integer number of seconds)`,
+    );
+  }
+  return n;
 }
 
 function parseSinkTtl(raw: unknown): number | undefined {
