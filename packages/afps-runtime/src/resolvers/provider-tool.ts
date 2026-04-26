@@ -105,26 +105,64 @@ const fromBytesBodySchema = z.object({
   encoding: z.literal("base64"),
 });
 
-const multipartTextPartSchema = z.object({
-  name: z.string(),
-  value: z.string(),
-  contentType: z.string().optional(),
+// Multipart part header fields (`name`, `filename`, `contentType`) are
+// emitted verbatim into the part headers (`Content-Disposition`,
+// `Content-Type`). A CR, LF, or NUL byte in any of them would let a
+// caller inject arbitrary headers — or split the multipart envelope —
+// from purely text input. Reject these eagerly at the schema layer so
+// the transport never has to think about it.
+const headerSafeString = z.string().refine((s) => !/[\r\n\0]/.test(s), {
+  message: "Must not contain CR, LF, or NUL characters",
 });
 
-const multipartFilePartSchema = z.object({
-  name: z.string(),
-  fromFile: z.string().describe("Workspace-relative path to a file"),
-  filename: z.string().optional(),
-  contentType: z.string().optional(),
-});
+const multipartTextPartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    value: z.string().describe("UTF-8 string value for this field"),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part (e.g. `application/json; charset=UTF-8`). " +
+          "When omitted, FormData defaults to `text/plain` with no explicit part header. " +
+          "Required for upload patterns where the server inspects per-part Content-Type, " +
+          "such as Google Drive's multipart resumable upload metadata part.",
+      ),
+  })
+  .strict();
 
-const multipartBytesPartSchema = z.object({
-  name: z.string(),
-  fromBytes: z.string().describe("Base64-encoded part bytes (standard RFC 4648 §4 only)"),
-  encoding: z.literal("base64"),
-  filename: z.string().optional(),
-  contentType: z.string().optional(),
-});
+const multipartFilePartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    fromFile: z.string().describe("Workspace-relative path to a file"),
+    filename: headerSafeString
+      .optional()
+      .describe(
+        "Optional override for the `filename` attribute in `Content-Disposition`. " +
+          "Defaults to the basename of `fromFile`.",
+      ),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part. Defaults to `application/octet-stream`.",
+      ),
+  })
+  .strict();
+
+const multipartBytesPartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    fromBytes: z.string().describe("Base64-encoded part bytes (standard RFC 4648 §4 only)"),
+    encoding: z.literal("base64"),
+    filename: headerSafeString
+      .optional()
+      .describe("Optional `filename` attribute for `Content-Disposition`."),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part. Defaults to `application/octet-stream`.",
+      ),
+  })
+  .strict();
 
 const multipartPartSchema = z.union([
   multipartTextPartSchema,
