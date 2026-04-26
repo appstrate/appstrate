@@ -4,10 +4,10 @@ You are an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, …) and a h
 
 ## Mental model
 
-Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth — 191 endpoints documented in OpenAPI 3.1. The `appstrate` CLI is a thin, authenticated wrapper around that API:
+Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth — 258 endpoints documented in OpenAPI 3.1. The `appstrate` CLI is a thin, authenticated wrapper around that API:
 
 - **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-App-Id` from the OS keyring; you never see the bearer.
-- **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the 191 endpoints without dumping the whole spec into your context window.
+- **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the 258 endpoints without dumping the whole spec into your context window.
 - **`appstrate org`** — pin which organization the profile targets (`X-Org-Id`).
 - **`appstrate app`** — pin which application the profile targets (`X-App-Id`). Required for app-scoped routes (agents, runs, schedules, …).
 - **`appstrate login` / `logout` / `whoami` / `token`** — session management.

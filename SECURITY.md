@@ -232,6 +232,22 @@ The platform API (`/internal/credentials/:providerId`) enforces additional contr
 - **Provider must be declared** — the requested `providerId` must appear as a key in the agent's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
 - **Access is logged** — every credential fetch is recorded with run ID, provider ID, and agent ID
 
+### Credential encryption at rest
+
+Credentials are stored in PostgreSQL using a **versioned envelope** that encodes the active key id alongside the AES-256-GCM payload:
+
+```
+v1:<kid>:<base64(iv ‖ authTag ‖ ciphertext)>
+```
+
+- `CONNECTION_ENCRYPTION_KEY` — 32-byte (base64) primary key used for new ciphertexts.
+- `CONNECTION_ENCRYPTION_KEY_ID` — kid embedded into newly-encrypted blobs (default `k1`, `/^[A-Za-z0-9_-]{1,32}$/`). Stable across deploys; only flip when promoting a freshly-rotated key.
+- `CONNECTION_ENCRYPTION_KEYS` — JSON map `{ kid: base64-32B-key }` of retired keys held for **decrypt-only** during a rotation window.
+
+**Rotation playbook**: add the new key to `CONNECTION_ENCRYPTION_KEYS` under a fresh kid → flip `CONNECTION_ENCRYPTION_KEY_ID` and replace `CONNECTION_ENCRYPTION_KEY` with the new value → restart → wait for backfill (re-encrypt on read or batch sweep) → drop the retired kid from `CONNECTION_ENCRYPTION_KEYS`. The legacy v0 raw-base64 envelope has been retired entirely (#288).
+
+The same versioning approach guards the sink secrets that authenticate remote runners (`runs.sink_secret_encrypted`).
+
 ### Why not pass credentials as environment variables?
 
 Environment variables are the most common credential delivery mechanism in containerized systems. Appstrate intentionally does **not** use them because:
@@ -616,14 +632,14 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 ### NIST SP 800-53 Rev 5 — Security Controls
 
-| Control                                     | Implementation                                                                         |
-| ------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **AC-3** Access Enforcement                 | Application-level org-scoped queries, cookie session auth, org membership verification |
-| **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering                                 |
-| **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards                     |
-| **AU-3** Content of Audit Records           | Structured JSON logging with run context                                               |
-| **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                                       |
-| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (application-level isolation)      |
+| Control                                     | Implementation                                                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **AC-3** Access Enforcement                 | Application-level org-scoped queries, cookie session auth, org membership verification                                        |
+| **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering                                                                        |
+| **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards                                                            |
+| **AU-3** Content of Audit Records           | Structured JSON logging with run context                                                                                      |
+| **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                                                                              |
+| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (versioned `v1:<kid>:<base64>` envelope + multi-key keyring for rotation) |
 
 ### CIS Docker Benchmark v1.8.0
 

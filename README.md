@@ -46,7 +46,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 249 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 258 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
@@ -81,7 +81,7 @@ See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and
 
 ## Control from coding agents
 
-The `appstrate` CLI is a first-class control plane for AI coding agents — Claude Code, Cursor, Codex, Gemini CLI, etc. Agents never see a raw bearer: the CLI injects `Authorization: Bearer …` + `X-Org-Id` from the OS keyring on every call, and the OpenAPI schema is explorable at human scale so the agent can discover the 191 endpoints on demand instead of flooding its context with the full spec.
+The `appstrate` CLI is a first-class control plane for AI coding agents — Claude Code, Cursor, Codex, Gemini CLI, etc. Agents never see a raw bearer: the CLI injects `Authorization: Bearer …` + `X-Org-Id` from the OS keyring on every call, and the OpenAPI schema is explorable at human scale so the agent can discover the 258 endpoints on demand instead of flooding its context with the full spec.
 
 ```sh
 # 1. Authenticate once — RFC 8628 device flow, tokens land in the OS keyring
@@ -167,9 +167,12 @@ appstrate/
 ├── apps/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
-│   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (249 endpoints)
+│   │   ├── modules/          # Built-in modules (oidc, webhooks) — owned schemas + routes
+│   │   ├── services/         # Business logic, Docker, adapters, scheduler
+│   │   ├── openapi/          # OpenAPI 3.1 spec (258 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireAgent)
+│   │
+│   ├── cli/                  # @appstrate/cli — channel-aware install + self-update + doctor
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
 │       ├── pages/            # Route pages (React Router v7)
@@ -179,38 +182,43 @@ appstrate/
 │
 ├── packages/
 │   ├── core/                 # @appstrate/core — shared validation, storage, utilities
-│   ├── db/                   # @appstrate/db — Drizzle ORM (31 tables, 5 enums) + Better Auth
+│   ├── ui/                   # @appstrate/ui — React components (schema-form, widgets)
+│   ├── afps-runtime/         # @appstrate/afps-runtime — portable AFPS bundle runner + signing + conformance
+│   ├── mcp-transport/        # @appstrate/mcp-transport — MCP SDK adapter (sidecar tools surface)
+│   ├── db/                   # @appstrate/db — Drizzle ORM + Better Auth
+│   ├── emails/               # @appstrate/emails — email template registry + cloud override
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
+│   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
-├── system-packages/           # System package ZIPs (providers, skills, extensions, agents — loaded at boot)
+├── system-packages/           # System package ZIPs (providers, skills, tools, agents — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
-│   ├── entrypoint.ts         # SDK session → JSON lines on stdout
-│   └── sidecar/server.ts     # Credential-isolating HTTP proxy
+│   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
+│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, llm_complete, recall_memory)
 │
-└── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint)
+└── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint + Zod ↔ spec + Code ⊆ Spec)
 ```
 
 ## API Overview
 
-The API is organized into 28 route domains with 249 documented endpoints:
+The API is organized into 30+ route domains with 258 documented endpoints:
 
 | Domain                  | Description                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- |
 | **Auth**                | Better Auth email/password + cookie sessions                                                            |
-| **Agents**              | Agent CRUD, config, skills/extensions binding, versions                                                 |
-| **Runs**                | Run agents, list runs, logs, cancel                                                                     |
-| **Realtime**            | SSE streams for run monitoring                                                                          |
+| **Agents**              | Agent CRUD, config, skills/tools binding, versions, bundle export                                       |
+| **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension     |
+| **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                            |
 | **Schedules**           | Cron-based agent scheduling                                                                             |
 | **Connections**         | OAuth2/API key service connections                                                                      |
 | **Connection Profiles** | Shared connection sets across agents                                                                    |
-| **Providers**           | Provider package configuration (OAuth2, API key, custom)                                                |
+| **Providers**           | Provider package configuration (OAuth2, OAuth1, API key, basic, custom)                                 |
 | **Provider Keys**       | Org-level LLM provider API key management                                                               |
 | **Proxies**             | Org-level and agent-level HTTP proxy config                                                             |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                                                                    |
-| **Packages**            | Organization skills/extensions CRUD, import, publish                                                    |
+| **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning     |
+| **Library**             | Consolidated package list with per-app install state                                                    |
 | **Notifications**       | Run notification management                                                                             |
 | **Organizations**       | Org CRUD, members, invitations                                                                          |
 | **Profile**             | User profile management                                                                                 |
@@ -222,11 +230,22 @@ The API is organized into 28 route domains with 249 documented endpoints:
 | **Health**              | Health check                                                                                            |
 | **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users |
 | **App Profiles**        | Application-scoped connection profile management                                                        |
-| **End-Users**           | External end-user management for headless API                                                           |
-| **Webhooks**            | Run event webhooks with HMAC signing                                                                    |
-| **Credential Proxy**    | Server-side credential injection for external runners (CLI, GitHub Action)                              |
+| **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)    |
+| **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                |
+| **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)              |
 | **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                  |
 | **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                             |
+| **CLI Sessions**        | OIDC module — admin oversight of CLI sessions per org (`cli-sessions` RBAC resource)                    |
+
+### Agent runtime — MCP-only
+
+Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. Three first-party tools cover every cross-boundary capability:
+
+- `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy for connected services.
+- `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
+- `llm_complete(...)` — platform-configured LLM passthrough exposed as a tool (sub-agent flows).
+
+The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
 
 ### API Documentation
 
@@ -260,41 +279,73 @@ Browser (React SPA)              Platform (Bun + Hono :3000)
 
 All variables are listed in `.env.example` with dev-ready defaults. The authoritative validation source is `packages/env/src/index.ts` (Zod schema).
 
-| Variable                    | Required | Default                                       | Description                                                        |
-| --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. Absent = PGlite (embedded)                  |
-| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                             |
-| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials                       |
-| `REDIS_URL`                 | No       | —                                             | Redis connection. Absent = in-memory adapters (single-instance)    |
-| `S3_BUCKET`                 | No       | —                                             | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)         |
-| `S3_REGION`                 | No       | —                                             | S3 region. Required when `S3_BUCKET` is set                        |
-| `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)          |
-| `PGLITE_DATA_DIR`           | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)         |
-| `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
-| `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
-| `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
-| `PORT`                      | No       | `3000`                                        | Server port                                                        |
-| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                                                 |
-| `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches host (fallback: `host.docker.internal:{PORT}`) |
-| `SYSTEM_PROVIDER_KEYS`      | No       | `[]`                                          | JSON array of system provider keys with nested models              |
-| `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                             |
-| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers                         |
-| `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
-| `RUN_ADAPTER`               | No       | `process`                                     | Execution backend: `docker` or `process`                           |
-| `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
-| `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
-| `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |
-| `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy                                 |
-| `COOKIE_DOMAIN`             | No       | —                                             | Cookie domain for cross-subdomain auth                             |
-| `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in)                    |
-| `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                         |
-| `GITHUB_CLIENT_ID`          | No       | —                                             | GitHub OAuth App client ID (enables GitHub sign-in)                |
-| `GITHUB_CLIENT_SECRET`      | No       | —                                             | GitHub OAuth App client secret                                     |
-| `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification)                      |
-| `SMTP_PORT`                 | No       | `587`                                         | SMTP server port                                                   |
-| `SMTP_USER`                 | No       | —                                             | SMTP authentication username                                       |
-| `SMTP_PASS`                 | No       | —                                             | SMTP authentication password                                       |
-| `SMTP_FROM`                 | No       | —                                             | Sender email address for verification emails                       |
+| Variable                              | Required | Default                                       | Description                                                                                           |
+| ------------------------------------- | -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                        | No       | —                                             | PostgreSQL connection. Absent = PGlite (embedded)                                                     |
+| `BETTER_AUTH_SECRET`                  | Yes      | —                                             | Session signing secret                                                                                |
+| `BETTER_AUTH_ACTIVE_KID`              | No       | `k1`                                          | Active key id for cookies/HMACs WE sign (rotation support)                                            |
+| `BETTER_AUTH_SECRETS`                 | No       | `{}`                                          | JSON map `{ kid: secret }` — verifier accepts every kid present (rotation window)                     |
+| `UPLOAD_SIGNING_SECRET`               | Yes      | —                                             | HMAC secret for FS upload-sink tokens (rotates independently of `BETTER_AUTH_SECRET`)                 |
+| `CONNECTION_ENCRYPTION_KEY`           | Yes      | —                                             | 32 bytes base64 — primary key for v1 credential envelope                                              |
+| `CONNECTION_ENCRYPTION_KEY_ID`        | No       | `k1`                                          | Active kid embedded in newly-encrypted credential blobs (must match `/^[A-Za-z0-9_-]{1,32}$/`)        |
+| `CONNECTION_ENCRYPTION_KEYS`          | No       | `{}`                                          | JSON map `{ kid: base64-32B-key }` — retired keys held for decrypt-only during rotation window        |
+| `REDIS_URL`                           | No       | —                                             | Redis connection. Absent = in-memory adapters (single-instance)                                       |
+| `S3_BUCKET`                           | No       | —                                             | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)                                            |
+| `S3_REGION`                           | No       | —                                             | S3 region. Required when `S3_BUCKET` is set                                                           |
+| `S3_ENDPOINT`                         | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                                                     |
+| `S3_PUBLIC_ENDPOINT`                  | No       | —                                             | Browser-facing S3 endpoint for presigned URLs (falls back to `S3_ENDPOINT`)                           |
+| `FS_STORAGE_PATH`                     | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)                                             |
+| `PGLITE_DATA_DIR`                     | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)                                            |
+| `RUN_TOKEN_SECRET`                    | No       | —                                             | Run token signing secret                                                                              |
+| `APP_URL`                             | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                        |
+| `TRUSTED_ORIGINS`                     | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                                                        |
+| `TRUST_PROXY`                         | No       | `false`                                       | `false` (XFF ignored) \| `true` (1 hop) \| `N` trusted proxy hops — critical for per-IP rate limiters |
+| `PORT`                                | No       | `3000`                                        | Server port                                                                                           |
+| `NODE_ENV`                            | No       | `development`                                 | `development` \| `production` \| `test` — gates production-only invariants (e.g. APP_URL https)       |
+| `API_BODY_LIMIT_BYTES`                | No       | `10485760`                                    | Global request body cap (Hono `bodyLimit` middleware)                                                 |
+| `MODULES`                             | No       | `oidc,webhooks`                               | Comma-separated module specifiers loaded at boot                                                      |
+| `DOCKER_SOCKET`                       | No       | `/var/run/docker.sock`                        | Docker socket path                                                                                    |
+| `PLATFORM_API_URL`                    | No       | —                                             | How sidecar reaches host (fallback: Docker bridge auto-detection / `host.docker.internal:{PORT}`)     |
+| `SYSTEM_PROVIDER_KEYS`                | No       | `[]`                                          | JSON array of system provider keys with nested models                                                 |
+| `SYSTEM_PROXIES`                      | No       | `[]`                                          | JSON array of system proxy definitions                                                                |
+| `PROXY_URL`                           | No       | —                                             | Outbound HTTP proxy for sidecar containers                                                            |
+| `LOG_LEVEL`                           | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                                                                |
+| `RUN_ADAPTER`                         | No       | `process`                                     | Execution backend: `docker` or `process`                                                              |
+| `SIDECAR_POOL_SIZE`                   | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                                                          |
+| `SIDECAR_MAX_REQUEST_BODY_BYTES`      | No       | `10485760` (10 MB)                            | Sidecar inbound POST size cap (hard ceiling 100 MB; loud-fail at boot if invalid)                     |
+| `SIDECAR_MAX_MCP_ENVELOPE_BYTES`      | No       | `16777216` (16 MB)                            | MCP envelope cap, sized for base64 inflation                                                          |
+| `PI_IMAGE`                            | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (slim — 313 MB)                                                 |
+| `SIDECAR_IMAGE`                       | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy                                                                    |
+| `COOKIE_DOMAIN`                       | No       | —                                             | Cookie domain for cross-subdomain auth                                                                |
+| `GOOGLE_CLIENT_ID`                    | No       | —                                             | Google OAuth client ID (enables Google sign-in)                                                       |
+| `GOOGLE_CLIENT_SECRET`                | No       | —                                             | Google OAuth client secret                                                                            |
+| `GITHUB_CLIENT_ID`                    | No       | —                                             | GitHub OAuth App client ID (enables GitHub sign-in)                                                   |
+| `GITHUB_CLIENT_SECRET`                | No       | —                                             | GitHub OAuth App client secret                                                                        |
+| `SMTP_HOST`                           | No       | —                                             | SMTP server host (enables email verification)                                                         |
+| `SMTP_PORT`                           | No       | `587`                                         | SMTP server port                                                                                      |
+| `SMTP_USER`                           | No       | —                                             | SMTP authentication username                                                                          |
+| `SMTP_PASS`                           | No       | —                                             | SMTP authentication password                                                                          |
+| `SMTP_FROM`                           | No       | —                                             | Sender email address for verification emails                                                          |
+| `LEGAL_TERMS_URL`                     | No       | —                                             | Footer link to terms (optional)                                                                       |
+| `LEGAL_PRIVACY_URL`                   | No       | —                                             | Footer link to privacy policy (optional)                                                              |
+| `AUTH_DISABLE_SIGNUP`                 | No       | `false`                                       | Closed mode — block account creation (3 exceptions: pending invite, platform admin, bootstrap owner)  |
+| `AUTH_DISABLE_ORG_CREATION`           | No       | `false`                                       | Restrict `POST /api/orgs` to platform admins; org-less users see "waiting for invitation"             |
+| `AUTH_PLATFORM_ADMIN_EMAILS`          | No       | `""`                                          | Comma-separated email allowlist of platform-level admins (bypasses signup/org disable)                |
+| `AUTH_ALLOWED_SIGNUP_DOMAINS`         | No       | `""`                                          | Comma-separated email domain allowlist (case-insensitive)                                             |
+| `AUTH_BOOTSTRAP_OWNER_EMAIL`          | No       | `""`                                          | Auto-create root org with this user as owner on first signup (idempotent)                             |
+| `AUTH_BOOTSTRAP_ORG_NAME`             | No       | `Default`                                     | Display name of the bootstrap org                                                                     |
+| `AFPS_TRUST_ROOT`                     | No       | `[]`                                          | JSON array of trusted publishers for `.afps-bundle` Ed25519 signature verification                    |
+| `AFPS_SIGNATURE_POLICY`               | No       | `off`                                         | `off` \| `warn` \| `required` — bundle signature enforcement at load                                  |
+| `OIDC_INSTANCE_CLIENTS`               | No       | `[]`                                          | JSON array of instance-level OAuth clients (admin dashboards, satellite apps) — reconciled at boot    |
+| `PLATFORM_RUN_LIMITS`                 | No       | `{}`                                          | JSON caps applied to EVERY run (timeout ceiling, per-org rate, max concurrent)                        |
+| `INLINE_RUN_LIMITS`                   | No       | `{}`                                          | JSON caps for `POST /api/runs/inline` (manifest size, prompt size, skill/tool counts, retention)      |
+| `REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS` | No       | `7200`                                        | Default sink TTL when caller doesn't request one                                                      |
+| `REMOTE_RUN_SINK_MAX_TTL_SECONDS`     | No       | `86400`                                       | Hard ceiling on caller-requested sink TTL                                                             |
+| `REMOTE_RUN_REPLAY_WINDOW_SECONDS`    | No       | `600`                                         | Redis dedup window for webhook-id replay detection                                                    |
+| `REMOTE_RUN_BUFFER_FLUSH_MS`          | No       | `5000`                                        | Out-of-order event buffer flush window (terminal events flush immediately)                            |
+| `RUN_HEARTBEAT_INTERVAL_SECONDS`      | No       | `30`                                          | Runner-side heartbeat cadence                                                                         |
+| `RUN_STALL_THRESHOLD_SECONDS`         | No       | `120`                                         | Watchdog stall threshold (rule of thumb: ≥ 3 × heartbeat interval)                                    |
+| `RUN_WATCHDOG_INTERVAL_SECONDS`       | No       | `30`                                          | Watchdog sweep interval                                                                               |
 
 ## Development
 

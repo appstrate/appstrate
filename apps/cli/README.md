@@ -139,15 +139,57 @@ Revokes the active session server-side (`POST /api/auth/sign-out`) and wipes the
 ```sh
 appstrate logout
 appstrate logout --profile prod
+appstrate logout --all                # nukes every CLI session (every device)
 ```
 
 **Flags**
 
-| Flag              | Values | Description                                   |
-| ----------------- | ------ | --------------------------------------------- |
-| `-p`, `--profile` | name   | Profile to log out from (default: `default`). |
+| Flag              | Values | Description                                                                                                                           |
+| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `-p`, `--profile` | name   | Profile to log out from (default: `default`).                                                                                         |
+| `--all`           | —      | Revokes every CLI refresh-token family server-side via `POST /api/auth/cli/sessions/revoke-all`. Use after suspecting key compromise. |
 
 If the instance is unreachable, local credentials are still wiped (with a warning on stderr) so the CLI returns to a clean state even during outages.
+
+The dashboard's **Devices** preferences page (and `GET /api/auth/cli/sessions`) lets you revoke individual sessions. Org admins can revoke any member's CLI sessions via `GET/DELETE /api/orgs/:orgId/cli-sessions[/:familyId]` (requires the `cli-sessions:read|delete` RBAC grant — owners + admins by default).
+
+---
+
+### `appstrate self-update`
+
+Channel-aware in-place upgrade. The binary stamps its install source at build time (`__APPSTRATE_INSTALL_SOURCE__`), so `self-update` knows whether it was installed via curl, Bun, or bunx and dispatches accordingly.
+
+```sh
+appstrate self-update                 # update to latest stable
+appstrate self-update --release v1.2.3
+appstrate self-update --force         # bypass version-equality short-circuit
+```
+
+| Flag              | Values  | Description                                   |
+| ----------------- | ------- | --------------------------------------------- |
+| `--release <tag>` | git tag | Pin the upgrade to a specific release.        |
+| `-f`, `--force`   | —       | Re-install even if already on target version. |
+
+- **curl channel** — downloads the new binary, verifies minisign + SHA-256, and atomically replaces `~/.local/bin/appstrate`.
+- **bun channel** — refuses to overwrite, prints the matching `bun update -g @appstrate/cli` invocation.
+- **unknown channel** — emits diagnostic instructions.
+
+Channel matrix and recipes: [`docs/cli/upgrades.md`](../../docs/cli/upgrades.md).
+
+---
+
+### `appstrate doctor`
+
+Diagnoses the local install: detects every `appstrate` on `$PATH`, deduplicates by realpath, prints version + channel + binary location for each. Use when `which -a appstrate` returns multiple results or when `self-update` reports an unexpected channel.
+
+```sh
+appstrate doctor                      # human-readable report
+appstrate doctor --json               # machine-readable (for scripts / CI)
+```
+
+If a dual install is detected (e.g. curl-installed binary shadowed by a Bun-global one), the runtime warns once per realpath set; ack persisted at `~/.config/appstrate/dual-install-ack.json` re-arms whenever the set changes. Override with `APPSTRATE_FORCE_DUAL=1` to silence non-interactively.
+
+A hidden `__install-source` subcommand exposes a stable JSON contract `{ version, source, schema: 1 }` for installers that need to gate on channel.
 
 ---
 
@@ -279,7 +321,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate openapi`
 
-Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes ~191 endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
+Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes ~258 endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
 
 The schema is fetched once per profile and cached under `~/.cache/appstrate/openapi-<profile>.json` (or `$XDG_CACHE_HOME/appstrate/…`). Each cached copy pairs with an ETag sibling — subsequent invocations send `If-None-Match` and short-circuit on a `304` response, so re-running `list` / `show` during exploration costs one conditional round-trip instead of re-downloading the full spec.
 

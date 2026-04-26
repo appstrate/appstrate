@@ -161,6 +161,31 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+      - MODULES=${MODULES:-oidc,webhooks}
+      # ── Auth lockdown (closed-mode self-hosting; see AUTH_MODES.md) ──
+      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-false}
+      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-false}
+      - AUTH_PLATFORM_ADMIN_EMAILS=${AUTH_PLATFORM_ADMIN_EMAILS:-}
+      - AUTH_ALLOWED_SIGNUP_DOMAINS=${AUTH_ALLOWED_SIGNUP_DOMAINS:-}
+      - AUTH_BOOTSTRAP_OWNER_EMAIL=${AUTH_BOOTSTRAP_OWNER_EMAIL:-}
+      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-Default}
+      # ── Credential / auth secret rotation (optional) ──
+      - BETTER_AUTH_ACTIVE_KID=${BETTER_AUTH_ACTIVE_KID:-k1}
+      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-{}}
+      - CONNECTION_ENCRYPTION_KEY_ID=${CONNECTION_ENCRYPTION_KEY_ID:-k1}
+      - CONNECTION_ENCRYPTION_KEYS=${CONNECTION_ENCRYPTION_KEYS:-{}}
+      # ── AFPS bundle signing (optional) ──
+      - AFPS_TRUST_ROOT=${AFPS_TRUST_ROOT:-[]}
+      - AFPS_SIGNATURE_POLICY=${AFPS_SIGNATURE_POLICY:-off}
+      # ── Sidecar capacity caps (optional, hard ceiling 100 MB) ──
+      - SIDECAR_MAX_REQUEST_BODY_BYTES=${SIDECAR_MAX_REQUEST_BODY_BYTES:-10485760}
+      - SIDECAR_MAX_MCP_ENVELOPE_BYTES=${SIDECAR_MAX_MCP_ENVELOPE_BYTES:-16777216}
+      # ── Remote runner protocol + watchdog (optional) ──
+      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS=${REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS:-7200}
+      - REMOTE_RUN_SINK_MAX_TTL_SECONDS=${REMOTE_RUN_SINK_MAX_TTL_SECONDS:-86400}
+      - RUN_HEARTBEAT_INTERVAL_SECONDS=${RUN_HEARTBEAT_INTERVAL_SECONDS:-30}
+      - RUN_STALL_THRESHOLD_SECONDS=${RUN_STALL_THRESHOLD_SECONDS:-120}
+      - RUN_WATCHDOG_INTERVAL_SECONDS=${RUN_WATCHDOG_INTERVAL_SECONDS:-30}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:

@@ -252,6 +252,7 @@ optional domain allowlist):
 AUTH_DISABLE_SIGNUP=true
 AUTH_DISABLE_ORG_CREATION=true
 AUTH_PLATFORM_ADMIN_EMAILS=admin@your-domain.com
+AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com         # optional — restrict invitee domains
 AUTH_BOOTSTRAP_OWNER_EMAIL=admin@your-domain.com
 AUTH_BOOTSTRAP_ORG_NAME=Acme
 ```
