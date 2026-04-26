@@ -27,6 +27,7 @@ import { isProviderEnabled, getProviderCredentialId, OAuthCallbackError } from "
 import { db } from "@appstrate/db/client";
 import type { Context } from "hono";
 import { getAppScope } from "../lib/scope.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
@@ -133,6 +134,12 @@ export function createConnectionsRouter() {
         }
 
         await saveApiKeyConnection(scope, provider, data.apiKey.trim(), profileId);
+        await recordAuditFromContext(c, {
+          action: "connection.created",
+          resourceType: "connection",
+          resourceId: provider,
+          after: { provider, profileId, mode: "api_key" },
+        });
         return c.json({ success: true });
       } catch (err: unknown) {
         if (err instanceof ApiError) throw err;
@@ -171,6 +178,12 @@ export function createConnectionsRouter() {
         }
 
         await saveCredentialsConnection(scope, provider, mode, data.credentials, profileId);
+        await recordAuditFromContext(c, {
+          action: "connection.created",
+          resourceType: "connection",
+          resourceId: provider,
+          after: { provider, profileId, mode },
+        });
         return c.json({ success: true });
       } catch (err: unknown) {
         if (err instanceof ApiError) throw err;
@@ -298,6 +311,12 @@ export function createConnectionsRouter() {
           }
           await disconnectProvider(scope, provider, profileId, credentialId);
         }
+        await recordAuditFromContext(c, {
+          action: "connection.deleted",
+          resourceType: "connection",
+          resourceId: provider,
+          before: { provider, connectionId: connectionId ?? null },
+        });
         return c.json({ success: true });
       } catch (err) {
         if (err instanceof ApiError) throw err;
