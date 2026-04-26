@@ -23,7 +23,7 @@ describe("Proxies API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.proxies).toBeArray();
+      expect(body.data).toBeArray();
     });
   });
 

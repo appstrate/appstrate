@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
@@ -13,7 +13,7 @@ export function useModels() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["models", orgId],
-    queryFn: () => api<{ models: OrgModelInfo[] }>("/models").then((d) => d.models),
+    queryFn: () => apiList<OrgModelInfo>("/models"),
     enabled: !!orgId,
   });
 }
@@ -126,9 +126,9 @@ export function useOpenRouterModels(search: string | undefined) {
   return useQuery({
     queryKey: ["openrouter-models", search],
     queryFn: () =>
-      api<{ models: OpenRouterModel[] }>(
+      apiList<OpenRouterModel>(
         `/models/openrouter${search ? `?q=${encodeURIComponent(search)}` : ""}`,
-      ).then((d) => d.models),
+      ),
     enabled: search !== undefined,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,

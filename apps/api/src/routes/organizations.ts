@@ -23,6 +23,7 @@ import {
 } from "../services/organizations.ts";
 import { toSlug } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
   sendMagicLinkInvitation,
@@ -90,15 +91,17 @@ router.get("/", async (c) => {
   const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
 
-  return c.json({
-    organizations: orgs.map((o) => ({
-      id: o.id,
-      name: o.name,
-      slug: o.slug,
-      role: o.role,
-      createdAt: o.createdAt,
-    })),
-  });
+  return c.json(
+    listResponse(
+      orgs.map((o) => ({
+        id: o.id,
+        name: o.name,
+        slug: o.slug,
+        role: o.role,
+        createdAt: o.createdAt,
+      })),
+    ),
+  );
 });
 
 // POST /api/orgs — create an organization (no org context needed)

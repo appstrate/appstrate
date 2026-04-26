@@ -40,7 +40,7 @@ describe("Models API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.models).toBeArray();
+      expect(body.data).toBeArray();
     });
 
     it("returns 401 without authentication", async () => {

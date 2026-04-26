@@ -162,15 +162,15 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      sessions: Array<{
+      data: Array<{
         familyId: string;
         userId: string;
         userEmail: string | null;
         deviceName: string | null;
       }>;
     };
-    expect(body.sessions.length).toBe(2);
-    const byFamily = new Map(body.sessions.map((s) => [s.familyId, s]));
+    expect(body.data.length).toBe(2);
+    const byFamily = new Map(body.data.map((s) => [s.familyId, s]));
     expect(byFamily.get(memberFamily.familyId)?.userId).toBe(member.userId);
     expect(byFamily.get(memberFamily.familyId)?.userEmail).toBe("adminclisess1-member@example.com");
     expect(byFamily.get(memberFamily.familyId)?.deviceName).toBe("member-laptop");
@@ -205,9 +205,9 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
       method: "GET",
       headers: { Cookie: a.admin.cookie },
     });
-    const aBody = (await aListedFromB.json()) as { sessions: Array<{ familyId: string }> };
+    const aBody = (await aListedFromB.json()) as { data: Array<{ familyId: string }> };
     // A's admin sees only A's member's session.
-    expect(aBody.sessions.map((s) => s.familyId)).not.toContain(bFamily.familyId);
+    expect(aBody.data.map((s) => s.familyId)).not.toContain(bFamily.familyId);
   });
 
   it("excludes sessions of users who left the org", async () => {
@@ -222,8 +222,8 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
       headers: { Cookie: admin.cookie },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { sessions: Array<unknown> };
-    expect(body.sessions.length).toBe(0);
+    const body = (await res.json()) as { data: Array<unknown> };
+    expect(body.data.length).toBe(0);
   });
 });
 

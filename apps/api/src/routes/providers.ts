@@ -7,6 +7,7 @@ import { getItemId } from "./packages.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { checkScopeMatch } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { logger } from "../lib/logger.ts";
@@ -234,7 +235,7 @@ export function createProvidersRouter() {
     });
 
     const callbackUrl = getOAuthCallbackUrl();
-    return c.json({ providers, callbackUrl });
+    return c.json({ ...listResponse(providers), callbackUrl });
   });
 
   // POST /api/providers — create a custom provider

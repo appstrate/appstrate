@@ -78,7 +78,7 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toBeArray();
+      expect(body.data).toBeArray();
     });
   });
 
@@ -167,8 +167,8 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toBeArray();
-      expect(body.profiles).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns created app profiles", async () => {
@@ -180,8 +180,8 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.profiles).toHaveLength(1);
-      expect(body.profiles[0].name).toBe("App Profile 1");
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].name).toBe("App Profile 1");
     });
   });
 
@@ -461,7 +461,7 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.connections).toBeArray();
+      expect(body.data).toBeArray();
     });
 
     it("returns 404 for a profile from a non-member", async () => {
@@ -495,7 +495,7 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.connections).toBeArray();
+      expect(body.data).toBeArray();
     });
 
     it("returns connections for an app-level profile in the same org", async () => {
@@ -510,7 +510,7 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.connections).toBeArray();
+      expect(body.data).toBeArray();
     });
 
     it("returns 404 for a non-existent profile", async () => {

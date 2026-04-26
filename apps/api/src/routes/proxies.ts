@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemProxy } from "../services/proxy-registry.ts";
@@ -45,7 +46,7 @@ export function createProxiesRouter() {
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const proxies = await listOrgProxies(orgId);
-    return c.json({ proxies });
+    return c.json(listResponse(proxies));
   });
 
   // POST /api/proxies — create a custom proxy

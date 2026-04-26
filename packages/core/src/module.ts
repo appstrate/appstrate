@@ -21,6 +21,7 @@ import type {
   InlineRunBody,
   PlatformApplication,
   PlatformConnectionProviderGroup,
+  PlatformListResponse,
   PlatformModel,
   PlatformPackage,
   PubSub,
@@ -749,8 +750,8 @@ export interface PlatformServices {
   };
   /** Connection manager helpers. */
   connections: {
-    /** Returns `{ providers: [...] }` — not a bare array. */
-    listAllForActor(actor: Actor): Promise<{ providers: PlatformConnectionProviderGroup[] }>;
+    /** Returns the Stripe-canonical list envelope `{ object: "list", data, hasMore }`. */
+    listAllForActor(actor: Actor): Promise<PlatformListResponse<PlatformConnectionProviderGroup>>;
   };
   /**
    * Run lifecycle operations (append log, update, abort).

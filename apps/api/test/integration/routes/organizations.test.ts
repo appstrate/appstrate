@@ -34,9 +34,9 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.organizations).toBeArray();
-      expect(body.organizations.length).toBeGreaterThanOrEqual(1);
-      const org = body.organizations.find((o: { id: string }) => o.id === ctx.orgId);
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      const org = body.data.find((o: { id: string }) => o.id === ctx.orgId);
       expect(org).toBeDefined();
       expect(org.name).toBe("My Org");
       expect(org.role).toBe("owner");
@@ -51,8 +51,8 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.organizations).toBeArray();
-      expect(body.organizations).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns 401 without authentication", async () => {
@@ -325,11 +325,11 @@ describe("Organizations API", () => {
 
       const res = await app.request("/api/orgs", { headers: bearer });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { organizations: { id: string }[] };
-      const ids = body.organizations.map((o) => o.id);
+      const body = (await res.json()) as { data: { id: string }[] };
+      const ids = body.data.map((o) => o.id);
       expect(ids).toContain(ctxA.orgId);
       expect(ids).not.toContain(orgB.id);
-      expect(body.organizations).toHaveLength(1);
+      expect(body.data).toHaveLength(1);
     });
 
     it("GET /api/orgs/:keyOrgId still works", async () => {
@@ -449,8 +449,8 @@ describe("Organizations API", () => {
         headers: { Cookie: ctxA.cookie },
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { organizations: { id: string }[] };
-      const ids = body.organizations.map((o) => o.id);
+      const body = (await res.json()) as { data: { id: string }[] };
+      const ids = body.data.map((o) => o.id);
       expect(ids).toContain(ctxA.orgId);
       expect(ids).toContain(orgB.id);
     });

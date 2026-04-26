@@ -142,14 +142,14 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
     });
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
-      sessions: Array<{ familyId: string; deviceName: string | null; current: boolean }>;
+      data: Array<{ familyId: string; deviceName: string | null; current: boolean }>;
     };
-    expect(body.sessions.length).toBe(2);
+    expect(body.data.length).toBe(2);
     // laptop (no last_used → ranked by createdAt = newer) comes first.
-    expect(body.sessions[0]!.deviceName).toBe("laptop");
-    expect(body.sessions[1]!.deviceName).toBe("workstation");
-    expect(body.sessions[0]!.current).toBe(false);
-    expect(body.sessions[0]!.familyId).toBe(first.familyId);
+    expect(body.data[0]!.deviceName).toBe("laptop");
+    expect(body.data[1]!.deviceName).toBe("workstation");
+    expect(body.data[0]!.current).toBe(false);
+    expect(body.data[0]!.familyId).toBe(first.familyId);
   });
 
   it("rejects unauthenticated callers with 401", async () => {
@@ -167,16 +167,16 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
       method: "GET",
       headers: { Cookie: a.cookie },
     });
-    const aBody = (await aList.json()) as { sessions: Array<{ familyId: string }> };
-    expect(aBody.sessions.length).toBe(1);
+    const aBody = (await aList.json()) as { data: Array<{ familyId: string }> };
+    expect(aBody.data.length).toBe(1);
 
     const bList = await app.request("/api/auth/cli/sessions", {
       method: "GET",
       headers: { Cookie: b.cookie },
     });
-    const bBody = (await bList.json()) as { sessions: Array<{ familyId: string }> };
-    expect(bBody.sessions.length).toBe(1);
-    expect(bBody.sessions[0]!.familyId).not.toBe(aBody.sessions[0]!.familyId);
+    const bBody = (await bList.json()) as { data: Array<{ familyId: string }> };
+    expect(bBody.data.length).toBe(1);
+    expect(bBody.data[0]!.familyId).not.toBe(aBody.data[0]!.familyId);
   });
 
   it("excludes revoked and expired families from the listing", async () => {
@@ -198,9 +198,9 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
       method: "GET",
       headers: { Cookie: cookie },
     });
-    const body = (await res.json()) as { sessions: Array<{ familyId: string }> };
-    expect(body.sessions.length).toBe(1);
-    expect(body.sessions[0]!.familyId).toBe(active.familyId);
+    const body = (await res.json()) as { data: Array<{ familyId: string }> };
+    expect(body.data.length).toBe(1);
+    expect(body.data[0]!.familyId).toBe(active.familyId);
     // Sanity: the active row really is owned by the caller.
     const [row] = await db
       .select()

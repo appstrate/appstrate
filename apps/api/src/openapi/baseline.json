@@ -748,7 +748,7 @@
         "operationId": "listAgentPersistence",
         "tags": ["Agents"],
         "summary": "List unified agent persistence (pinned slots + memories)",
-        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the legacy `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
+        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -896,7 +896,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the legacy `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1045,7 +1045,7 @@
         "operationId": "deleteAgentPersistencePinnedSlot",
         "tags": ["Agents"],
         "summary": "Delete a single pinned slot by id",
-        "description": "Admin-only. Deletes any named pinned slot (legacy `checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
+        "description": "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3901,17 +3901,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "connections": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/ConnectionStatus"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "connections": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "provider": "@appstrate/gmail",
                       "status": "connected",
@@ -4401,12 +4411,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "providers": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/ProviderConfig"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     },
                     "callbackUrl": {
                       "type": "string"
@@ -4414,7 +4432,9 @@
                   }
                 },
                 "example": {
-                  "providers": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "@appstrate/gmail",
                       "displayName": "Gmail",
@@ -4761,17 +4781,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "models": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgModel"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "models": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "gpt-4o",
                       "label": "GPT-4o",
@@ -5022,8 +5052,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "models": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -5057,11 +5092,16 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "models": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "anthropic/claude-sonnet-4",
                       "name": "Claude Sonnet 4",
@@ -5445,17 +5485,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "keys": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgProviderKey"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "keys": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "cm7stu901",
                       "label": "OpenAI Production",
@@ -5837,17 +5887,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "proxies": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgProxy"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "proxies": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "cm6pqr678",
                       "label": "US Residential Proxy",
@@ -6192,8 +6252,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "profiles": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -6221,11 +6286,16 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "profiles": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440010",
                       "name": "Default",
@@ -6655,8 +6725,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "profiles": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -6684,11 +6759,16 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "profiles": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "profile": {
                         "id": "550e8400-e29b-41d4-a716-446655440030",
@@ -6737,8 +6817,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "profiles": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -6766,11 +6851,16 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "profiles": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440030",
                       "name": "Shared Production",
@@ -7236,8 +7326,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "connections": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -7273,6 +7368,9 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -7575,17 +7673,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "organizations": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/Organization"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "organizations": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Acme Corp",
@@ -8519,17 +8627,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "profiles": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/ProfileBatchItem"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "profiles": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "usr_abc123",
                       "displayName": "Alice Martin"
@@ -8570,8 +8688,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "orgs": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -8597,11 +8720,16 @@
                           }
                         }
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 },
                 "example": {
-                  "orgs": [
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
                     {
                       "id": "org_abc123",
                       "name": "Acme Corp",
@@ -8646,12 +8774,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "models": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/OrgModel"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -15624,7 +15760,7 @@
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
-            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
             }
@@ -15754,7 +15890,7 @@
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
-            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
             }
@@ -15891,7 +16027,7 @@
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
-            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
             }
@@ -16028,7 +16164,7 @@
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
-            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
             }
@@ -16165,7 +16301,7 @@
             "name": "X-Run-Id",
             "in": "header",
             "required": false,
-            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
             }

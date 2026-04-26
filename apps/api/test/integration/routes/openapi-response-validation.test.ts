@@ -190,9 +190,9 @@ describe("OpenAPI response validation", () => {
       }
 
       expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("organizations");
-      expect((body as any).organizations).toBeArray();
-      expect((body as any).organizations.length).toBeGreaterThanOrEqual(1);
+      expect(body).toHaveProperty("data");
+      expect((body as any).data).toBeArray();
+      expect((body as any).data.length).toBeGreaterThanOrEqual(1);
     });
 
     it("each organization item conforms to Organization schema", async () => {
@@ -204,7 +204,7 @@ describe("OpenAPI response validation", () => {
       });
       const body = (await res.json()) as any;
 
-      for (const org of body.organizations) {
+      for (const org of body.data) {
         const result = validateResponse(org, orgSchema);
         if (!result.valid) {
           console.error(`Organization validation errors for ${org.id}:`, result.errors);

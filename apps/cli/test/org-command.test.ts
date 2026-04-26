@@ -174,7 +174,9 @@ async function pinnedAppId(profile = "default"): Promise<string | undefined> {
 }
 
 const twoOrgs = {
-  organizations: [
+  object: "list",
+  hasMore: false,
+  data: [
     { id: "org_1", name: "Acme", slug: "acme", role: "owner", createdAt: "t" },
     { id: "org_2", name: "Beta", slug: "beta", role: "member", createdAt: "t" },
   ],
@@ -213,7 +215,7 @@ describe("org list", () => {
     await seedLoggedIn();
     installFetch({
       listOrgs: () =>
-        new Response(JSON.stringify({ organizations: [] }), {
+        new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -312,7 +314,7 @@ describe("org switch", () => {
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
-        new Response(JSON.stringify({ organizations: [] }), {
+        new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),

@@ -40,7 +40,7 @@ describe("Multi-org profile isolation", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.profiles.find((p: { id: string }) => p.id === profileB.id);
+      const leaked = body.data.find((p: { id: string }) => p.id === profileB.id);
       expect(leaked).toBeUndefined();
     });
 
@@ -199,7 +199,7 @@ describe("Multi-org profile isolation", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.profiles.find((p: { name: string }) => p.name === "Owner Private");
+      const leaked = body.data.find((p: { name: string }) => p.name === "Owner Private");
       expect(leaked).toBeUndefined();
     });
 

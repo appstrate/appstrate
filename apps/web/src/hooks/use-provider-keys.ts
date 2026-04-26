@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 
@@ -9,7 +9,7 @@ export function useProviderKeys() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["provider-keys", orgId],
-    queryFn: () => api<{ keys: OrgProviderKeyInfo[] }>("/provider-keys").then((d) => d.keys),
+    queryFn: () => apiList<OrgProviderKeyInfo>("/provider-keys"),
     enabled: !!orgId,
   });
 }

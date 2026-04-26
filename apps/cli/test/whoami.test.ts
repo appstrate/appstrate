@@ -253,7 +253,9 @@ describe("whoami (happy path)", () => {
       if (url.endsWith("/api/orgs")) {
         return new Response(
           JSON.stringify({
-            organizations: [
+            object: "list",
+            hasMore: false,
+            data: [
               { id: "org_42", name: "Acme Corp", slug: "acme", role: "owner", createdAt: "t" },
             ],
           }),
@@ -285,7 +287,7 @@ describe("whoami (happy path)", () => {
         );
       }
       if (url.endsWith("/api/orgs")) {
-        return new Response(JSON.stringify({ organizations: [] }), {
+        return new Response(JSON.stringify({ object: "list", hasMore: false, data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });

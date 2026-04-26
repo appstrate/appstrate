@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemProviderKey } from "../services/model-registry.ts";
@@ -51,7 +52,7 @@ export function createProviderKeysRouter() {
   router.get("/", requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const keys = await listOrgProviderKeys(orgId);
-    return c.json({ keys });
+    return c.json(listResponse(keys));
   });
 
   // POST /api/provider-keys

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
@@ -10,7 +10,7 @@ export function useProxies() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["proxies", orgId],
-    queryFn: () => api<{ proxies: OrgProxyInfo[] }>("/proxies").then((d) => d.proxies),
+    queryFn: () => apiList<OrgProxyInfo>("/proxies"),
     enabled: !!orgId,
   });
 }
