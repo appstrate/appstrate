@@ -28,7 +28,7 @@ import {
   readProviderRefs,
   type ProviderEventEmitter,
 } from "@appstrate/runner-pi";
-import { McpProviderResolver } from "./mcp-provider-resolver.ts";
+import { McpProviderResolver } from "./provider-resolver.ts";
 
 // ─── MCP CallToolResult → Pi AgentToolResult adapter ──────────────────
 // Folded in from the prior `./mcp-result.ts` module (single consumer
@@ -243,4 +243,3 @@ function makeRecallMemoryExtension(opts: BuildMcpDirectFactoriesOptions): Extens
     });
   };
 }
-

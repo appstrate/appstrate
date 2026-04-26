@@ -126,8 +126,22 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi
 
+# Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
+# in runtime-pi/node_modules per bun's hoisting decisions. Extension
+# and MCP utility scripts under /runtime/{extensions,mcp}/ resolve from
+# /runtime/node_modules, so symlink the SDK pair to make import
+# resolution work.
+RUN mkdir -p node_modules/@mariozechner \
+ && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-ai           node_modules/@mariozechner/pi-ai \
+ && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent \
+ && chown -h pi:pi \
+        node_modules/@mariozechner \
+        node_modules/@mariozechner/pi-ai \
+        node_modules/@mariozechner/pi-coding-agent
+
 # Bootstrap sources.
 COPY --chown=pi:pi runtime-pi/extensions/          ./extensions/
+COPY --chown=pi:pi runtime-pi/mcp/                 ./mcp/
 COPY --chown=pi:pi runtime-pi/extension-wrapper.ts ./extension-wrapper.ts
 COPY --chown=pi:pi runtime-pi/tee-sink.ts          ./tee-sink.ts
 COPY --chown=pi:pi runtime-pi/env.ts               ./env.ts

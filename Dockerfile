@@ -7,17 +7,23 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
 
-# Copy workspace structure for dependency resolution
+# Copy workspace structure for dependency resolution.
+# Every workspace member referenced by the lockfile must have its
+# manifest on disk — `bun install --frozen-lockfile` walks the full
+# graph even when only a subset is needed at runtime.
 COPY package.json bun.lock turbo.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
-COPY packages/core/package.json packages/core/
-COPY packages/shared-types/package.json packages/shared-types/
+COPY packages/afps-runtime/package.json packages/afps-runtime/
 COPY packages/connect/package.json packages/connect/
+COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
+COPY packages/mcp-transport/package.json packages/mcp-transport/
+COPY packages/runner-pi/package.json packages/runner-pi/
+COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/ui/package.json packages/ui/
 COPY runtime-pi/package.json runtime-pi/
 COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
@@ -35,10 +41,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
+COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
+COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
+COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
@@ -59,10 +67,12 @@ WORKDIR /app
 # Runtime dependencies (root hoisted + workspace-specific)
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
+COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
+COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
+COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 
 # API source (Bun runs TypeScript directly)
@@ -73,6 +83,14 @@ COPY --from=build /app/apps/api/package.json ./apps/api/
 COPY --from=build /app/packages/core/src ./packages/core/src
 COPY --from=build /app/packages/core/schema ./packages/core/schema
 COPY --from=build /app/packages/core/package.json ./packages/core/
+
+# AFPS runtime (renderPlatformPrompt, bundle assembly, event sinks — used by API at runtime)
+COPY --from=build /app/packages/afps-runtime/src ./packages/afps-runtime/src
+COPY --from=build /app/packages/afps-runtime/package.json ./packages/afps-runtime/
+
+# Runner-pi adapter (buildRuntimePiEnv — used by API's Pi orchestrator at runtime)
+COPY --from=build /app/packages/runner-pi/src ./packages/runner-pi/src
+COPY --from=build /app/packages/runner-pi/package.json ./packages/runner-pi/
 
 # Shared types (used by API at runtime)
 COPY --from=build /app/packages/shared-types/src ./packages/shared-types/src
