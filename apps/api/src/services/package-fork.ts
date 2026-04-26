@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
+import type { PackageType } from "@appstrate/core/validation";
 
 import { zipArtifact } from "@appstrate/core/zip";
 import {
@@ -9,10 +10,7 @@ import {
   createOrgItem,
   uploadPackageFiles,
   type PackageTypeConfig,
-  AGENT_CONFIG,
-  SKILL_CONFIG,
-  TOOL_CONFIG,
-  PROVIDER_CONFIG,
+  CONFIG_BY_TYPE,
 } from "./package-items/index.ts";
 
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
@@ -21,13 +19,6 @@ import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { asRecord } from "../lib/safe-json.ts";
-
-const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
-  agent: AGENT_CONFIG,
-  skill: SKILL_CONFIG,
-  tool: TOOL_CONFIG,
-  provider: PROVIDER_CONFIG,
-};
 
 export interface ForkResult {
   packageId: string;
@@ -56,12 +47,13 @@ export async function forkPackage(
   const parsed = parseScopedName(sourcePackageId);
   if (!parsed) return { code: "NOT_FOUND" };
 
-  const cfg = TYPE_TO_CONFIG[await getPackageType(orgId, sourcePackageId)];
+  const detectedType = await getPackageType(orgId, sourcePackageId);
+  const cfg = detectedType ? CONFIG_BY_TYPE[detectedType] : undefined;
   if (!cfg) {
     // Try to find the package to get its type
     const raw = await getPackageById(sourcePackageId);
     if (!raw) return { code: "NOT_FOUND" };
-    const typeCfg = TYPE_TO_CONFIG[raw.type];
+    const typeCfg = CONFIG_BY_TYPE[raw.type as PackageType];
     if (!typeCfg) return { code: "UNKNOWN_TYPE", type: raw.type };
     return forkWithConfig(
       orgId,
@@ -76,13 +68,13 @@ export async function forkPackage(
   return forkWithConfig(orgId, orgSlug, sourcePackageId, customName ?? parsed.name, cfg, userId);
 }
 
-async function getPackageType(orgId: string, packageId: string): Promise<string> {
+async function getPackageType(orgId: string, packageId: string): Promise<PackageType | null> {
   // Try each config type to find the package in the org context
-  for (const [type, cfg] of Object.entries(TYPE_TO_CONFIG)) {
+  for (const [type, cfg] of Object.entries(CONFIG_BY_TYPE)) {
     const item = await getOrgItem(orgId, packageId, cfg);
-    if (item) return type;
+    if (item) return type as PackageType;
   }
-  return "";
+  return null;
 }
 
 async function forkWithConfig(

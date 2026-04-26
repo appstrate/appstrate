@@ -9,9 +9,11 @@ import {
   listOrgItems,
   getOrgItem,
   deleteOrgItem,
-  SKILL_CONFIG,
-  TOOL_CONFIG,
+  CONFIG_BY_TYPE,
 } from "../../../src/services/package-items/index.ts";
+
+const SKILL_CONFIG = CONFIG_BY_TYPE.skill;
+const TOOL_CONFIG = CONFIG_BY_TYPE.tool;
 import {
   buildDependencies,
   collectAllDepIds,
