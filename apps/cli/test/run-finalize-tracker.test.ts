@@ -17,7 +17,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
-import { _wrapHttpSinkWithFinalizeTrackerForTesting as wrap } from "../src/commands/run.ts";
+import {
+  _wrapHttpSinkWithFinalizeTrackerForTesting as wrap,
+  _raceFinalizeAgainstTimeoutForTesting as raceTimeout,
+} from "../src/commands/run.ts";
 
 interface CapturedRequest {
   url: string;
@@ -133,6 +136,31 @@ describe("wrapHttpSinkWithFinalizeTracker", () => {
     await tracked.sink.finalize(emptyResult());
     expect(tracked.wasFinalized()).toBe(true);
     expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(2);
+  });
+
+  it("raceFinalizeAgainstTimeout: rejects with a clear error if the inner promise outlasts the cap", async () => {
+    // Without the timeout cap, an unreachable platform would let
+    // HttpSink retry for tens of seconds — exactly the UX problem the
+    // safety-net is trying to eliminate. The cap MUST fire even if the
+    // inner promise never settles.
+    const slow = new Promise<void>(() => {
+      // never resolves — simulates a partitioned platform
+    });
+    const start = Date.now();
+    await expect(raceTimeout(slow, 50)).rejects.toThrow(/timed out after 50ms/);
+    const elapsed = Date.now() - start;
+    // 50ms cap + small scheduler slack — must NOT take seconds.
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("raceFinalizeAgainstTimeout: resolves normally when the inner promise wins the race", async () => {
+    const fast = Promise.resolve();
+    await expect(raceTimeout(fast, 5_000)).resolves.toBeUndefined();
+  });
+
+  it("raceFinalizeAgainstTimeout: surfaces inner rejection when it wins the race", async () => {
+    const failing = Promise.reject(new Error("boom"));
+    await expect(raceTimeout(failing, 5_000)).rejects.toThrow("boom");
   });
 
   it("does not interfere with regular event POSTs (handle still works)", async () => {

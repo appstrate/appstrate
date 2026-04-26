@@ -334,6 +334,14 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     // (server CAS on `sink_closed_at IS NULL`), and turns a 60-second
     // watchdog wait into an instant transition. Best-effort — if it
     // fails, the watchdog still backs us up.
+    //
+    // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS` because HttpSink
+    // retries 4× with exponential backoff and Bun's `fetch` has no
+    // default timeout — an unreachable platform would otherwise hang
+    // the CLI for tens of seconds after Ctrl-C, exactly the UX problem
+    // this whole change is trying to eliminate. Industry guidance for
+    // graceful-shutdown cleanup is 5–10s; we sit at 5s and rely on the
+    // watchdog (60s by default) for the abandoned cases.
     if (trackedHttpSink && !trackedHttpSink.wasFinalized()) {
       const aborted = controller.signal.aborted;
       const result: RunResult = emptyRunResult();
@@ -343,7 +351,10 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
           ? "Runner cancelled by user (CLI received signal)."
           : "Runner exited before completion (CLI bootstrap or teardown error).",
       };
-      await trackedHttpSink.sink.finalize(result).catch((err) => {
+      await raceFinalizeAgainstTimeout(
+        trackedHttpSink.sink.finalize(result),
+        SAFETY_NET_FINALIZE_TIMEOUT_MS,
+      ).catch((err) => {
         if (!opts.json) {
           process.stderr.write(
             `warn: finalize on cancel failed: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -386,6 +397,42 @@ function wrapHttpSinkWithFinalizeTracker(inner: HttpSink): TrackedHttpSink {
     sink: inner,
     wasFinalized: () => finalized,
   };
+}
+
+/**
+ * Cap on the safety-net finalize POST. HttpSink itself retries 4× with
+ * exponential backoff and Bun's `fetch` has no default request timeout,
+ * so a partition or dead platform could otherwise hold the CLI open for
+ * tens of seconds after the user hit Ctrl-C. 5s is the standard cleanup
+ * cap (Node graceful-shutdown guides converge on 5–10s); the run
+ * watchdog (60s default) covers everything we abandon here.
+ */
+const SAFETY_NET_FINALIZE_TIMEOUT_MS = 5_000;
+
+/**
+ * Race a finalize promise against a timeout. If the timeout wins,
+ * resolve with a `TimeoutError` rejection so the caller's `.catch`
+ * surfaces a clean warning. The abandoned finalize promise keeps
+ * running in the background — we do NOT cancel it (HttpSink does not
+ * accept an AbortSignal), but the host process exits seconds later so
+ * the in-flight fetch is dropped at the OS layer regardless.
+ */
+function raceFinalizeAgainstTimeout(p: Promise<void>, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`finalize POST timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    p.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -692,4 +739,16 @@ export async function _buildResolverInputsForTesting(
  */
 export function _wrapHttpSinkWithFinalizeTrackerForTesting(inner: HttpSink): TrackedHttpSink {
   return wrapHttpSinkWithFinalizeTracker(inner);
+}
+
+/**
+ * Test-only access to the safety-net timeout race so we can assert
+ * the cap is enforced (a partitioned platform must not hang the CLI
+ * for tens of seconds on Ctrl-C — see SAFETY_NET_FINALIZE_TIMEOUT_MS).
+ */
+export function _raceFinalizeAgainstTimeoutForTesting(
+  p: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  return raceFinalizeAgainstTimeout(p, timeoutMs);
 }
