@@ -81,11 +81,16 @@ export function deriveSkillName(packageId: string): string {
   // Strip leading `@` from scoped names so it doesn't survive normalisation.
   const stripped = packageId.startsWith("@") ? packageId.slice(1) : packageId;
 
-  const normalised = stripped
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  // `[^a-z0-9]+` collapses every run of non-alphanumerics (incl. runs of
+  // hyphens) to a single `-` in one pass, so a separate `-+ → -` step is
+  // unnecessary. After collapse, at most one leading and one trailing
+  // hyphen can survive — strip them by slice rather than a `^-+|-+$`
+  // alternation (CodeQL flags the latter as polynomial on hyphen-heavy
+  // package ids supplied by untrusted bundles).
+  const collapsed = stripped.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const start = collapsed.startsWith("-") ? 1 : 0;
+  const end = collapsed.endsWith("-") ? collapsed.length - 1 : collapsed.length;
+  const normalised = collapsed.slice(start, end);
 
   if (normalised === "") {
     throw new ProviderSkillSynthesisError(
@@ -156,6 +161,22 @@ function escapeYamlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ")}"`;
 }
 
+/**
+ * Strip trailing periods and ASCII whitespace in a single linear pass.
+ * Avoids the `\.+\s*$` regex (CodeQL flags it as polynomial on inputs
+ * with long runs of `.` followed by whitespace coming from untrusted
+ * `manifest.description` fields).
+ */
+function stripTrailingPeriodsAndWhitespace(value: string): string {
+  let i = value.length;
+  while (i > 0) {
+    const c = value.charCodeAt(i - 1);
+    if (c === 46 || c <= 32) i--;
+    else break;
+  }
+  return value.slice(0, i);
+}
+
 function buildSkillDescription(
   displayName: string,
   manifestDescription: string | undefined,
@@ -163,7 +184,9 @@ function buildSkillDescription(
 ): string {
   const prefix = `${displayName} API.`;
   const directive = `READ this skill before any provider_call(providerId="${packageId}").`;
-  const middle = manifestDescription ? `${manifestDescription.replace(/\.+\s*$/, "")}.` : "";
+  const middle = manifestDescription
+    ? `${stripTrailingPeriodsAndWhitespace(manifestDescription)}.`
+    : "";
   const full = [prefix, middle, directive].filter(Boolean).join(" ");
   if (full.length <= MAX_SKILL_DESCRIPTION_LENGTH) return full;
   // Drop the optional middle clause to preserve the load-bearing directive.
