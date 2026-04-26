@@ -124,7 +124,11 @@ function parseAndVerify(raw: string): string | null {
 /**
  * Minimal cookie-header parser — we can't pull in a heavy dep just to read
  * one cookie out of band. Matches `name=value; name2=value2` format,
- * respects spaces and quoted values (RFC 6265 §5.4).
+ * respects spaces and quoted values (RFC 6265 §5.4). The value is
+ * URL-decoded to mirror what hono's `getCookie` does on the context path —
+ * Set-Cookie serialization runs every value through `encodeURIComponent`,
+ * so the signature's `kid$sig` separator arrives here as `kid%24sig` and
+ * would otherwise fail `verifyAuthHmac`'s prefixed-form check.
  */
 function parseCookieHeader(header: string, name: string): string | null {
   const target = `${name}=`;
@@ -135,7 +139,11 @@ function parseCookieHeader(header: string, name: string): string | null {
       if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1);
       }
-      return value;
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return null;
+      }
     }
   }
   return null;
