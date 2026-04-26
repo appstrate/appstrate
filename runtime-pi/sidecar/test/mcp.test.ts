@@ -162,13 +162,13 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises provider_call, run_history, and llm_complete", async () => {
+  it("advertises provider_call, run_history, recall_memory, and llm_complete", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["llm_complete", "provider_call", "run_history"]);
+    expect(names).toEqual(["llm_complete", "provider_call", "recall_memory", "run_history"]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -188,6 +188,25 @@ describe("POST /mcp — tools/list", () => {
     ]);
     const history = result.tools.find((t) => t.name === "run_history")!;
     expect(Object.keys(history.inputSchema.properties).sort()).toEqual(["fields", "limit"]);
+    const recall = result.tools.find((t) => t.name === "recall_memory")!;
+    expect(Object.keys(recall.inputSchema.properties).sort()).toEqual(["limit", "q"]);
+  });
+
+  // Regression — the agent-facing `run_history.fields` enum is the LLM's
+  // single source of truth for the wire vocabulary. If the legacy `state`
+  // value re-appears here, agents start sending it again and the platform
+  // 400s every call. Lock it to the canonical AFPS 1.4+ values.
+  it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{
+        name: string;
+        inputSchema: { properties: { fields?: { items?: { enum?: string[] } } } };
+      }>;
+    };
+    const history = result.tools.find((t) => t.name === "run_history")!;
+    expect(history.inputSchema.properties.fields?.items?.enum).toEqual(["checkpoint", "result"]);
   });
 });
 
@@ -204,7 +223,7 @@ describe("POST /mcp — tools/call run_history", () => {
 
     const res = await rpc(app, {
       method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 5, fields: ["state"] } },
+      params: { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
     });
     expect(res.status).toBe(200);
     const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
@@ -217,7 +236,48 @@ describe("POST /mcp — tools/call run_history", () => {
     const calledUrl = fetchFn.mock.calls[0]![0] as string;
     expect(calledUrl).toContain("/internal/run-history");
     expect(calledUrl).toContain("limit=5");
-    expect(calledUrl).toContain("fields=state");
+    expect(calledUrl).toContain("fields=checkpoint");
+  });
+});
+
+describe("POST /mcp — tools/call recall_memory", () => {
+  it("delegates to the platform's /internal/memories and forwards q + limit", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"memories":[{"id":1,"content":"x"}]}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: { name: "recall_memory", arguments: { q: "python", limit: 3 } },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toBe('{"memories":[{"id":1,"content":"x"}]}');
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    expect(calledUrl).toContain("/internal/memories");
+    expect(calledUrl).toContain("q=python");
+    expect(calledUrl).toContain("limit=3");
+  });
+
+  it("omits empty q from the upstream URL", async () => {
+    const fetchFn = mock(async () => new Response('{"memories":[]}', { status: 200 }));
+    const app = createApp(makeDeps({ fetchFn }));
+
+    await rpc(app, {
+      method: "tools/call",
+      params: { name: "recall_memory", arguments: { limit: 1 } },
+    });
+    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    expect(calledUrl).not.toContain("q=");
+    expect(calledUrl).toContain("limit=1");
   });
 });
 
@@ -353,6 +413,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
       "llm_complete",
       "provider_call",
+      "recall_memory",
       "run_history",
     ]);
 
@@ -363,6 +424,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
       "llm_complete",
       "provider_call",
+      "recall_memory",
       "run_history",
     ]);
   });

@@ -45,7 +45,7 @@ import type { RunResult } from "../../src/types/run-result.ts";
 interface SnapshotFile {
   memories?: MemorySnapshot[];
   history?: HistoryEntry[];
-  state?: unknown;
+  checkpoint?: unknown;
 }
 
 const FIXTURE = new URL("../../fixtures/reference/", import.meta.url).pathname;
@@ -87,7 +87,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
         ...context,
         ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
         ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
-        ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+        ...(snapshot.checkpoint !== undefined ? { checkpoint: snapshot.checkpoint } : {}),
       },
     });
     expect(rendered).toContain("Run id: `ref_run_001`");
@@ -117,7 +117,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
 
     expect(emitted).toHaveLength(events.length);
     expect(result.memories).toHaveLength(1);
-    expect(result.state).toEqual({ iteration: 1 });
+    expect(result.checkpoint).toEqual({ iteration: 1 });
     expect(result.output).toEqual({ summary: "AFPS ships a portable runtime.", partial: false });
     expect(result.report).toBe("All checks executed.");
     expect(finalized).toBeDefined();

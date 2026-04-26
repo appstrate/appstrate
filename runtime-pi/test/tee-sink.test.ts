@@ -79,14 +79,14 @@ describe("mergeTerminalResult", () => {
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
       memories: [{ content: "hello" }],
-      state: { step: 2 },
+      checkpoint: { step: 2 },
       output: { foo: "bar" },
       report: "# Report\nline",
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: RunResult = {
       memories: [{ content: "old" }],
-      state: { step: 1 },
+      checkpoint: { step: 1 },
       output: { foo: "baz" },
       report: "fallback",
       logs: [{ level: "info", message: "y", timestamp: 50 }],
@@ -95,7 +95,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "hello" }]);
-    expect(merged.state).toEqual({ step: 2 });
+    expect(merged.checkpoint).toEqual({ step: 2 });
     expect(merged.output).toEqual({ foo: "bar" });
     expect(merged.report).toBe("# Report\nline");
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
@@ -108,7 +108,7 @@ describe("mergeTerminalResult", () => {
     const aggregate = emptyRunResult();
     const runner: RunResult = {
       memories: [{ content: "r" }],
-      state: { ok: true },
+      checkpoint: { ok: true },
       output: { answer: 42 },
       report: "runner-report",
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
@@ -117,7 +117,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "r" }]);
-    expect(merged.state).toEqual({ ok: true });
+    expect(merged.checkpoint).toEqual({ ok: true });
     expect(merged.output).toEqual({ answer: 42 });
     expect(merged.report).toBe("runner-report");
     expect(merged.logs).toHaveLength(1);
@@ -270,17 +270,18 @@ describe("attachTeeSink — stdout bridge", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachTeeSink — aggregation via finalize", () => {
-  it("aggregates report.appended + output.emitted + state.set across session + stdout", async () => {
+  it("aggregates report.appended + output.emitted + pinned.set across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
 
     // Session-style: emit via the tee sink directly (what PiRunner does).
     await tee.sink.handle({
-      type: "state.set",
+      type: "pinned.set",
       timestamp: 1,
       runId: "r",
-      state: { step: 1 },
+      key: "checkpoint",
+      content: { step: 1 },
     });
 
     // Stdout-style: tool writes a JSON line.
@@ -310,7 +311,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.report).toBe("## Header\nbody");
     expect(final.output).toEqual({ answer: 42 });
-    expect(final.state).toEqual({ step: 1 });
+    expect(final.checkpoint).toEqual({ step: 1 });
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(500);
     tee.restore();
@@ -350,6 +351,46 @@ describe("attachTeeSink — aggregation via finalize", () => {
     });
 
     expect(underlying.handled).toHaveLength(2);
+    tee.restore();
+  });
+
+  it("aggregates pinned.set with key='checkpoint' (AFPS 1.5) into result.checkpoint with scope captured", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
+
+    stdout.write.call(
+      null as never,
+      '{"type":"pinned.set","key":"checkpoint","content":{"cursor":"abc"},"scope":"shared","timestamp":1}\n',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
+
+    const final = underlying.finalized!;
+    expect(final.checkpoint).toEqual({ cursor: "abc" });
+    expect(final.checkpointScope).toBe("shared");
+    tee.restore();
+  });
+
+  it("aggregates pinned.set with arbitrary key (AFPS 1.5) into result.pinned", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
+
+    stdout.write.call(
+      null as never,
+      '{"type":"pinned.set","key":"persona","content":"agent persona","timestamp":1}\n',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
+
+    const final = underlying.finalized!;
+    expect(final.pinned).toEqual({ persona: { content: "agent persona" } });
+    expect(final.checkpoint).toBeNull();
     tee.restore();
   });
 });

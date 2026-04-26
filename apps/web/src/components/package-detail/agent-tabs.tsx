@@ -5,10 +5,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useAgentMemories } from "../../hooks/use-memories";
+import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
-import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useAgentReadiness } from "../../hooks/use-agent-readiness";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
@@ -17,9 +16,8 @@ import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
-import { Ban, BrainCircuit, CalendarClock, Play } from "lucide-react";
+import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
-import { formatDateField } from "../../lib/markdown";
 
 export function AgentRunsTab({
   packageId,
@@ -103,45 +101,8 @@ export function AgentConnectorsTab({
   return <AgentProvidersSection packageId={packageId} detail={detail} />;
 }
 
-export function AgentMemoriesTab({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const { data: memories } = useAgentMemories(packageId);
-  const deleteMemory = useDeleteMemory(packageId);
-
-  return (
-    <>
-      {!memories || memories.length === 0 ? (
-        <EmptyState
-          message={t("detail.emptyMemories")}
-          hint={t("detail.emptyMemoriesHint")}
-          icon={BrainCircuit}
-          compact
-        />
-      ) : (
-        <div className="space-y-1">
-          {memories.map((mem) => (
-            <div
-              key={mem.id}
-              className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
-            >
-              <span className="text-foreground flex-1 truncate text-sm">{mem.content}</span>
-              <span className="text-muted-foreground text-xs whitespace-nowrap">
-                {mem.createdAt ? formatDateField(mem.createdAt) : ""}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => deleteMemory.mutate(mem.id)}
-                disabled={deleteMemory.isPending}
-              >
-                {t("btn.delete")}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
+export function AgentMemoryTab({ packageId }: { packageId: string }) {
+  return <MemoryPanel packageId={packageId} />;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

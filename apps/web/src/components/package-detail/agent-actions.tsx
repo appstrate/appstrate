@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { isFileField } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useRuns } from "../../hooks/use-runs";
-import { useAgentMemories } from "../../hooks/use-memories";
+import { useAgentMemories } from "../../hooks/use-persistence";
 import {
   useDeleteAgent,
   useDeleteAgentRuns,

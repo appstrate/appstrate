@@ -670,7 +670,7 @@ program
   .option("--config <json>", "Config JSON object passed to the agent")
   .option(
     "--snapshot <path>",
-    "JSON file { memories?, history?, state? } seeded onto the ExecutionContext before the run",
+    "JSON file { memories?, history?, checkpoint? } seeded onto the ExecutionContext before the run",
   )
   .option(
     "--model-source <mode>",

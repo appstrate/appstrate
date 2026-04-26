@@ -30,6 +30,9 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
+export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
+export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
+
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
 
@@ -223,7 +226,7 @@ export async function updateRun(
   updates: {
     status?: string;
     result?: Record<string, unknown>;
-    state?: Record<string, unknown>;
+    checkpoint?: Record<string, unknown>;
     error?: string;
     completedAt?: string;
     duration?: number;
@@ -241,7 +244,7 @@ export async function updateRun(
   if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
   if (updates.duration !== undefined) set.duration = updates.duration;
   if (updates.result !== undefined) set.result = updates.result;
-  if (updates.state !== undefined) set.state = updates.state;
+  if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
   if (updates.metadata !== undefined) set.metadata = updates.metadata;
@@ -266,7 +269,7 @@ export async function updateRun(
   }
 }
 
-export async function getLastRunState(
+export async function getLastCheckpoint(
   scope: AppScope,
   packageId: string,
   actor: Actor | null,
@@ -275,7 +278,7 @@ export async function getLastRunState(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.applicationId, scope.applicationId),
-    isNotNull(runs.state),
+    isNotNull(runs.checkpoint),
   ];
   if (actor) {
     conditions.push(
@@ -284,13 +287,15 @@ export async function getLastRunState(
   }
 
   const [row] = await db
-    .select({ state: runs.state })
+    .select({ checkpoint: runs.checkpoint })
     .from(runs)
     .where(and(...conditions))
     .orderBy(desc(runs.startedAt))
     .limit(1);
-  return asRecordOrNull(row?.state);
+  return asRecordOrNull(row?.checkpoint);
 }
+
+export type RecentRunsField = RunHistoryField;
 
 export async function getRecentRuns(
   scope: AppScope,
@@ -298,12 +303,12 @@ export async function getRecentRuns(
   actor: Actor | null,
   options: {
     limit?: number;
-    fields?: ("state" | "result")[];
+    fields?: RecentRunsField[];
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
   const limit = options.limit ?? 10;
-  const fields = options.fields ?? ["state"];
+  const fields = options.fields ?? ["checkpoint"];
 
   const conditions = [
     eq(runs.packageId, packageId),
@@ -311,6 +316,8 @@ export async function getRecentRuns(
     eq(runs.applicationId, scope.applicationId),
     eq(runs.status, "success"),
   ];
+  // Actor isolation is mandatory — never leak cross-actor checkpoints.
+  // Scheduled / system runs (`actor === null`) read the shared bucket only.
   if (actor) {
     conditions.push(
       actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
@@ -327,7 +334,7 @@ export async function getRecentRuns(
       status: runs.status,
       startedAt: runs.startedAt,
       duration: runs.duration,
-      state: runs.state,
+      checkpoint: runs.checkpoint,
       result: runs.result,
     })
     .from(runs)
@@ -342,7 +349,7 @@ export async function getRecentRuns(
       date: toISO(row.startedAt),
       duration: row.duration,
     };
-    if (fields.includes("state")) entry.state = row.state;
+    if (fields.includes("checkpoint")) entry.checkpoint = row.checkpoint;
     if (fields.includes("result")) entry.result = row.result;
     return entry;
   });

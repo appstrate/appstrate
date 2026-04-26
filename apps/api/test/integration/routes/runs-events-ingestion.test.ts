@@ -19,7 +19,7 @@
  *      the complete row) which would fail in either infra mode if the
  *      abstractions were bypassed.
  *
- *   2. `result.report` / `result.output` / `result.state` sent with
+ *   2. `result.report` / `result.output` / `result.checkpoint` sent with
  *      finalize land on `runs.result`. Before the tee sink merged
  *      aggregator fields into the finalize POST, tools that emitted
  *      `report.appended` via stdout produced an empty report column.
@@ -276,12 +276,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     await seedPackage({ orgId: ctx.orgId, id: "@test/final-agent", type: "agent" });
   });
 
-  it("writes output + report + state from the finalize body onto runs.result", async () => {
+  it("writes output + report + checkpoint from the finalize body onto runs.result", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const result = {
       memories: [{ content: "m1" }],
-      state: { step: 3 },
+      checkpoint: { step: 3 },
       output: { answer: 42 },
       report: "# Report\nparagraph",
       logs: [],

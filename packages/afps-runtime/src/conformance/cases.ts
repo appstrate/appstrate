@@ -376,8 +376,8 @@ const SAMPLE_SCRIPT: RunEvent[] = [
   scriptEvent("log.written", { level: "info", message: "starting" }),
   scriptEvent("memory.added", { content: "first" }),
   scriptEvent("memory.added", { content: "second" }),
-  scriptEvent("state.set", { state: { counter: 1 } }),
-  scriptEvent("state.set", { state: { counter: 2 } }),
+  scriptEvent("pinned.set", { key: "checkpoint", content: { counter: 1 } }),
+  scriptEvent("pinned.set", { key: "checkpoint", content: { counter: 2 } }),
   scriptEvent("output.emitted", { data: { answer: 0, partial: true } }),
   scriptEvent("output.emitted", { data: { answer: 42, partial: false, extra: "done" } }),
   scriptEvent("report.appended", { content: "line 1" }),
@@ -412,8 +412,8 @@ const L4_ORDERED_EMISSION: ConformanceCase = {
       "log.written",
       "memory.added",
       "memory.added",
-      "state.set",
-      "state.set",
+      "pinned.set",
+      "pinned.set",
       "output.emitted",
       "output.emitted",
       "report.appended",
@@ -457,8 +457,8 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     if (r.memories[0]!.content !== "first" || r.memories[1]!.content !== "second") {
       return fail("memory order / content mismatch");
     }
-    if (!r.state || (r.state as { counter: number }).counter !== 2) {
-      return fail(`state should be last-write-wins, got ${JSON.stringify(r.state)}`);
+    if (!r.checkpoint || (r.checkpoint as { counter: number }).counter !== 2) {
+      return fail(`checkpoint should be last-write-wins, got ${JSON.stringify(r.checkpoint)}`);
     }
     const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
@@ -491,7 +491,7 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
     if (
       r.memories.length !== 0 ||
       r.logs.length !== 0 ||
-      r.state !== null ||
+      r.checkpoint !== null ||
       r.output !== null ||
       r.report !== null
     ) {

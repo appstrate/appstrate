@@ -33,7 +33,7 @@ afterEach(() => {
 describe("resolveRunnerContext", () => {
   it("returns null/null when no header, no resolver, no auth extra", async () => {
     const ctx = makeContext({});
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result).toEqual({ name: null, kind: null });
   });
@@ -45,7 +45,7 @@ describe("resolveRunnerContext", () => {
         "X-Appstrate-Runner-Kind": "github-action",
       },
     });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result).toEqual({ name: "acme/web @ run-42", kind: "github-action" });
   });
@@ -55,7 +55,7 @@ describe("resolveRunnerContext", () => {
     const ctx = makeContext({
       headers: { "X-Appstrate-Runner-Name": `   ${longName}   ` },
     });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result.name?.length).toBe(120);
     expect(result.name).toMatch(/^a+$/);
@@ -63,7 +63,7 @@ describe("resolveRunnerContext", () => {
 
   it("treats empty/whitespace-only header as missing", async () => {
     const ctx = makeContext({ headers: { "X-Appstrate-Runner-Name": "   " } });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result.name).toBeNull();
   });
@@ -74,7 +74,7 @@ describe("resolveRunnerContext", () => {
       return null;
     });
     const ctx = makeContext({ authExtra: { cliFamilyId: "crf_known" } });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result).toEqual({ name: "pierres-mbp", kind: "cli" });
   });
@@ -85,7 +85,7 @@ describe("resolveRunnerContext", () => {
       headers: { "X-Appstrate-Runner-Name": "from-header" },
       authExtra: { cliFamilyId: "crf_known" },
     });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result.name).toBe("from-header");
   });
@@ -96,7 +96,7 @@ describe("resolveRunnerContext", () => {
       headers: { "X-Appstrate-Runner-Kind": "github-action" },
       authExtra: { cliFamilyId: "crf_known" },
     });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result.kind).toBe("github-action");
   });
@@ -104,7 +104,7 @@ describe("resolveRunnerContext", () => {
   it("ignores resolver result when name is null and no header was set", async () => {
     setRunnerResolver(async () => ({ name: null, kind: "cli" }));
     const ctx = makeContext({ authExtra: { cliFamilyId: "crf_unknown" } });
-     
+
     const result = await resolveRunnerContext(ctx as any);
     expect(result.name).toBeNull();
     // The resolver still gets to set the kind even when it can't supply

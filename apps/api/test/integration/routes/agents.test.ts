@@ -9,6 +9,7 @@ import { seedAgent, seedRun, seedConnectionProfile, seedApplication } from "../.
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { runs } from "@appstrate/db/schema";
+import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 
 const app = getTestApp();
 
@@ -579,6 +580,236 @@ describe("Agents API", () => {
       const body = (await res.json()) as any;
       expect(body.agent.agentAppProfileId).toBeNull();
       expect(body.agent.agentAppProfileName).toBeNull();
+    });
+  });
+
+  // ─── Persistence Routes (ADR-011 + ADR-013 — pinned slots + memories) ─
+
+  describe("GET /api/agents/:scope/:name/persistence", () => {
+    it("returns pinned slots as an array (admin sees every actor's row)", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-list",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      // Two distinct scopes write pinned `checkpoint` slots
+      await upsertPinned(
+        "@myorg/persist-list",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        "checkpoint",
+        { step: "user-checkpoint" },
+        null,
+      );
+      await upsertPinned(
+        "@myorg/persist-list",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "checkpoint",
+        { step: "shared-checkpoint" },
+        null,
+      );
+
+      const res = await app.request("/api/agents/@myorg/persist-list/persistence?kind=pinned", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        pinned: Array<{ key: string; actorType: string; content: { step: string } }>;
+      };
+      expect(Array.isArray(body.pinned)).toBe(true);
+      expect(body.pinned).toHaveLength(2);
+      const actorTypes = body.pinned.map((c) => c.actorType).sort();
+      expect(actorTypes).toEqual(["shared", "user"]);
+      // Every row is the legacy `checkpoint` slot here.
+      expect(body.pinned.every((c) => c.key === "checkpoint")).toBe(true);
+    });
+
+    it("returns Letta-style named pinned slots alongside the legacy checkpoint", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-named-pin",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      // Mix of keys: legacy `checkpoint` + Letta-style `persona` + `goals`
+      await upsertPinned(
+        "@myorg/persist-named-pin",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "checkpoint",
+        { step: "carry-over" },
+        null,
+      );
+      await upsertPinned(
+        "@myorg/persist-named-pin",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "persona",
+        "Senior coding assistant",
+        null,
+      );
+      await upsertPinned(
+        "@myorg/persist-named-pin",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "goals",
+        ["ship faster", "fewer bugs"],
+        null,
+      );
+
+      const res = await app.request(
+        "/api/agents/@myorg/persist-named-pin/persistence?kind=pinned",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        pinned: Array<{ key: string; content: unknown }>;
+      };
+      const keys = body.pinned.map((p) => p.key).sort();
+      expect(keys).toEqual(["checkpoint", "goals", "persona"]);
+    });
+
+    it("filters memories by runId", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+      const r1 = await seedRun({
+        packageId: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+      });
+      const r2 = await seedRun({
+        packageId: "@myorg/persist-runid",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+      });
+      await addMemories(
+        "@myorg/persist-runid",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["from-r1-a", "from-r1-b"],
+        r1.id,
+      );
+      await addMemories(
+        "@myorg/persist-runid",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["from-r2"],
+        r2.id,
+      );
+
+      const res = await app.request(
+        `/api/agents/@myorg/persist-runid/persistence?kind=memory&runId=${r1.id}`,
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: Array<{ runId: string }> };
+      expect(body.memories).toHaveLength(2);
+      expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
+    });
+  });
+
+  describe("DELETE /api/agents/:scope/:name/persistence/pinned/:id", () => {
+    it("deletes a single pinned slot by id", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-del-cp",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+      await upsertPinned(
+        "@myorg/persist-del-cp",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "checkpoint",
+        { step: "x" },
+        null,
+      );
+
+      const listRes = await app.request(
+        "/api/agents/@myorg/persist-del-cp/persistence?kind=pinned",
+        { headers: authHeaders(ctx) },
+      );
+      const listBody = (await listRes.json()) as { pinned: Array<{ id: number }> };
+      expect(listBody.pinned).toHaveLength(1);
+      const slotId = listBody.pinned[0]!.id;
+
+      const delRes = await app.request(
+        `/api/agents/@myorg/persist-del-cp/persistence/pinned/${slotId}`,
+        { method: "DELETE", headers: authHeaders(ctx) },
+      );
+      expect(delRes.status).toBe(200);
+
+      const after = await app.request("/api/agents/@myorg/persist-del-cp/persistence?kind=pinned", {
+        headers: authHeaders(ctx),
+      });
+      const afterBody = (await after.json()) as { pinned: unknown[] };
+      expect(afterBody.pinned).toHaveLength(0);
+    });
+
+    it("deletes a Letta-style named pinned slot (e.g. persona) by id", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-del-persona",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+      await upsertPinned(
+        "@myorg/persist-del-persona",
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "shared" },
+        "persona",
+        "Senior coding assistant",
+        null,
+      );
+
+      const listRes = await app.request(
+        "/api/agents/@myorg/persist-del-persona/persistence?kind=pinned",
+        { headers: authHeaders(ctx) },
+      );
+      const listBody = (await listRes.json()) as { pinned: Array<{ id: number; key: string }> };
+      const personaSlot = listBody.pinned.find((s) => s.key === "persona")!;
+
+      const delRes = await app.request(
+        `/api/agents/@myorg/persist-del-persona/persistence/pinned/${personaSlot.id}`,
+        { method: "DELETE", headers: authHeaders(ctx) },
+      );
+      expect(delRes.status).toBe(200);
+    });
+
+    it("returns 404 for unknown pinned slot id", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/persist-del-404",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request(
+        "/api/agents/@myorg/persist-del-404/persistence/pinned/999999",
+        { method: "DELETE", headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(404);
     });
   });
 });

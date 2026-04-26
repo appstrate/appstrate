@@ -112,9 +112,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Memories
-  "memories:read",
-  "memories:delete",
+  // Persistence (unified checkpoints + memories — see ADR-011)
+  "persistence:read",
+  "persistence:delete",
   // Connections
   "connections:read",
   "connections:connect",
@@ -178,8 +178,8 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Memories (read only)
-  "memories:read",
+  // Persistence (read only — unified checkpoints + memories)
+  "persistence:read",
   // Connections (full self-service)
   "connections:read",
   "connections:connect",
@@ -210,7 +210,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "providers:read",
   "runs:read",
   "schedules:read",
-  "memories:read",
+  "persistence:read",
   "connections:read",
   "profiles:read",
   "app-profiles:read",

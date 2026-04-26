@@ -79,7 +79,7 @@ interface PromptContext {
   runId?: string;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
-  previousState: Record<string, unknown> | null;
+  previousCheckpoint: Record<string, unknown> | null;
   runApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
@@ -106,7 +106,7 @@ function splitLegacy(ctx: PromptContext): {
       content: m.content,
       createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
     })),
-    ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
+    ...(ctx.previousCheckpoint !== null ? { checkpoint: ctx.previousCheckpoint } : {}),
     config: ctx.config,
   };
   const bundle = makeTestBundle({
@@ -146,7 +146,7 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
     rawPrompt: "Do the task.",
     tokens: {},
     config: {},
-    previousState: null,
+    previousCheckpoint: null,
     input: {},
     schemas: {},
     providers: [],
@@ -167,8 +167,12 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
     availableTools: [
       { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
       { id: "@appstrate/output", name: "Output", description: "Return run result" },
-      { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
-      { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+      {
+        id: "@appstrate/pin",
+        name: "Pin",
+        description: "Upsert a pinned slot",
+      },
+      { id: "@appstrate/note", name: "Note", description: "Append an archive memory" },
     ],
     ...overrides,
   });
@@ -223,16 +227,23 @@ describe("buildEnrichedPrompt — tool documentation", () => {
   it("includes multiple tool docs", () => {
     const ctx = baseContext({
       availableTools: [
-        { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
-        { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+        {
+          id: "@appstrate/pin",
+          name: "Pin",
+          description: "Upsert a pinned slot",
+        },
+        { id: "@appstrate/note", name: "Note", description: "Append an archive memory" },
       ],
       toolDocs: [
-        { id: "@appstrate/set-state", content: "## State Persistence\n\nUse `set_state`." },
-        { id: "@appstrate/add-memory", content: "## Memory\n\nUse `add_memory`." },
+        {
+          id: "@appstrate/pin",
+          content: "## Checkpoint Persistence\n\nUse `pin({ key, content })`.",
+        },
+        { id: "@appstrate/note", content: "## Memory\n\nUse `note({ content })`." },
       ],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## State Persistence");
+    expect(prompt).toContain("## Checkpoint Persistence");
     expect(prompt).toContain("## Memory");
   });
 
@@ -348,31 +359,31 @@ describe("buildEnrichedPrompt — configuration", () => {
 
 // ─── Previous state ─────────────────────────────────────────
 
-describe("buildEnrichedPrompt — previous state", () => {
-  it("includes previous state when set-state tool is available", () => {
+describe("buildEnrichedPrompt — checkpoint", () => {
+  it("includes checkpoint when set-checkpoint tool is available", () => {
     const ctx = contextWithSystemTools({
-      previousState: { cursor: "abc123", processedCount: 42 },
+      previousCheckpoint: { cursor: "abc123", processedCount: 42 },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Previous State");
+    expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("```json");
     expect(prompt).toContain('"cursor": "abc123"');
     expect(prompt).toContain('"processedCount": 42');
   });
 
-  it("omits previous state when null", () => {
-    const ctx = contextWithSystemTools({ previousState: null });
+  it("omits checkpoint when null", () => {
+    const ctx = contextWithSystemTools({ previousCheckpoint: null });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Previous State");
+    expect(prompt).not.toContain("## Checkpoint");
   });
 
-  it("includes previous state regardless of available tools", () => {
+  it("includes checkpoint regardless of available tools", () => {
     const ctx = baseContext({
-      previousState: { cursor: "abc123" },
+      previousCheckpoint: { cursor: "abc123" },
       availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Previous State");
+    expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("abc123");
   });
 });
@@ -394,10 +405,14 @@ describe("buildEnrichedPrompt — memories", () => {
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("omits memory section when no memories", () => {
+  it("emits memory section even with no memories — surfaces the recall_memory tool to the agent", () => {
+    // ADR-012: the section is always emitted so the LLM discovers
+    // `recall_memory` exists, even before any memory has been pinned.
     const ctx = contextWithSystemTools({ memories: [] });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Memory");
+    expect(prompt).toContain("## Memory");
+    expect(prompt).toContain("No memories are currently pinned");
+    expect(prompt).toContain("recall_memory");
   });
 
   it("includes memories regardless of available tools", () => {

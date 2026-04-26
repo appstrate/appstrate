@@ -71,6 +71,20 @@
       "when": 1778025600000,
       "tag": "0009_run_runner_name",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778025700000,
+      "tag": "0010_package_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778025800000,
+      "tag": "0011_persistence_unify",
+      "breakpoints": true
     }
   ]
 }

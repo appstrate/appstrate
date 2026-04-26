@@ -39,13 +39,16 @@ function emit(ctx: ToolContext, type: string, extra: Record<string, unknown>): v
 }
 
 // ─────────────────────────────────────────────
-// @afps/memory — add_memory → memory.added
+// @afps/note — note → memory.added (AFPS 1.5+; replaces add_memory)
 // ─────────────────────────────────────────────
 
-export const memoryTool: Tool = {
-  name: "add_memory",
+export const noteTool: Tool = {
+  name: "note",
   description:
-    "Save a durable memory — a discovery, fact, or user preference worth keeping across future runs. Prefer bullet-sized entries (one fact per call).",
+    "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
+    "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
+    "Prefer bullet-sized entries (one fact per call). " +
+    'By default notes are scoped to the current actor (the user or end-user that triggered the run); pass scope: "shared" for app-wide notes every actor will see.',
   parameters: {
     type: "object",
     required: ["content"],
@@ -56,37 +59,70 @@ export const memoryTool: Tool = {
         minLength: 1,
         description: "Memory content (max ~2000 chars).",
       },
-    },
-  } satisfies JSONSchema,
-  async execute(args, ctx) {
-    const { content } = args as { content: string };
-    emit(ctx, "memory.added", { content });
-    return successResult("Memory saved");
-  },
-};
-
-// ─────────────────────────────────────────────
-// @afps/state — set_state → state.set
-// ─────────────────────────────────────────────
-
-export const stateTool: Tool = {
-  name: "set_state",
-  description:
-    "Overwrite the agent's carry-over state for the next run. Last-write-wins; the most recent call fully replaces any previous state.",
-  parameters: {
-    type: "object",
-    required: ["state"],
-    additionalProperties: false,
-    properties: {
-      state: {
-        description: "Arbitrary JSON value stored as carry-over state.",
+      scope: {
+        type: "string",
+        enum: ["actor", "shared"],
+        description:
+          'Persistence scope. "actor" (default) keeps the note private to the run\'s actor; "shared" makes it visible to every actor of this app.',
       },
     },
   } satisfies JSONSchema,
   async execute(args, ctx) {
-    const { state } = args as { state: unknown };
-    emit(ctx, "state.set", { state });
-    return successResult("State updated");
+    const { content, scope } = args as { content: string; scope?: "actor" | "shared" };
+    emit(ctx, "memory.added", {
+      content,
+      ...(scope !== undefined ? { scope } : {}),
+    });
+    return successResult("Note saved");
+  },
+};
+
+// ─────────────────────────────────────────────
+// @afps/pin — pin → pinned.set (AFPS 1.5+; replaces set_checkpoint)
+// ─────────────────────────────────────────────
+
+export const pinTool: Tool = {
+  name: "pin",
+  description:
+    "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per `(scope, key)` — the most recent call fully replaces the previous value. " +
+    'Use `key: "checkpoint"` for the legacy carry-over checkpoint; other keys (e.g. "persona", "goals") are accepted and persisted as named pinned blocks. ' +
+    'By default the slot is scoped to the current actor (the user or end-user that triggered the run); pass scope: "shared" for an app-wide slot shared across all actors.',
+  parameters: {
+    type: "object",
+    required: ["key", "content"],
+    additionalProperties: false,
+    properties: {
+      key: {
+        type: "string",
+        minLength: 1,
+        maxLength: 64,
+        pattern: "^[a-z0-9_]+$",
+        description:
+          'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is reserved for the carry-over checkpoint slot.',
+      },
+      content: {
+        description: "Arbitrary JSON value stored under the pinned slot.",
+      },
+      scope: {
+        type: "string",
+        enum: ["actor", "shared"],
+        description:
+          'Persistence scope. "actor" (default) keeps the slot private to the run\'s actor; "shared" makes it visible to every actor of this app.',
+      },
+    },
+  } satisfies JSONSchema,
+  async execute(args, ctx) {
+    const { key, content, scope } = args as {
+      key: string;
+      content: unknown;
+      scope?: "actor" | "shared";
+    };
+    emit(ctx, "pinned.set", {
+      key,
+      content,
+      ...(scope !== undefined ? { scope } : {}),
+    });
+    return successResult(`Pinned slot "${key}" updated`);
   },
 };
 
@@ -170,8 +206,8 @@ export const logTool: Tool = {
  * when a runner needs to inject all five at once.
  */
 export const PLATFORM_TOOLS = {
-  add_memory: memoryTool,
-  set_state: stateTool,
+  note: noteTool,
+  pin: pinTool,
   output: outputTool,
   report: reportTool,
   log: logTool,

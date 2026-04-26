@@ -16,7 +16,10 @@ describe("isCanonicalRunEvent", () => {
   it("accepts all canonical, well-formed events", () => {
     const events: RunEvent[] = [
       { ...baseEnvelope, type: "memory.added", content: "hello" },
-      { ...baseEnvelope, type: "state.set", state: { counter: 1 } },
+      { ...baseEnvelope, type: "memory.added", content: "scoped", scope: "shared" },
+      { ...baseEnvelope, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
+      { ...baseEnvelope, type: "pinned.set", key: "checkpoint", content: { c: 2 }, scope: "actor" },
+      { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "report.appended", content: "## Title" },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
@@ -30,6 +33,42 @@ describe("isCanonicalRunEvent", () => {
       },
     ];
     for (const e of events) expect(isCanonicalRunEvent(e)).toBe(true);
+  });
+
+  it("rejects malformed scope on memory.added or pinned.set", () => {
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "memory.added",
+        content: "x",
+        scope: "global",
+      } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "pinned.set",
+        key: "checkpoint",
+        content: 1,
+        scope: "everyone",
+      } as RunEvent),
+    ).toBe(false);
+    // pinned.set without `key` is rejected
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "pinned.set",
+        content: 1,
+      } as RunEvent),
+    ).toBe(false);
+    // pinned.set without `content` is rejected
+    expect(
+      isCanonicalRunEvent({
+        ...baseEnvelope,
+        type: "pinned.set",
+        key: "checkpoint",
+      } as RunEvent),
+    ).toBe(false);
   });
 
   it("rejects third-party event types", () => {
@@ -239,7 +278,7 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 8 reserved namespaces (memory/state/output/report/log + appstrate.{progress,error,metric})
+    // 8 reserved namespaces (memory/pinned/output/report/log + appstrate.{progress,error,metric})
     // + 5 run lifecycle events (run.{started,success,failed,timeout,cancelled}, #278 item I).
     expect(arr.length).toBe(13);
     expect(new Set(arr).size).toBe(arr.length);

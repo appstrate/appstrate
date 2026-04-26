@@ -78,12 +78,12 @@ export {
   type RemoteAppstrateProviderResolverOptions,
 } from "./remote-appstrate-provider-resolver.ts";
 
-// Spec-compliant platform tools (memory, state, output, report, log)
-// — the runtime no longer hardcodes these internally; agents declare
-// them in dependencies.tools[] and a BundledToolResolver loads them.
+// Spec-compliant platform tools (note, pin, output, report, log) — the
+// runtime no longer hardcodes these internally; agents declare them in
+// dependencies.tools[] and a BundledToolResolver loads them.
 export {
-  memoryTool,
-  stateTool,
+  noteTool,
+  pinTool,
   outputTool,
   reportTool,
   logTool,

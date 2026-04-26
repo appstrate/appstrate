@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/afps-runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Portable, open-source runtime for executing AFPS agent bundles. Powers Appstrate and any compatible machine.",
   "license": "Apache-2.0",
   "type": "module",

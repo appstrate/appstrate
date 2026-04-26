@@ -1,0 +1,29 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/note",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Note",
+  "description": "Append a long-term archive memory. Reachable from the agent only via recall_memory. Supports per-actor and shared scopes.",
+  "schemaVersion": "1.5",
+  "entrypoint": "tool.ts",
+  "tool": {
+    "name": "note",
+    "description": "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. Archive memories are NOT injected into the system prompt; retrieve them on demand with recall_memory. By default notes are scoped to the current actor (the user or end-user that triggered the run); pass scope=\"shared\" for an app-wide note visible to every actor.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "Memory text to save (max 2000 characters)"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["actor", "shared"],
+          "description": "Persistence scope: \"actor\" (default) keeps the note private to the run's actor; \"shared\" makes it app-wide."
+        }
+      },
+      "required": ["content"]
+    }
+  }
+}

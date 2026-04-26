@@ -23,6 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ShieldCheck } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
+import { caretRange } from "./utils";
 
 interface ResourceSectionProps {
   type: PackageType;
@@ -45,14 +46,17 @@ export function VersionSelect({
 }) {
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
-  const latestVersion = available?.[0]?.version;
+  const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
+  const latestRange = ranges[0];
 
-  // Sync state when current value doesn't match any available option
+  // Migrate the stored value to a caret range whenever it doesn't
+  // match one of the offered choices — covers legacy `*`, exact pins
+  // typed by hand, and yanked versions that disappeared since save.
   useEffect(() => {
-    if (!latestVersion) return;
-    if (value !== "*" && available!.some((v) => v.version === value)) return;
-    onChange(latestVersion);
-  }, [latestVersion, available, value]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!latestRange) return;
+    if (ranges.includes(value)) return;
+    onChange(latestRange);
+  }, [latestRange, ranges, value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {
@@ -65,14 +69,13 @@ export function VersionSelect({
 
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-7 w-[80px] text-xs" onClick={(e) => e.stopPropagation()}>
+      <SelectTrigger className="h-7 w-[100px] text-xs" onClick={(e) => e.stopPropagation()}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {value === "*" && <SelectItem value="*">*</SelectItem>}
         {available.map((v) => (
-          <SelectItem key={v.id} value={v.version}>
-            {v.version}
+          <SelectItem key={v.id} value={caretRange(v.version)}>
+            {caretRange(v.version)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -99,7 +102,11 @@ export function ResourceSection({
       onChange(selectedEntries.filter((e) => e.id !== id));
     } else {
       const item = items?.find((i) => i.id === id);
-      const version = item?.version ?? "*";
+      // `*` only as a last-resort placeholder — `VersionSelect` migrates
+      // it to caret-of-latest as soon as the package's version list
+      // arrives. Hitting this branch means the package list lacks a
+      // `version` field, which would already be a registry data issue.
+      const version = item?.version ? caretRange(item.version) : "*";
       onChange([...selectedEntries, { id, version }]);
     }
   };
@@ -117,6 +124,9 @@ export function ResourceSection({
       const newId = result.packageId;
 
       if (!selectedMap.has(newId)) {
+        // Placeholder — `VersionSelect` migrates `*` to caret-of-latest
+        // on mount, which after this upload resolves to the version we
+        // just published.
         onChange([...selectedEntries, { id: newId, version: "*" }]);
       }
     } catch (err) {
@@ -184,18 +194,12 @@ export function ResourceSection({
                 </div>
                 {isSelected && (
                   <div className="ml-auto shrink-0">
-                    {isBuiltIn ? (
-                      <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
-                        {t("editor.builtIn")}
-                      </span>
-                    ) : (
-                      <VersionSelect
-                        type={type}
-                        packageId={item.id}
-                        value={entry?.version ?? "*"}
-                        onChange={(v) => updateVersion(item.id, v)}
-                      />
-                    )}
+                    <VersionSelect
+                      type={type}
+                      packageId={item.id}
+                      value={entry?.version ?? "*"}
+                      onChange={(v) => updateVersion(item.id, v)}
+                    />
                   </div>
                 )}
               </label>

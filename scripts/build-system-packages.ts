@@ -28,8 +28,36 @@ const OUTPUT_DIR = join(import.meta.dir, "../system-packages");
 async function main() {
   const entries = await readdir(SOURCES_DIR);
   const dirs = entries.filter((e) => !e.startsWith(".") && e !== "node_modules");
-  const existingAfps = checkOnly ? [] : await readdir(OUTPUT_DIR);
+  const existingAfps = await readdir(OUTPUT_DIR);
   let count = 0;
+
+  // Compute the set of archive names that should exist, based on source
+  // dirs. Used below to detect orphan `.afps` files (source removed but
+  // archive left behind — they would otherwise be loaded at boot and
+  // resurface in the UI as "Intégré" packages).
+  const expectedZips = new Set<string>();
+  for (const dirName of dirs) {
+    const dirStat = await stat(join(SOURCES_DIR, dirName));
+    if (dirStat.isDirectory()) expectedZips.add(`${dirName}.afps`);
+  }
+  const orphans = existingAfps.filter((name) => name.endsWith(".afps") && !expectedZips.has(name));
+  if (orphans.length > 0) {
+    if (checkOnly) {
+      console.error(
+        `\nORPHAN: ${orphans.length} archive(s) in system-packages/ have no source dir in scripts/system-packages/:`,
+      );
+      for (const o of orphans) console.error(`  - ${o}`);
+      console.error(
+        `\nDelete these archives or restore their sources. Orphan archives are\n` +
+          `loaded at boot and resurface in the UI as built-in packages.\n`,
+      );
+      process.exit(1);
+    }
+    for (const o of orphans) {
+      await unlink(join(OUTPUT_DIR, o));
+      console.log(`  Deleted orphan: ${o}`);
+    }
+  }
 
   for (const dirName of dirs.sort()) {
     const dirPath = join(SOURCES_DIR, dirName);

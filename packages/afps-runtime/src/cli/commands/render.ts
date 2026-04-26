@@ -16,7 +16,7 @@ Usage:
 Options:
   --context <path>    JSON file with render context (runId, input, …).
                       Fields omitted default to empty.
-  --snapshot <path>   JSON file with { memories?, state?, history? }
+  --snapshot <path>   JSON file with { memories?, checkpoint?, history? }
                       merged onto the context before rendering.
 
 The rendered prompt is printed to stdout with no headers or framing so
@@ -32,7 +32,7 @@ interface RenderContextFile {
 interface SnapshotFile {
   memories?: ExecutionContext["memories"];
   history?: ExecutionContext["history"];
-  state?: unknown;
+  checkpoint?: unknown;
 }
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
@@ -96,7 +96,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     ...contextFile,
     ...(snapshot.memories !== undefined ? { memories: snapshot.memories } : {}),
     ...(snapshot.history !== undefined ? { history: snapshot.history } : {}),
-    ...(snapshot.state !== undefined ? { state: snapshot.state } : {}),
+    ...(snapshot.checkpoint !== undefined ? { checkpoint: snapshot.checkpoint } : {}),
   };
   const rendered = await renderPrompt({
     template,

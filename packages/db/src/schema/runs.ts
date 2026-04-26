@@ -45,7 +45,7 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result"),
-    state: jsonb("state"),
+    checkpoint: jsonb("checkpoint"),
     // `error` stores the human-readable `RunError.message` only. The
     // runtime `RunError` shape (`code`, `message`, `stack`, `context`,
     // `timestamp`) IS round-tripped at the runtime/runner boundary —
@@ -209,29 +209,83 @@ export const runLogs = pgTable(
   ],
 );
 
-export const packageMemories = pgTable(
-  "package_memories",
+/**
+ * Unified agent persistence — one row per piece of cross-run state the agent
+ * chooses to keep, regardless of its shape. The shape collapses two
+ * orthogonal dimensions instead of an enum (ADR-012):
+ *
+ * - `key` — nullable string. When set, the row is upsert-by-key (single
+ *   slot per `(package, app, actor, key)`); when null, the row is append-
+ *   only. Today the only named slot is `'checkpoint'`; archive memories
+ *   leave `key` null.
+ * - `pinned` — when true, the row is rendered into the agent's system
+ *   prompt on every run. When false, the row only surfaces if the agent
+ *   calls `recall_memory`. Checkpoints are pinned by default; memories
+ *   default to false.
+ *
+ * Mapping from the legacy `kind` enum (pre-0011):
+ *   `kind='checkpoint'` ≡ `key='checkpoint'`, `pinned=true`.
+ *   `kind='memory'`     ≡ `key IS NULL`,      `pinned=false`.
+ *
+ * Actor columns mirror the `runs` convention: `actor_type ∈
+ * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.
+ *
+ * See `docs/adr/ADR-011-checkpoint-unification.md` and
+ * `docs/adr/ADR-012-memory-as-tool.md`.
+ */
+export const packagePersistence = pgTable(
+  "package_persistence",
   {
     id: serial("id").primaryKey(),
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
-    content: text("content").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    key: text("key"),
+    pinned: boolean("pinned").notNull().default(false),
+    actorType: text("actor_type").notNull().$type<"user" | "end_user" | "shared">(),
+    actorId: text("actor_id"),
+    content: jsonb("content").notNull(),
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    index("idx_package_memories_package_app").on(table.packageId, table.applicationId),
-    index("idx_package_memories_org_id").on(table.orgId),
-    index("idx_package_memories_app_id").on(table.applicationId),
+    // Upsert target for named slots. The partial WHERE keeps archive rows
+    // (`key IS NULL`) out of the index entirely. COALESCE on actor_id is
+    // load-bearing across PG and PGlite — see migration 0011 for context.
+    uniqueIndex("pkp_key_unique")
+      .on(
+        table.packageId,
+        table.applicationId,
+        table.actorType,
+        sql`(COALESCE(${table.actorId}, '__shared__'))`,
+        table.key,
+      )
+      .where(sql`key IS NOT NULL`),
+    // Primary read paths: getCheckpoint / listMemories / listPinned /
+    // recall_memory all narrow on (package, app, actor) first.
+    index("pkp_lookup").on(
+      table.packageId,
+      table.applicationId,
+      table.actorType,
+      table.actorId,
+      table.key,
+      table.pinned,
+    ),
+    index("pkp_org").on(table.orgId),
+    check("pkp_actor_type_valid", sql`actor_type IN ('user', 'end_user', 'shared')`),
+    check(
+      "pkp_actor_id_shape",
+      sql`(actor_type = 'shared' AND actor_id IS NULL) OR (actor_type <> 'shared' AND actor_id IS NOT NULL)`,
+    ),
   ],
 );
 

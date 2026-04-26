@@ -447,7 +447,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     descriptor: {
       name: "run_history",
       description:
-        "Fetch metadata and optionally the carry-over state or final output of the agent's " +
+        "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
         "most recent past runs (current run excluded). Returns JSON. " +
         "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
       inputSchema: {
@@ -462,9 +462,9 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           },
           fields: {
             type: "array",
-            items: { type: "string", enum: ["state", "result"] },
+            items: { type: "string", enum: ["checkpoint", "result"] },
             uniqueItems: true,
-            description: "Optional subset of `{state, result}` to include per run.",
+            description: "Optional subset of `{checkpoint, result}` to include per run.",
           },
         },
       },
@@ -492,6 +492,67 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         };
       }
       return responseToToolResult(res, { source: "run_history" });
+    },
+  };
+
+  // `recall_memory` MCP tool — backs the agent's archive memory store.
+  // Pinned memories are already in the system prompt; this tool fetches
+  // the archive (everything else) on demand so the working context stays
+  // small. See ADR-012.
+  const recallMemory: AppstrateToolDefinition = {
+    descriptor: {
+      name: "recall_memory",
+      description:
+        "Search the agent's archive memories — durable facts and learnings from past runs that " +
+        "are NOT visible in the system prompt by default. Pass an optional `q` to filter by " +
+        "case-insensitive substring; omit it to retrieve the most recent archive memories. " +
+        "Use this when the prompt's `## Memory` section says you have archived memories worth " +
+        "checking, when looking for a fact you remember saving, or before answering a question " +
+        "that depends on prior-session context. Returns JSON `{ memories: [...] }`.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          q: {
+            type: "string",
+            minLength: 1,
+            maxLength: 2000,
+            description:
+              "Case-insensitive substring to match against memory content (text or JSON). " +
+              "Omit for an unfiltered most-recent-first slice.",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 50,
+            description: "Max memories to return (1..50, default 10).",
+          },
+        },
+      },
+    },
+    handler: async (rawArgs) => {
+      const args = rawArgs as { q?: string; limit?: number };
+      const params = new URLSearchParams();
+      if (args.q !== undefined && args.q.length > 0) params.set("q", args.q);
+      if (args.limit !== undefined) params.set("limit", String(args.limit));
+      const qs = params.size > 0 ? `?${params.toString()}` : "";
+
+      const url = `${config.platformApiUrl}/internal/memories${qs}`;
+      let res: Response;
+      try {
+        res = await fetchFn(url, {
+          headers: { Authorization: `Bearer ${config.runToken}` },
+        });
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+        const suffix = code ? `: ${code}` : "";
+        return {
+          content: [{ type: "text", text: `recall_memory: upstream fetch failed${suffix}` }],
+          isError: true,
+        };
+      }
+      return responseToToolResult(res, { source: "recall_memory" });
     },
   };
 
@@ -615,7 +676,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     },
   };
 
-  return [providerCall, runHistory, llmComplete];
+  return [providerCall, runHistory, recallMemory, llmComplete];
 }
 
 /**

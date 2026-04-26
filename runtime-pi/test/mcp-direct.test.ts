@@ -101,6 +101,7 @@ async function makeMockServer(): Promise<MockServer> {
   const pair = await createInProcessPair([
     tool("provider_call", { ok: true }),
     tool("run_history", []),
+    tool("recall_memory", { memories: [] }),
     tool("llm_complete", { id: "ok" }),
   ]);
   const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
@@ -191,8 +192,12 @@ describe("buildMcpDirectFactories — provider_call registration (D5.3)", () => 
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
       expect(captured.find((c) => c.name === "provider_call")).toBeUndefined();
-      // run_history + llm_complete are always registered.
-      expect(captured.map((c) => c.name).sort()).toEqual(["llm_complete", "run_history"]);
+      // run_history + recall_memory + llm_complete are always registered.
+      expect(captured.map((c) => c.name).sort()).toEqual([
+        "llm_complete",
+        "recall_memory",
+        "run_history",
+      ]);
     } finally {
       await pair.close();
     }
@@ -215,8 +220,34 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
       const runHistory = captured.find((c) => c.name === "run_history");
-      await runHistory!.execute("call-1", { limit: 5, fields: ["state"] });
-      expect(calls).toEqual([{ name: "run_history", arguments: { limit: 5, fields: ["state"] } }]);
+      await runHistory!.execute("call-1", { limit: 5, fields: ["checkpoint"] });
+      expect(calls).toEqual([
+        { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
+      ]);
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
+describe("buildMcpDirectFactories — recall_memory dispatch", () => {
+  it("forwards q + limit to the MCP recall_memory tool", async () => {
+    const { mcp, pair, calls } = await makeMockServer();
+    try {
+      const factories = await buildMcpDirectFactories({
+        bundle: makeBundleWithProviders({}),
+        mcp,
+        runId: "run-1",
+        workspace: TEST_WORKSPACE,
+        emitProvider: () => {},
+        emit: () => {},
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const recall = captured.find((c) => c.name === "recall_memory");
+      await recall!.execute("call-1", { q: "python", limit: 5 });
+      expect(calls).toEqual([{ name: "recall_memory", arguments: { q: "python", limit: 5 } }]);
     } finally {
       await pair.close();
     }

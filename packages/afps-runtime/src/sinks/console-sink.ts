@@ -45,7 +45,7 @@ export class ConsoleSink implements EventSink {
       `▶ run complete — memories=${result.memories.length} logs=${result.logs.length}` +
       (result.output !== null ? " output=set" : "") +
       (result.report !== null ? " report=set" : "") +
-      (result.state !== null ? " state=set" : "") +
+      (result.checkpoint !== null ? " checkpoint=set" : "") +
       (result.error ? ` ERROR=${result.error.message}` : "");
     this.out.write(summary + "\n");
   }
@@ -55,10 +55,14 @@ export class ConsoleSink implements EventSink {
     const canonical = narrowCanonicalEvent(event);
     if (canonical !== null) {
       switch (canonical.type) {
-        case "memory.added":
-          return `${seq} ✚ memory: ${truncate(canonical.content, 200)}`;
-        case "state.set":
-          return `${seq} ▲ state: ${truncate(safeStringify(canonical.state), 200)}`;
+        case "memory.added": {
+          const scopeTag = canonical.scope ? ` [${canonical.scope}]` : "";
+          return `${seq} ✚ memory${scopeTag}: ${truncate(canonical.content, 200)}`;
+        }
+        case "pinned.set": {
+          const scopeTag = canonical.scope ? ` [${canonical.scope}]` : "";
+          return `${seq} ▲ pinned[${canonical.key}]${scopeTag}: ${truncate(safeStringify(canonical.content), 200)}`;
+        }
         case "output.emitted":
           return `${seq} ◆ output: ${truncate(safeStringify(canonical.data), 200)}`;
         case "report.appended":

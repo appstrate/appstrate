@@ -104,7 +104,7 @@ function makeContext(): ExecutionContext {
     input: { query: "what is the answer" },
     config: { verbose: true },
     memories: [{ content: "Last run found something useful.", createdAt: 0 }],
-    state: { turn: 3 },
+    checkpoint: { turn: 3 },
   };
 }
 
@@ -175,7 +175,7 @@ describe("cross-path prompt parity", () => {
       expect(prompt).toContain("## User Input");
       expect(prompt).toContain("**query**");
       expect(prompt).toContain("## Configuration");
-      expect(prompt).toContain("## Previous State");
+      expect(prompt).toContain("## Checkpoint");
       expect(prompt).toContain("## Memory");
       expect(prompt).toContain("## Output Format");
       expect(prompt).toContain("Answer the user's question.");

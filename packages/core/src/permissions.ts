@@ -67,7 +67,9 @@ export interface CoreResources {
   providers: "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
-  memories: "read" | "delete";
+  // Unified `package_persistence` (checkpoints + memories) with first-class
+  // actor scoping. Supersedes the dropped `memories` resource.
+  persistence: "read" | "delete";
   connections: "read" | "connect" | "disconnect";
   profiles: "read" | "write" | "delete";
   "app-profiles": "read" | "write" | "delete" | "bind";
@@ -112,7 +114,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "providers",
   "runs",
   "schedules",
-  "memories",
+  "persistence",
   "connections",
   "profiles",
   "app-profiles",

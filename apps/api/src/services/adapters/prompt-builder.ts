@@ -4,7 +4,7 @@
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
  * every section (System / Environment / Tools / Skills / Providers /
- * Input / Documents / Config / State / Memory / Output Format) happens
+ * Input / Documents / Config / Checkpoint / Memory / Output Format) happens
  * in the runtime from the parsed Bundle; this function only adds the
  * overrides that are platform-specific:
  *

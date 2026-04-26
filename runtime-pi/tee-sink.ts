@@ -7,8 +7,8 @@
  *
  *   1. PiRunner's session bridge — emits Pi SDK lifecycle events (tool
  *      starts, assistant messages, metrics) to `eventSink.handle`.
- *   2. System tools (`@appstrate/report`, `@appstrate/add-memory`,
- *      `@appstrate/output`, `@appstrate/set-state`, `@appstrate/log`)
+ *   2. System tools (`@appstrate/report`, `@appstrate/note`,
+ *      `@appstrate/output`, `@appstrate/pin`, `@appstrate/log`)
  *      emit canonical domain events via `process.stdout.write(JSON+\n)`
  *      — the legacy stdout-JSONL protocol.
  *
@@ -25,7 +25,7 @@
  *   - On `finalize(result)`, merges PiRunner's terminal metadata
  *     (`status` / `error` / `durationMs`) with the tee's aggregate so
  *     the single finalize POST carries the complete shape. Without the
- *     merge, `result.report` / `result.output` / `result.state` /
+ *     merge, `result.report` / `result.output` / `result.checkpoint` /
  *     `result.memories` would be empty — PiRunner's internal reducer
  *     only sees session events, not tool-stdout events.
  *
@@ -76,9 +76,16 @@ export function looksLikeRunEvent(value: unknown): value is RunEvent {
  * case) keeps its values when the aggregate is untouched.
  */
 export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResult): RunResult {
+  const checkpointScope = aggregate.checkpointScope ?? runnerResult.checkpointScope;
+  const pinned =
+    aggregate.pinned !== undefined && Object.keys(aggregate.pinned).length > 0
+      ? aggregate.pinned
+      : runnerResult.pinned;
   return {
     memories: aggregate.memories.length > 0 ? aggregate.memories : runnerResult.memories,
-    state: aggregate.state ?? runnerResult.state,
+    checkpoint: aggregate.checkpoint ?? runnerResult.checkpoint,
+    ...(checkpointScope !== undefined ? { checkpointScope } : {}),
+    ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     report: aggregate.report ?? runnerResult.report,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
@@ -86,7 +93,7 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
     ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
     ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),
     // Token usage + cost are sourced exclusively from the runner — the
-    // tee aggregator only sees canonical AFPS events (memory/state/
+    // tee aggregator only sees canonical AFPS events (memory/pinned/
     // output/report/log), not `appstrate.metric`. Forwarding them here
     // is what makes finalize self-contained on the platform side.
     ...(runnerResult.usage !== undefined ? { usage: runnerResult.usage } : {}),

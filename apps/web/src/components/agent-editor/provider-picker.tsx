@@ -18,6 +18,7 @@ import type { ProviderEntry } from "./types";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { AvailableScope } from "@appstrate/core/validation";
 import { VersionSelect } from "./resource-section";
+import { caretRange } from "./utils";
 
 interface ProviderPickerProps {
   value: ProviderEntry[];
@@ -198,11 +199,16 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
     const alreadySelected = value.some((s) => s.id === providerId);
     if (alreadySelected) return;
     const provider = providers?.find((p) => p.id === providerId);
+    // Mirror npm's `install` default — caret of the provider's
+    // currently-published version. `*` is the last-resort placeholder
+    // when the registry hasn't surfaced a version yet; `VersionSelect`
+    // migrates it on its first render.
+    const version = provider?.version ? caretRange(provider.version) : "*";
     onChange([
       ...value,
       {
         id: providerId,
-        version: provider?.version ?? "*",
+        version,
         scopes: [],
       },
     ]);

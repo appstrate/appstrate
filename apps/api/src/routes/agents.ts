@@ -4,9 +4,14 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getRunningRunCounts,
-  getPackageMemories,
-  deletePackageMemory,
-  deleteAllPackageMemories,
+  listPinnedSlots,
+  listMemories,
+  deleteMemory,
+  deleteAllMemories,
+  deleteCheckpoint,
+  deletePinnedSlotById,
+  scopeFromActor,
+  type PersistenceScope,
 } from "../services/state/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import {
@@ -41,6 +46,28 @@ export const setProviderProfileSchema = z.object({
   profileId: z.uuid(),
 });
 export const removeProviderProfileSchema = z.object({ providerId: z.string().min(1) });
+
+/**
+ * Parse the `actorType` / `actorId` query-param pair shared by the
+ * persistence GET / DELETE routes into a {@link PersistenceScope}.
+ * Returns `null` when the caller did not supply `actorType` (i.e. no
+ * scope override) and throws `invalidRequest` when the combination is
+ * malformed.
+ */
+function scopeFromQueryParams(
+  actorTypeParam: string | undefined,
+  actorIdParam: string | undefined,
+): PersistenceScope | null {
+  if (!actorTypeParam) return null;
+  if (actorTypeParam === "shared") return { type: "shared" };
+  if (actorTypeParam === "user" && actorIdParam) {
+    return { type: "member", id: actorIdParam };
+  }
+  if (actorTypeParam === "end_user" && actorIdParam) {
+    return { type: "end_user", id: actorIdParam };
+  }
+  throw invalidRequest("Invalid actorType / actorId combination");
+}
 
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
@@ -229,52 +256,155 @@ export function createAgentsRouter() {
     },
   );
 
-  // GET /api/agents/:scope/:name/memories — list agent memories
-  router.get("/:scope{@[^/]+}/:name/memories", requireAgent(), async (c) => {
-    const agent = c.get("agent");
-    const applicationId = c.get("applicationId");
-    const memories = await getPackageMemories(agent.id, applicationId);
-    return c.json({
-      memories: memories.map((m) => ({
-        id: m.id,
-        content: m.content,
-        runId: m.runId,
-        createdAt: m.createdAt?.toISOString() ?? null,
-      })),
-    });
-  });
+  // ─────────────────────────────────────────────────────────────────
+  // Unified persistence (checkpoints + memories) — ADR-011
+  // ─────────────────────────────────────────────────────────────────
 
-  // DELETE /api/agents/:scope/:name/memories — delete all memories (admin only)
-  router.delete(
-    "/:scope{@[^/]+}/:name/memories",
+  // GET /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // Read the unified persistence rows visible to the caller.
+  router.get(
+    "/:scope{@[^/]+}/:name/persistence",
     requireAgent(),
-    requirePermission("memories", "delete"),
+    requirePermission("persistence", "read"),
     async (c) => {
       const agent = c.get("agent");
       const applicationId = c.get("applicationId");
-      const deleted = await deleteAllPackageMemories(agent.id, applicationId);
-      return c.json({ deleted });
+      const kindParam = c.req.query("kind");
+      const actorTypeParam = c.req.query("actorType");
+      const actorIdParam = c.req.query("actorId");
+      const runIdParam = c.req.query("runId");
+
+      // Default scope = caller's actor. Admin filtering by other actors
+      // is controlled by `persistence:read` (admin-grade); members see
+      // their own actor's view through this endpoint.
+      const callerScope = scopeFromActor(getActor(c));
+
+      // Optional explicit scope override (admin only — the requirePermission
+      // gate above gates the route; a member who somehow had `persistence:read`
+      // would still see only their own data because we don't honour overrides
+      // for members. Guard:
+      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
+
+      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
+      const scope = scopeOverride ?? callerScope;
+
+      const wantsPinned = !kindParam || kindParam === "pinned";
+      const wantsMemory = !kindParam || kindParam === "memory";
+      if (kindParam && !wantsPinned && !wantsMemory) {
+        throw invalidRequest("kind must be 'pinned' or 'memory'");
+      }
+
+      // Admins inspecting at agent-level (no scope override, no runId) see
+      // every actor's pinned slots; everyone else is narrowed to their scope.
+      const pinnedScope = isAdmin && !scopeOverride ? undefined : scope;
+
+      const [pinned, memories] = await Promise.all([
+        wantsPinned
+          ? listPinnedSlots(agent.id, applicationId, pinnedScope, runIdParam)
+          : Promise.resolve([]),
+        wantsMemory
+          ? listMemories(agent.id, applicationId, scope, runIdParam)
+          : Promise.resolve([]),
+      ]);
+
+      return c.json({
+        pinned: wantsPinned
+          ? pinned.map((slot) => ({
+              id: slot.id,
+              key: slot.key,
+              content: slot.content,
+              runId: slot.runId,
+              actorType: slot.actorType,
+              actorId: slot.actorId,
+              createdAt: slot.createdAt?.toISOString() ?? null,
+              updatedAt: slot.updatedAt?.toISOString() ?? null,
+            }))
+          : undefined,
+        memories: wantsMemory
+          ? memories.map((m) => ({
+              id: m.id,
+              content: m.content,
+              runId: m.runId,
+              actorType: m.actorType,
+              actorId: m.actorId,
+              pinned: m.pinned,
+              createdAt: m.createdAt?.toISOString() ?? null,
+            }))
+          : undefined,
+      });
     },
   );
 
-  // DELETE /api/agents/:scope/:name/memories/:memoryId — delete single memory (admin only)
+  // DELETE /api/agents/:scope/:name/persistence/memories/:id
   router.delete(
-    "/:scope{@[^/]+}/:name/memories/:memoryId",
+    "/:scope{@[^/]+}/:name/persistence/memories/:id",
     requireAgent(),
-    requirePermission("memories", "delete"),
+    requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("agent");
       const applicationId = c.get("applicationId");
-      const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
+      const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
-        throw invalidRequest("Invalid memory ID", "memoryId");
+        throw invalidRequest("Invalid memory id", "id");
       }
-      const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, agent.id, applicationId);
+      const deleted = await deleteMemory(result.data, agent.id, applicationId);
       if (!deleted) {
         throw notFound("Memory not found");
       }
       return c.json({ deleted: true });
+    },
+  );
+
+  // DELETE /api/agents/:scope/:name/persistence/pinned/:id
+  router.delete(
+    "/:scope{@[^/]+}/:name/persistence/pinned/:id",
+    requireAgent(),
+    requirePermission("persistence", "delete"),
+    async (c) => {
+      const agent = c.get("agent");
+      const applicationId = c.get("applicationId");
+      const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
+      if (!result.success) {
+        throw invalidRequest("Invalid pinned slot id", "id");
+      }
+      const deleted = await deletePinnedSlotById(result.data, agent.id, applicationId);
+      if (!deleted) {
+        throw notFound("Pinned slot not found");
+      }
+      return c.json({ deleted: true });
+    },
+  );
+
+  // DELETE /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // Bulk delete: by default wipes every memory + checkpoint for the agent
+  // in this app. Narrow with query params.
+  router.delete(
+    "/:scope{@[^/]+}/:name/persistence",
+    requireAgent(),
+    requirePermission("persistence", "delete"),
+    async (c) => {
+      const agent = c.get("agent");
+      const applicationId = c.get("applicationId");
+      const kindParam = c.req.query("kind");
+      const actorTypeParam = c.req.query("actorType");
+      const actorIdParam = c.req.query("actorId");
+
+      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
+
+      let memoriesDeleted = 0;
+      let checkpointDeleted = false;
+
+      if (!kindParam || kindParam === "memory") {
+        memoriesDeleted = await deleteAllMemories(agent.id, applicationId, scope);
+      }
+      if ((!kindParam || kindParam === "pinned") && scope) {
+        // Checkpoint slot is upserted per-scope; require an explicit scope here.
+        // (Bulk-delete of every pinned slot key is intentionally not exposed —
+        // each named slot must be deleted individually via DELETE /pinned/:id.)
+        checkpointDeleted = await deleteCheckpoint(agent.id, applicationId, scope);
+      }
+
+      return c.json({ memoriesDeleted, checkpointDeleted });
     },
   );
 

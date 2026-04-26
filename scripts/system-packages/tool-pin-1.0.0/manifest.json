@@ -1,0 +1,35 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/pin",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Pin",
+  "description": "Upsert a named slot pinned into the system prompt on every run. Supports per-actor and shared scopes.",
+  "schemaVersion": "1.5",
+  "entrypoint": "tool.ts",
+  "tool": {
+    "name": "pin",
+    "description": "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). Use key=\"checkpoint\" for the legacy carry-over checkpoint; other keys (e.g. \"persona\", \"goals\") are accepted and persisted as named pinned blocks. By default the slot is scoped to the current actor (the user or end-user that triggered the run); pass scope=\"shared\" for an app-wide slot.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Pinned slot identifier. Lowercase, digits and underscores only. \"checkpoint\" is reserved for the carry-over checkpoint slot."
+        },
+        "content": {
+          "description": "Arbitrary JSON value stored under the pinned slot."
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["actor", "shared"],
+          "description": "Persistence scope: \"actor\" (default) keeps the slot private to the run's actor; \"shared\" makes it app-wide."
+        }
+      },
+      "required": ["key", "content"]
+    }
+  }
+}

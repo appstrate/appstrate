@@ -48,6 +48,8 @@
   "btn.disconnect": "Disconnect",
   "btn.reconnect": "Reconnect",
   "btn.copy": "Copy",
+  "btn.expand": "Show all",
+  "btn.collapse": "Collapse",
   "btn.copyLink": "Copy link",
   "btn.copied": "Copied!",
   "btn.close": "Close",

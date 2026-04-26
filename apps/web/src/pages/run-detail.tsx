@@ -24,8 +24,10 @@ import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
 import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
-import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
+import { JsonView } from "../components/json-view";
+import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
+import { MemoryPanel } from "../components/persistence/memory-panel";
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -103,16 +105,30 @@ export function RunDetailPage() {
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
   const finalReport = reportContent || execResult?.report || null;
   const hasResult = hasOutput || !!finalReport;
-  const stateData = (run?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
+
+  // Run-level memory rows (only those touched during this run).
+  const { data: runMemories } = useRunMemories(packageId, runId);
+  const { data: runPinned } = useRunPinned(packageId, runId);
+  const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
+  const hasRunMemory = runMemoryCount > 0;
 
   // Default tab: "result" if results exist, otherwise "logs".
   // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "state", "info"] as const,
+    ["result", "logs", "memory", "info"] as const,
     defaultTab,
   );
+
+  // Legacy hash redirect: #checkpoint and #memories (split tabs pre-ADR-013)
+  // both fold into the unified #memory tab.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (hash === "checkpoint" || hash === "memories") {
+      setActiveTab("memory");
+    }
+  }, [setActiveTab]);
 
   // Sub-tab state: report by default if available, otherwise data.
   // Auto-default is derived; user override is tracked separately.
@@ -204,7 +220,7 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "info")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
@@ -216,7 +232,14 @@ export function RunDetailPage() {
                 </span>
               )}
             </TabsTrigger>
-            {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
+            {hasRunMemory && (
+              <TabsTrigger value="memory">
+                {t("exec.tabMemory")}
+                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                  {runMemoryCount}
+                </span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -264,7 +287,7 @@ export function RunDetailPage() {
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "state" && stateData && <JsonView data={stateData} />}
+      {activeTab === "memory" && <MemoryPanel packageId={packageId!} runId={runId!} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

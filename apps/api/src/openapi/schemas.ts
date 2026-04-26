@@ -365,7 +365,7 @@ export const schemas = {
       },
       input: { type: "object" },
       result: { type: "object" },
-      state: { type: "object" },
+      checkpoint: { type: "object" },
       error: { type: "string" },
       tokenUsage: {
         type: ["object", "null"],
@@ -866,16 +866,6 @@ export const schemas = {
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-    },
-  },
-  AgentMemory: {
-    type: "object",
-    required: ["id", "content", "createdAt"],
-    properties: {
-      id: { type: "integer" },
-      content: { type: "string" },
-      runId: { type: ["string", "null"] },
-      createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
   OrgProviderKey: {

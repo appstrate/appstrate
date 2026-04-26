@@ -74,6 +74,7 @@ function callToolResultToPi(result: CallToolResult): PiToolResult {
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 const RUN_HISTORY_TOOL_NAME = "run_history";
+const RECALL_MEMORY_TOOL_NAME = "recall_memory";
 const LLM_COMPLETE_TOOL_NAME = "llm_complete";
 
 /**
@@ -104,8 +105,8 @@ interface BuildMcpDirectFactoriesOptions {
 }
 
 /**
- * Build the `provider_call` + `run_history` + `llm_complete` Pi
- * extension factories. The set is built once per agent.
+ * Build the `provider_call` + `run_history` + `recall_memory` +
+ * `llm_complete` Pi extension factories. The set is built once per agent.
  *
  * `provider_call` delegates to `runner-pi`'s
  * `buildProviderCallExtensionFactory` (the same factory CLI mode uses)
@@ -117,7 +118,7 @@ interface BuildMcpDirectFactoriesOptions {
  *
  * Returns `[]` for `provider_call` when the bundle declares no
  * providers (so the LLM doesn't see a tool whose `providerId` enum is
- * empty), but always emits `run_history` + `llm_complete`.
+ * empty), but always emits the three platform tools.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,
@@ -129,7 +130,7 @@ export async function buildMcpDirectFactories(
   // expected tools are missing.
   const { tools } = await opts.mcp.listTools();
   const advertised = new Set(tools.map((t) => t.name));
-  const expected = [RUN_HISTORY_TOOL_NAME, LLM_COMPLETE_TOOL_NAME];
+  const expected = [RUN_HISTORY_TOOL_NAME, RECALL_MEMORY_TOOL_NAME, LLM_COMPLETE_TOOL_NAME];
   if (providerIds.length > 0) expected.push(PROVIDER_CALL_TOOL_NAME);
   for (const name of expected) {
     if (!advertised.has(name)) {
@@ -152,6 +153,7 @@ export async function buildMcpDirectFactories(
     factories.push(...providerFactories);
   }
   factories.push(makeRunHistoryExtension(opts));
+  factories.push(makeRecallMemoryExtension(opts));
   factories.push(makeLlmCompleteExtension(opts));
   return factories;
 }
@@ -162,7 +164,7 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
       name: RUN_HISTORY_TOOL_NAME,
       label: RUN_HISTORY_TOOL_NAME,
       description:
-        "Fetch metadata and optionally state/result of recent past runs (current run excluded).",
+        "Fetch metadata and optionally checkpoint/result of recent past runs (current run excluded).",
       parameters: Type.Unsafe<Record<string, unknown>>({
         type: "object",
         additionalProperties: false,
@@ -170,7 +172,7 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
           limit: { type: "integer", minimum: 1, maximum: 50 },
           fields: {
             type: "array",
-            items: { type: "string", enum: ["state", "result"] },
+            items: { type: "string", enum: ["checkpoint", "result"] },
             uniqueItems: true,
           },
         },
@@ -189,6 +191,49 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
         );
         opts.emit({
           type: "run_history.completed",
+          runId: opts.runId,
+          toolCallId,
+          durationMs: Date.now() - startedAt,
+          isError: result.isError === true,
+          timestamp: Date.now(),
+        });
+        return callToolResultToPi(result);
+      },
+    });
+  };
+}
+
+function makeRecallMemoryExtension(opts: BuildMcpDirectFactoriesOptions): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: RECALL_MEMORY_TOOL_NAME,
+      label: RECALL_MEMORY_TOOL_NAME,
+      description:
+        "Search the agent's archive memories — durable facts and learnings from past runs that " +
+        "are NOT in the system prompt by default. Pass `q` to filter by case-insensitive " +
+        "substring; omit it for the most recent archive memories.",
+      parameters: Type.Unsafe<Record<string, unknown>>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          q: { type: "string", minLength: 1, maxLength: 2000 },
+          limit: { type: "integer", minimum: 1, maximum: 50 },
+        },
+      }),
+      async execute(toolCallId, params, signal) {
+        const startedAt = Date.now();
+        opts.emit({
+          type: "recall_memory.called",
+          runId: opts.runId,
+          toolCallId,
+          timestamp: startedAt,
+        });
+        const result = await opts.mcp.callTool(
+          { name: RECALL_MEMORY_TOOL_NAME, arguments: (params as Record<string, unknown>) ?? {} },
+          { ...(signal ? { signal } : {}) },
+        );
+        opts.emit({
+          type: "recall_memory.completed",
           runId: opts.runId,
           toolCallId,
           durationMs: Date.now() - startedAt,

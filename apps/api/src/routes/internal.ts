@@ -9,7 +9,18 @@ import { runs, userProviderConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { getRecentRuns } from "../services/state/index.ts";
+import {
+  getRecentRuns,
+  RUN_HISTORY_FIELDS,
+  type RunHistoryField,
+} from "../services/state/index.ts";
+import {
+  recallMemories,
+  RECALL_LIMIT_DEFAULT,
+  RECALL_LIMIT_MAX,
+  scopeFromActor,
+  MAX_MEMORY_CONTENT,
+} from "../services/state/package-persistence.ts";
 import { getPackage } from "../services/agent-service.ts";
 import {
   resolveCredentialsForProxy,
@@ -144,16 +155,32 @@ export function createInternalRouter() {
       .catch(10)
       .parse(limitParam ?? 10);
 
-    const validFields = ["state", "result"] as const;
-    const parsed = fieldsParam
-      ?.split(",")
-      .map((f) => f.trim())
-      .filter((f): f is "state" | "result" =>
-        validFields.includes(f as (typeof validFields)[number]),
-      );
-    const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
+    // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
+    // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
+    // Unknown values fail loudly with 400 so a stale runner schema can't
+    // silently strip fields the agent is asking for.
+    let fields: RunHistoryField[] = ["checkpoint"];
+    if (fieldsParam !== undefined) {
+      const requested = fieldsParam
+        .split(",")
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0);
+      const invalid = requested.filter((f) => !RUN_HISTORY_FIELDS.includes(f as RunHistoryField));
+      if (invalid.length > 0) {
+        throw invalidRequest(
+          `Unknown fields: ${invalid.join(", ")}. Valid: ${RUN_HISTORY_FIELDS.join(", ")}.`,
+          "fields",
+        );
+      }
+      const dedup = [...new Set(requested as RunHistoryField[])];
+      if (dedup.length > 0) fields = dedup;
+    }
 
     try {
+      // Actor isolation is mandatory: `getRecentRuns` filters runs by
+      // dashboardUserId / endUserId so an end-user run never sees
+      // another actor's checkpoint, and a scheduled run (actor === null)
+      // sees only the shared / no-actor bucket.
       const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
       const recentRuns = await getRecentRuns(
         { orgId: run.orgId, applicationId: run.applicationId },
@@ -169,6 +196,55 @@ export function createInternalRouter() {
       return c.json({ runs: recentRuns });
     } catch (err) {
       logger.error("Failed to fetch run history", {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw internalError();
+    }
+  });
+
+  // GET /internal/memories — backs the agent-facing `recall_memory` MCP
+  // tool. Returns archive (pinned=false) memories visible to the run's
+  // actor, optionally filtered by an ILIKE substring match. Pinned
+  // memories are NOT returned here — they're already in the system prompt.
+  router.get("/memories", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+
+    const queryRaw = c.req.query("q");
+    const query = queryRaw && queryRaw.trim().length > 0 ? queryRaw.trim() : undefined;
+    if (query !== undefined && query.length > MAX_MEMORY_CONTENT) {
+      throw invalidRequest(`Query too long (max ${MAX_MEMORY_CONTENT} chars).`, "q");
+    }
+
+    const limitParam = c.req.query("limit");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(RECALL_LIMIT_MAX)
+      .catch(RECALL_LIMIT_DEFAULT)
+      .parse(limitParam ?? RECALL_LIMIT_DEFAULT);
+
+    try {
+      const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
+      const memories = await recallMemories(
+        run.packageId,
+        run.applicationId,
+        scopeFromActor(actor),
+        { ...(query !== undefined ? { query } : {}), limit },
+      );
+
+      return c.json({
+        memories: memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          createdAt: m.createdAt.toISOString(),
+          actorType: m.actorType,
+          actorId: m.actorId,
+        })),
+      });
+    } catch (err) {
+      logger.error("Failed to recall memories", {
         runId,
         error: err instanceof Error ? err.message : String(err),
       });

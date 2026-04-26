@@ -23,14 +23,14 @@ import type { RunResult } from "../types/run-result.ts";
 
 /**
  * Pre-captured snapshot merged onto the {@link ExecutionContext} before
- * rendering. Mirrors the optional `memories` / `history` / `state`
+ * rendering. Mirrors the optional `memories` / `history` / `checkpoint`
  * fields of {@link ExecutionContext} so the suite can inject pull-side
  * data without exposing a provider interface.
  */
 export interface RenderSnapshot {
   memories?: MemorySnapshot[];
   history?: HistoryEntry[];
-  state?: unknown;
+  checkpoint?: unknown;
 }
 
 export interface ConformanceAdapter {
@@ -73,7 +73,7 @@ export interface ConformanceAdapter {
    *
    * 1. Emit each event through its internal sink in arrival order.
    * 2. Reduce the events into a `RunResult` using the canonical
-   *    semantics (`memory.added` → append, `state.set` → last-write-wins,
+   *    semantics (`memory.added` → append, `pinned.set` → last-write-wins per key,
    *    `output.emitted` → merge-patch, `report.appended` → concat,
    *    `log.written` → append).
    *

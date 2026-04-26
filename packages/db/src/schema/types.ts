@@ -9,7 +9,7 @@ import type {
   packageVersionDependencies,
   applicationPackages,
 } from "./packages.ts";
-import type { runs, runLogs, schedules, packageMemories } from "./runs.ts";
+import type { runs, runLogs, schedules } from "./runs.ts";
 import type {
   connectionProfiles,
   appProfileProviderBindings,
@@ -72,8 +72,6 @@ export type OrgProxy = InferSelectModel<typeof orgProxies>;
 export type OrgSystemProviderKey = InferSelectModel<typeof orgSystemProviderKeys>;
 
 export type OrgModel = InferSelectModel<typeof orgModels>;
-
-export type PackageMemory = InferSelectModel<typeof packageMemories>;
 
 export type User = InferSelectModel<typeof user>;
 

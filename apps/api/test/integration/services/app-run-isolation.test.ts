@@ -3,7 +3,7 @@
 /**
  * Cross-app isolation tests for run state functions.
  *
- * Verifies that getLastRunState, getRecentRuns, getRunningRunCounts,
+ * Verifies that getLastCheckpoint, getRecentRuns, getRunningRunCounts,
  * and deletePackageRuns properly scope to applicationId.
  */
 
@@ -13,7 +13,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import {
-  getLastRunState,
+  getLastCheckpoint,
   getRecentRuns,
   getRunningRunCounts,
   deletePackageRuns,
@@ -35,7 +35,7 @@ describe("Cross-app run isolation (service layer)", () => {
     await installPackage({ orgId: ctx.orgId, applicationId: appBId }, agentId);
   });
 
-  describe("getLastRunState", () => {
+  describe("getLastCheckpoint", () => {
     it("returns state only from the requested application", async () => {
       // Seed a run with state in AppA
       await seedRun({
@@ -44,7 +44,7 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appA" },
+        checkpoint: { source: "appA" },
         startedAt: new Date("2025-01-01"),
       });
 
@@ -55,19 +55,19 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: appBId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appB" },
+        checkpoint: { source: "appB" },
         startedAt: new Date("2025-01-02"),
       });
 
       // AppA should get its own state, not AppB's (even though AppB's is more recent)
-      const stateA = await getLastRunState(
+      const stateA = await getLastCheckpoint(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         agentId,
         null,
       );
       expect(stateA).toEqual({ source: "appA" });
 
-      const stateB = await getLastRunState(
+      const stateB = await getLastCheckpoint(
         { orgId: ctx.orgId, applicationId: appBId },
         agentId,
         null,
@@ -82,10 +82,10 @@ describe("Cross-app run isolation (service layer)", () => {
         applicationId: appBId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { source: "appB" },
+        checkpoint: { source: "appB" },
       });
 
-      const state = await getLastRunState(
+      const state = await getLastCheckpoint(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         agentId,
         null,

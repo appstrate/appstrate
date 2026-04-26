@@ -173,8 +173,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "app-profiles:write",
       "app-profiles:delete",
       "app-profiles:bind",
-      "memories:read",
-      "memories:delete",
       "provider-keys:read",
       "provider-keys:write",
       "provider-keys:delete",

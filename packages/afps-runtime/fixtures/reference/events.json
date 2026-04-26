@@ -13,10 +13,11 @@
     "content": "Reference agents are useful for contract tests."
   },
   {
-    "type": "state.set",
+    "type": "pinned.set",
     "timestamp": 0,
     "runId": "ref_run_001",
-    "state": {
+    "key": "checkpoint",
+    "content": {
       "iteration": 1
     }
   },

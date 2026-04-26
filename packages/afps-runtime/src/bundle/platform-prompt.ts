@@ -9,7 +9,7 @@
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
  * Tools / Skills / Connected Providers / User Input / Documents /
- * Configuration / Previous State / Memory / Run History) represent one
+ * Configuration / Checkpoint / Memory / Run History) represent one
  * reasonable convention for an AFPS-style agent; platforms and CLIs
  * may compose it as-is or override specific option fields.
  */
@@ -72,7 +72,7 @@ export interface PlatformPromptSchema {
 export interface PlatformPromptOptions {
   /** Raw prompt template from the bundle's root package (`prompt.md`). */
   template: string;
-  /** Run context — flows into the 1.1+ template render + state/memory sections. */
+  /** Run context — flows into the 1.1+ template render + checkpoint/memory sections. */
   context: ExecutionContext;
   /** Manifest schemaVersion — gates Mustache render path selection. */
   schemaVersion?: string;
@@ -310,39 +310,51 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("");
   }
 
-  // --- Previous state ---
-  if (context.state !== undefined && context.state !== null) {
-    sections.push("## Previous State\n");
+  // --- Checkpoint ---
+  if (context.checkpoint !== undefined && context.checkpoint !== null) {
+    sections.push("## Checkpoint\n");
     sections.push(
       "This agent supports stateful operation across runs. " +
-        "Your most recent run left the following state:\n",
+        "Your most recent run left the following checkpoint:\n",
     );
     sections.push("```json");
-    sections.push(JSON.stringify(context.state, null, 2));
+    sections.push(JSON.stringify(context.checkpoint, null, 2));
     sections.push("```\n");
     sections.push(
-      "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
-        "To update the state for the next run, use the `set_state` tool.\n",
+      "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
+        'To update the checkpoint for the next run, call `pin({ key: "checkpoint", content: ... })`. ' +
+        "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
+        'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
     );
   }
 
   // --- Memory ---
+  // Two tiers (ADR-012, ADR-013):
+  //   - Pinned memories (rendered here)  → working set, always visible.
+  //   - Archive memories (NOT rendered) → reachable via `recall_memory`.
+  // We always emit the section so the agent knows the archive exists,
+  // even when no memories are pinned yet.
+  sections.push("## Memory\n");
   if (context.memories && context.memories.length > 0) {
-    sections.push("## Memory\n");
-    sections.push(
-      "This agent has accumulated the following memories from previous runs. " +
-        "These are shared across all users running this agent:\n",
-    );
+    sections.push("Pinned memories (always visible across runs):\n");
     for (const mem of context.memories) {
       const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
       sections.push(`- ${mem.content}${date}`);
     }
-    sections.push(
-      "\nTo add new memories, use the `add_memory` tool. " +
-        "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
-        "Use `set_state` for structured data needed for the next run.\n",
-    );
+    sections.push("");
+  } else {
+    sections.push("No memories are currently pinned to this prompt.\n");
   }
+  sections.push(
+    "To save a new archive memory, call `note({ content })` — it goes to the **archive** " +
+      "(not visible in this prompt on future runs). " +
+      "To search the archive, call `recall_memory({ q?, limit? })`: pass `q` to filter by " +
+      "case-insensitive substring, omit it for the most recent entries. " +
+      'By default notes are scoped to the current actor; pass `scope: "shared"` on `note` ' +
+      "to make it app-wide. Use `pin({ key, content })` to upsert a pinned slot rendered " +
+      'into this prompt on every run — `key: "checkpoint"` for the carry-over checkpoint, ' +
+      'or any other key (e.g. "persona", "goals") for additional pinned blocks.\n',
+  );
 
   // --- Output format ---
   // Rendered LAST so the constraint is freshly in the LLM's context when
@@ -398,7 +410,7 @@ function buildTemplateView(context: ExecutionContext): PromptView {
     runId: context.runId,
     input: (context.input as Record<string, unknown>) ?? {},
     config: context.config ?? {},
-    state: context.state ?? null,
+    checkpoint: context.checkpoint ?? null,
     memories: context.memories ?? [],
     history: context.history ?? [],
   };

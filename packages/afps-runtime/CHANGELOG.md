@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Letta-style `note` + `pin` tools (AFPS 1.5)
+
+- New `noteTool` (`note`) and `pinTool` (`pin`) replace `memoryTool`
+  (`add_memory`) and `checkpointTool` (`set_checkpoint`). `pin` accepts
+  a required `key` parameter — `key="checkpoint"` is the legacy
+  carry-over slot, other keys (e.g. `"persona"`, `"goals"`) are
+  first-class named pinned blocks.
+- New canonical event `pinned.set` (carries `key` + `content` + optional
+  `scope`). Replaces `checkpoint.set`. The reducer aggregates events
+  into `RunResult.pinned: Record<string, PinnedSlot>`; the
+  `key="checkpoint"` slot is mirrored into the legacy top-level
+  `RunResult.checkpoint` field for backward compatibility.
+- `PLATFORM_TOOLS` now keys on `note` / `pin` (and `output` / `report` /
+  `log`).
+- Platform prompt's memory section references `note({ content })` and
+  `pin({ key, content })`. The `## Checkpoint` section instructs agents
+  to update via `pin({ key: "checkpoint", content })`.
+- See ADR-013 for the rationale.
+
+### Removed — `add_memory` / `set_checkpoint` tools (BREAKING)
+
+- `memoryTool` / `add_memory` and `checkpointTool` / `set_checkpoint`
+  are removed from `PLATFORM_TOOLS`. Agents that imported the system
+  packages `@appstrate/add-memory` / `@appstrate/set-checkpoint` must
+  switch to `@appstrate/note` / `@appstrate/pin`.
+- `checkpoint.set` event type removed. Runners that emitted it must
+  emit `pinned.set` with `key: "checkpoint"`.
+- Compat aliases were intentionally not added; the AFPS 1.4 break in
+  ADR-011 already required redeploys.
+
+### Added — `set_checkpoint` tool + scope-aware `add_memory`
+
+- New canonical event `checkpoint.set` (carries `data` + optional
+  `scope: "actor" | "shared"`). Emitted by the renamed `set_checkpoint`
+  tool — replaces the legacy `set_state` tool.
+- `add_memory` tool now accepts an optional `scope` parameter; the
+  emitted `memory.added` event carries the field through.
+- `RunResult.checkpointScope` records the scope of the most recent
+  checkpoint emit so platform finalize logic can route writes into the
+  unified `package_persistence` store.
+- Platform prompt section renamed `## Previous State` → `## Checkpoint`
+  and now documents the scope default (`"actor"`) for both tools.
+
+### Removed — `set_state` tool + `state.set` event (BREAKING)
+
+- `stateTool` / `set_state` removed from `PLATFORM_TOOLS`. Agents that
+  emitted `state.set` must rebuild against `set_checkpoint`.
+- `StateSetEvent` removed from the canonical-event union; the reducer +
+  narrower no longer fold it. `RunResult.state` renamed to
+  `RunResult.checkpoint`.
+- Bundles depending on `@appstrate/set-state@1.0.0` no longer resolve;
+  depend on `@appstrate/set-checkpoint@2.0.0` instead.
+
 ### Removed — `afps run` and `afps test` subcommands (BREAKING)
 
 - **`afps run <bundle>` is gone.** Live LLM execution now lives

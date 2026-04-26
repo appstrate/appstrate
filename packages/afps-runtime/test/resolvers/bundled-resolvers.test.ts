@@ -86,7 +86,7 @@ describe("BundledToolResolver", () => {
     );
     const bundle = makeBundle(root, [toolPkg]);
     const fake: Tool = {
-      name: "add_memory",
+      name: "note",
       description: "stub",
       parameters: { type: "object", properties: {}, required: [] },
       execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
@@ -96,7 +96,7 @@ describe("BundledToolResolver", () => {
     });
     const tools = await resolver.resolve([{ name: "@afps/memory", version: "^1" }], bundle);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("add_memory");
+    expect(tools[0]!.name).toBe("note");
   });
 
   it("rejects tool packages whose manifest has no entrypoint", async () => {

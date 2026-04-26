@@ -353,11 +353,41 @@ export interface VersionDetailResponse extends Omit<PackageVersionInfo, "created
 
 // --- Agent Memory Types ---
 
+export type PersistenceActorType = "user" | "end_user" | "shared";
+
 export interface AgentMemoryItem {
   id: number;
   content: string;
   runId: string | null;
+  /** Actor scope of this memory row. `shared` = visible to all actors. */
+  actorType?: PersistenceActorType;
+  /** Actor identifier. NULL when `actorType === "shared"`. */
+  actorId?: string | null;
+  /**
+   * When true, this memory is rendered into the system prompt on every
+   * run (working set). When false, it lives in the archive and is only
+   * reachable via the `recall_memory` tool. See ADR-012.
+   */
+  pinned?: boolean;
   createdAt: string | null;
+}
+
+export interface AgentPinnedSlotItem {
+  id: number;
+  /**
+   * Slot key (Letta-style label). The reserved key `"checkpoint"` is the
+   * legacy carry-over slot; other keys (`"persona"`, `"goals"`, …) are
+   * first-class named pinned blocks. See ADR-013.
+   */
+  key: string;
+  /** Slot content — agent-defined JSON or string. */
+  content: unknown;
+  /** Run that wrote the latest snapshot, if any. */
+  runId: string | null;
+  actorType: PersistenceActorType;
+  actorId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 // --- Org Proxy Types ---

@@ -10,6 +10,7 @@ import {
   seedConnectionProfile,
   seedConnectionForApp,
   seedPackage,
+  seedEndUser,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
@@ -106,7 +107,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { counter: 1 },
+        checkpoint: { counter: 1 },
       });
       await seedRun({
         packageId: pkgId,
@@ -114,7 +115,7 @@ describe("Internal API", () => {
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { counter: 2 },
+        checkpoint: { counter: 2 },
       });
 
       const res = await app.request("/internal/run-history", {
@@ -136,7 +137,7 @@ describe("Internal API", () => {
           applicationId: ctx.defaultAppId,
           dashboardUserId: ctx.user.id,
           status: "success",
-          state: { i },
+          checkpoint: { i },
         });
       }
 
@@ -189,7 +190,7 @@ describe("Internal API", () => {
         applicationId: other.defaultAppId,
         dashboardUserId: other.user.id,
         status: "success",
-        state: { foreign: true },
+        checkpoint: { foreign: true },
       });
 
       const res = await app.request("/internal/run-history", {
@@ -201,18 +202,18 @@ describe("Internal API", () => {
       expect(body.runs).toHaveLength(0);
     });
 
-    it("accepts fields=state,result query parameter", async () => {
+    it("accepts fields=checkpoint,result and returns the canonical `checkpoint` key", async () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
         dashboardUserId: ctx.user.id,
         status: "success",
-        state: { key: "value" },
+        checkpoint: { key: "value" },
         result: { output: "done" },
       });
 
-      const res = await app.request("/internal/run-history?fields=state,result", {
+      const res = await app.request("/internal/run-history?fields=checkpoint,result", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -220,8 +221,249 @@ describe("Internal API", () => {
       const body = (await res.json()) as { runs: Record<string, unknown>[] };
       expect(body.runs).toHaveLength(1);
       const entry = body.runs[0]!;
-      expect(entry.state).toEqual({ key: "value" });
+      expect(entry.checkpoint).toEqual({ key: "value" });
       expect(entry.result).toEqual({ output: "done" });
+      // Legacy key never leaks back out — response speaks the new vocabulary.
+      expect(entry.state).toBeUndefined();
+    });
+
+    it("returns 400 with the valid-fields list when an unknown field is passed", async () => {
+      // The legacy AFPS ≤ 1.3 alias `state` is no longer accepted. Failing
+      // loudly here is what protects agents whose runtime is stale: the
+      // earlier silent-filter behaviour stripped the field and fell back to
+      // `["checkpoint"]`, masking the misconfiguration.
+      const res = await app.request("/internal/run-history?fields=state", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string; errors?: { field?: string }[] };
+      expect(body.detail).toContain("state");
+      expect(body.detail).toContain("checkpoint");
+      expect(body.detail).toContain("result");
+    });
+
+    it("returns 400 when only some fields are valid", async () => {
+      const res = await app.request("/internal/run-history?fields=checkpoint,bogus", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("bogus");
+    });
+
+    it("treats an empty fields= query as default (`checkpoint` only)", async () => {
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "success",
+        checkpoint: { key: "v" },
+        result: { output: "irrelevant" },
+      });
+
+      const res = await app.request("/internal/run-history?fields=", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runs: Record<string, unknown>[] };
+      expect(body.runs).toHaveLength(1);
+      expect(body.runs[0]!.checkpoint).toEqual({ key: "v" });
+      // No `result` because we defaulted to `checkpoint` only.
+      expect(body.runs[0]!.result).toBeUndefined();
+    });
+
+    it("does not return checkpoints from a different end-user (actor isolation)", async () => {
+      // The current `runningToken` belongs to a run triggered by
+      // `ctx.user.id` (a dashboard user). Seed a successful end-user
+      // run for the SAME agent + SAME app and assert that its
+      // checkpoint never appears in the running run's history — the
+      // internal endpoint filters by the run's actor.
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: `ext_${Date.now()}`,
+      });
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: null,
+        endUserId: eu.id,
+        status: "success",
+        checkpoint: { secret: true },
+      });
+
+      const res = await app.request("/internal/run-history?fields=checkpoint", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { runs: Record<string, unknown>[] };
+      // No `secret` checkpoint may leak through — the end-user run is
+      // a different actor than the running run's dashboard-user actor.
+      for (const r of body.runs) {
+        const cp = r.checkpoint as Record<string, unknown> | null;
+        if (cp) expect(cp.secret).toBeUndefined();
+      }
+    });
+  });
+
+  // ─── GET /internal/memories ─────────────────────────────────
+
+  describe("GET /internal/memories", () => {
+    it("returns 401 without token", async () => {
+      const res = await app.request("/internal/memories");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns archive memories visible to the run's actor (most recent first)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      // Two archive memories scoped to the running user's actor.
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["archived fact A", "archived fact B"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        memories: { content: string; createdAt: string }[];
+      };
+      expect(body.memories).toHaveLength(2);
+      // ORDER BY createdAt DESC — most recent first.
+      expect(body.memories[0]!.content).toBe("archived fact B");
+      expect(body.memories[1]!.content).toBe("archived fact A");
+    });
+
+    it("excludes pinned memories — they are already in the prompt", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["pinned-only"],
+        runningRunId,
+        { pinned: true },
+      );
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["archive-only"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      expect(body.memories).toHaveLength(1);
+      expect(body.memories[0]!.content).toBe("archive-only");
+    });
+
+    it("filters by `q` substring (case-insensitive)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["User prefers Python", "User likes coffee", "API quirk: 429 on /v1/x"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories?q=python", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      expect(body.memories).toHaveLength(1);
+      expect(body.memories[0]!.content).toBe("User prefers Python");
+    });
+
+    it("respects the `limit` query (capped at 50)", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      const contents = Array.from({ length: 12 }, (_, i) => `mem-${i}`);
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        contents,
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories?limit=3", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: unknown[] };
+      expect(body.memories).toHaveLength(3);
+    });
+
+    it("does not leak across actors — the running user does not see another end-user's archive", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: `ext_${Date.now()}_recall`,
+      });
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "end_user", id: eu.id },
+        ["secret end-user memory"],
+        runningRunId,
+      );
+
+      const res = await app.request("/internal/memories", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: { content: string }[] };
+      for (const m of body.memories) {
+        expect(m.content).not.toBe("secret end-user memory");
+      }
+    });
+
+    it("returns 400 when `q` exceeds the per-entry content cap", async () => {
+      const oversized = "a".repeat(2001);
+      const res = await app.request(`/internal/memories?q=${oversized}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("treats an empty `q=` as no filter", async () => {
+      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
+      await addMemories(
+        pkgId,
+        ctx.defaultAppId,
+        ctx.orgId,
+        { type: "member", id: ctx.user.id },
+        ["entry"],
+        runningRunId,
+      );
+      const res = await app.request("/internal/memories?q=", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { memories: unknown[] };
+      expect(body.memories).toHaveLength(1);
     });
   });
 

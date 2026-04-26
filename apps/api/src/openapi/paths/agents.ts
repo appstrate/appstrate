@@ -210,22 +210,50 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/memories": {
+  "/api/agents/{scope}/{name}/persistence": {
     get: {
-      operationId: "listAgentMemories",
+      operationId: "listAgentPersistence",
       tags: ["Agents"],
-      summary: "List agent memories",
+      summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns accumulated memories for an agent (org-scoped, shared across all users).",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the legacy `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "kind",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["pinned", "memory"] },
+          description: "Limit the response to one kind. Omitted → both.",
+        },
+        {
+          name: "actorType",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["user", "end_user", "shared"] },
+          description: "Admin-only scope override. Defaults to caller's actor scope.",
+        },
+        {
+          name: "actorId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Required when `actorType` is `user` or `end_user`.",
+        },
+        {
+          name: "runId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Narrow `memories` and `pinned` to rows touched during a specific run.",
+        },
       ],
       responses: {
         "200": {
-          description: "Memory list",
+          description: "Persistence rows",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -235,9 +263,35 @@ export const agentsPaths = {
               schema: {
                 type: "object",
                 properties: {
+                  pinned: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        key: { type: "string" },
+                        content: {},
+                        runId: { type: ["string", "null"] },
+                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actorId: { type: ["string", "null"] },
+                        createdAt: { type: ["string", "null"], format: "date-time" },
+                        updatedAt: { type: ["string", "null"], format: "date-time" },
+                      },
+                    },
+                  },
                   memories: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/AgentMemory" },
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        content: {},
+                        runId: { type: ["string", "null"] },
+                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actorId: { type: ["string", "null"] },
+                        createdAt: { type: ["string", "null"], format: "date-time" },
+                      },
+                    },
                   },
                 },
               },
@@ -245,23 +299,43 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
-      operationId: "deleteAllAgentMemories",
+      operationId: "deleteAgentPersistence",
       tags: ["Agents"],
-      summary: "Delete all agent memories",
-      description: "Delete all accumulated memories for an agent.",
+      summary: "Bulk-delete persistence rows for an agent",
+      description:
+        "Wipes memories (always) and optionally the legacy `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "kind",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["pinned", "memory"] },
+        },
+        {
+          name: "actorType",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["user", "end_user", "shared"] },
+        },
+        {
+          name: "actorId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Memories deleted",
+          description: "Counts of deleted rows",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -271,7 +345,8 @@ export const agentsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  deleted: { type: "integer" },
+                  memoriesDeleted: { type: "integer" },
+                  checkpointDeleted: { type: "boolean" },
                 },
               },
             },
@@ -283,18 +358,18 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/memories/{memoryId}": {
+  "/api/agents/{scope}/{name}/persistence/memories/{id}": {
     delete: {
-      operationId: "deleteAgentMemory",
+      operationId: "deleteAgentPersistenceMemory",
       tags: ["Agents"],
-      summary: "Delete a single agent memory",
-      description: "Delete a specific memory by ID.",
+      summary: "Delete a single memory by id",
+      description: "Admin-only. The id must belong to the targeted agent in the current app.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        { name: "memoryId", in: "path", required: true, schema: { type: "integer" } },
+        { name: "id", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
         "200": {
@@ -307,9 +382,43 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                properties: {
-                  deleted: { type: "boolean" },
-                },
+                properties: { deleted: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/agents/{scope}/{name}/persistence/pinned/{id}": {
+    delete: {
+      operationId: "deleteAgentPersistencePinnedSlot",
+      tags: ["Agents"],
+      summary: "Delete a single pinned slot by id",
+      description:
+        "Admin-only. Deletes any named pinned slot (legacy `checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        { name: "id", in: "path", required: true, schema: { type: "integer" } },
+      ],
+      responses: {
+        "200": {
+          description: "Pinned slot deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { deleted: { type: "boolean" } },
               },
             },
           },

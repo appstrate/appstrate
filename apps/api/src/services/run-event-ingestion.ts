@@ -38,7 +38,13 @@ import {
   writeRunnerLedgerRow,
 } from "./adapters/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
-import { addPackageMemories } from "./state/package-memories.ts";
+import {
+  addMemories as addUnifiedMemories,
+  upsertPinned,
+  scopeFromActor,
+  CHECKPOINT_KEY,
+} from "./state/package-persistence.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { getPackage } from "./agent-service.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -208,9 +214,9 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
  *      whether the run executed in-process or came from a remote runner.
  *   5. Fire the `afterRun` hook to collect module-provided metadata (billing,
  *      usage quotas, ...).
- *   6. CAS-update the run row (status, result, state, cost, metadata,
+ *   6. CAS-update the run row (status, result, cost, metadata,
  *      sink_closed_at). Idempotent: zero rows affected = already finalized.
- *   7. Persist memories + terminal log rows.
+ *   7. Persist memories + checkpoint into the unified store + terminal log rows.
  *   8. Emit `onRunStatusChange` (modules react asynchronously).
  *
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
@@ -322,20 +328,25 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
-  const stateToPersist = isPlainRecord(result.state) ? result.state : null;
+  const checkpointToPersist = isPlainRecord(result.checkpoint) ? result.checkpoint : null;
 
   const rowsAffected = await db
     .update(runs)
     .set({
       status,
       result: resultToPersist,
-      state: stateToPersist,
       error: errorMessage,
       completedAt: now,
       duration: resolvedDurationMs,
       cost: cost.total > 0 ? cost.total : null,
       sinkClosedAt: now,
       notifiedAt: now,
+      // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
+      // sidecar `run_history` tool. The unified `package_persistence`
+      // store only keeps the latest checkpoint per actor (last-write-wins
+      // on the unique index); `runs.checkpoint` preserves the per-run
+      // history so agents can inspect what each prior run emitted.
+      ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
       // When the runner ships authoritative usage in the finalize body
       // we persist it here so `runs.tokenUsage` reflects reality even if
       // the side-channel `appstrate.metric` event was dropped (network
@@ -366,14 +377,87 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       "error",
     );
   }
+
+  // Resolve the run's actor for the unified persistence scope.
+  const [actorRow] = await db
+    .select({
+      dashboardUserId: runs.dashboardUserId,
+      endUserId: runs.endUserId,
+    })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  const persistenceScope = scopeFromActor(
+    actorFromIds(actorRow?.dashboardUserId ?? null, actorRow?.endUserId ?? null),
+  );
+
   if (result.memories?.length) {
-    await addPackageMemories(
+    // Split memories by declared scope and write each non-empty bucket
+    // to the unified store. The store IS the store — exceptions
+    // propagate so finalize fails loudly on persistence faults.
+    const sharedContent: string[] = [];
+    const actorContent: string[] = [];
+    for (const m of result.memories) {
+      if (m.scope === "shared") sharedContent.push(m.content);
+      else actorContent.push(m.content);
+    }
+
+    if (actorContent.length > 0) {
+      await addUnifiedMemories(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        persistenceScope,
+        actorContent,
+        run.id,
+      );
+    }
+    if (sharedContent.length > 0) {
+      await addUnifiedMemories(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        { type: "shared" },
+        sharedContent,
+        run.id,
+      );
+    }
+  }
+
+  // Unified-persistence pinned-slot write — the single store for the
+  // carry-over checkpoint AND any other named pinned slot the agent
+  // wrote via `pin({ key, content })`. Honors the AFPS 1.4 scope when
+  // the runtime stamped one onto each slot; falls back to the run's
+  // actor scope.
+  if (checkpointToPersist !== null) {
+    const checkpointScope =
+      result.checkpointScope === "shared" ? { type: "shared" as const } : persistenceScope;
+    await upsertPinned(
       run.packageId,
-      run.orgId,
       run.applicationId,
-      result.memories.map((m) => m.content),
+      run.orgId,
+      checkpointScope,
+      CHECKPOINT_KEY,
+      checkpointToPersist,
       run.id,
     );
+  }
+  if (result.pinned) {
+    for (const [key, slot] of Object.entries(result.pinned)) {
+      // The "checkpoint" slot is mirrored into `result.checkpoint` and
+      // already persisted above — skip the duplicate write.
+      if (key === CHECKPOINT_KEY) continue;
+      const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+      await upsertPinned(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        slotScope,
+        key,
+        slot.content,
+        run.id,
+      );
+    }
   }
   if (status === "success" && resultToPersist) {
     await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
