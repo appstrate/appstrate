@@ -28,7 +28,7 @@ afterEach(async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-describe("prepareBundleForPi — skills/ and providers/ install", () => {
+describe("prepareBundleForPi — skills/ install", () => {
   it("copies every skill file under .pi/skills/<packageId>/", async () => {
     const root = makeBundlePackage(
       "@acme/agent",
@@ -68,7 +68,19 @@ describe("prepareBundleForPi — skills/ and providers/ install", () => {
     ).toBe("nested");
   });
 
-  it("copies providers/ the same way", async () => {
+  it("creates .pi dir even when bundle has no skills/providers (noop)", async () => {
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeTestBundle(root);
+    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+    });
+    expect(extensionFactories).toEqual([]);
+    await cleanup();
+  });
+});
+
+describe("prepareBundleForPi — provider → synthesised skill", () => {
+  it("writes a synthesised SKILL.md at .pi/skills/provider-<scope>-<name>/", async () => {
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
@@ -78,27 +90,74 @@ describe("prepareBundleForPi — skills/ and providers/ install", () => {
         dependencies: { providers: { "@acme/gmail": "^1" } },
       },
     );
-    const providerPkg = makeBundlePackage("@acme/gmail", "1.0.0", "provider", {
-      "provider.json": '{"name":"gmail"}',
-    });
+    const providerPkg = makeBundlePackage(
+      "@acme/gmail",
+      "1.0.0",
+      "provider",
+      { "PROVIDER.md": "# Gmail API\n\nBase URL: https://gmail.googleapis.com/" },
+      {
+        name: "Gmail",
+        description: "Send and read mail",
+        definition: {
+          authMode: "oauth2",
+          authorizedUris: ["https://gmail.googleapis.com/**"],
+        },
+      },
+    );
     const bundle = makeTestBundle(root, [providerPkg]);
     await prepareBundleForPi(bundle, { workspaceDir: workspace });
-    expect(
-      await fs.readFile(
-        path.join(workspace, ".pi", "providers", "@acme", "gmail", "provider.json"),
-        "utf8",
-      ),
-    ).toBe('{"name":"gmail"}');
+
+    const skillContents = await fs.readFile(
+      path.join(workspace, ".pi", "skills", "provider-acme-gmail", "SKILL.md"),
+      "utf8",
+    );
+    expect(skillContents).toContain("name: provider-acme-gmail");
+    expect(skillContents).toContain("Gmail API.");
+    expect(skillContents).toContain("READ this skill before any provider_call");
+    expect(skillContents).toContain("## Provider metadata");
+    expect(skillContents).toContain("- **providerId**: `@acme/gmail`");
+    expect(skillContents).toContain("# Gmail API");
+
+    const legacyDir = await fs
+      .stat(path.join(workspace, ".pi", "providers"))
+      .then(() => true)
+      .catch(() => false);
+    expect(legacyDir).toBe(false);
   });
 
-  it("creates .pi dir even when bundle has no skills/providers (noop)", async () => {
-    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
-    const bundle = makeTestBundle(root);
-    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
-      workspaceDir: workspace,
-    });
-    expect(extensionFactories).toEqual([]);
-    await cleanup();
+  it("synthesises a usable skill even when the provider has no PROVIDER.md", async () => {
+    const root = makeBundlePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      {
+        dependencies: { providers: { "@acme/notion": "^1" } },
+      },
+    );
+    const providerPkg = makeBundlePackage(
+      "@acme/notion",
+      "1.0.0",
+      "provider",
+      {},
+      {
+        name: "Notion",
+        definition: {
+          authMode: "oauth2",
+          docsUrl: "https://developers.notion.com/reference",
+        },
+      },
+    );
+    const bundle = makeTestBundle(root, [providerPkg]);
+    await prepareBundleForPi(bundle, { workspaceDir: workspace });
+
+    const skillContents = await fs.readFile(
+      path.join(workspace, ".pi", "skills", "provider-acme-notion", "SKILL.md"),
+      "utf8",
+    );
+    expect(skillContents).toContain("name: provider-acme-notion");
+    expect(skillContents).toContain("No bundled PROVIDER.md");
+    expect(skillContents).toContain("https://developers.notion.com/reference");
   });
 });
 
