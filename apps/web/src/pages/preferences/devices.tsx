@@ -12,7 +12,9 @@ import { apiFetch } from "../../api";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
 interface CliSessionsResponse {
-  sessions: CliSessionDisplay[];
+  object: "list";
+  data: CliSessionDisplay[];
+  hasMore: boolean;
 }
 
 const SESSIONS_QUERY_KEY = ["cli-sessions"] as const;
@@ -53,7 +55,7 @@ export function PreferencesDevicesPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const sessions = data?.sessions ?? [];
+  const sessions = data?.data ?? [];
 
   return (
     <>

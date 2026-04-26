@@ -30,7 +30,7 @@
  *   GET  /api/auth/cli/sessions                    [issue #251]
  *     Cookie auth required (BA session). Lists the caller's active
  *     CLI sessions (one entry per `family_id` head, not revoked, not
- *     expired). 200: { sessions: [...] }
+ *     expired). 200: { object: "list", data: [...], hasMore: false }
  *
  *   POST /api/auth/cli/sessions/revoke              [issue #251]
  *     Cookie auth required. Body: { familyId }. Revokes a single
@@ -78,6 +78,7 @@ import {
   type DeviceMetadata,
 } from "../services/cli-tokens.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+import { listResponse } from "../../../lib/list-response.ts";
 
 /** Header the CLI uses to declare a human-friendly device label
  *  (mirrors `gh auth login --hostname`). Optional — when absent, the UI
@@ -348,7 +349,8 @@ export function cliTokenPlugin() {
                       schema: {
                         type: "object",
                         properties: {
-                          sessions: {
+                          object: { type: "string", const: "list" },
+                          data: {
                             type: "array",
                             items: {
                               type: "object",
@@ -369,6 +371,7 @@ export function cliTokenPlugin() {
                               },
                             },
                           },
+                          hasMore: { type: "boolean" },
                         },
                       },
                     },
@@ -387,7 +390,7 @@ export function cliTokenPlugin() {
             });
           }
           const sessions = await listSessionsForUser(session.user.id);
-          return ctx.json({ sessions });
+          return ctx.json(listResponse(sessions));
         },
       ),
 
