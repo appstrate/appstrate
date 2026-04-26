@@ -56,7 +56,7 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
             validate: true,
             schemas: [
               {
-                uri: schema?.uri ?? "https://afps.appstrate.dev/schema/v1/any.schema.json",
+                uri: schema?.uri ?? "https://afps.appstrate.dev/packages/schema/v1/any.schema.json",
                 fileMatch: ["*"],
                 schema: schema?.schema ?? {},
               },

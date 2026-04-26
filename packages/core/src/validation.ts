@@ -32,10 +32,10 @@ export const PACKAGE_TYPES = packageTypeEnum.options;
 
 /** AFPS JSON Schema URLs by package type — for the `$schema` field in manifest.json. */
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
-  agent: "https://afps.appstrate.dev/schema/v1/agent.schema.json",
-  skill: "https://afps.appstrate.dev/schema/v1/skill.schema.json",
-  tool: "https://afps.appstrate.dev/schema/v1/tool.schema.json",
-  provider: "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  agent: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+  skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
+  tool: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
+  provider: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
 };
 
 /** Base Zod schema for package manifests — common fields shared by all package types. */

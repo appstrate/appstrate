@@ -1,5 +1,5 @@
 {
-  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
   "name": "@appstrate/output",
   "version": "1.0.0",
   "type": "tool",
