@@ -273,10 +273,14 @@ function AgentEditorInner({
           title={t("editor.tabSkills")}
           emptyLabel={t("editor.skillsEmpty")}
           selectedEntries={getResourceEntries(state.manifest, "skills")}
-          onChange={(entries) => {
-            const m = { ...state.manifest };
-            setResourceEntries(m, "skills", entries);
-            setState((s) => ({ ...s, manifest: m }));
+          onChange={(updater) => {
+            setState((s) => {
+              const prev = getResourceEntries(s.manifest, "skills");
+              const next = typeof updater === "function" ? updater(prev) : updater;
+              const m = { ...s.manifest };
+              setResourceEntries(m, "skills", next);
+              return { ...s, manifest: m };
+            });
           }}
         />
       )}
@@ -300,10 +304,14 @@ function AgentEditorInner({
             title={t("editor.tabTools")}
             emptyLabel={t("editor.toolsEmpty")}
             selectedEntries={getResourceEntries(state.manifest, "tools")}
-            onChange={(entries) => {
-              const m = { ...state.manifest };
-              setResourceEntries(m, "tools", entries);
-              setState((s) => ({ ...s, manifest: m }));
+            onChange={(updater) => {
+              setState((s) => {
+                const prev = getResourceEntries(s.manifest, "tools");
+                const next = typeof updater === "function" ? updater(prev) : updater;
+                const m = { ...s.manifest };
+                setResourceEntries(m, "tools", next);
+                return { ...s, manifest: m };
+              });
             }}
           />
         </>
