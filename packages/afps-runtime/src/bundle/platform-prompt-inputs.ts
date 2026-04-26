@@ -113,8 +113,8 @@ function toolFromPackage(pkg: BundlePackage): PlatformPromptTool {
  * Derive provider meta from a provider package's manifest. Reads
  * `authorizedUris` / `allowAllUris` from `manifest.definition` per AFPS
  * spec §7.5 / §8.6; surfaces `docsUrl` and `authMode` when declared.
- * Flags `hasProviderDoc: true` when a `PROVIDER.md` file ships in the
- * package.
+ * Per-provider documentation (PROVIDER.md) is surfaced through the
+ * synthesised provider-skill mechanism, not through this struct.
  */
 function providerFromPackage(pkg: BundlePackage): PlatformPromptProvider {
   const manifest = pkg.manifest as Record<string, unknown>;
@@ -135,7 +135,6 @@ function providerFromPackage(pkg: BundlePackage): PlatformPromptProvider {
   if (typeof def["allowAllUris"] === "boolean") {
     out.allowAllUris = def["allowAllUris"] as boolean;
   }
-  if (pkg.files.has("PROVIDER.md")) out.hasProviderDoc = true;
   return out;
 }
 

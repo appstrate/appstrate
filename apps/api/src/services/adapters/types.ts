@@ -33,9 +33,9 @@ export type { ToolMeta };
 /**
  * Provider definition projected for prompt enrichment + sidecar wiring.
  * Extends the runtime's {@link PlatformPromptProvider} (id / displayName /
- * authMode / authorizedUris / allowAllUris / docsUrl / hasProviderDoc /
- * toolName) with platform-internal credential metadata consumed by the
- * sidecar but never surfaced to the LLM prompt.
+ * authMode / authorizedUris / allowAllUris / docsUrl / toolName) with
+ * platform-internal credential metadata consumed by the sidecar but never
+ * surfaced to the LLM prompt.
  */
 export interface ProviderSummary extends PlatformPromptProvider {
   displayName: string;

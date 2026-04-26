@@ -59,10 +59,7 @@ export interface PlatformPromptTool {
   description?: string;
 }
 
-export interface PlatformPromptProvider extends PromptViewProvider {
-  /** When true, a per-provider `PROVIDER.md` ships in the workspace skills tree. */
-  hasProviderDoc?: boolean;
-}
+export type PlatformPromptProvider = PromptViewProvider;
 
 export interface PlatformPromptSchema {
   properties?: Record<string, unknown>;
@@ -215,17 +212,14 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Total size across all parts is capped at 5 MB; use a single `{ fromFile }` body for larger uploads.\n",
     );
 
-    sections.push("Available providers:\n");
+    sections.push("Available providers:");
+    sections.push(
+      "Each provider has a corresponding skill (`provider-<scope>-<name>`) — read it before calling `provider_call` for the first time. Skills are listed under `<available_skills>` with full descriptions and file paths.\n",
+    );
     for (const provider of connectedProviders) {
       const displayName = provider.displayName ?? provider.id;
 
       sections.push(`- **${displayName}** (\`${provider.id}\`)`);
-
-      if (provider.hasProviderDoc) {
-        sections.push(`  API docs: \`.pi/providers/${provider.id}/PROVIDER.md\``);
-      } else if (provider.docsUrl) {
-        sections.push(`  Documentation: ${provider.docsUrl}`);
-      }
 
       if (provider.allowAllUris) {
         sections.push(`  Authorized URLs: all public URLs`);

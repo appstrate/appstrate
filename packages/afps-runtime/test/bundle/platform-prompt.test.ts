@@ -75,7 +75,6 @@ describe("renderPlatformPrompt", () => {
           displayName: "Gmail",
           authMode: "oauth2",
           authorizedUris: ["https://gmail.googleapis.com/**"],
-          hasProviderDoc: true,
         },
       ],
     });
@@ -83,7 +82,9 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("provider_call");
     expect(out).toContain("**Gmail** (`@appstrate/gmail`)");
     expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/**");
-    expect(out).toContain(".pi/providers/@appstrate/gmail/PROVIDER.md");
+    expect(out).toContain("provider-<scope>-<name>");
+    expect(out).toContain("<available_skills>");
+    expect(out).not.toContain(".pi/providers/");
     // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
     expect(out).not.toContain("appstrate_gmail_call");
   });
@@ -131,7 +132,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Authorized URLs: all public URLs");
   });
 
-  it("uses docsUrl when hasProviderDoc is false", () => {
+  it("does not surface docsUrl in the providers list (carried by the provider skill instead)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
@@ -144,8 +145,8 @@ describe("renderPlatformPrompt", () => {
         },
       ],
     });
-    expect(out).toContain("Documentation: https://docs.linked.example/api");
-    expect(out).not.toContain(".pi/providers/@x/linked/PROVIDER.md");
+    expect(out).not.toContain("Documentation: https://docs.linked.example/api");
+    expect(out).not.toContain(".pi/providers/");
   });
 
   it("renders the User Input section with schema type/required info", () => {
