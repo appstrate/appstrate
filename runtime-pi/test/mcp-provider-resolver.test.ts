@@ -219,6 +219,100 @@ describe("McpProviderResolver — body forwarding", () => {
     }
   });
 
+  it("emits explicit Content-Type on a multipart text part (Drive metadata pattern)", async () => {
+    // Drive multipart upload requires the metadata part to carry
+    // `Content-Type: application/json`. The text part schema accepts an
+    // optional `contentType` so callers do not have to base64-encode the
+    // JSON via `fromBytes` just to set the part header.
+    const { pair, mcp, captured } = await makeServer({});
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      writeFileSync(join(workspace, "out.xlsx"), "binary-bytes");
+
+      await tool!.execute(
+        {
+          method: "POST",
+          target: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+          body: {
+            multipart: [
+              {
+                name: "metadata",
+                value: '{"name":"file.xlsx"}',
+                contentType: "application/json; charset=UTF-8",
+              },
+              {
+                name: "media",
+                fromFile: "out.xlsx",
+                contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+            ],
+          },
+        },
+        ctxBase(workspace),
+      );
+
+      const arg = captured.arguments as {
+        body?: { fromBytes: string; encoding: string };
+      };
+      const decoded = Buffer.from(arg.body!.fromBytes, "base64").toString("utf-8");
+      // Metadata text part carries the requested JSON content-type instead
+      // of FormData's default `text/plain`. Bun's FormData lowercases the
+      // charset value and adds a stub `filename=""` for Blob-wrapped
+      // values — Drive's resumable upload tolerates both.
+      expect(decoded).toMatch(
+        /name="metadata"[^\r\n]*\r\nContent-Type: application\/json; charset=utf-8/i,
+      );
+      expect(decoded).toContain('{"name":"file.xlsx"}');
+      // File part still carries its own content-type alongside.
+      expect(decoded).toMatch(
+        /name="media"; filename="out\.xlsx"[\s\S]*?Content-Type: application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/,
+      );
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("omits Content-Type on a multipart text part when contentType is not set", async () => {
+    // Backwards-compat: existing callers that pass `{ name, value }` without
+    // contentType continue to get FormData's plain-string serialization (no
+    // explicit `Content-Type` part header — server defaults to `text/plain`).
+    const { pair, mcp, captured } = await makeServer({});
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+
+      await tool!.execute(
+        {
+          method: "POST",
+          target: "https://api.example.com/x",
+          body: { multipart: [{ name: "field", value: "plain" }] },
+        },
+        ctxBase(workspace),
+      );
+
+      const arg = captured.arguments as {
+        body?: { fromBytes: string; encoding: string };
+      };
+      const decoded = Buffer.from(arg.body!.fromBytes, "base64").toString("utf-8");
+      // Neither the value nor the surrounding part should carry an
+      // explicit Content-Type when none was requested.
+      const partRegion = decoded.match(/name="field"[\s\S]*?--/);
+      expect(partRegion).not.toBeNull();
+      expect(partRegion![0]).not.toContain("Content-Type:");
+    } finally {
+      await pair.close();
+    }
+  });
+
   it("rejects { fromFile } resolving outside the workspace (path traversal)", async () => {
     const { pair, mcp, captured } = await makeServer({});
     try {

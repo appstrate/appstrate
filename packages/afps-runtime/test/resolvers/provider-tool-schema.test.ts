@@ -110,6 +110,36 @@ describe("providerCallRequestSchema — valid inputs", () => {
     expect(body.multipart).toHaveLength(1);
   });
 
+  it("parses a multipart text part with explicit contentType (Drive metadata pattern)", () => {
+    // Google Drive multipart resumable upload requires the JSON metadata
+    // part to carry `Content-Type: application/json` — without this knob
+    // callers had to base64-encode the JSON via `fromBytes`.
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+      body: {
+        multipart: [
+          {
+            name: "metadata",
+            value: '{"name":"file.xlsx","parents":["folder123"]}',
+            contentType: "application/json; charset=UTF-8",
+          },
+          {
+            name: "media",
+            fromFile: "out.xlsx",
+            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const body = result.data.body as {
+      multipart: Array<{ name: string; value?: string; contentType?: string }>;
+    };
+    expect(body.multipart[0]?.contentType).toBe("application/json; charset=UTF-8");
+  });
+
   it("parses a multipart body mixing text + file + bytes parts", () => {
     const result = providerCallRequestSchema.safeParse({
       method: "POST",

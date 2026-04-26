@@ -108,6 +108,7 @@ const fromBytesBodySchema = z.object({
 const multipartTextPartSchema = z.object({
   name: z.string(),
   value: z.string(),
+  contentType: z.string().optional(),
 });
 
 const multipartFilePartSchema = z.object({
@@ -791,8 +792,16 @@ async function buildMultipartBytes(
   for (const part of parts) {
     if ("value" in part) {
       // Plain text field — byte-count via Buffer.byteLength so multi-byte
-      // Unicode characters (emoji, CJK, …) are counted correctly.
-      fd.append(part.name, part.value);
+      // Unicode characters (emoji, CJK, …) are counted correctly. When the
+      // caller supplies an explicit contentType (e.g. JSON metadata for
+      // Drive resumable upload), wrap the value in a Blob so FormData
+      // emits the correct `Content-Type` part header instead of defaulting
+      // to `text/plain`.
+      if (part.contentType) {
+        fd.append(part.name, new Blob([part.value], { type: part.contentType }));
+      } else {
+        fd.append(part.name, part.value);
+      }
       totalSize += Buffer.byteLength(part.value, "utf8");
     } else if ("fromFile" in part) {
       // Workspace file reference.
