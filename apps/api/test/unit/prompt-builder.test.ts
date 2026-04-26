@@ -455,7 +455,7 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
 // ─── Connected providers ────────────────────────────────────
 
 describe("buildEnrichedPrompt — provider documentation", () => {
-  it("shows PROVIDER.md path when hasProviderDoc is true", () => {
+  it("cross-references the synthesised provider skill instead of inlining PROVIDER.md paths", () => {
     const ctx = baseContext({
       tokens: { "@test/gmail": "tok" },
       providers: [
@@ -465,18 +465,19 @@ describe("buildEnrichedPrompt — provider documentation", () => {
           authMode: "oauth2",
           credentialHeaderName: "Authorization",
           credentialHeaderPrefix: "Bearer ",
-          hasProviderDoc: true,
           authorizedUris: ["https://gmail.googleapis.com/*"],
         },
       ],
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain(".pi/providers/@test/gmail/PROVIDER.md");
-    expect(prompt).not.toContain("Documentation: http");
+    expect(prompt).not.toContain(".pi/providers/");
+    expect(prompt).not.toContain("PROVIDER.md");
+    expect(prompt).toContain("provider-<scope>-<name>");
+    expect(prompt).toContain("<available_skills>");
   });
 
-  it("falls back to docsUrl when hasProviderDoc is false", () => {
+  it("does not inline docsUrl in the providers list", () => {
     const ctx = baseContext({
       tokens: { "@test/stripe": "tok" },
       providers: [
@@ -486,7 +487,6 @@ describe("buildEnrichedPrompt — provider documentation", () => {
           authMode: "api_key",
           credentialHeaderName: "Authorization",
           credentialHeaderPrefix: "Bearer ",
-          hasProviderDoc: false,
           docsUrl: "https://stripe.com/docs/api",
           authorizedUris: ["https://api.stripe.com/*"],
         },
@@ -494,7 +494,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Documentation: https://stripe.com/docs/api");
+    expect(prompt).not.toContain("Documentation: https://stripe.com/docs/api");
     expect(prompt).not.toContain("PROVIDER.md");
   });
 

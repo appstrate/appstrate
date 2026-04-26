@@ -25,7 +25,6 @@ export async function getProvider(
     .select({
       id: packages.id,
       draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
     })
     .from(packages)
     .where(and(eq(packages.id, providerId), orgOrSystemFilter(orgId)))
@@ -33,15 +32,10 @@ export async function getProvider(
 
   if (rows.length === 0) return null;
   const pkg = rows[0]!;
-  const resolved = buildProviderDefinitionFromManifest(
+  return buildProviderDefinitionFromManifest(
     pkg.id,
     (pkg.draftManifest ?? {}) as Record<string, unknown>,
   );
-  const content = pkg.draftContent?.trim() ?? "";
-  return {
-    ...resolved,
-    hasProviderDoc: content.length > 0 && !content.startsWith("{"),
-  };
 }
 
 /**
