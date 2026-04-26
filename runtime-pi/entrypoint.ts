@@ -291,7 +291,6 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 //   - `provider_call({ providerId, … })` — credential-injecting proxy.
 //   - `run_history` — recent past-run metadata.
 //   - `recall_memory({ q?, limit? })` — archive memory store.
-//   - `llm_complete` — platform-configured LLM passthrough.
 // The agent LLM never sees the sidecar URL; the contract ("agent never
 // talks to the sidecar directly") is enforced via the env-var deletion
 // in 2d below.
@@ -323,7 +322,7 @@ if (mcpClient) {
   try {
     // `buildMcpDirectFactories` registers `provider_call` (only when
     // the bundle declares providers — empty enum is rejected by the
-    // SDK), `run_history`, `recall_memory`, and `llm_complete` in one shot.
+    // SDK), `run_history`, and `recall_memory` in one shot.
     const factories = await buildMcpDirectFactories({
       bundle: bundle ?? buildInContainerBundle(env.agentPrompt),
       mcp: mcpClient,

@@ -192,7 +192,7 @@ Credentials are **never** passed to the agent container — not as environment v
 
 ### How the agent makes authenticated API calls
 
-The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. Three canonical tools are registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`): `provider_call`, `run_history`, `llm_complete`. The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
+The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. Three canonical tools are registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`): `provider_call`, `run_history`, `recall_memory`. The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
 
 ```ts
 // What the agent actually calls (not curl, not bash)

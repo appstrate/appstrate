@@ -141,11 +141,11 @@ appstrate/
 ### Agent runtime — MCP-only
 
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface
-- Four canonical first-party tools registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`):
+- Three canonical first-party tools registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`):
   - `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy
   - `run_history({ limit?, fields? })` — past-run metadata via per-run signed token
-  - `llm_complete(...)` — platform-configured LLM passthrough exposed as a tool
   - `recall_memory({ scope?, key? })` — read the unified `package_persistence` archive (replaces the legacy memory-as-prompt-section model)
+- The agent's primary completions are served by the `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API
 - Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes `process.env.SIDECAR_URL` so the bash extension cannot discover the sidecar
 - The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
 

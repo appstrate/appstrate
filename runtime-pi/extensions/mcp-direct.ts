@@ -3,8 +3,8 @@
 /**
  * Direct MCP tool surface (the only LLM-facing surface).
  *
- * Registers `provider_call`, `run_history`, `recall_memory`, and
- * `llm_complete` as Pi-SDK tools, each forwarding to the sidecar's MCP `tools/call`
+ * Registers `provider_call`, `run_history`, and `recall_memory` as
+ * Pi-SDK tools, each forwarding to the sidecar's MCP `tools/call`
  * endpoint via {@link AppstrateMcpClient}. The LLM sees the canonical
  * MCP names verbatim — Appstrate is indistinguishable (LLM-side) from
  * any other MCP host.
@@ -75,7 +75,6 @@ function callToolResultToPi(result: CallToolResult): PiToolResult {
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 const RUN_HISTORY_TOOL_NAME = "run_history";
 const RECALL_MEMORY_TOOL_NAME = "recall_memory";
-const LLM_COMPLETE_TOOL_NAME = "llm_complete";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -105,8 +104,8 @@ interface BuildMcpDirectFactoriesOptions {
 }
 
 /**
- * Build the `provider_call` + `run_history` + `recall_memory` +
- * `llm_complete` Pi extension factories. The set is built once per agent.
+ * Build the `provider_call` + `run_history` + `recall_memory` Pi
+ * extension factories. The set is built once per agent.
  *
  * `provider_call` delegates to `runner-pi`'s
  * `buildProviderCallExtensionFactory` (the same factory CLI mode uses)
@@ -118,7 +117,7 @@ interface BuildMcpDirectFactoriesOptions {
  *
  * Returns `[]` for `provider_call` when the bundle declares no
  * providers (so the LLM doesn't see a tool whose `providerId` enum is
- * empty), but always emits the three platform tools.
+ * empty), but always emits the two platform tools.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,
@@ -130,7 +129,7 @@ export async function buildMcpDirectFactories(
   // expected tools are missing.
   const { tools } = await opts.mcp.listTools();
   const advertised = new Set(tools.map((t) => t.name));
-  const expected = [RUN_HISTORY_TOOL_NAME, RECALL_MEMORY_TOOL_NAME, LLM_COMPLETE_TOOL_NAME];
+  const expected = [RUN_HISTORY_TOOL_NAME, RECALL_MEMORY_TOOL_NAME];
   if (providerIds.length > 0) expected.push(PROVIDER_CALL_TOOL_NAME);
   for (const name of expected) {
     if (!advertised.has(name)) {
@@ -154,7 +153,6 @@ export async function buildMcpDirectFactories(
   }
   factories.push(makeRunHistoryExtension(opts));
   factories.push(makeRecallMemoryExtension(opts));
-  factories.push(makeLlmCompleteExtension(opts));
   return factories;
 }
 
@@ -246,50 +244,3 @@ function makeRecallMemoryExtension(opts: BuildMcpDirectFactoriesOptions): Extens
   };
 }
 
-function makeLlmCompleteExtension(opts: BuildMcpDirectFactoriesOptions): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: LLM_COMPLETE_TOOL_NAME,
-      label: LLM_COMPLETE_TOOL_NAME,
-      description:
-        "Issue a completion request to the platform-configured LLM. " +
-        "Synchronous: returns once the upstream response is fully received.",
-      parameters: Type.Unsafe<Record<string, unknown>>({
-        type: "object",
-        additionalProperties: false,
-        required: ["path", "body"],
-        properties: {
-          path: {
-            type: "string",
-            pattern: "^/[A-Za-z0-9._/-]{1,256}$",
-          },
-          method: { type: "string", enum: ["POST", "PUT", "PATCH"] },
-          headers: { type: "object", additionalProperties: { type: "string" } },
-          body: { type: "string" },
-        },
-      }),
-      async execute(toolCallId, params, signal) {
-        const startedAt = Date.now();
-        opts.emit({
-          type: "llm_complete.called",
-          runId: opts.runId,
-          toolCallId,
-          timestamp: startedAt,
-        });
-        const result = await opts.mcp.callTool(
-          { name: LLM_COMPLETE_TOOL_NAME, arguments: params as Record<string, unknown> },
-          { ...(signal ? { signal } : {}) },
-        );
-        opts.emit({
-          type: "llm_complete.completed",
-          runId: opts.runId,
-          toolCallId,
-          durationMs: Date.now() - startedAt,
-          isError: result.isError === true,
-          timestamp: Date.now(),
-        });
-        return callToolResultToPi(result);
-      },
-    });
-  };
-}

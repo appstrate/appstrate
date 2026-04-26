@@ -2,7 +2,6 @@
 
 /**
  * Tests for the sidecar's `/mcp` resource surface:
- *   - `llm_complete` MCP tool — platform-configured LLM passthrough.
  *   - `resources/list` + `resources/read` backed by the run-scoped blob cache.
  *   - `provider_call` spilling oversized / binary upstream responses to
  *     `resource_link` blocks.
@@ -21,11 +20,6 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
       platformApiUrl: "http://localhost:3000",
       runToken: "test-token",
       proxyUrl: "",
-      llm: {
-        baseUrl: "https://llm.example.com",
-        apiKey: "real-key",
-        placeholder: "sk-placeholder",
-      },
     },
     fetchCredentials: mock(
       async (): Promise<CredentialsResponse> => ({
@@ -79,116 +73,6 @@ async function rpc(
     json: (await res.json()) as { result?: unknown; error?: { code: number; message: string } },
   };
 }
-
-describe("POST /mcp — llm_complete tool", () => {
-  it("is advertised in tools/list with the documented input schema", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, { method: "tools/list" });
-    const result = res.json.result as {
-      tools: Array<{
-        name: string;
-        inputSchema: { properties: Record<string, unknown>; required: string[] };
-      }>;
-    };
-    const tool = result.tools.find((t) => t.name === "llm_complete");
-    expect(tool).toBeDefined();
-    expect(tool!.inputSchema.required).toEqual(["path", "body"]);
-    expect(tool!.inputSchema.properties).toHaveProperty("path");
-    expect(tool!.inputSchema.properties).toHaveProperty("body");
-    expect(tool!.inputSchema.properties).toHaveProperty("method");
-    expect(tool!.inputSchema.properties).toHaveProperty("headers");
-  });
-
-  it("forwards POST /v1/messages to the upstream LLM with placeholder substitution", async () => {
-    let observedUrl: string | null = null;
-    let observedAuth: string | null = null;
-    let observedBody: string | null = null;
-    const fetchFn = mock(async (url: string, init: RequestInit) => {
-      observedUrl = url;
-      // After the MCP migration the llm_complete tool calls fetch
-      // directly (no Hono round-trip), so caller-supplied header
-      // casing is preserved. Read with the same case the test sends.
-      const hdrs = init.headers as Record<string, string>;
-      observedAuth = hdrs?.["Authorization"] ?? hdrs?.["authorization"] ?? null;
-      if (typeof init.body === "string") {
-        observedBody = init.body;
-      } else if (init.body && typeof (init.body as ReadableStream).getReader === "function") {
-        const reader = (init.body as ReadableStream<Uint8Array>).getReader();
-        const chunks: Uint8Array[] = [];
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) chunks.push(value);
-        }
-        const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-        const merged = new Uint8Array(total);
-        let off = 0;
-        for (const c of chunks) {
-          merged.set(c, off);
-          off += c.byteLength;
-        }
-        observedBody = new TextDecoder().decode(merged);
-      }
-      return new Response('{"completion":"hi"}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const app = createApp(
-      makeDeps({
-        fetchFn: fetchFn as unknown as typeof fetch,
-      }),
-    );
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "llm_complete",
-        arguments: {
-          path: "/v1/messages",
-          body: '{"model":"claude-sonnet-4","messages":[]}',
-          headers: { Authorization: "Bearer sk-placeholder" },
-        },
-      },
-    });
-    const result = res.json.result as { content: Array<{ type: string; text?: string }> };
-    expect(result.content[0]!.type).toBe("text");
-    expect(result.content[0]!.text).toBe('{"completion":"hi"}');
-    expect(observedUrl).toBe("https://llm.example.com/v1/messages");
-    expect(observedAuth).toBe("Bearer real-key");
-    expect(observedBody).toBe('{"model":"claude-sonnet-4","messages":[]}');
-  });
-
-  it("rejects path traversal attempts in the path argument", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "llm_complete",
-        arguments: { path: "/../../etc/passwd", body: "{}" },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toMatch(/invalid path/);
-  });
-
-  it("returns isError: true when LLM proxy is not configured", async () => {
-    const deps = makeDeps();
-    delete (deps.config as { llm?: unknown }).llm;
-    const app = createApp(deps);
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "llm_complete",
-        arguments: { path: "/v1/messages", body: "{}" },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    // The /llm/* route returns 503 when LLM not configured; the MCP
-    // layer surfaces that as a tool-level error.
-    expect(result.isError).toBe(true);
-  });
-});
 
 describe("POST /mcp — provider_call resource spillover", () => {
   it("returns a resource_link block for binary upstream responses", async () => {

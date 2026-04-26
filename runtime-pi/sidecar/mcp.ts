@@ -6,7 +6,7 @@
  * surface after the migration.
  *
  * The sidecar's HTTP endpoints are `/health` and `/configure`; everything
- * the agent talks to (`provider_call`, `run_history`, `llm_complete`) is
+ * the agent talks to (`provider_call`, `run_history`, `recall_memory`) is
  * dispatched here as MCP tools.
  *
  * Key invariants:
@@ -19,9 +19,9 @@
  *    core (`./credential-proxy.ts`) which is the SOLE place those
  *    invariants live.
  *
- * 2. `run_history` and `llm_complete` use `proxyDeps.fetchFn` to call
- *    the platform / LLM upstreams directly (no Hono round-trip). Tests
- *    inject a mock `fetchFn` via `AppDeps`.
+ * 2. `run_history` and `recall_memory` use `proxyDeps.fetchFn` to call
+ *    the platform directly (no Hono round-trip). Tests inject a mock
+ *    `fetchFn` via `AppDeps`.
  *
  * 3. Stateless transport, **per-request**. Each `/mcp` invocation builds
  *    a fresh `Server` + `WebStandardStreamableHTTPServerTransport` pair,
@@ -56,9 +56,6 @@ import {
   type Resource,
 } from "@appstrate/mcp-transport";
 import {
-  filterHeaders,
-  isBlockedUrl,
-  LLM_PROXY_TIMEOUT_MS,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
@@ -208,13 +205,12 @@ function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
 const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
 
 /**
- * Build the `provider_call`, `run_history`, and `llm_complete` MCP
+ * Build the `provider_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
  * `provider_call` calls {@link executeProviderCall} directly via
- * {@link MountMcpOptions.proxyDeps}; `run_history` and `llm_complete`
- * call `proxyDeps.fetchFn` against the configured platform / LLM
- * upstreams. None of these tools round-trip through a Hono HTTP
- * envelope.
+ * {@link MountMcpOptions.proxyDeps}; `run_history` and `recall_memory`
+ * call `proxyDeps.fetchFn` against the platform upstream. None of
+ * these tools round-trip through a Hono HTTP envelope.
  *
  * When a `provider_call` upstream response is binary or exceeds
  * {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in the
@@ -556,127 +552,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     },
   };
 
-  // `llm_complete` MCP tool — wraps the platform-configured LLM upstream
-  // (anthropic/openai/google/…) with placeholder-key substitution and
-  // returns the response body as text. Modeled as a tool rather than
-  // MCP `sampling/createMessage` because sampling is server-initiated
-  // (wrong direction) and barely deployed by hosts. Synchronous:
-  // the tool returns once the upstream response is fully received.
-  const llmComplete: AppstrateToolDefinition = {
-    descriptor: {
-      name: "llm_complete",
-      description:
-        "Issue a completion request to the platform-configured LLM. The sidecar substitutes " +
-        "the placeholder API key, forwards the request, and returns the upstream response body " +
-        "as text. Synchronous: the tool returns once the upstream response is fully received. " +
-        "For very long completions consider chunking the prompt instead.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["path", "body"],
-        properties: {
-          path: {
-            type: "string",
-            description:
-              "Upstream path relative to the LLM base URL (e.g. `/v1/messages`, `/v1/chat/completions`). " +
-              "Must start with `/` and contain no path traversal sequences.",
-            pattern: "^/[A-Za-z0-9._/-]{1,256}$",
-          },
-          method: {
-            type: "string",
-            enum: ["POST", "PUT", "PATCH"],
-            description: "HTTP method. Defaults to POST.",
-          },
-          headers: {
-            type: "object",
-            additionalProperties: { type: "string" },
-            description:
-              "Additional headers to forward. Hop-by-hop headers are filtered server-side. " +
-              "Authorization headers using the placeholder are auto-substituted.",
-          },
-          body: {
-            type: "string",
-            description: "Request body — JSON-encoded string for typical LLM endpoints.",
-          },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const args = rawArgs as {
-        path: string;
-        method?: string;
-        headers?: Record<string, string>;
-        body: string;
-      };
-
-      // Defence in depth: even though the JSON Schema pattern restricts
-      // the path, we re-check here so any bypass route through the SDK
-      // (e.g. callers that disable schema validation) still fails safely.
-      if (!/^\/[A-Za-z0-9._/-]{1,256}$/.test(args.path) || args.path.includes("..")) {
-        return {
-          content: [{ type: "text", text: `llm_complete: invalid path '${args.path}'` }],
-          isError: true,
-        };
-      }
-
-      if (!config.llm) {
-        return {
-          content: [{ type: "text", text: "llm_complete: LLM proxy not configured" }],
-          isError: true,
-        };
-      }
-      if (isBlockedUrl(config.llm.baseUrl)) {
-        return {
-          content: [
-            { type: "text", text: "llm_complete: LLM base URL targets a blocked network range" },
-          ],
-          isError: true,
-        };
-      }
-
-      // Build headers — the SDK pattern is to embed the placeholder in
-      // an Authorization (or vendor-specific) header; we substitute the
-      // real key into every header value that contains the placeholder.
-      const incomingHeaders = filterHeaders({
-        "Content-Type": "application/json",
-        ...(args.headers ?? {}),
-      });
-      const forwardedHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(incomingHeaders)) {
-        forwardedHeaders[key] = value.includes(config.llm.placeholder)
-          ? value.replace(config.llm.placeholder, config.llm.apiKey)
-          : value;
-      }
-
-      let res: Response;
-      try {
-        res = await fetchFn(`${config.llm.baseUrl}${args.path}`, {
-          method: args.method ?? "POST",
-          headers: forwardedHeaders,
-          body: args.body,
-          signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-        });
-      } catch (err) {
-        const code =
-          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-        const suffix = code ? `: ${code}` : "";
-        return {
-          content: [{ type: "text", text: `llm_complete: LLM request failed${suffix}` }],
-          isError: true,
-        };
-      }
-      return responseToToolResult(res, {
-        ...(blobStore ? { blobStore } : {}),
-        source: "llm_complete",
-        // LLM responses are large but always text — never spill them to
-        // a blob unless they breach the absolute MAX_RESPONSE_SIZE
-        // truncation guard, which already kicks in upstream.
-        inlineThreshold: MAX_RESPONSE_SIZE,
-      });
-    },
-  };
-
-  return [providerCall, runHistory, recallMemory, llmComplete];
+  return [providerCall, runHistory, recallMemory];
 }
 
 /**
@@ -963,14 +839,14 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * tool then performs.
  */
 export interface MountMcpOptions {
-  /** Run-scoped blob store for `provider_call` / `llm_complete` resource spillover. */
+  /** Run-scoped blob store for `provider_call` resource spillover. */
   blobStore?: BlobStore;
   /**
    * Credential-proxy core deps. `provider_call` calls
    * {@link executeProviderCall} directly with structured args; `run_history`
-   * and `llm_complete` use `proxyDeps.fetchFn` + `proxyDeps.config` to
-   * reach the platform / LLM upstreams. Required: there is no longer a
-   * legacy HTTP-route fallback.
+   * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
+   * reach the platform upstream. Required: there is no longer a legacy
+   * HTTP-route fallback.
    */
   proxyDeps: ProviderCallDeps;
 }

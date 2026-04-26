@@ -4,7 +4,7 @@
  * MCP endpoint integration tests.
  *
  * The sidecar mounts `/mcp` and exposes `provider_call`, `run_history`,
- * and `llm_complete` as MCP tools. These tests verify wire-format
+ * and `recall_memory` as MCP tools. These tests verify wire-format
  * compliance and the auth / authorisation / SSRF guarantees that the
  * MCP path enforces end-to-end.
  */
@@ -162,13 +162,13 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises provider_call, run_history, recall_memory, and llm_complete", async () => {
+  it("advertises provider_call, run_history, and recall_memory", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["llm_complete", "provider_call", "recall_memory", "run_history"]);
+    expect(names).toEqual(["provider_call", "recall_memory", "run_history"]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -411,7 +411,6 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
     expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
-      "llm_complete",
       "provider_call",
       "recall_memory",
       "run_history",
@@ -422,7 +421,6 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
     expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
-      "llm_complete",
       "provider_call",
       "recall_memory",
       "run_history",
