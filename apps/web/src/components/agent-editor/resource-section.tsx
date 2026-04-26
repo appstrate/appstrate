@@ -102,13 +102,13 @@ export function ResourceSection({
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
-  // Resolve any `*` placeholders against the canonical version from the
-  // package list as soon as both are available, in a single setState.
-  // Doing this here instead of letting each `VersionSelect` migrate
-  // independently avoids a batched-update race where multiple effects
-  // each call onChange with a stale full-array snapshot and only the
-  // last write survives. Runs idempotently — once entries carry caret
-  // ranges, subsequent renders no-op.
+  // Defense-in-depth for legacy manifests that still carry `*` (or for
+  // a freshly uploaded package whose entry is added with `*` while we
+  // wait for the package list to refetch). Resolve in one setState so
+  // multiple stale entries can't race the per-`VersionSelect` migration
+  // and clobber each other in the same React batch. New agents go
+  // through `package-editor.tsx`'s create-mode prefill, which emits
+  // caret ranges from the start — no `*` to migrate.
   useEffect(() => {
     if (!items || items.length === 0 || selectedEntries.length === 0) return;
     let mutated = false;
