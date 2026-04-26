@@ -74,9 +74,11 @@ export async function fetchRunConfigPayload(
 ): Promise<ResolvedRunConfigPayload | null> {
   const fetchFn = input.fetchImpl ?? fetch;
   const instance = normalizeInstance(input.instance);
-  const url = `${instance}/api/applications/${encodeURIComponent(
-    input.appId,
-  )}/packages/${encodeURIComponent(input.scope)}/${encodeURIComponent(input.name)}/run-config`;
+  // appId is `app_<uuid>` — safe characters, no encoding needed.
+  // scope is `@<slug>` — must NOT be percent-encoded (see bundle-fetch.ts:buildBundleUrl):
+  // Hono's `:scope{@[^/]+}` route rejects `%40scope` as 404. Both scope
+  // and name are validated upstream to a strict `[a-z0-9-]` charset.
+  const url = `${instance}/api/applications/${input.appId}/packages/${input.scope}/${input.name}/run-config`;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${input.bearerToken}`,

@@ -25,6 +25,7 @@ import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
+import { validateMergedConfigOrThrow } from "../services/agent-readiness.ts";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
@@ -317,6 +318,14 @@ export function createRunsRouter() {
       // client reaches an identical resolved config for the same
       // `(persisted, override)` pair.
       const mergedConfig = configOverride ? deepMergeConfig(config, configOverride) : config;
+
+      // Re-validate the merged config against the manifest schema. The
+      // persisted side was vetted by `resolveRunPreflight`, but the override
+      // could push the result out of schema — the CLI's local-run path
+      // already gates this, the server must too. No-op when no override.
+      if (configOverride) {
+        validateMergedConfigOrThrow(effectiveAgent, mergedConfig);
+      }
 
       // Single canonical prefix — `run_` — shared with inline + remote
       // origins. The legacy `exec_` prefix was a platform-only relic from

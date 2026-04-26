@@ -221,9 +221,10 @@ function buildReadinessUrl(instance: string, inputs: PreflightInputs): string {
     params.set(`providerProfile.${providerId}`, profileId);
   }
   const qs = params.toString();
-  const base = `${instance}/api/agents/${encodeURIComponent(inputs.scope)}/${encodeURIComponent(
-    inputs.name,
-  )}/readiness`;
+  // See bundle-fetch.ts:buildBundleUrl — `@` in scope must NOT be percent-encoded
+  // or the Hono route `:scope{@[^/]+}` 404s on `%40scope`. scope/name are
+  // already validated to a strict `[a-z0-9-]` charset.
+  const base = `${instance}/api/agents/${inputs.scope}/${inputs.name}/readiness`;
   return qs ? `${base}?${qs}` : base;
 }
 

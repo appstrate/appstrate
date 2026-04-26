@@ -219,7 +219,12 @@ function buildBundleUrl(
   name: string,
   spec: string | undefined,
 ): string {
-  const base = `${instance}/api/agents/${encodeURIComponent(scope)}/${encodeURIComponent(name)}/bundle`;
+  // Don't encode scope/name. They're already validated by `package-spec.ts`
+  // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
+  // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
+  // Hono's RegExpRouter matches against the raw (encoded) path. The
+  // version spec is encoded because it can include `+`, `>=`, etc.
+  const base = `${instance}/api/agents/${scope}/${name}/bundle`;
   if (!spec) return base;
   return `${base}?version=${encodeURIComponent(spec)}`;
 }

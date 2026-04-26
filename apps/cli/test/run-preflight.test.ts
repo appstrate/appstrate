@@ -261,6 +261,22 @@ describe("preflightCheck", () => {
     expect(urls[0]).toContain("providerProfile.%40afps%2Fgmail=prof_2");
   });
 
+  it("uses a literal `@` in the path — never percent-encoded", async () => {
+    // The Hono server route `:scope{@[^/]+}` matches against the raw
+    // (encoded) path; `%40scope` returns 404. Pin the contract so a
+    // future "let's just encodeURIComponent everything" refactor fails
+    // loudly here instead of silently breaking the readiness call.
+    const { fetchImpl, urls } = makeFetch([{ ready: true, missing: [] }]);
+    await preflightCheck({
+      ...BASE_INPUTS,
+      fetchImpl,
+      openBrowser: () => {},
+      confirmPrompt: async () => true,
+    });
+    expect(urls[0]).toContain("/api/agents/@scope/agent/readiness");
+    expect(urls[0]).not.toContain("%40scope");
+  });
+
   it("uses capped exponential backoff between polls", async () => {
     const missing = [
       {

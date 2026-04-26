@@ -98,7 +98,10 @@ describe("fetchRunConfigPayload", () => {
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
     expect(capture.headers?.get("X-App-Id")).toBe("app_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
-    expect(capture.url).toContain("/api/applications/app_1/packages/%40scope/agent/run-config");
+    // Literal `@` — the Hono server route `:scope{@[^/]+}` rejects
+    // `%40scope` as 404. The CLI URL builder leaves scope/name unencoded.
+    expect(capture.url).toContain("/api/applications/app_1/packages/@scope/agent/run-config");
+    expect(capture.url).not.toContain("%40scope");
   });
 });
 

@@ -83,7 +83,11 @@ describe("fetchBundleForRun — happy path", () => {
     expect(result.path).toContain("/bundles/app.example.com/");
     expect(result.path.endsWith(".afps-bundle")).toBe(true);
 
-    expect(capture.url).toBe("https://app.example.com/api/agents/%40system/hello/bundle");
+    // Literal `@` — encodeURIComponent would produce `%40system`, which the
+    // Hono server route `:scope{@[^/]+}` rejects as 404. The CLI's URL
+    // builder leaves scope/name unencoded (they're regex-validated to a
+    // strict charset upstream).
+    expect(capture.url).toBe("https://app.example.com/api/agents/@system/hello/bundle");
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
     expect(capture.headers?.get("X-App-Id")).toBe("app_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");

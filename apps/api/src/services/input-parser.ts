@@ -143,11 +143,20 @@ export async function parseRequestInput(
   // an opaque object — validation against the manifest schema runs after
   // the merge so a client can omit keys the persisted state already
   // satisfies.
+  //
+  // Reject `null` explicitly: at top-level the merge short-circuits on a
+  // falsy override (`null` would silently inherit defaults) which conflicts
+  // with the schedule-update semantics where `null` clears the override.
+  // Force callers to pick: omit `config` to inherit defaults, send `{}` for
+  // an explicit empty override, send a populated object for a real override.
   if (
     body.config !== undefined &&
-    (typeof body.config !== "object" || Array.isArray(body.config))
+    (body.config === null || typeof body.config !== "object" || Array.isArray(body.config))
   ) {
-    throw invalidRequest("`config` must be a JSON object", "config");
+    throw invalidRequest(
+      "`config` must be a JSON object — omit the field to inherit persisted defaults",
+      "config",
+    );
   }
 
   return {

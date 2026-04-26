@@ -127,6 +127,36 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   });
 }
 
+/**
+ * Re-validate a deep-merged config against the manifest schema.
+ *
+ * `resolveRunPreflight` validates the *persisted* `application_packages.config`
+ * once at preflight time. When a caller supplies a per-run `config` override
+ * on `POST /run` (or freezes one on a schedule), the merged result has not
+ * been vetted — the override could push the config out of schema. This
+ * function closes that gap on every merge.
+ *
+ * Throws `ApiError(400, "invalid_config")` on the first violation, mirroring
+ * the contract of `validateAgentReadiness` so existing error mapping handles
+ * it without special cases. No-op when the manifest declares no config schema.
+ */
+export function validateMergedConfigOrThrow(
+  agent: LoadedPackage,
+  config: Record<string, unknown>,
+): void {
+  const { config: configSchema } = extractManifestSchemas(agent.manifest);
+  if (!configSchema) return;
+  const result = validateConfig(config, configSchema);
+  if (result.valid) return;
+  const first = result.errors[0]!;
+  throw new ApiError({
+    status: 400,
+    code: "invalid_config",
+    title: "Invalid Config",
+    detail: first.field ? `config.${first.field}: ${first.message}` : first.message,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Readiness preflight — read-only contract for the CLI (and dashboard) to
 // inspect provider readiness before a run, without committing to one.

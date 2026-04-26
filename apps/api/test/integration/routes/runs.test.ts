@@ -128,6 +128,70 @@ describe("Runs API", () => {
       const body = (await res.json()) as { detail?: string };
       expect(body.detail).toContain("config");
     });
+
+    it("rejects `config: null` with 400 invalid_request", async () => {
+      // Top-level `null` is ambiguous: deepMergeConfig short-circuits on a
+      // falsy override (treats null as "no override"), but the schedule
+      // route uses `null` to *clear* an override. We force the caller to
+      // pick — omit the field to inherit defaults, or send `{}` for an
+      // empty override.
+      await seedAgentWithInput();
+
+      const res = await app.request("/api/agents/@runorg/input-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: "a@b.c" }, config: null }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("config");
+    });
+
+    it("rejects a merged config that violates the manifest schema with 400 invalid_config", async () => {
+      // The persisted config is vetted by `resolveRunPreflight`. A per-run
+      // override could push the merged result out of schema, and the CLI's
+      // local-run path already gates this — the server must too. This test
+      // pins the contract: install a config schema, send an override that
+      // breaks `format: email` after merge, expect a 400.
+      const configSchema = {
+        type: "object",
+        properties: {
+          contact: { type: "string", format: "email" },
+          notify: { type: "boolean" },
+        },
+        required: ["contact"],
+      } as const;
+      await seedAgent({
+        id: "@runorg/cfg-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@runorg/cfg-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Agent with config schema",
+          config: { schema: configSchema },
+        },
+        draftContent: "Send to {{contact}}",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/cfg-agent",
+        { contact: "ops@example.com", notify: true },
+      );
+
+      const res = await app.request("/api/agents/@runorg/cfg-agent/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ config: { contact: "not-an-email" } }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("invalid_config");
+      expect(body.detail).toContain("contact");
+    });
   });
 
   // ─── GET /api/agents/:scope/:name/runs ─────────────────────
