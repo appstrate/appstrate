@@ -123,6 +123,34 @@ describe("buildProviderCallExtensionFactory", () => {
     expect(params.properties.providerId.enum).toEqual(["@appstrate/gmail", "@appstrate/clickup"]);
   });
 
+  it("exposes the canonical body union schema (string | fromFile | fromBytes | multipart)", async () => {
+    // Regression: a `body: {}` (any) schema gives the LLM no shape
+    // guidance, so models JSON-stringify object bodies. `{ fromFile: "x" }`
+    // then arrives as a string and resolveBodyForFetch's file-reading
+    // branch is skipped — the literal `{"fromFile":"x"}` is forwarded
+    // upstream verbatim. The fix is to surface the canonical AFPS body
+    // union JSON schema so the LLM picks the right shape.
+    const factories = await buildProviderCallExtensionFactory({
+      bundle: makeBundle({ "@appstrate/gmail": "1" }),
+      providerResolver: makeResolver({
+        "@appstrate/gmail": makeAfpsTool("appstrate_gmail_call", async () => ({ ok: true })),
+      }),
+      runId: "r",
+      workspace: "/w",
+      emitProvider: () => {},
+    });
+    const { api, tools } = makeFakePi();
+    factories[0]!(api);
+    const params = tools[0]!.parameters as {
+      properties: { body: unknown; responseMode: unknown };
+    };
+    const bodyJson = JSON.stringify(params.properties.body);
+    expect(bodyJson).toContain("fromFile");
+    expect(bodyJson).toContain("fromBytes");
+    expect(bodyJson).toContain("multipart");
+    expect(JSON.stringify(params.properties.responseMode)).toContain("toFile");
+  });
+
   it("dispatches by providerId, stripping it from the forwarded params", async () => {
     const seen: Array<{ tool: string; params: unknown }> = [];
     const factories = await buildProviderCallExtensionFactory({

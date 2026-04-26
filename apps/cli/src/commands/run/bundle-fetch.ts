@@ -27,7 +27,7 @@
 import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 
@@ -228,12 +228,6 @@ function computeCachePath(
     safeName,
     `${safeVersion}-${integrityShort}.afps-bundle`,
   );
-}
-
-function dirname(path: string): string {
-  const idx = path.lastIndexOf("/");
-  if (idx < 0) return ".";
-  return path.slice(0, idx);
 }
 
 async function safeText(res: Response): Promise<string> {
