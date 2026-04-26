@@ -49,7 +49,6 @@ export function buildPlatformSystemPrompt(
       ...(p.authorizedUris?.length ? { authorizedUris: p.authorizedUris } : {}),
       allowAllUris: p.allowAllUris ?? false,
       ...(p.docsUrl !== undefined ? { docsUrl: p.docsUrl } : {}),
-      ...(p.hasProviderDoc !== undefined ? { hasProviderDoc: p.hasProviderDoc } : {}),
     }));
 
   const uploads = plan.files?.map((f) => ({
