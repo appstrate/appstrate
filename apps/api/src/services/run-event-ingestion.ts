@@ -123,6 +123,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       sinkClosedAt: runs.sinkClosedAt,
       lastEventSequence: runs.lastEventSequence,
       startedAt: runs.startedAt,
+      modelSource: runs.modelSource,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -305,6 +306,10 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 5. afterRun hook — the hook SHOULD be idempotent (callers may retry on
   //    transient failures) so it runs before the CAS. Any metadata it
   //    returns is included atomically in the same UPDATE.
+  // Forward `runs.model_source` so the `afterRun` hook can distinguish
+  // platform-paid runs (system models) from BYOK runs (org models) without
+  // a re-query. Cloud's billing handler keys credit recording on this —
+  // omitting the field made it silently bill every run as `"system"`.
   const hookParams: RunStatusChangeParams = {
     orgId: run.orgId,
     runId: run.id,
@@ -314,6 +319,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     packageEphemeral,
     duration: resolvedDurationMs,
     ...(cost.total > 0 ? { cost: cost.total } : {}),
+    ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
   };
   let metadata: Record<string, unknown> | null = null;
   try {

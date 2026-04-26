@@ -27,7 +27,7 @@
  *      container POSTs a complete `result`, the row is complete too.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
@@ -38,6 +38,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
 
 const app = getTestApp();
 
@@ -67,6 +69,8 @@ async function seedRunWithSink(
      * the row without usage (exercises the heuristic on purpose).
      */
     tokenUsage?: Record<string, number> | null;
+    /** Persisted on `runs.model_source` — forwarded to the `afterRun` hook. */
+    modelSource?: string | null;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -85,6 +89,7 @@ async function seedRunWithSink(
       overrides.tokenUsage === undefined
         ? { input_tokens: 100, output_tokens: 50 }
         : overrides.tokenUsage,
+    ...(overrides.modelSource !== undefined ? { modelSource: overrides.modelSource } : {}),
   });
   return runId;
 }
@@ -602,6 +607,95 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.cost).toBeCloseTo(0.003, 5);
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 300, output_tokens: 125 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `afterRun` hook contract — finalize MUST forward `runs.model_source` so
+// module billing handlers can distinguish platform-paid (system) runs from
+// BYOK (org) runs. Skipping the field collapses every run to "system" in
+// cloud's `recordUsage` fallback and silently bills runs the platform was
+// never paid for.
+// ---------------------------------------------------------------------------
+describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetModules();
+    ctx = await createTestContext({ email: "hook@test.dev", orgSlug: "hook-org" });
+    await seedPackage({ orgId: ctx.orgId, id: "@test/hook-agent", type: "agent" });
+  });
+
+  afterAll(() => {
+    // Don't leak the spy module into sibling test files.
+    resetModules();
+  });
+
+  async function captureAfterRunParams(): Promise<{
+    captured: () => RunStatusChangeParams | null;
+  }> {
+    let last: RunStatusChangeParams | null = null;
+    const mod: AppstrateModule = {
+      manifest: { id: "afterrun-spy", name: "After-Run Spy", version: "1.0.0" },
+      async init() {},
+      hooks: {
+        afterRun: async (params) => {
+          last = params;
+          return null;
+        },
+      },
+    };
+    await loadModulesFromInstances([mod], {
+      databaseUrl: null,
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      isEmbeddedDb: true,
+      applyMigrations: async () => {},
+      getSendMail: async () => () => {},
+      getOrgAdminEmails: async () => [],
+      services: {} as never,
+    });
+    return { captured: () => last };
+  }
+
+  it("forwards runs.modelSource = 'system' to the afterRun hook", async () => {
+    const { captured } = await captureAfterRunParams();
+    const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "system" });
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+    });
+    expect(res.status).toBe(200);
+    expect(captured()).not.toBeNull();
+    expect(captured()!.modelSource).toBe("system");
+  });
+
+  it("forwards runs.modelSource = 'org' (BYOK) to the afterRun hook so cloud skips billing", async () => {
+    const { captured } = await captureAfterRunParams();
+    const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "org" });
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+    });
+    expect(res.status).toBe(200);
+    expect(captured()).not.toBeNull();
+    expect(captured()!.modelSource).toBe("org");
+  });
+
+  it("omits modelSource when the run row has none (legacy / inline runs)", async () => {
+    const { captured } = await captureAfterRunParams();
+    const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: null });
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+    });
+    expect(res.status).toBe(200);
+    expect(captured()).not.toBeNull();
+    expect(captured()!.modelSource).toBeUndefined();
   });
 });
 
