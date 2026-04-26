@@ -6,7 +6,7 @@
  *
  * The sidecar exposes a single `/mcp` endpoint to the agent. Inside, we
  * aggregate tools from multiple MCP servers:
- *   - First-party (in-process): provider_call, run_history, llm_complete.
+ *   - First-party (in-process): provider_call, run_history, recall_memory.
  *   - Third-party (subprocess via SubprocessTransport): notion-mcp,
  *     filesystem-mcp, etc.
  *
@@ -159,7 +159,7 @@ export class McpHost {
    * upstream client identified by the prefix.
    *
    * Optional `inject` parameter merges first-party tools (provider_call,
-   * run_history, llm_complete) into the same flat list. The host does
+   * run_history, recall_memory) into the same flat list. The host does
    * not validate name collisions between first-party and third-party
    * tools — first-party names take precedence.
    */

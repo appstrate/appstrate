@@ -4,10 +4,8 @@
 /**
  * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface.
  *
- * Two writers populate this store:
- *   1. The `provider_call` tool when an upstream response is too large
- *      to inline.
- *   2. The `llm_complete` tool when a completion ships with file outputs.
+ * One writer populates this store: the `provider_call` tool when an
+ * upstream response is too large to inline.
  *
  * One reader: the MCP `resources/read` handler (validated against the
  * session's `runId` before serving bytes — cross-run reads are a

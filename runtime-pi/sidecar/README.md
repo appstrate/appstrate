@@ -15,14 +15,15 @@ The sidecar's external HTTP surface is intentionally small:
 
 ## MCP tools
 
-The `/mcp` endpoint advertises four first-party tools, all backed by the platform's per-run-token internal endpoints:
+The `/mcp` endpoint advertises three first-party tools, all backed by the platform's per-run-token internal endpoints:
 
-| Tool            | Purpose                                                                                                                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                                          |
-| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                                                     |
-| `llm_complete`  | LLM-as-a-tool for sub-agent workflows. The agent's primary completions go over the HTTP `/llm/*` route consumed by the Pi SDK; `llm_complete` is for tool-call paths where the agent itself wants to invoke a completion. |
-| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013).                        |
+| Tool            | Purpose                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                   |
+| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                              |
+| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013). |
+
+The agent's primary completions are served by the HTTP `/llm/*` route the Pi SDK calls natively; the sidecar does not expose a completions tool. Sub-agent workflows are handled platform-side by spawning a separate run.
 
 Third-party MCP servers can be mounted alongside the first-party tools via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
 
@@ -43,7 +44,7 @@ The only path that decodes the request body to UTF-8 is the optional `substitute
 | `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                       |
 | `INLINE_RESPONSE_THRESHOLD`  | 32 KB  | Above this responses spill to the `BlobStore` as a `resource_link`.    |
 | `OUTBOUND_TIMEOUT_MS`        | 30 s   | Upstream `provider_call` request timeout.                              |
-| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `llm_complete` request timeout (long enough for streamed completions). |
+| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions). |
 
 When the upstream response exceeds the inline threshold, the bytes are stored in the run-scoped `BlobStore` (256 MB cap, ULID URIs, traversal-safe) and the tool returns a `resource_link` block. The agent reads the bytes on demand via `client.readResource({ uri })`.
 

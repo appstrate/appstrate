@@ -55,7 +55,7 @@ export interface AppDeps {
  *                          buffering. The agent never sees the key.
  *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
  *                          Exposes `provider_call`, `run_history`, and
- *                          `llm_complete` as MCP tools backed by the
+ *                          `recall_memory` as MCP tools backed by the
  *                          credential-proxy core in `credential-proxy.ts`.
  */
 export function createApp(deps: AppDeps): Hono {
@@ -195,7 +195,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // MCP exposure — the agent-facing surface for `provider_call`,
-  // `run_history`, and `llm_complete`. `mountMcp` forwards
+  // `run_history`, and `recall_memory`. `mountMcp` forwards
   // `provider_call` directly to `executeProviderCall` via the shared
   // `proxyDeps` (no header round-trip).
   const blobStore = new BlobStore(deps.runId ?? "unknown");
