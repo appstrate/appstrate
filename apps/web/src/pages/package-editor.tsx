@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { usePackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
+import { usePackageDetail, usePackageList, PACKAGE_CONFIG } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
@@ -39,6 +39,8 @@ import {
   DEFAULT_SKILL_CONTENT,
   DEFAULT_TOOL_CONTENT,
   DEFAULT_TOOL_SOURCE,
+  DEFAULT_SYSTEM_TOOL_IDS,
+  caretRange,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -94,6 +96,43 @@ function AgentEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
   const [jsonEditorKey, setJsonEditorKey] = useState(0);
+
+  // Pre-populate the platform's "stdlib" tools (log/output/report/pin/note)
+  // once on first mount in create mode, after the registry's package list
+  // resolves. We resolve caret ranges from the canonical version here
+  // instead of hardcoding `*` placeholders in `defaultEditorState` and
+  // migrating later — that earlier approach raced when multiple
+  // `VersionSelect` instances tried to migrate in the same React batch.
+  // The `populated` ref makes this a one-shot: removing a system tool
+  // afterwards must not re-add it.
+  const { data: toolsList } = usePackageList("tool");
+  const populatedRef = useRef(false);
+  useEffect(() => {
+    if (populatedRef.current) return;
+    if (isEdit) return;
+    if (!toolsList || toolsList.length === 0) return;
+
+    const presetTools: Record<string, string> = {};
+    for (const id of DEFAULT_SYSTEM_TOOL_IDS) {
+      const item = toolsList.find((i) => i.id === id);
+      if (item?.version) {
+        presetTools[id] = caretRange(item.version);
+      }
+    }
+    populatedRef.current = true;
+    if (Object.keys(presetTools).length === 0) return;
+
+    setState((s) => {
+      const m = { ...s.manifest };
+      const deps = { ...((m.dependencies as Record<string, unknown> | undefined) ?? {}) };
+      const existing = (deps.tools as Record<string, string> | undefined) ?? {};
+      // Don't override anything the user has already touched (e.g. a
+      // toggle/version pick that landed before the items list resolved).
+      deps.tools = { ...presetTools, ...existing };
+      m.dependencies = deps;
+      return { ...s, manifest: m };
+    });
+  }, [isEdit, toolsList]);
 
   const updateManifest = (patch: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
@@ -273,10 +312,14 @@ function AgentEditorInner({
           title={t("editor.tabSkills")}
           emptyLabel={t("editor.skillsEmpty")}
           selectedEntries={getResourceEntries(state.manifest, "skills")}
-          onChange={(entries) => {
-            const m = { ...state.manifest };
-            setResourceEntries(m, "skills", entries);
-            setState((s) => ({ ...s, manifest: m }));
+          onChange={(updater) => {
+            setState((s) => {
+              const prev = getResourceEntries(s.manifest, "skills");
+              const next = typeof updater === "function" ? updater(prev) : updater;
+              const m = { ...s.manifest };
+              setResourceEntries(m, "skills", next);
+              return { ...s, manifest: m };
+            });
           }}
         />
       )}
@@ -300,10 +343,14 @@ function AgentEditorInner({
             title={t("editor.tabTools")}
             emptyLabel={t("editor.toolsEmpty")}
             selectedEntries={getResourceEntries(state.manifest, "tools")}
-            onChange={(entries) => {
-              const m = { ...state.manifest };
-              setResourceEntries(m, "tools", entries);
-              setState((s) => ({ ...s, manifest: m }));
+            onChange={(updater) => {
+              setState((s) => {
+                const prev = getResourceEntries(s.manifest, "tools");
+                const next = typeof updater === "function" ? updater(prev) : updater;
+                const m = { ...s.manifest };
+                setResourceEntries(m, "tools", next);
+                return { ...s, manifest: m };
+              });
             }}
           />
         </>

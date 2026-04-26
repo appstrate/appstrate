@@ -25,12 +25,17 @@ import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 
+type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
+
 interface ResourceSectionProps {
   type: PackageType;
   title: string;
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
-  onChange: (entries: ResourceEntry[]) => void;
+  // Accepts a functional updater so concurrent version migrations from
+  // multiple `VersionSelect` instances compose instead of clobbering each
+  // other in the same React batch.
+  onChange: (updater: ResourceEntriesUpdater) => void;
 }
 
 export function VersionSelect({
@@ -97,22 +102,43 @@ export function ResourceSection({
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
+  // Defense-in-depth for legacy manifests that still carry `*` (or for
+  // a freshly uploaded package whose entry is added with `*` while we
+  // wait for the package list to refetch). Resolve in one setState so
+  // multiple stale entries can't race the per-`VersionSelect` migration
+  // and clobber each other in the same React batch. New agents go
+  // through `package-editor.tsx`'s create-mode prefill, which emits
+  // caret ranges from the start — no `*` to migrate.
+  useEffect(() => {
+    if (!items || items.length === 0 || selectedEntries.length === 0) return;
+    let mutated = false;
+    const next = selectedEntries.map((e) => {
+      if (e.version && e.version !== "*") return e;
+      const item = items.find((i) => i.id === e.id);
+      if (!item?.version) return e;
+      mutated = true;
+      return { ...e, version: caretRange(item.version) };
+    });
+    if (mutated) onChange(next);
+  }, [items, selectedEntries, onChange]);
+
   const toggle = (id: string) => {
-    if (selectedMap.has(id)) {
-      onChange(selectedEntries.filter((e) => e.id !== id));
-    } else {
+    onChange((prev) => {
+      if (prev.some((e) => e.id === id)) {
+        return prev.filter((e) => e.id !== id);
+      }
       const item = items?.find((i) => i.id === id);
       // `*` only as a last-resort placeholder — `VersionSelect` migrates
       // it to caret-of-latest as soon as the package's version list
       // arrives. Hitting this branch means the package list lacks a
       // `version` field, which would already be a registry data issue.
       const version = item?.version ? caretRange(item.version) : "*";
-      onChange([...selectedEntries, { id, version }]);
-    }
+      return [...prev, { id, version }];
+    });
   };
 
   const updateVersion = (id: string, version: string) => {
-    onChange(selectedEntries.map((e) => (e.id === id ? { ...e, version } : e)));
+    onChange((prev) => prev.map((e) => (e.id === id ? { ...e, version } : e)));
   };
 
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -123,12 +149,13 @@ export function ResourceSection({
       const result = await upload.mutateAsync(file);
       const newId = result.packageId;
 
-      if (!selectedMap.has(newId)) {
+      onChange((prev) => {
+        if (prev.some((e) => e.id === newId)) return prev;
         // Placeholder — `VersionSelect` migrates `*` to caret-of-latest
         // on mount, which after this upload resolves to the version we
         // just published.
-        onChange([...selectedEntries, { id: newId, version: "*" }]);
-      }
+        return [...prev, { id: newId, version: "*" }];
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("error.unknown"));
     }

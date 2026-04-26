@@ -37,6 +37,20 @@ export function caretRange(version: string): string {
 
 // ─── Default state ──────────────────────────────────────────
 
+/**
+ * IDs of the platform's "stdlib" tools — pre-selected when the user
+ * opens the new-agent editor. Versions are filled in by package-editor
+ * once `usePackageList("tool")` has loaded the canonical caret range
+ * from the registry, so the template never carries a placeholder.
+ */
+export const DEFAULT_SYSTEM_TOOL_IDS: readonly string[] = [
+  "@appstrate/log",
+  "@appstrate/output",
+  "@appstrate/report",
+  "@appstrate/pin",
+  "@appstrate/note",
+];
+
 export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentEditorState {
   return {
     manifest: {
@@ -49,20 +63,8 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
       description: "",
       author: userEmail ?? "",
       timeout: 300,
-      // `*` is a placeholder — `VersionSelect` migrates each entry to
-      // caret-of-latest (`^X.Y.Z`) the first time the editor mounts.
-      // Hardcoding caret here would couple the template to a frozen
-      // major; the migration keeps new agents on whatever major the
-      // registry currently ships as canonical.
       dependencies: {
         providers: {},
-        tools: {
-          "@appstrate/log": "*",
-          "@appstrate/output": "*",
-          "@appstrate/report": "*",
-          "@appstrate/pin": "*",
-          "@appstrate/note": "*",
-        },
       },
     },
     prompt: "",

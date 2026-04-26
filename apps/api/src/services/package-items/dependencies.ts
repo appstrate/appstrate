@@ -114,8 +114,9 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
 
   for (const row of rows) {
     if (!row.registryScope || !row.registryName) continue;
+    if (!row.version) continue;
     const scopedName = `@${row.registryScope}/${row.registryName}`;
-    const version = row.version || "*";
+    const version = row.version;
     if (row.type === "skill") skills[scopedName] = version;
     else if (row.type === "tool") tools[scopedName] = version;
     else if (row.type === "provider") providers[scopedName] = version;
