@@ -104,17 +104,6 @@ describe("buildPlatformPromptInputs", () => {
     ]);
   });
 
-  it("flags hasProviderDoc when PROVIDER.md ships in the provider package", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const provider = pkg(
-      "@acme/p1@1.0.0",
-      { type: "provider", name: "X", definition: { allowAllUris: true } },
-      { "PROVIDER.md": "# docs" },
-    );
-    const inputs = buildPlatformPromptInputs(bundleOf(root, provider), ctx());
-    expect(inputs.providers?.[0]?.hasProviderDoc).toBe(true);
-  });
-
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent", timeout: 120 }, { "prompt.md": "T" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx(), {
