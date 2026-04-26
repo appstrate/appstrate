@@ -198,12 +198,21 @@ const envSchema = z
     // explicit /sink/extend on idle; the watchdog sweeps any open-sink
     // row whose last heartbeat slipped past STALL_THRESHOLD.
     //
+    // The watchdog is the *backstop* — cooperative shutdown (Ctrl-C /
+    // SIGTERM in the CLI, container exit synthesis on the platform)
+    // sends an explicit finalize POST so the run terminates instantly.
+    // The threshold only matters for hard crashes (kill -9, OOM,
+    // network partition) where the runner can never speak again. 60s
+    // strikes a compromise: short enough that the user notices quickly,
+    // long enough that a single dropped heartbeat doesn't trip the wire.
+    //
     // Ratio rule-of-thumb: stall_threshold ≥ 3 × heartbeat_interval
     // (industry consensus: Temporal, Sidekiq, BullMQ, AWS Builders'
-    // Library) so a single dropped ping never trips the watchdog.
-    RUN_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
-    RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(120),
-    RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+    // Library) so a single dropped ping never trips the watchdog. Current
+    // defaults: 60 / 15 = 4×.
+    RUN_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
+    RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(60),
+    RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 
     // Modules (comma-separated specifiers).
     // Default loads built-in OSS modules (oidc, webhooks).

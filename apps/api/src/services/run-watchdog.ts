@@ -63,8 +63,12 @@ export interface RunWatchdogConfig {
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: RunWatchdogConfig = {
-  intervalSeconds: 30,
-  stallThresholdSeconds: 120,
+  // Defaults match `packages/env` so test code that constructs a config
+  // without going through env stays in sync with production behaviour.
+  // See `RUN_*` envs for the rationale (cooperative finalize is the
+  // primary path; this watchdog is the crash-only backstop).
+  intervalSeconds: 15,
+  stallThresholdSeconds: 60,
   maxFinalizesPerTick: 200,
 };
 
