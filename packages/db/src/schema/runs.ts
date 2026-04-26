@@ -96,6 +96,19 @@ export const runs = pgTable(
     }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     config: jsonb("config").$type<Record<string, unknown>>(),
+    // Per-run override layer — the delta the caller sent on top of
+    // `application_packages.config`. `config` above is the resolved
+    // (deep-merged) snapshot; `configOverride` is the raw delta so the
+    // UI can badge "default vs override" and "Re-run with these settings"
+    // can replay the exact same delta. Null when the run used persisted
+    // defaults verbatim.
+    configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
+    // Booleans driving "default vs override" badges on the run detail
+    // page. Cheaper than diffing snapshot vs persisted-at-run-time on
+    // every render. Stamped at INSERT, never updated.
+    modelOverridden: boolean("model_overridden").default(false).notNull(),
+    proxyOverridden: boolean("proxy_overridden").default(false).notNull(),
+    versionOverridden: boolean("version_overridden").default(false).notNull(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name
@@ -452,6 +465,18 @@ export const schedules = pgTable(
     cronExpression: text("cron_expression").notNull(),
     timezone: text("timezone").default("UTC"),
     input: jsonb("input"),
+    // Per-schedule override layer — frozen at schedule creation/edit and
+    // deep-merged with the application's persisted config every time the
+    // schedule fires. Mirrors the per-run override pipeline (POST /run
+    // body) so a schedule is "a recurring run with frozen overrides".
+    // Argo CronWorkflow inherit-with-override semantics.
+    configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
+    modelIdOverride: text("model_id_override"),
+    proxyIdOverride: text("proxy_id_override"),
+    // Version pin. Either a literal label ("1.2.3") or a dist-tag
+    // ("latest", "next"). Resolved at fire time the same way the run
+    // route resolves `?version=`.
+    versionOverride: text("version_override"),
     lastRunAt: timestamp("last_run_at"),
     nextRunAt: timestamp("next_run_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

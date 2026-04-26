@@ -7,6 +7,8 @@ import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
+import { useAgentModel } from "../hooks/use-models";
+import { useAgentProxy } from "../hooks/use-proxies";
 import { ScheduleForm } from "../components/schedule-form";
 import type { ForeignProfile } from "../components/combined-profile-select";
 import { PageHeader } from "../components/page-header";
@@ -21,6 +23,8 @@ export function ScheduleEditPage() {
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId || undefined);
+  const { data: agentModel } = useAgentModel(schedule?.packageId || undefined);
+  const { data: agentProxy } = useAgentProxy(schedule?.packageId || undefined);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
@@ -75,8 +79,18 @@ export function ScheduleEditPage() {
           timezone: schedule.timezone ?? "UTC",
           enabled: schedule.enabled ?? true,
           input: (schedule.input ?? {}) as Record<string, unknown>,
+          configOverride: (schedule.configOverride ?? null) as Record<string, unknown> | null,
+          modelIdOverride: schedule.modelIdOverride ?? null,
+          proxyIdOverride: schedule.proxyIdOverride ?? null,
+          versionOverride: schedule.versionOverride ?? null,
         }}
         inputSchema={inputSchema}
+        configSchema={agentDetail?.config?.schema ?? undefined}
+        persistedConfig={(agentDetail?.config?.current ?? {}) as Record<string, unknown>}
+        persistedModelId={agentModel?.modelId ?? null}
+        persistedProxyId={agentProxy?.proxyId ?? null}
+        persistedVersion={agentDetail?.version ?? null}
+        packageId={schedule.packageId}
         blockedMessage={hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
         onSubmit={(data) => {

@@ -136,6 +136,44 @@ describe("scheduler service", () => {
       expect(schedule.nextRunAt).not.toBeNull();
       expect(schedule.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
     });
+
+    it("persists per-schedule overrides verbatim", async () => {
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 9 * * *",
+          configOverride: { providers: { gmail: { scopes: ["read"] } } },
+          modelIdOverride: "model_abc",
+          proxyIdOverride: "prx_xyz",
+          versionOverride: "1.2.3",
+        },
+      );
+
+      expect(schedule.configOverride).toEqual({
+        providers: { gmail: { scopes: ["read"] } },
+      });
+      expect(schedule.modelIdOverride).toBe("model_abc");
+      expect(schedule.proxyIdOverride).toBe("prx_xyz");
+      expect(schedule.versionOverride).toBe("1.2.3");
+    });
+
+    it("defaults all overrides to null when omitted", async () => {
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 9 * * *",
+        },
+      );
+
+      expect(schedule.configOverride).toBeNull();
+      expect(schedule.modelIdOverride).toBeNull();
+      expect(schedule.proxyIdOverride).toBeNull();
+      expect(schedule.versionOverride).toBeNull();
+    });
   });
 
   // ── listSchedules ───────────────────────────────────────
@@ -337,6 +375,48 @@ describe("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("Updated Name");
+    });
+
+    it("clears overrides when set to null, keeps when undefined", async () => {
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 9 * * *",
+          configOverride: { foo: "bar" },
+          modelIdOverride: "model_init",
+          proxyIdOverride: "prx_init",
+          versionOverride: "1.0.0",
+        },
+      );
+
+      // Cron-only update — overrides untouched (undefined leaves them).
+      const partialUpdate = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        { cronExpression: "*/15 * * * *" },
+      );
+      expect(partialUpdate!.configOverride).toEqual({ foo: "bar" });
+      expect(partialUpdate!.modelIdOverride).toBe("model_init");
+      expect(partialUpdate!.proxyIdOverride).toBe("prx_init");
+      expect(partialUpdate!.versionOverride).toBe("1.0.0");
+
+      // Explicit null clears the override (UI's "Inherit" sentinel).
+      const cleared = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        {
+          configOverride: null,
+          modelIdOverride: null,
+          proxyIdOverride: null,
+          versionOverride: null,
+        },
+      );
+      expect(cleared!.configOverride).toBeNull();
+      expect(cleared!.modelIdOverride).toBeNull();
+      expect(cleared!.proxyIdOverride).toBeNull();
+      expect(cleared!.versionOverride).toBeNull();
     });
 
     it("sets nextRunAt to null when enabled is false", async () => {

@@ -208,6 +208,7 @@ export function AgentConfigurationTab({
   configSchemaOverride?: JSONSchemaObject;
   isHistorical?: boolean;
 }) {
+  const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
   const schema = isHistorical
@@ -217,6 +218,7 @@ export function AgentConfigurationTab({
 
   return (
     <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">{t("detail.tabConfigurationHint")}</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />

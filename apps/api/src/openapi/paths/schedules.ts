@@ -95,6 +95,26 @@ export const schedulesPaths = {
                 },
                 timezone: { type: "string", default: "UTC" },
                 input: { type: "object" },
+                configOverride: {
+                  type: "object",
+                  description:
+                    "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires.",
+                },
+                modelIdOverride: {
+                  type: "string",
+                  description:
+                    "Override the persisted model on every run triggered by this schedule.",
+                },
+                proxyIdOverride: {
+                  type: "string",
+                  description:
+                    "Override the persisted proxy on every run triggered by this schedule.",
+                },
+                versionOverride: {
+                  type: "string",
+                  description:
+                    "Pin the agent version every run triggered by this schedule. Literal label or dist-tag.",
+                },
               },
             },
           },
@@ -223,6 +243,13 @@ export const schedulesPaths = {
                 timezone: { type: "string" },
                 enabled: { type: "boolean" },
                 input: { type: "object" },
+                configOverride: {
+                  type: ["object", "null"],
+                  description: "Per-schedule config delta. Pass `null` to clear the override.",
+                },
+                modelIdOverride: { type: ["string", "null"] },
+                proxyIdOverride: { type: ["string", "null"] },
+                versionOverride: { type: ["string", "null"] },
               },
             },
           },

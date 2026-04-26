@@ -31,6 +31,14 @@ export const createScheduleSchema = z.object({
   cronExpression: z.string().min(1, "cronExpression is required"),
   timezone: z.string().default("UTC"),
   input: z.record(z.string(), z.unknown()).default({}),
+  // Per-schedule override layer — frozen at create/update and deep-merged
+  // with the application's persisted config every time the schedule
+  // fires. Mirrors the per-run override pipeline (POST /run body) so a
+  // schedule is "a recurring run with frozen overrides".
+  configOverride: z.record(z.string(), z.unknown()).optional(),
+  modelIdOverride: z.string().optional(),
+  proxyIdOverride: z.string().optional(),
+  versionOverride: z.string().optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -40,6 +48,11 @@ export const updateScheduleSchema = z.object({
   timezone: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   enabled: z.boolean().optional(),
+  // `null` clears the override; omitted leaves it untouched.
+  configOverride: z.record(z.string(), z.unknown()).nullable().optional(),
+  modelIdOverride: z.string().nullable().optional(),
+  proxyIdOverride: z.string().nullable().optional(),
+  versionOverride: z.string().nullable().optional(),
 });
 
 export function createSchedulesRouter() {
@@ -109,7 +122,13 @@ export function createSchedulesRouter() {
       }
 
       const scope = getAppScope(c);
-      const schedule = await createSchedule(scope, agent.id, data.connectionProfileId, data);
+      const schedule = await createSchedule(scope, agent.id, data.connectionProfileId, {
+        ...data,
+        configOverride: data.configOverride ?? null,
+        modelIdOverride: data.modelIdOverride ?? null,
+        proxyIdOverride: data.proxyIdOverride ?? null,
+        versionOverride: data.versionOverride ?? null,
+      });
       await recordAuditFromContext(c, {
         action: "schedule.created",
         resourceType: "schedule",

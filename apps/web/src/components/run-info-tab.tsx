@@ -15,10 +15,32 @@ interface RunInfoTabProps {
   run: EnrichedRun;
 }
 
-function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
+function InfoCard({
+  label,
+  value,
+  badge,
+}: {
+  label: string;
+  value: React.ReactNode;
+  badge?: { tone: "default" | "override"; text: string };
+}) {
   return (
     <div className="border-border bg-muted/30 rounded-lg border p-4">
-      <p className="text-muted-foreground mb-1 text-xs">{label}</p>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-muted-foreground text-xs">{label}</p>
+        {badge && (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase",
+              badge.tone === "override"
+                ? "bg-primary/15 text-primary"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
+            {badge.text}
+          </span>
+        )}
+      </div>
       <p className="text-sm font-medium">{value}</p>
     </div>
   );
@@ -46,6 +68,9 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
+  const configOverride = run.configOverride as Record<string, unknown> | null;
+  const hasConfigOverride = !!configOverride && Object.keys(configOverride).length > 0;
+  const overrideKeys = hasConfigOverride ? new Set(Object.keys(configOverride!)) : null;
   const usage = run.tokenUsage as {
     input_tokens?: number;
     output_tokens?: number;
@@ -79,6 +104,11 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
                   ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
                   : t("exec.draft")}
               </span>
+            }
+            badge={
+              run.versionOverridden
+                ? { tone: "override", text: t("exec.badgeOverride") }
+                : undefined
             }
           />
         )}
@@ -116,9 +146,30 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Config */}
+      {/* Config — resolved snapshot. The badge distinguishes "ran with the
+          persisted defaults" from "caller sent a per-run override delta",
+          and when an override exists we highlight which top-level keys
+          differed (the same keys that would replay via "Re-run with
+          these settings"). */}
       {config && Object.keys(config).length > 0 && (
-        <SectionCard title={t("exec.infoConfig")}>
+        <SectionCard
+          title={t("exec.infoConfig")}
+          headerRight={
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+                hasConfigOverride ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+              )}
+            >
+              {hasConfigOverride ? t("exec.badgeOverride") : t("exec.badgeDefault")}
+            </span>
+          }
+        >
+          {hasConfigOverride && overrideKeys && (
+            <p className="text-muted-foreground mb-2 text-xs">
+              {t("exec.infoConfigOverride")}: {Array.from(overrideKeys).join(", ")}
+            </p>
+          )}
           <JsonView data={config} />
         </SectionCard>
       )}
@@ -134,10 +185,26 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
           {startedAt && <InfoCard label={t("exec.infoStartedAt")} value={startedAt} />}
           {completedAt && <InfoCard label={t("exec.infoCompletedAt")} value={completedAt} />}
           {run.modelLabel != null && (
-            <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />
+            <InfoCard
+              label={t("exec.usageModel")}
+              value={run.modelLabel}
+              badge={
+                run.modelOverridden
+                  ? { tone: "override", text: t("exec.badgeOverride") }
+                  : undefined
+              }
+            />
           )}
           {run.proxyLabel != null && (
-            <InfoCard label={t("exec.infoProxy")} value={run.proxyLabel} />
+            <InfoCard
+              label={t("exec.infoProxy")}
+              value={run.proxyLabel}
+              badge={
+                run.proxyOverridden
+                  ? { tone: "override", text: t("exec.badgeOverride") }
+                  : undefined
+              }
+            />
           )}
         </div>
       </SectionCard>

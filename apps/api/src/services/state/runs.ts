@@ -160,6 +160,18 @@ interface CreateRunParams {
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;
   /**
+   * Per-run override delta — the raw object the caller sent in the
+   * request body (or `null` if the run used persisted defaults verbatim).
+   * Persisted alongside the resolved `config` snapshot so the dashboard
+   * can badge "default vs override" and the "Re-run with these settings"
+   * button can replay the exact same delta.
+   */
+  configOverride?: Record<string, unknown> | null;
+  /** True when the caller's `modelId` differed from the persisted default. */
+  modelOverridden?: boolean;
+  proxyOverridden?: boolean;
+  versionOverridden?: boolean;
+  /**
    * Which runner drives this run. Platform-origin runs execute in a
    * server-managed Docker container; remote-origin runs execute on the
    * caller's host. Both speak the same HMAC-signed event protocol.
@@ -213,6 +225,10 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
     config: parseRunConfig(params.config),
+    configOverride: parseRunConfig(params.configOverride),
+    modelOverridden: params.modelOverridden ?? false,
+    proxyOverridden: params.proxyOverridden ?? false,
+    versionOverridden: params.versionOverridden ?? false,
     runOrigin: params.runOrigin ?? "platform",
     ...(params.sinkSecretEncrypted !== undefined
       ? { sinkSecretEncrypted: params.sinkSecretEncrypted }

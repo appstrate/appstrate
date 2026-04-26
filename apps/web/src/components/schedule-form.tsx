@@ -16,12 +16,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { ChevronDown } from "lucide-react";
 import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
+import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -50,6 +53,15 @@ export interface ScheduleSaveData {
   timezone?: string;
   input?: Record<string, unknown>;
   enabled?: boolean;
+  /**
+   * Per-schedule override layer. Frozen at create/update; deep-merged with
+   * the application's persisted config every time the schedule fires.
+   * `null` clears a previously-set override on edit.
+   */
+  configOverride?: Record<string, unknown> | null;
+  modelIdOverride?: string | null;
+  proxyIdOverride?: string | null;
+  versionOverride?: string | null;
 }
 
 interface ScheduleFormProps {
@@ -61,8 +73,22 @@ interface ScheduleFormProps {
     timezone?: string;
     enabled?: boolean;
     input?: Record<string, unknown>;
+    configOverride?: Record<string, unknown> | null;
+    modelIdOverride?: string | null;
+    proxyIdOverride?: string | null;
+    versionOverride?: string | null;
   };
   inputSchema?: JSONSchemaObject;
+  /** Agent's config schema — drives the override panel's config form. */
+  configSchema?: JSONSchemaObject;
+  /** Persisted application config — the merge baseline for the override delta. */
+  persistedConfig?: Record<string, unknown>;
+  /** Persisted defaults — passed straight through to RunOverridesPanel. */
+  persistedModelId?: string | null;
+  persistedProxyId?: string | null;
+  persistedVersion?: string | null;
+  /** Package id needed by RunOverridesPanel to fetch versions. */
+  packageId?: string;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
@@ -87,6 +113,12 @@ export function ScheduleForm({
   mode,
   defaultValues,
   inputSchema,
+  configSchema,
+  persistedConfig,
+  persistedModelId,
+  persistedProxyId,
+  persistedVersion,
+  packageId,
   agents,
   selectedAgentId,
   onAgentChange,
@@ -118,6 +150,24 @@ export function ScheduleForm({
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(
     () => (defaultValues?.input ?? {}) as Record<string, unknown>,
   );
+
+  // Override-layer state — mirrors the Run modal's accordion, except
+  // these overrides are persisted on the schedule row and replayed on
+  // every fire (vs. the Run modal which only applies them once).
+  const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
+    const v: RunOverridesValue = {};
+    if (defaultValues?.configOverride) v.configOverride = defaultValues.configOverride;
+    if (defaultValues?.modelIdOverride) v.modelId = defaultValues.modelIdOverride;
+    if (defaultValues?.proxyIdOverride) v.proxyId = defaultValues.proxyIdOverride;
+    if (defaultValues?.versionOverride) v.version = defaultValues.versionOverride;
+    return v;
+  });
+  const initialOverridesNonEmpty =
+    !!(defaultValues?.configOverride && Object.keys(defaultValues.configOverride).length > 0) ||
+    !!defaultValues?.modelIdOverride ||
+    !!defaultValues?.proxyIdOverride ||
+    !!defaultValues?.versionOverride;
+  const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
   const {
     register,
@@ -152,6 +202,24 @@ export function ScheduleForm({
   const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? inputValues : undefined;
 
+    // On create: omit empty overrides entirely (server stores null).
+    // On edit: send `null` for cleared overrides so the row resets to
+    // "use the agent's persisted defaults". `undefined` would leave the
+    // existing override untouched per the Zod schema's optional rule.
+    const overridePayload = isEdit
+      ? {
+          configOverride: overrides.configOverride ?? null,
+          modelIdOverride: overrides.modelId ?? null,
+          proxyIdOverride: overrides.proxyId ?? null,
+          versionOverride: overrides.version ?? null,
+        }
+      : {
+          ...(overrides.configOverride ? { configOverride: overrides.configOverride } : {}),
+          ...(overrides.modelId ? { modelIdOverride: overrides.modelId } : {}),
+          ...(overrides.proxyId ? { proxyIdOverride: overrides.proxyId } : {}),
+          ...(overrides.version ? { versionOverride: overrides.version } : {}),
+        };
+
     onSubmit({
       connectionProfileId: data.connectionProfileId,
       name: data.name || undefined,
@@ -159,6 +227,7 @@ export function ScheduleForm({
       timezone: data.timezone,
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
+      ...overridePayload,
     });
   });
 
@@ -316,6 +385,41 @@ export function ScheduleForm({
             onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
           />
         </div>
+      )}
+
+      {/* Overrides accordion — surfaces per-schedule overrides for config,
+          model, proxy, and version. Same UX vocabulary as the Run modal so
+          users learn the override layer once. */}
+      {packageId && (
+        <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+            >
+              <span>{t("schedule.overridesTitle")}</span>
+              <ChevronDown
+                className={cn(
+                  "text-muted-foreground size-4 transition-transform",
+                  overridesOpen && "rotate-180",
+                )}
+              />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3">
+            <p className="text-muted-foreground mb-3 text-xs">{t("schedule.overridesHint")}</p>
+            <RunOverridesPanel
+              packageId={packageId}
+              configSchema={configSchema}
+              persistedConfig={persistedConfig ?? {}}
+              persistedModelId={persistedModelId ?? null}
+              persistedProxyId={persistedProxyId ?? null}
+              persistedVersion={persistedVersion ?? null}
+              value={overrides}
+              onChange={setOverrides}
+            />
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Footer */}

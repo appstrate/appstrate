@@ -16,7 +16,8 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
-import { InputModal } from "../components/input-modal";
+import { RunModal } from "../components/run-modal";
+import type { RunOverridesValue } from "../components/run-overrides-panel";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
@@ -28,6 +29,43 @@ import { Markdown } from "../components/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { MemoryPanel } from "../components/persistence/memory-panel";
+import { Play } from "lucide-react";
+
+/**
+ * Build a `RunOverridesValue` from a Run record so the Run modal can
+ * replay the run faithfully. We seed the override delta from
+ * `run.configOverride` (the raw payload originally sent) plus the
+ * version label. Model/proxy IDs aren't snapshotted on `runs` (only
+ * their labels), so the replay reuses whatever defaults are persisted at
+ * replay time — the user can re-pick in the modal if they need exact
+ * reproduction. Acceptable because labels can be ambiguous after a
+ * model/proxy is renamed and IDs would still drift if the underlying
+ * model definition was deleted.
+ */
+function buildOverridesFromRun(run: {
+  configOverride?: Record<string, unknown> | null;
+  versionLabel?: string | null;
+  versionOverridden?: boolean;
+}): RunOverridesValue {
+  const out: RunOverridesValue = {};
+  if (run.configOverride && Object.keys(run.configOverride).length > 0) {
+    out.configOverride = run.configOverride;
+  }
+  if (run.versionOverridden && run.versionLabel) {
+    out.version = run.versionLabel;
+  }
+  return out;
+}
+
+function hasRecordedOverride(run: {
+  configOverride?: Record<string, unknown> | null;
+  modelOverridden?: boolean;
+  proxyOverridden?: boolean;
+  versionOverridden?: boolean;
+}): boolean {
+  if (run.configOverride && Object.keys(run.configOverride).length > 0) return true;
+  return !!(run.modelOverridden || run.proxyOverridden || run.versionOverridden);
+}
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -190,15 +228,31 @@ export function RunDetailPage() {
       </div>
 
       {agent && (
-        <InputModal
+        <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={agent}
-          onSubmit={(input) => {
-            runAgent.mutate({ input }, { onSuccess: () => setInputOpen(false) });
+          onSubmit={({ input, overrides }) => {
+            runAgent.mutate(
+              {
+                input,
+                version: overrides.version ?? run.versionLabel ?? undefined,
+                ...(overrides.configOverride ? { config: overrides.configOverride } : {}),
+                ...(overrides.modelId ? { modelId: overrides.modelId } : {}),
+                ...(overrides.proxyId ? { proxyId: overrides.proxyId } : {}),
+              },
+              { onSuccess: () => setInputOpen(false) },
+            );
           }}
           isPending={runAgent.isPending}
-          initialValues={(run.input as Record<string, unknown>) ?? undefined}
+          initialInput={(run.input as Record<string, unknown>) ?? undefined}
+          // "Re-run with these settings" — pre-fill the override panel
+          // with the resolved snapshot from this run so the next run
+          // reproduces it byte-for-byte, even if the persisted defaults
+          // mutated between runs. Sent as a verbatim configOverride so
+          // the deep-merge resolves to the same final config.
+          initialOverrides={buildOverridesFromRun(run)}
+          defaultOverridesOpen={hasRecordedOverride(run)}
         />
       )}
 
@@ -235,6 +289,19 @@ export function RunDetailPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
+          {!isRunning && !isInline && agent && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setInputOpen(true)}
+              title={t("exec.rerunWithSettingsHint")}
+            >
+              <Play className="size-3.5" />
+              {hasRecordedOverride(run as Parameters<typeof hasRecordedOverride>[0])
+                ? t("exec.rerunWithSettings")
+                : t("exec.rerun")}
+            </Button>
+          )}
           {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel
               (server flag + CLI poll) is tracked as a follow-up. */}

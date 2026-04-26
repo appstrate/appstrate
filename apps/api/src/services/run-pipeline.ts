@@ -59,9 +59,24 @@ export interface RunPipelineParams {
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   config: Record<string, unknown>;
+  /**
+   * Per-run override delta — the raw object the caller sent in the request
+   * body. `config` above is the resolved (deep-merged) snapshot. Persisted
+   * separately on `runs.config_override` so the dashboard can badge
+   * "default vs override" and a "Re-run with these settings" button can
+   * replay the exact same delta. Null when the run used persisted defaults.
+   */
+  configOverride?: Record<string, unknown> | null;
   modelId?: string | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
+  /**
+   * Set when the caller's `modelId` differs from the persisted default. UI
+   * uses this for the "override" badge instead of diffing snapshot values.
+   */
+  modelOverridden?: boolean;
+  proxyOverridden?: boolean;
+  versionOverridden?: boolean;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
   /** Connection profile ID used to create the run. */
@@ -279,6 +294,10 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
       config,
+      configOverride: params.configOverride ?? null,
+      modelOverridden: params.modelOverridden ?? false,
+      proxyOverridden: params.proxyOverridden ?? false,
+      versionOverridden: params.versionOverridden ?? false,
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),

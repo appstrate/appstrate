@@ -34,6 +34,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
+import { deepMergeConfig } from "@appstrate/core/schema-validation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,14 @@ interface ScheduleJobData {
   orgId: string;
   applicationId: string;
   input?: Record<string, unknown>;
+  // Per-schedule override layer — frozen at schedule create/update and
+  // deep-merged with `application_packages.config` every time the
+  // schedule fires. Mirrors the per-run override pipeline (POST /run
+  // body) so a schedule is "a recurring run with frozen overrides".
+  configOverride?: Record<string, unknown>;
+  modelIdOverride?: string;
+  proxyIdOverride?: string;
+  versionOverride?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +66,7 @@ function toSchedule(row: typeof schedules.$inferSelect): Schedule {
   return {
     ...row,
     input: asRecordOrNull(row.input),
+    configOverride: asRecordOrNull(row.configOverride),
   };
 }
 
@@ -84,6 +94,10 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     orgId,
     applicationId: schedule.applicationId,
     input: asRecordOrNull(schedule.input) ?? undefined,
+    configOverride: asRecordOrNull(schedule.configOverride) ?? undefined,
+    modelIdOverride: schedule.modelIdOverride ?? undefined,
+    proxyIdOverride: schedule.proxyIdOverride ?? undefined,
+    versionOverride: schedule.versionOverride ?? undefined,
   };
 
   await (
@@ -102,7 +116,18 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
+  const {
+    scheduleId,
+    packageId,
+    connectionProfileId,
+    orgId,
+    applicationId,
+    input,
+    configOverride,
+    modelIdOverride,
+    proxyIdOverride,
+    versionOverride,
+  } = job.data;
 
   await triggerScheduledRun(
     scheduleId,
@@ -111,6 +136,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     orgId,
     applicationId,
     input,
+    { configOverride, modelIdOverride, proxyIdOverride, versionOverride },
   );
 
   // Update schedule timestamps
@@ -184,6 +210,12 @@ async function triggerScheduledRun(
   orgId: string,
   applicationId: string,
   input: Record<string, unknown> | undefined,
+  overrides: {
+    configOverride?: Record<string, unknown>;
+    modelIdOverride?: string;
+    proxyIdOverride?: string;
+    versionOverride?: string;
+  } = {},
 ) {
   // Populated once the agent loads so every failSchedule() call can
   // denormalize `agent_scope` / `agent_name` onto the failed run row.
@@ -311,6 +343,16 @@ async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
+    // Apply per-schedule overrides on top of the resolved preflight values.
+    // Same shape as POST /run body — deep-merge for `config`, first-non-null
+    // for model/proxy/version. Stamped on the run record (not just used at
+    // execute time) so the dashboard can badge "default vs override".
+    const mergedConfig = overrides.configOverride
+      ? deepMergeConfig(config, overrides.configOverride)
+      : config;
+    const finalModelId = overrides.modelIdOverride ?? preflightModelId;
+    const finalProxyId = overrides.proxyIdOverride ?? preflightProxyId;
+
     const result = await prepareAndExecuteRun({
       runId,
       agent,
@@ -318,9 +360,14 @@ async function triggerScheduledRun(
       orgId,
       actor,
       input,
-      config,
-      modelId: preflightModelId,
-      proxyId: preflightProxyId,
+      config: mergedConfig,
+      configOverride: overrides.configOverride,
+      modelId: finalModelId,
+      modelOverridden: overrides.modelIdOverride != null,
+      proxyId: finalProxyId,
+      proxyOverridden: overrides.proxyIdOverride != null,
+      overrideVersionLabel: overrides.versionOverride,
+      versionOverridden: overrides.versionOverride != null,
       scheduleId,
       connectionProfileId,
       applicationId,
@@ -521,6 +568,10 @@ export async function createSchedule(
     cronExpression: string;
     timezone?: string;
     input?: Record<string, unknown>;
+    configOverride?: Record<string, unknown> | null;
+    modelIdOverride?: string | null;
+    proxyIdOverride?: string | null;
+    versionOverride?: string | null;
   },
 ): Promise<Schedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -542,6 +593,10 @@ export async function createSchedule(
       cronExpression: data.cronExpression,
       timezone: tz,
       input: data.input ?? null,
+      configOverride: data.configOverride ?? null,
+      modelIdOverride: data.modelIdOverride ?? null,
+      proxyIdOverride: data.proxyIdOverride ?? null,
+      versionOverride: data.versionOverride ?? null,
       nextRunAt: nextRun ?? null,
     })
     .returning();
@@ -566,6 +621,10 @@ export async function updateSchedule(
     timezone?: string;
     input?: Record<string, unknown>;
     enabled?: boolean;
+    configOverride?: Record<string, unknown> | null;
+    modelIdOverride?: string | null;
+    proxyIdOverride?: string | null;
+    versionOverride?: string | null;
   },
 ): Promise<Schedule | null> {
   const existing = await getSchedule(id, scope);
@@ -589,6 +648,11 @@ export async function updateSchedule(
     payload.connectionProfileId = data.connectionProfileId;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
+  // Explicit `null` clears the override; `undefined` leaves it untouched.
+  if (data.configOverride !== undefined) payload.configOverride = data.configOverride;
+  if (data.modelIdOverride !== undefined) payload.modelIdOverride = data.modelIdOverride;
+  if (data.proxyIdOverride !== undefined) payload.proxyIdOverride = data.proxyIdOverride;
+  if (data.versionOverride !== undefined) payload.versionOverride = data.versionOverride;
 
   const [row] = await db
     .update(schedules)
