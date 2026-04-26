@@ -35,6 +35,7 @@ import {
   resolveActorProfileContext,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
@@ -548,6 +549,15 @@ export function createAgentsRouter() {
       const parsed = parseScopedName(agent.id);
       const safeName = parsed ? `${parsed.scope}-${parsed.name}` : "bundle";
 
+      // X-Bundle-Integrity is the SHA256 of the wire bytes — the CLI
+      // recomputes the same digest on the downloaded archive to detect
+      // transport-level corruption (proxies, CDN, partial reads). The
+      // in-archive `bundle.integrity` field is a different, AFPS-spec
+      // contract (canonical packages-map JSON SRI) and intentionally
+      // does not equal the zip-bytes SHA — sending it as the header
+      // would always trip `integrity_mismatch` on a clean download.
+      const wireIntegrity = computeIntegrity(new Uint8Array(bytes));
+
       return new Response(new Uint8Array(bytes), {
         status: 200,
         headers: {
@@ -565,7 +575,7 @@ export function createAgentsRouter() {
           // from the scoped agent id which is `[a-z0-9-/_]` only, so
           // no quoting hazard here.
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
-          "X-Bundle-Integrity": bundle.integrity,
+          "X-Bundle-Integrity": wireIntegrity,
         },
       });
     },

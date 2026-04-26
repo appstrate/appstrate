@@ -299,12 +299,21 @@ describe("Agents API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      // The bundle SRI digest contract: clients (CLI cache) compare it
-      // to a client-side recompute to detect transfer corruption.
-      // Without it, `appstrate run` aborts with `integrity_mismatch`.
       const integrity = res.headers.get("X-Bundle-Integrity");
       expect(integrity).toMatch(/^sha256-/);
       expect(res.headers.get("Content-Type")).toBe("application/zip");
+
+      // X-Bundle-Integrity contract: SHA256 over the wire bytes, NOT the
+      // in-archive `bundle.integrity` field (which is the canonical
+      // packages-map JSON SRI). The CLI recomputes the wire digest after
+      // download to detect proxy/CDN corruption — a regression that ever
+      // sends `bundle.integrity` instead trips `integrity_mismatch` on
+      // every clean run, which is the exact bug we just fixed.
+      const body = new Uint8Array(await res.arrayBuffer());
+      const hasher = new Bun.CryptoHasher("sha256");
+      hasher.update(body);
+      const computed = `sha256-${hasher.digest("base64")}`;
+      expect(integrity).toBe(computed);
     });
 
     it("rejects ?source=draft combined with ?version= (400 draft_with_version)", async () => {
