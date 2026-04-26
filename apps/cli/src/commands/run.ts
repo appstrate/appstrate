@@ -162,8 +162,15 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
-  const modelSource = parseModelSource(opts.modelSource);
   const target = parseRunTarget(opts.bundle);
+  // Auto-default to `preset` when the user runs an agent by id (the
+  // "UI parity" path) AND has a remote provider context. Path mode
+  // keeps `env` as the default — local file = local execution = local
+  // credentials. The user can always override via --model-source or
+  // APPSTRATE_MODEL_SOURCE.
+  const modelSource = parseModelSource(opts.modelSource, {
+    autoPreset: target.kind === "id" && mode !== "none" && mode !== "local",
+  });
 
   // Build provider resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
@@ -469,12 +476,29 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseModelSource(raw: string | undefined): ModelSource {
-  const value = (raw ?? process.env.APPSTRATE_MODEL_SOURCE ?? "env").toLowerCase();
+/**
+ * Resolve the effective `--model-source`. Exported for unit tests.
+ * Precedence: explicit flag > `APPSTRATE_MODEL_SOURCE` env > auto.
+ * Auto picks `preset` when the caller passes `{ autoPreset: true }`
+ * (id-mode + remote provider context, the UI-parity path) and `env`
+ * otherwise (local file, or any local-credentials run).
+ */
+export function parseModelSource(
+  raw: string | undefined,
+  opts: { autoPreset?: boolean } = {},
+): ModelSource {
+  // Explicit flag wins over env var wins over auto-detection. The auto
+  // default kicks in only when neither is set: id-mode + remote → preset
+  // (UI parity), everything else → env (local credentials).
+  const explicit = raw ?? process.env.APPSTRATE_MODEL_SOURCE;
+  if (!explicit) {
+    return opts.autoPreset ? "preset" : "env";
+  }
+  const value = explicit.toLowerCase();
   if (value === "env" || value === "preset") return value;
   throw new ModelResolutionError(
     `Unknown --model-source "${raw}"`,
-    "Accepted values: env (default), preset.",
+    "Accepted values: env, preset. Default: preset for `appstrate run @scope/agent` against a remote instance, env otherwise.",
   );
 }
 

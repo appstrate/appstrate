@@ -52,11 +52,14 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
 /**
  * Protocol families the **CLI** can route through `/api/llm-proxy/*`.
  *
- * The platform accepts both `openai-completions` and `anthropic-messages`
- * on the proxy, but pi-ai's Anthropic SDK path sends `x-api-key` — our
- * proxy requires `Authorization: Bearer`, so preset mode is limited to
- * the OpenAI Chat Completions shape on the CLI side for now. Other
- * clients (HTTP, LangChain, …) that already send `Authorization: Bearer`
- * can use the anthropic-messages route directly.
+ * Both `openai-completions` and `anthropic-messages` are wired today.
+ * The Anthropic case takes a side-channel: pi-ai's Anthropic SDK sends
+ * `x-api-key` natively, but the platform's auth pipeline reads
+ * `Authorization: Bearer` — so the CLI's preset path injects the bearer
+ * token via `model.headers["Authorization"]` and passes a placeholder
+ * `apiKey` to keep pi-ai happy. The platform's anthropic adapter strips
+ * the inbound `x-api-key` (it isn't in HEADERS_TO_FORWARD) and injects
+ * the real upstream key from server-side storage, so the placeholder
+ * never reaches Anthropic.
  */
-export const PROXY_SUPPORTED_APIS = new Set<string>(["openai-completions"]);
+export const PROXY_SUPPORTED_APIS = new Set<string>(["openai-completions", "anthropic-messages"]);

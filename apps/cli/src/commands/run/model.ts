@@ -54,6 +54,11 @@ export interface PresetResolutionInputs {
    * ignores the header.
    */
   orgId: string;
+  /**
+   * Test seam — inject a presets loader to avoid hitting the network in
+   * unit tests. Production calls `listModelPresets(profileName)`.
+   */
+  presetsLoader?: (profileName: string) => Promise<ModelPreset[]>;
 }
 
 const PROVIDER_BY_API: Record<string, string> = {
@@ -140,7 +145,8 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
  * before any LLM call goes out.
  */
 export async function resolvePresetModel(inputs: PresetResolutionInputs): Promise<ResolvedModel> {
-  const presets = await listModelPresets(inputs.profileName);
+  const loader = inputs.presetsLoader ?? listModelPresets;
+  const presets = await loader(inputs.profileName);
   const preset = pickPreset(presets, inputs.modelId);
   if (!PROXY_SUPPORTED_APIS.has(preset.api)) {
     throw new ModelResolutionError(
@@ -151,6 +157,19 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   }
 
   const baseUrl = buildProxyBaseUrl(inputs.instance, preset.api);
+  // pi-ai's Anthropic SDK path sends auth as `x-api-key`, but the
+  // platform's auth pipeline reads `Authorization: Bearer`. We inject
+  // the bearer via model.headers and pass a placeholder `apiKey` to
+  // satisfy the Anthropic SDK constructor — the platform strips
+  // inbound `x-api-key` (not in HEADERS_TO_FORWARD) and injects the
+  // real upstream key from server-side storage. Net effect: the
+  // placeholder never leaves the platform's network. See
+  // `apps/api/src/services/llm-proxy/anthropic.ts:HEADERS_TO_FORWARD`.
+  const isAnthropic = preset.api === "anthropic-messages";
+  const headers: Record<string, string> = { "X-Org-Id": inputs.orgId };
+  if (isAnthropic) {
+    headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
+  }
   const model: Model<Api> = {
     id: preset.id,
     name: preset.label,
@@ -162,9 +181,12 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     cost: preset.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
-    headers: { "X-Org-Id": inputs.orgId },
+    headers,
   };
-  return { model, apiKey: inputs.bearerToken };
+  // Placeholder for anthropic — never reaches upstream (see comment above).
+  // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
+  const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;
+  return { model, apiKey };
 }
 
 function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
@@ -203,16 +225,21 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
 
 function buildProxyBaseUrl(instance: string, api: string): string {
   const trimmed = instance.replace(/\/+$/, "");
-  // The OpenAI + Anthropic SDKs both append `/chat/completions` or
-  // `/v1/messages` to `baseURL`; we stop one segment short of the
-  // upstream path so the SDK's canonical suffix lands on the right
+  // Each SDK appends its own canonical suffix to `baseURL`; we stop one
+  // segment short so the suffix lands on the platform's
   // `/api/llm-proxy/<api>/v1/…` route.
+  //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`.
+  //   - Anthropic SDK appends `/v1/messages`   → baseUrl is the bare
+  //     route prefix (no `/v1`).
   if (api === "openai-completions") {
     return `${trimmed}/api/llm-proxy/openai-completions/v1`;
   }
+  if (api === "anthropic-messages") {
+    return `${trimmed}/api/llm-proxy/anthropic-messages`;
+  }
   throw new ModelResolutionError(
     `CLI preset mode does not yet route protocol "${api}"`,
-    "Supported today: openai-completions. Pick a compatible preset or use --model-source env.",
+    `Supported today: ${Array.from(["openai-completions", "anthropic-messages"]).join(", ")}. Pick a compatible preset or use --model-source env.`,
   );
 }
 
