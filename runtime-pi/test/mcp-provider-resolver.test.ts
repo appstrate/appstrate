@@ -19,7 +19,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import type { Bundle, PackageIdentity } from "@appstrate/afps-runtime/bundle";
-import { McpProviderResolver } from "../extensions/mcp-provider-resolver.ts";
+import { McpProviderResolver } from "../mcp/provider-resolver.ts";
 
 function makeBundle(): Bundle {
   const identity = "@test/agent@0.0.0" as PackageIdentity;

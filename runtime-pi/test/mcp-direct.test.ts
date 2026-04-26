@@ -20,7 +20,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import type { Bundle, PackageIdentity } from "@appstrate/afps-runtime/bundle";
-import { buildMcpDirectFactories, DIRECT_TOOL_PROMPT } from "../extensions/mcp-direct.ts";
+import { buildMcpDirectFactories, DIRECT_TOOL_PROMPT } from "../mcp/direct.ts";
 
 // Provider tools never resolve `{ fromFile }` against this workspace
 // in these tests — the body is always a string or absent — but

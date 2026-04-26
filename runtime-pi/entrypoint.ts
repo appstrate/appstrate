@@ -59,7 +59,7 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { attachTeeSink } from "./tee-sink.ts";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
-import { buildMcpDirectFactories } from "./extensions/mcp-direct.ts";
+import { buildMcpDirectFactories } from "./mcp/direct.ts";
 
 /**
  * Synthesise a Bundle the runner can consume when no `.afps` ships
