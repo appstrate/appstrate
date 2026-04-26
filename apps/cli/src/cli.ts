@@ -657,8 +657,13 @@ program
 
 program
   .command("run")
-  .description("Execute an AFPS bundle locally via PiRunner (CLI mode — no platform preamble)")
-  .argument("<bundle>", "Path to the bundle — .afps (single-package) or .afps-bundle (with deps)")
+  .description(
+    "Execute an agent locally via PiRunner — by package id (downloads + caches the bundle) or from a local file path",
+  )
+  .argument(
+    "<bundle>",
+    "Either @scope/agent[@spec] (id, fetched from the pinned instance) or a path to a .afps / .afps-bundle file",
+  )
   .option(
     "--providers <mode>",
     "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",
@@ -697,6 +702,7 @@ program
     "--sink-ttl <seconds>",
     "Requested sink lifetime in seconds (server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS)",
   )
+  .option("--no-cache", "Bypass the local bundle cache (id mode only) — always re-fetch")
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -719,6 +725,10 @@ program
       report: parseReportMode(opts.report),
       reportFallback: parseReportFallback(opts.reportFallback),
       sinkTtl: parseSinkTtl(opts.sinkTtl),
+      // commander maps `--no-cache` to `opts.cache === false`. Treat the
+      // explicit-false case as "skip the cache" — `undefined` falls back
+      // to the default cache-on-hit behaviour.
+      noCache: opts.cache === false,
     });
   });
 

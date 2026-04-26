@@ -63,6 +63,8 @@ import {
 } from "./run/report.ts";
 import { CompositeSink } from "@appstrate/afps-runtime/sinks";
 import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
+import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
+import { fetchBundleForRun, BundleFetchError } from "./run/bundle-fetch.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -94,6 +96,8 @@ export interface RunCommandOptions {
   reportFallback?: ReportFallback;
   /** Requested sink TTL in seconds. Server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
   sinkTtl?: number;
+  /** Bypass the local bundle cache when running an agent by package id. */
+  noCache?: boolean;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -126,15 +130,14 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   const { model, apiKey: llmApiKey } = await resolveLlmConfig(modelSource, opts, resolverInputs);
 
   // ─── 3. Load the bundle ────────────────────────────────────────────
-  // Load before building the provider resolver so the reporting layer
-  // (which needs the manifest + prompt to register the run) can run
-  // before any resolver is wired.
-  const bundlePath = path.resolve(opts.bundle);
-  try {
-    await fs.access(bundlePath);
-  } catch {
-    throw new Error(`Bundle not found: ${bundlePath}`);
-  }
+  // Two shapes share this path:
+  //   - `appstrate run ./local.afps[-bundle]` → resolve as a path.
+  //   - `appstrate run @scope/agent[@spec]` → fetch from the pinned
+  //     instance (with deps inlined) and cache locally. Requires a
+  //     remote provider mode so we already have the bearer token + appId
+  //     in `resolverInputs`.
+  const target = parseRunTarget(opts.bundle);
+  const bundlePath = await resolveBundlePath(target, opts, resolverInputs);
   const bundle = await readBundleFromFile(bundlePath);
 
   // ─── 3a. Optional: register run + build reporting session ─────────
@@ -592,6 +595,54 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
   return inputs && "bearerToken" in inputs ? inputs.instance : "(local)";
 }
 
+async function resolveBundlePath(
+  target: ReturnType<typeof parseRunTarget>,
+  opts: RunCommandOptions,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+): Promise<string> {
+  if (target.kind === "path") {
+    const abs = path.resolve(target.path);
+    try {
+      await fs.access(abs);
+    } catch {
+      throw new Error(`Bundle not found: ${abs}`);
+    }
+    return abs;
+  }
+
+  // id mode — needs remote provider context so we have a bearer + appId
+  // to authenticate the bundle download against the pinned instance.
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) {
+    throw new PackageSpecError(
+      `Running an agent by id requires a logged-in profile or an API key`,
+      `Run \`appstrate login\`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID. To run a local file, prefix the path with ./`,
+    );
+  }
+
+  const fetched = await fetchBundleForRun({
+    instance: resolverInputs.instance,
+    bearerToken: resolverInputs.bearerToken,
+    appId: resolverInputs.appId,
+    orgId: resolverInputs.orgId,
+    packageId: target.packageId,
+    spec: target.spec,
+    noCache: opts.noCache,
+    onLog: (msg) => {
+      if (!opts.json && process.env.APPSTRATE_DEBUG === "1") {
+        process.stderr.write(`[debug] ${msg}\n`);
+      }
+    },
+  });
+  if (!opts.json) {
+    process.stderr.write(
+      `→ ${fetched.fromCache ? "using cached" : "fetched"} bundle ${target.packageId}${
+        target.spec ? `@${target.spec}` : ""
+      }\n`,
+    );
+  }
+  return fetched.path;
+}
+
 // Re-export error types for the CLI's formatError pipeline.
 export {
   ModelResolutionError,
@@ -599,6 +650,8 @@ export {
   ReportConfigError,
   ReportStartError,
   SnapshotError,
+  PackageSpecError,
+  BundleFetchError,
 };
 
 /**
