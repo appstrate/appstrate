@@ -40,20 +40,9 @@ interface SettingsLayoutProps {
   title: string;
   emoji?: string;
   breadcrumbs?: BreadcrumbEntry[];
-  /**
-   * Map of legacy hash values (without `#`) to destination pathnames.
-   * When the current URL has a matching hash, we redirect to the pathname.
-   */
-  legacyHashRedirects?: Record<string, string>;
 }
 
-export function SettingsLayout({
-  sections,
-  title,
-  emoji,
-  breadcrumbs,
-  legacyHashRedirects,
-}: SettingsLayoutProps) {
+export function SettingsLayout({ sections, title, emoji, breadcrumbs }: SettingsLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -67,17 +56,6 @@ export function SettingsLayout({
       useSidebarStore.getState().setOpenTransient(prev);
     };
   }, []);
-
-  // Backwards-compat: redirect old hash URLs (e.g. /preferences#security) to /preferences/security
-  useEffect(() => {
-    if (!legacyHashRedirects) return;
-    const hash = location.hash.replace(/^#/, "");
-    if (!hash) return;
-    const target = legacyHashRedirects[hash];
-    if (target && target !== location.pathname) {
-      navigate(target, { replace: true });
-    }
-  }, [location.hash, location.pathname, legacyHashRedirects, navigate]);
 
   const visibleSections = sections
     .map((s) => ({ ...s, items: s.items.filter((i) => i.show !== false) }))

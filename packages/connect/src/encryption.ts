@@ -14,10 +14,6 @@ const AUTH_TAG_LENGTH = 16;
  *
  * The version tag + key id enable online key rotation: new writes embed the
  * active kid, reads dispatch decryption to the matching key in the keyring.
- * Legacy v0 blobs (raw base64 of `iv|authTag|ciphertext`, no header) carry no
- * kid, so they remain decryptable by probing every key in the keyring until
- * AES-GCM tag verification succeeds — non-breaking, and survives rotations as
- * long as the encrypting key stays in the keyring.
  *
  * `kid` MUST match `^[A-Za-z0-9_-]{1,32}$` so it can travel inside the
  * delimiter-based envelope without escaping.
@@ -31,13 +27,6 @@ const KID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
  * - `activeKid`: kid embedded in newly-encrypted blobs.
  * - `keys`: every kid the process can decrypt with — at minimum the active
  *   key, plus retired keys still in the rotation window.
- *
- * Legacy ("v0") blobs carry no kid, so `decrypt()` tries every key in the
- * keyring (active + retired) until AES-GCM tag verification succeeds. This
- * keeps v0 blobs readable across rotations without requiring a strict
- * sweep-before-retire ordering — a key may only be removed from
- * `CONNECTION_ENCRYPTION_KEYS` once the v0 → v1 sweep confirms no legacy
- * blobs remain that depend on it.
  */
 interface Keyring {
   activeKid: string;
@@ -127,14 +116,8 @@ export function encrypt(plaintext: string): string {
 }
 
 /**
- * Decrypt a ciphertext string. Accepts both formats:
- *
- * - v1 envelope (`v1:<kid>:<base64>`): the embedded kid drives key lookup —
- *   single attempt against the matching key.
- * - v0 legacy (raw `base64(iv|authTag|ciphertext)`): the blob carries no kid,
- *   so we try every key in the keyring (active + retired) until one decrypts
- *   successfully. AES-GCM tag verification makes this safe — a mismatched key
- *   cannot produce a successful decrypt by chance (~2^-128).
+ * Decrypt a v1 envelope (`v1:<kid>:<base64>`). The embedded kid drives key
+ * lookup against the keyring (active + retired).
  */
 export function decrypt(ciphertext: string): string {
   const parsed = parseEnvelope(ciphertext);
@@ -143,16 +126,7 @@ export function decrypt(ciphertext: string): string {
     throw new Error("Invalid encrypted data: too short");
   }
 
-  if (parsed.kind === "v1") {
-    return decryptWithKey(parsed.packed, getKey(parsed.kid));
-  }
-
-  // v0 legacy: try every key in the keyring. The blob was encrypted under
-  // *some* historical active key — which one is unknown until we verify the
-  // GCM tag. This eliminates the temporal coupling between key rotation and
-  // the v0 → v1 re-encrypt sweep: a v0 blob written under k1 stays readable
-  // after k2 is promoted active, so long as k1 is still in the keyring.
-  return decryptV0(parsed.packed);
+  return decryptWithKey(parsed.packed, getKey(parsed.kid));
 }
 
 function decryptWithKey(packed: Buffer, key: Buffer): string {
@@ -167,47 +141,26 @@ function decryptWithKey(packed: Buffer, key: Buffer): string {
   return decrypted.toString("utf8");
 }
 
-function decryptV0(packed: Buffer): string {
-  const keyring = loadKeyring();
-  // Active first (hot path: no rotation in flight), then retired.
-  const candidateKids = [
-    keyring.activeKid,
-    ...[...keyring.keys.keys()].filter((kid) => kid !== keyring.activeKid),
-  ];
-
-  let lastError: unknown;
-  for (const kid of candidateKids) {
-    try {
-      return decryptWithKey(packed, getKey(kid));
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  // Intentionally generic — leaking which kid was tried would help an attacker
-  // probe key state. AES-GCM tag failures are indistinguishable from each other.
-  throw new Error("Failed to decrypt v0 credential blob with any keyring key", {
-    cause: lastError,
-  });
+interface ParsedEnvelope {
+  kid: string;
+  packed: Buffer;
 }
 
-type ParsedEnvelope = { kind: "v1"; kid: string; packed: Buffer } | { kind: "v0"; packed: Buffer };
-
 function parseEnvelope(ciphertext: string): ParsedEnvelope {
-  if (ciphertext.startsWith(`${ENVELOPE_VERSION}:`)) {
-    const rest = ciphertext.slice(ENVELOPE_VERSION.length + 1);
-    const sepIdx = rest.indexOf(":");
-    if (sepIdx === -1) {
-      throw new Error("Invalid v1 envelope: missing kid separator");
-    }
-    const kid = rest.slice(0, sepIdx);
-    const payload = rest.slice(sepIdx + 1);
-    if (!KID_PATTERN.test(kid)) {
-      throw new Error(`Invalid v1 envelope: kid '${kid}' does not match ${KID_PATTERN.source}`);
-    }
-    return { kind: "v1", kid, packed: Buffer.from(payload, "base64") };
+  if (!ciphertext.startsWith(`${ENVELOPE_VERSION}:`)) {
+    throw new Error(`Invalid envelope: expected '${ENVELOPE_VERSION}:' prefix`);
   }
-  // v0 legacy: raw base64 of iv|authTag|ciphertext — no embedded kid.
-  return { kind: "v0", packed: Buffer.from(ciphertext, "base64") };
+  const rest = ciphertext.slice(ENVELOPE_VERSION.length + 1);
+  const sepIdx = rest.indexOf(":");
+  if (sepIdx === -1) {
+    throw new Error("Invalid v1 envelope: missing kid separator");
+  }
+  const kid = rest.slice(0, sepIdx);
+  const payload = rest.slice(sepIdx + 1);
+  if (!KID_PATTERN.test(kid)) {
+    throw new Error(`Invalid v1 envelope: kid '${kid}' does not match ${KID_PATTERN.source}`);
+  }
+  return { kid, packed: Buffer.from(payload, "base64") };
 }
 
 /**

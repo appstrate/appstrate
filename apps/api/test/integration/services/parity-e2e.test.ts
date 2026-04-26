@@ -96,7 +96,7 @@ describe("Parity E2E — full adapter stack", () => {
     // no platform projection.
     const snap = sink.snapshot();
     expect(snap.output).toEqual({ deliverable: "shipped" });
-    expect(snap.checkpoint).toEqual({ counter: 7 });
+    expect(snap.pinned!.checkpoint).toEqual({ content: { counter: 7 } });
     expect(snap.memories).toEqual([{ content: "learned A" }, { content: "learned B" }]);
     expect(snap.report).toBe("work done");
 

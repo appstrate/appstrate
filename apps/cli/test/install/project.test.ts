@@ -14,7 +14,6 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  LEGACY_PROJECT_NAME,
   PROJECT_FILE_RELPATH,
   deriveProjectName,
   projectFilePath,
@@ -120,16 +119,5 @@ describe("readProjectFile / writeProjectFile", () => {
     );
     const read = await readProjectFile(workDir);
     expect(read).toBeNull();
-  });
-});
-
-describe("LEGACY_PROJECT_NAME", () => {
-  it("matches the literal string pre-#167 installs used", () => {
-    // The constant gates backward compatibility: pre-fix installs had
-    // `name: appstrate` baked into their compose file, so upgrades on
-    // those dirs MUST continue to target containers under that exact
-    // project name. If this literal ever changes, the upgrade path
-    // for legacy installs breaks.
-    expect(LEGACY_PROJECT_NAME).toBe("appstrate");
   });
 });

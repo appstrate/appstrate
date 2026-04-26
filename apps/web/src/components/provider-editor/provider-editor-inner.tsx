@@ -105,44 +105,19 @@ function makeDefaultCredentialFields(mode: CredentialMode): SchemaField[] {
 }
 
 /**
- * Normalize the initial editor state: extract credential fields from the manifest,
- * and seed defaults in-place if the manifest declares a credential authMode but
- * lacks a schema (repairs legacy drafts so they pass AFPS validation on save).
+ * Extract credential fields from the manifest's existing credentials schema.
+ * Returns an empty array when the manifest is in an OAuth mode (no creds
+ * needed) or when the credential schema is missing — in the latter case
+ * the user fills in fields via the form and the manifest is patched on
+ * save.
  */
-function normalizeProviderInitialState(initial: ProviderEditorState): {
-  state: ProviderEditorState;
-  credentialFields: SchemaField[];
-} {
-  const def = getDef(initial.manifest);
+function extractCredentialFields(manifest: Record<string, unknown>): SchemaField[] {
+  const def = getDef(manifest);
   const authMode = (def.authMode as string) || "oauth2";
+  if (!isCredentialMode(authMode)) return [];
   const creds = def.credentials as { schema?: JSONSchemaObject } | undefined;
-
-  if (!isCredentialMode(authMode)) {
-    return { state: initial, credentialFields: [] };
-  }
-
-  if (creds?.schema) {
-    return {
-      state: initial,
-      credentialFields: schemaToFields(creds.schema, "credentials"),
-    };
-  }
-
-  const seeded = makeDefaultCredentialFields(authMode);
-  if (seeded.length === 0) {
-    return { state: initial, credentialFields: [] };
-  }
-
-  return {
-    state: {
-      ...initial,
-      manifest: {
-        ...initial.manifest,
-        definition: writeCredentialsToDef(def, seeded),
-      },
-    },
-    credentialFields: seeded,
-  };
+  if (!creds?.schema) return [];
+  return schemaToFields(creds.schema, "credentials");
 }
 
 // ─── Component ─────────────────────────────────────────────
@@ -160,13 +135,12 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
   const createPkg = useCreatePackage("provider");
   const updatePkg = useUpdatePackage("provider", packageId || "");
 
-  // Normalize once at mount: extract credential fields, repair legacy drafts
-  // that declare a credential authMode without a schema. The normalized state
-  // becomes the baseline for both `state` and `isDirty` comparisons.
-  const [initialNormalized] = useState(() => normalizeProviderInitialState(initialState));
-  const [state, setState] = useState(initialNormalized.state);
-  const [credentialFields, setCredentialFields] = useState<SchemaField[]>(
-    initialNormalized.credentialFields,
+  // Snapshot the initial state once so `isDirty` compares against the
+  // exact bytes the editor mounted with.
+  const [initialSnapshot] = useState(initialState);
+  const [state, setState] = useState(initialState);
+  const [credentialFields, setCredentialFields] = useState<SchemaField[]>(() =>
+    extractCredentialFields(initialState.manifest),
   );
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProviderEditorTab>("general");
@@ -191,8 +165,8 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
 
   // --- Unsaved changes detection ---
   const isDirty = useMemo(
-    () => JSON.stringify(initialNormalized.state) !== JSON.stringify(state),
-    [initialNormalized, state],
+    () => JSON.stringify(initialSnapshot) !== JSON.stringify(state),
+    [initialSnapshot, state],
   );
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
 

@@ -75,13 +75,11 @@ export CONNECTION_ENCRYPTION_KEY=$NEW_KEY
 export CONNECTION_ENCRYPTION_KEY_ID=k2
 
 # 3. Restart the platform. New writes emit `v1:k2:...`. Existing `v1:k1:...`
-#    blobs remain readable via the retired keyring; v0 blobs decrypt by
-#    probing every key in the keyring (active + retired) until AES-GCM tag
-#    verification succeeds.
+#    blobs remain readable via the retired keyring.
 
 # 4. Run a background re-encrypt sweep (read → decrypt → encrypt → write) to
 #    rewrite every `userProviderConnections.credentialsEncrypted` row. Idempotent.
-#    The sweep migrates v0 → v1 *and* re-keys v1:<old-kid> blobs to v1:<active-kid>.
+#    The sweep re-keys v1:<old-kid> blobs to v1:<active-kid>.
 
 # 5. Only after the sweep confirms no blob still depends on the retired key,
 #    drop it:

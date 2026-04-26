@@ -142,15 +142,6 @@ export function OrgSettingsLayout() {
       title={t("orgSettings.pageTitle")}
       emoji="⚙️"
       breadcrumbs={breadcrumbs}
-      legacyHashRedirects={{
-        general: "/org-settings/general",
-        members: "/org-settings/members",
-        models: "/org-settings/models",
-        proxies: "/org-settings/proxies",
-        oauth: "/org-settings/oauth",
-        billing: "/org-settings/billing",
-        "cli-sessions": "/org-settings/cli-sessions",
-      }}
       sections={sections}
     />
   );

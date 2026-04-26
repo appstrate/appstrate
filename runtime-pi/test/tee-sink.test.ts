@@ -79,14 +79,14 @@ describe("mergeTerminalResult", () => {
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
       memories: [{ content: "hello" }],
-      checkpoint: { step: 2 },
+      pinned: { checkpoint: { content: { step: 2 } } },
       output: { foo: "bar" },
       report: "# Report\nline",
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: RunResult = {
       memories: [{ content: "old" }],
-      checkpoint: { step: 1 },
+      pinned: { checkpoint: { content: { step: 1 } } },
       output: { foo: "baz" },
       report: "fallback",
       logs: [{ level: "info", message: "y", timestamp: 50 }],
@@ -95,7 +95,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "hello" }]);
-    expect(merged.checkpoint).toEqual({ step: 2 });
+    expect(merged.pinned!.checkpoint).toEqual({ content: { step: 2 } });
     expect(merged.output).toEqual({ foo: "bar" });
     expect(merged.report).toBe("# Report\nline");
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
@@ -108,7 +108,7 @@ describe("mergeTerminalResult", () => {
     const aggregate = emptyRunResult();
     const runner: RunResult = {
       memories: [{ content: "r" }],
-      checkpoint: { ok: true },
+      pinned: { checkpoint: { content: { ok: true } } },
       output: { answer: 42 },
       report: "runner-report",
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
@@ -117,7 +117,7 @@ describe("mergeTerminalResult", () => {
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "r" }]);
-    expect(merged.checkpoint).toEqual({ ok: true });
+    expect(merged.pinned!.checkpoint).toEqual({ content: { ok: true } });
     expect(merged.output).toEqual({ answer: 42 });
     expect(merged.report).toBe("runner-report");
     expect(merged.logs).toHaveLength(1);
@@ -311,7 +311,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.report).toBe("## Header\nbody");
     expect(final.output).toEqual({ answer: 42 });
-    expect(final.checkpoint).toEqual({ step: 1 });
+    expect(final.pinned!.checkpoint).toEqual({ content: { step: 1 } });
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(500);
     tee.restore();
@@ -354,7 +354,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     tee.restore();
   });
 
-  it("aggregates pinned.set with key='checkpoint' (AFPS 1.5) into result.checkpoint with scope captured", async () => {
+  it("aggregates pinned.set with key='checkpoint' (AFPS 1.5) into result.pinned with scope captured", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
@@ -369,8 +369,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
     await tee.sink.finalize({ ...emptyRunResult(), status: "success" });
 
     const final = underlying.finalized!;
-    expect(final.checkpoint).toEqual({ cursor: "abc" });
-    expect(final.checkpointScope).toBe("shared");
+    expect(final.pinned!.checkpoint).toEqual({ content: { cursor: "abc" }, scope: "shared" });
     tee.restore();
   });
 
@@ -390,7 +389,7 @@ describe("attachTeeSink — aggregation via finalize", () => {
 
     const final = underlying.finalized!;
     expect(final.pinned).toEqual({ persona: { content: "agent persona" } });
-    expect(final.checkpoint).toBeNull();
+    expect(final.pinned!.checkpoint).toBeUndefined();
     tee.restore();
   });
 });

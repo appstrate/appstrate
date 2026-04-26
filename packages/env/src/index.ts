@@ -54,8 +54,7 @@ const envSchema = z
       }),
     // Retired keys held for decrypt-only during a rotation window. JSON map of
     // kid → base64-encoded 32-byte key. Exclude the active kid (validated at boot).
-    // Empty map disables the legacy keyring; existing v0 blobs still decrypt with
-    // the active key.
+    // Empty map disables the retired keyring.
     //
     // Validated as `Record<string, string>` AT BOOT — a non-string value or
     // JSON parse error fails fast with a clear Zod issue path, rather than
