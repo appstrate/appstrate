@@ -11,6 +11,7 @@ import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
+import { bodyLimit } from "./middleware/body-limit.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
@@ -80,6 +81,15 @@ app.use("*", clientIp());
 const trustedOrigins = env.TRUSTED_ORIGINS;
 
 app.use("*", cors({ origin: trustedOrigins, credentials: true }));
+
+// Global body-size cap. Skipped for the public FS upload sink — that route
+// authenticates via a signed token whose payload encodes its own size limit
+// and uses streaming I/O up to 100 MB by design.
+const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
+app.use("*", async (c, next) => {
+  if (c.req.path === "/api/uploads/_content") return next();
+  return globalBodyLimit(c, next);
+});
 
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);

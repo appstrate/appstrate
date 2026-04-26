@@ -169,6 +169,13 @@ const envSchema = z
           .filter(Boolean),
       ),
     PORT: z.coerce.number().int().positive().default(3000),
+    // Global request body size cap enforced by the Hono `bodyLimit` middleware.
+    // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
+    API_BODY_LIMIT_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10 * 1024 * 1024),
     COOKIE_DOMAIN: z.string().optional(),
     DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
     // Empty string → undefined so downstream `??` fallbacks (and the sidecar
