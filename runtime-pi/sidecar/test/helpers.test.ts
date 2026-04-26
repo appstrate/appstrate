@@ -2,15 +2,19 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  ABSOLUTE_BODY_CEILING,
   isBlockedHost,
   isBlockedUrl,
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUri,
+  MAX_MCP_ENVELOPE_SIZE,
+  MAX_REQUEST_BODY_SIZE,
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   OUTBOUND_TIMEOUT_MS,
+  readPositiveByteEnv,
 } from "../helpers.ts";
 
 // --- Constants ---
@@ -26,6 +30,25 @@ describe("constants", () => {
 
   it("OUTBOUND_TIMEOUT_MS is 30_000", () => {
     expect(OUTBOUND_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it("MAX_REQUEST_BODY_SIZE defaults to 10 MB", () => {
+    expect(MAX_REQUEST_BODY_SIZE).toBe(10 * 1024 * 1024);
+  });
+
+  it("MAX_MCP_ENVELOPE_SIZE defaults to 16 MB", () => {
+    expect(MAX_MCP_ENVELOPE_SIZE).toBe(16 * 1024 * 1024);
+  });
+
+  it("ABSOLUTE_BODY_CEILING is 100 MB", () => {
+    expect(ABSOLUTE_BODY_CEILING).toBe(100 * 1024 * 1024);
+  });
+
+  it("MAX_MCP_ENVELOPE_SIZE leaves room for base64-encoded MAX_REQUEST_BODY_SIZE", () => {
+    // base64 inflates ~1.37×; envelope must fit the inflated body plus
+    // JSON-RPC overhead (negligible for any realistic call shape).
+    const minEnvelopeNeeded = Math.ceil((MAX_REQUEST_BODY_SIZE * 4) / 3);
+    expect(MAX_MCP_ENVELOPE_SIZE).toBeGreaterThanOrEqual(minEnvelopeNeeded);
   });
 
   it("PROVIDER_ID_RE accepts simple IDs", () => {
@@ -287,5 +310,107 @@ describe("matchesAuthorizedUri", () => {
     expect(
       matchesAuthorizedUri("https://b.com/data", ["https://a.com/**", "https://b.com/**"]),
     ).toBe(true);
+  });
+});
+
+describe("readPositiveByteEnv", () => {
+  // Use a unique env var name per test to avoid leakage between cases.
+  // bun:test runs sequentially within a file so reuse-with-cleanup is
+  // also safe, but unique names keep failures attributable.
+  const NAME_BASE = "__APPSTRATE_TEST_BYTE_ENV";
+
+  it("returns the default when the env var is unset", () => {
+    const name = `${NAME_BASE}_UNSET`;
+    delete process.env[name];
+    expect(readPositiveByteEnv(name, 1234)).toBe(1234);
+  });
+
+  it("returns the default when the env var is empty", () => {
+    const name = `${NAME_BASE}_EMPTY`;
+    process.env[name] = "";
+    try {
+      expect(readPositiveByteEnv(name, 1234)).toBe(1234);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("returns the parsed value when the env var is a valid positive integer", () => {
+    const name = `${NAME_BASE}_VALID`;
+    process.env[name] = "5242880"; // 5 MB
+    try {
+      expect(readPositiveByteEnv(name, 1234)).toBe(5_242_880);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws when the env var is non-numeric", () => {
+    const name = `${NAME_BASE}_NON_NUMERIC`;
+    process.env[name] = "ten megabytes";
+    try {
+      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws when the env var is zero or negative", () => {
+    const name = `${NAME_BASE}_NEGATIVE`;
+    process.env[name] = "-1";
+    try {
+      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+
+    const zeroName = `${NAME_BASE}_ZERO`;
+    process.env[zeroName] = "0";
+    try {
+      expect(() => readPositiveByteEnv(zeroName, 1234)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[zeroName];
+    }
+  });
+
+  it("throws when the env var is non-integer", () => {
+    const name = `${NAME_BASE}_FLOAT`;
+    process.env[name] = "1.5";
+    try {
+      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws when the env var exceeds the absolute ceiling", () => {
+    const name = `${NAME_BASE}_OVER_CEILING`;
+    // Default ceiling is 100 MB; ask for 200 MB.
+    process.env[name] = String(200 * 1024 * 1024);
+    try {
+      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/absolute ceiling/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("respects a custom ceiling argument", () => {
+    const name = `${NAME_BASE}_CUSTOM_CEILING`;
+    process.env[name] = "1000";
+    try {
+      // Within the custom ceiling — accepted.
+      expect(readPositiveByteEnv(name, 100, 5000)).toBe(1000);
+    } finally {
+      delete process.env[name];
+    }
+
+    process.env[name] = "10000";
+    try {
+      // Above the custom ceiling — rejected even though far below the
+      // module-level ABSOLUTE_BODY_CEILING.
+      expect(() => readPositiveByteEnv(name, 100, 5000)).toThrow(/absolute ceiling/);
+    } finally {
+      delete process.env[name];
+    }
   });
 });
