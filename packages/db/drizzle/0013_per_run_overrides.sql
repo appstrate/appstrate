@@ -1,13 +1,14 @@
 -- Per-run + per-schedule override layer.
 --
--- The `config` column on `runs` already stores the resolved (deep-merged)
--- snapshot. `config_override` records the raw delta the caller sent on
--- `POST /run`, so the dashboard can badge "default vs override" and a
--- "Re-run with these settings" button can replay the exact same payload
+-- The `config` column on `runs` stores the resolved (deep-merged) snapshot
+-- used by the runtime. `config_override` records the raw delta the caller
+-- sent on `POST /run` (CLI `--config`, API `config?: object`, schedule
+-- fire-time merge), so a replay can reproduce the exact same payload
 -- without diffing against possibly-mutated `application_packages.config`.
 --
--- The boolean override flags drive UI badges without forcing the client
--- to compare snapshot vs persisted-at-run-time on every render.
+-- The boolean override flags mark which slots came from the request vs
+-- the persisted defaults — useful for audit, debugging, and any future
+-- consumer that needs to distinguish "explicit choice" from "inherited".
 --
 -- `package_schedules` gets the same four override columns. A schedule is
 -- semantically a recurring run, so the same override layer applies at
