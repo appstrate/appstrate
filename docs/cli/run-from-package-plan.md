@@ -1,5 +1,7 @@
 # Plan — `appstrate run` from package id + UI alignment
 
+**Status:** Shipped. Commits: P1 83a8ad9, P2 c31dddf, P3 519fa8a, P4 bb4b8e8a, P5 (this commit).
+
 > Statut : draft. Brainstorming validé, à transformer en phases GSD avant exécution.
 
 ## Objectif
@@ -30,7 +32,7 @@ Faire passer `appstrate run` du mode "exécute un fichier `.afps` que tu as sous
 
 ## Phases
 
-### Phase 1 — Run par id de package (bundle aplati)
+### [done] Phase 1 — Run par id de package (bundle aplati)
 
 **Goal** : `appstrate run @scope/agent[@spec]` télécharge le bundle aplati (avec deps) et exécute. Comportement local-only inchangé pour `appstrate run ./local.afps`.
 
@@ -53,7 +55,7 @@ La route `GET /api/agents/{scope}/{name}/bundle?version=<spec>` existe déjà �
 
 ---
 
-### Phase 2 — Config héritée depuis l'application
+### [done] Phase 2 — Config héritée depuis l'application
 
 **Goal** : un run CLI avec profil + appli pinnés se comporte comme l'UI ("Run" depuis la page agent), ie. avec config / model / proxy persistés.
 
@@ -84,7 +86,7 @@ La route `GET /api/agents/{scope}/{name}/bundle?version=<spec>` existe déjà �
 
 ---
 
-### Phase 3 — Profils de connexion côté CLI
+### [done] Phase 3 — Profils de connexion côté CLI
 
 **Goal** : aligner le CLI sur le modèle `connection_profiles` + `user_agent_provider_profiles` + `providerProfiles`.
 
@@ -118,7 +120,7 @@ appstrate connections profile create <name>
 
 ---
 
-### Phase 4 — Preflight connexions manquantes + browser handoff
+### [done] Phase 4 — Preflight connexions manquantes + browser handoff
 
 **Goal** : si une connexion requise manque, ne pas crasher mais guider vers l'UI.
 
@@ -153,7 +155,7 @@ appstrate connections profile create <name>
 
 ---
 
-### Phase 5 — Hardening + docs
+### [done] Phase 5 — Hardening + docs
 
 1. Tests `bun:test` couvrant : résolution id, cache, héritage config, override per-provider, preflight (mock readiness).
 2. Mise à jour `apps/cli/README.md` + section dédiée dans `docs/cli/`.
