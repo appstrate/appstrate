@@ -23,6 +23,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/index.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
@@ -210,6 +211,7 @@ export function createSchedulesRouter() {
       limit,
       offset,
     });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
   });
 

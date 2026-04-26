@@ -12,8 +12,10 @@ export function useRuns(packageId: string | undefined) {
   return useQuery({
     queryKey: ["runs", orgId, appId, packageId],
     queryFn: async () => {
-      const result = await api<{ runs: Run[]; total: number }>(`/agents/${packageId}/runs`);
-      return result.runs;
+      const result = await api<{ object: "list"; data: Run[]; total: number; hasMore: boolean }>(
+        `/agents/${packageId}/runs`,
+      );
+      return result.data;
     },
     enabled: !!packageId && !!appId,
   });
@@ -38,7 +40,9 @@ export function useAllRuns(page: number, limit = 20) {
   return useQuery({
     queryKey: ["all-runs", orgId, appId, page, limit],
     queryFn: async () => {
-      return api<{ runs: Run[]; total: number }>(`/runs?limit=${limit}&offset=${offset}`);
+      return api<{ object: "list"; data: Run[]; total: number; hasMore: boolean }>(
+        `/runs?limit=${limit}&offset=${offset}`,
+      );
     },
     enabled: !!orgId && !!appId,
   });

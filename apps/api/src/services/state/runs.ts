@@ -563,11 +563,18 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   return deleted.length;
 }
 
+export interface RunListPage {
+  object: "list";
+  data: Record<string, unknown>[];
+  total: number;
+  hasMore: boolean;
+}
+
 export async function listRunsWithFilter(
   filter: SQL,
   limit: number,
   offset = 0,
-): Promise<{ runs: Record<string, unknown>[]; total: number }> {
+): Promise<RunListPage> {
   const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
@@ -583,9 +590,13 @@ export async function listRunsWithFilter(
     .limit(limit)
     .offset(offset);
 
+  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const total = countRow?.count ?? 0;
   return {
-    runs: rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[],
-    total: countRow?.count ?? 0,
+    object: "list",
+    data,
+    total,
+    hasMore: offset + data.length < total,
   };
 }
 
@@ -635,10 +646,7 @@ export interface ListGlobalRunsOptions {
 export async function listGlobalRuns(
   scope: AppScope,
   options: ListGlobalRunsOptions = {},
-): Promise<{
-  runs: Record<string, unknown>[];
-  total: number;
-}> {
+): Promise<RunListPage> {
   const { limit = 50, offset = 0, kind, status, startDate, endDate, endUserId } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
@@ -672,9 +680,13 @@ export async function listGlobalRuns(
     .limit(limit)
     .offset(offset);
 
+  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const total = countRow?.count ?? 0;
   return {
-    runs: rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[],
-    total: countRow?.count ?? 0,
+    object: "list",
+    data,
+    total,
+    hasMore: offset + data.length < total,
   };
 }
 

@@ -37,8 +37,8 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents).toBeArray();
-      expect(body.agents).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns agents installed in the current app", async () => {
@@ -55,8 +55,8 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents.length).toBeGreaterThanOrEqual(1);
-      const agent = body.agents.find((f: { id: string }) => f.id === "@myorg/test-agent");
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      const agent = body.data.find((f: { id: string }) => f.id === "@myorg/test-agent");
       expect(agent).toBeDefined();
       expect(agent.source).toBe("local");
     });
@@ -71,7 +71,7 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.agents.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
+      const leaked = body.data.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
       expect(leaked).toBeUndefined();
     });
 
@@ -259,7 +259,7 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const agent = body.agents.find((f: { id: string }) => f.id === "@myorg/counted-agent");
+      const agent = body.data.find((f: { id: string }) => f.id === "@myorg/counted-agent");
       expect(agent).toBeDefined();
       expect(agent.runningRuns).toBe(1);
     });

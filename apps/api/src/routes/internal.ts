@@ -193,7 +193,7 @@ export function createInternalRouter() {
         },
       );
 
-      return c.json({ runs: recentRuns });
+      return c.json({ object: "list" as const, data: recentRuns, hasMore: false });
     } catch (err) {
       logger.error("Failed to fetch run history", {
         runId,

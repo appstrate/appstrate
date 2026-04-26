@@ -396,7 +396,7 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     const applicationId = c.get("applicationId");
     const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
     const enriched = await enrichWithCreatorNames(items);
-    return c.json({ [rcfg.cfg.storageFolder]: enriched });
+    return c.json({ object: "list" as const, data: enriched, hasMore: false });
   };
 }
 

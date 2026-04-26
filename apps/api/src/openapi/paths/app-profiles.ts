@@ -382,8 +382,10 @@ export const appProfilesPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  agents: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: {
                       type: "object",
@@ -393,6 +395,7 @@ export const appProfilesPaths = {
                       },
                     },
                   },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

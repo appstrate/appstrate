@@ -22,10 +22,10 @@ import type {
 // --- Packages — config-driven factory ---
 
 const PACKAGE_CONFIG = {
-  agent: { path: "agents", listKey: "agents", detailKey: "agent" },
-  skill: { path: "skills", listKey: "skills", detailKey: "skill" },
-  tool: { path: "tools", listKey: "tools", detailKey: "tool" },
-  provider: { path: "providers", listKey: "providers", detailKey: "provider" },
+  agent: { path: "agents", detailKey: "agent" },
+  skill: { path: "skills", detailKey: "skill" },
+  tool: { path: "tools", detailKey: "tool" },
+  provider: { path: "providers", detailKey: "provider" },
 } as const;
 
 type PackageDetailMap = {
@@ -42,8 +42,10 @@ function usePackageList(type: PackageType) {
   return useQuery({
     queryKey: ["packages", cfg.path, orgId, appId],
     queryFn: async () => {
-      const data = await api<Record<string, OrgPackageItem[]>>(`/packages/${cfg.path}`);
-      return data[cfg.listKey] as OrgPackageItem[];
+      const result = await api<{ object: "list"; data: OrgPackageItem[]; hasMore: boolean }>(
+        `/packages/${cfg.path}`,
+      );
+      return result.data;
     },
     enabled: !!orgId && !!appId,
   });
@@ -120,8 +122,10 @@ export function useAgents() {
   return useQuery({
     queryKey: ["agents", orgId, appId],
     queryFn: async () => {
-      const data = await api<{ agents: AgentListItem[] }>("/agents");
-      return data.agents;
+      const result = await api<{ object: "list"; data: AgentListItem[]; hasMore: boolean }>(
+        "/agents",
+      );
+      return result.data;
     },
     enabled: !!orgId && !!appId,
   });

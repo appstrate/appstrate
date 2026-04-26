@@ -393,14 +393,7 @@ export function createRunsRouter() {
       endUserId: endUser?.id,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
-    // Stripe-style envelope alongside the legacy `runs` / `total` keys.
-    // Drop the legacy keys at the next MAJOR.
-    return c.json({
-      ...result,
-      object: "list" as const,
-      data: result.runs,
-      hasMore: offset + result.runs.length < result.total,
-    });
+    return c.json(result);
   });
 
   // GET /api/runs — served by the notifications router (registered first

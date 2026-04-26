@@ -33,8 +33,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents).toBeArray();
-      expect(body.agents).toHaveLength(0);
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns agents owned by the org", async () => {
@@ -54,7 +54,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const agent = body.agents.find((f: { id: string }) => f.id === "@pkgorg/list-agent");
+      const agent = body.data.find((f: { id: string }) => f.id === "@pkgorg/list-agent");
       expect(agent).toBeDefined();
     });
 
@@ -72,7 +72,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.agents.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
+      const leaked = body.data.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
       expect(leaked).toBeUndefined();
     });
 

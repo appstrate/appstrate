@@ -143,13 +143,15 @@ export const runsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  runs: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/Run" },
                   },
                   total: { type: "integer" },
+                  hasMore: { type: "boolean" },
                 },
-                required: ["runs", "total"],
+                required: ["object", "data", "total", "hasMore"],
               },
             },
           },
@@ -430,13 +432,15 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["runs", "total"],
+                required: ["object", "data", "total", "hasMore"],
                 properties: {
-                  runs: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
                     type: "array",
                     items: { $ref: "#/components/schemas/Run" },
                   },
                   total: { type: "integer" },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

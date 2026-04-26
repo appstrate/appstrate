@@ -301,10 +301,10 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents).toBeArray();
-      expect(body.agents).toHaveLength(1);
-      expect(body.agents[0].id).toBe("@testorg/linked-agent");
-      expect(body.agents[0].displayName).toBe("Linked Agent");
+      expect(body.data).toBeArray();
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].id).toBe("@testorg/linked-agent");
+      expect(body.data[0].displayName).toBe("Linked Agent");
     });
 
     it("returns empty array when no agents use the profile", async () => {
@@ -319,7 +319,7 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agents).toHaveLength(0);
+      expect(body.data).toHaveLength(0);
     });
 
     it("returns 404 for non-existent profile", async () => {

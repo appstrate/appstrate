@@ -13,8 +13,10 @@ export function useScheduleRuns(scheduleId: string | undefined) {
   return useQuery({
     queryKey: ["schedule-runs", orgId, appId, scheduleId],
     queryFn: async () => {
-      const result = await api<{ runs: Run[]; total: number }>(`/schedules/${scheduleId}/runs`);
-      return result.runs;
+      const result = await api<{ object: "list"; data: Run[]; total: number; hasMore: boolean }>(
+        `/schedules/${scheduleId}/runs`,
+      );
+      return result.data;
     },
     enabled: !!scheduleId && !!appId,
   });
