@@ -31,7 +31,7 @@ test.describe("Cross-org agent isolation", () => {
     const res = await clientB.get("/agents");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    const agentIds = (body.agents ?? []).map((a: { id: string }) => a.id);
+    const agentIds = (body.data ?? []).map((a: { id: string }) => a.id);
     // OrgA's agents should not appear in OrgB's list
     expect(agentIds.every((id: string) => !id.startsWith(scope))).toBe(true);
   });
