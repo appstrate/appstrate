@@ -3,8 +3,8 @@
 /**
  * Direct MCP tool surface (the only LLM-facing surface).
  *
- * Registers `provider_call`, `run_history`, and `llm_complete` as
- * Pi-SDK tools, each forwarding to the sidecar's MCP `tools/call`
+ * Registers `provider_call`, `run_history`, `recall_memory`, and
+ * `llm_complete` as Pi-SDK tools, each forwarding to the sidecar's MCP `tools/call`
  * endpoint via {@link AppstrateMcpClient}. The LLM sees the canonical
  * MCP names verbatim — Appstrate is indistinguishable (LLM-side) from
  * any other MCP host.

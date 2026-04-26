@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { extractDependencies, detectCycle } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
 
 describe("extractDependencies", () => {
-  test("manifest with skills and tools", () => {
+  it("manifest with skills and tools", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0", "@acme/skill-b": "~2.0.0" },
@@ -26,17 +26,17 @@ describe("extractDependencies", () => {
     expect(extC!.depType).toBe("tool");
   });
 
-  test("manifest without dependencies", () => {
+  it("manifest without dependencies", () => {
     const deps = extractDependencies({});
     expect(deps).toHaveLength(0);
   });
 
-  test("manifest with empty dependencies", () => {
+  it("manifest with empty dependencies", () => {
     const deps = extractDependencies({ dependencies: {} });
     expect(deps).toHaveLength(0);
   });
 
-  test("scoped names are parsed correctly", () => {
+  it("scoped names are parsed correctly", () => {
     const manifest = {
       dependencies: {
         skills: { "@my-org/cool-skill": "^1.0.0" },
@@ -47,7 +47,7 @@ describe("extractDependencies", () => {
     expect(deps[0]!.depName).toBe("cool-skill");
   });
 
-  test("manifest with providers", () => {
+  it("manifest with providers", () => {
     const manifest = {
       dependencies: {
         providers: { "@acme/slack": "^1.0.0", "@acme/github": "~2.0.0" },
@@ -63,7 +63,7 @@ describe("extractDependencies", () => {
     expect(slack!.versionRange).toBe("^1.0.0");
   });
 
-  test("manifest with skills, tools, and providers", () => {
+  it("manifest with skills, tools, and providers", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0" },
@@ -78,7 +78,7 @@ describe("extractDependencies", () => {
     expect(deps.find((d) => d.depType === "provider")).toBeDefined();
   });
 
-  test("throws on invalid scoped package name", () => {
+  it("throws on invalid scoped package name", () => {
     const manifest = {
       dependencies: {
         skills: { "invalid-name": "^1.0.0" },
@@ -91,7 +91,7 @@ describe("extractDependencies", () => {
 });
 
 describe("detectCycle", () => {
-  test("self-reference detected", async () => {
+  it("self-reference detected", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-a", depType: "skill", versionRange: "^1.0.0" },
     ];
@@ -100,7 +100,7 @@ describe("detectCycle", () => {
     expect(result.cyclePath).toContain("@acme/pkg-a");
   });
 
-  test("direct cycle A→B→A", async () => {
+  it("direct cycle A→B→A", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
     ];
@@ -117,7 +117,7 @@ describe("detectCycle", () => {
     expect(result.cyclePath![result.cyclePath!.length - 1]).toBe("@acme/pkg-a");
   });
 
-  test("transitive cycle A→B→C→A", async () => {
+  it("transitive cycle A→B→C→A", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
     ];
@@ -136,7 +136,7 @@ describe("detectCycle", () => {
     expect(result.cyclePath!.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("valid DAG — no cycle", async () => {
+  it("valid DAG — no cycle", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
       { depScope: "@acme", depName: "pkg-c", depType: "tool", versionRange: "^1.0.0" },
@@ -153,7 +153,7 @@ describe("detectCycle", () => {
     expect(result.cyclePath).toBeUndefined();
   });
 
-  test("resolveDeps returns empty — no cycle", async () => {
+  it("resolveDeps returns empty — no cycle", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
     ];
@@ -161,12 +161,12 @@ describe("detectCycle", () => {
     expect(result.hasCycle).toBe(false);
   });
 
-  test("no direct deps — no cycle", async () => {
+  it("no direct deps — no cycle", async () => {
     const result = await detectCycle("@acme/pkg-a", [], async () => []);
     expect(result.hasCycle).toBe(false);
   });
 
-  test("diamond dependency — no cycle", async () => {
+  it("diamond dependency — no cycle", async () => {
     // A → B, A → C, B → D, C → D (diamond, not circular)
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },

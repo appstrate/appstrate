@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -98,7 +98,7 @@ afterEach(async () => {
 // ─────────────────────────────────────────────
 
 describe("loadSystemPackages", () => {
-  test("loads provider ZIPs", async () => {
+  it("loads provider ZIPs", async () => {
     const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
@@ -114,7 +114,7 @@ describe("loadSystemPackages", () => {
     expect(entry.version).toBe("1.0.0");
   });
 
-  test("loads agent ZIPs", async () => {
+  it("loads agent ZIPs", async () => {
     const zip = makeZip({
       "manifest.json": agentManifest("@test/my-agent"),
       "prompt.md": "# Test prompt",
@@ -126,7 +126,7 @@ describe("loadSystemPackages", () => {
     expect(result.packages[0]!.type).toBe("agent");
   });
 
-  test("loads skill ZIPs", async () => {
+  it("loads skill ZIPs", async () => {
     const zip = makeZip({
       "manifest.json": skillManifest("@test/my-skill"),
       "SKILL.md": validSkillContent,
@@ -138,7 +138,7 @@ describe("loadSystemPackages", () => {
     expect(result.packages[0]!.type).toBe("skill");
   });
 
-  test("loads tool ZIPs", async () => {
+  it("loads tool ZIPs", async () => {
     const zip = makeZip({
       "manifest.json": toolManifest("@test/my-tool"),
       "index.ts": validToolSource,
@@ -150,7 +150,7 @@ describe("loadSystemPackages", () => {
     expect(result.packages[0]!.type).toBe("tool");
   });
 
-  test("loads multiple ZIPs", async () => {
+  it("loads multiple ZIPs", async () => {
     const zip1 = makeZip({ "manifest.json": providerManifest("@test/gmail") });
     const zip2 = makeZip({ "manifest.json": providerManifest("@test/slack") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip1);
@@ -161,7 +161,7 @@ describe("loadSystemPackages", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("skips non-zip files", async () => {
+  it("skips non-zip files", async () => {
     const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
     await writeFile(join(testDir, "readme.txt"), "not a zip");
@@ -172,7 +172,7 @@ describe("loadSystemPackages", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("reports invalid ZIPs as warnings", async () => {
+  it("reports invalid ZIPs as warnings", async () => {
     await writeFile(join(testDir, "bad.afps"), "not a valid zip");
 
     const result = await loadSystemPackages(testDir);
@@ -181,7 +181,7 @@ describe("loadSystemPackages", () => {
     expect(result.warnings[0]!.file).toBe("bad.afps");
   });
 
-  test("reports ZIPs with missing manifest name as warnings", async () => {
+  it("reports ZIPs with missing manifest name as warnings", async () => {
     const zip = makeZip({
       "manifest.json": JSON.stringify({ version: "1.0.0", type: "provider" }),
     });
@@ -193,13 +193,13 @@ describe("loadSystemPackages", () => {
     expect(result.warnings[0]!.error).toContain("name");
   });
 
-  test("returns empty for non-existent directory", async () => {
+  it("returns empty for non-existent directory", async () => {
     const result = await loadSystemPackages(join(testDir, "does-not-exist"));
     expect(result.packages).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("returns empty for empty directory", async () => {
+  it("returns empty for empty directory", async () => {
     const emptyDir = join(testDir, "empty");
     await mkdir(emptyDir);
 
@@ -208,7 +208,7 @@ describe("loadSystemPackages", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("preserves zipBuffer for each entry", async () => {
+  it("preserves zipBuffer for each entry", async () => {
     const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
@@ -217,7 +217,7 @@ describe("loadSystemPackages", () => {
     expect(result.packages[0]!.zipBuffer.length).toBeGreaterThan(0);
   });
 
-  test("mixes valid and invalid ZIPs", async () => {
+  it("mixes valid and invalid ZIPs", async () => {
     const valid = makeZip({ "manifest.json": providerManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail.afps"), valid);
     await writeFile(join(testDir, "bad.afps"), "corrupted");

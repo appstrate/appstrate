@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, test, expect } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { AppError, createErrorStatusMap } from "../src/errors.ts";
 
 describe("AppError", () => {
-  test("extends Error with code property", () => {
+  it("extends Error with code property", () => {
     const err = new AppError("NOT_FOUND", "Resource not found");
     expect(err).toBeInstanceOf(Error);
     expect(err).toBeInstanceOf(AppError);
@@ -13,7 +13,7 @@ describe("AppError", () => {
     expect(err.name).toBe("AppError");
   });
 
-  test("can be caught as Error", () => {
+  it("can be caught as Error", () => {
     try {
       throw new AppError("FORBIDDEN", "Access denied");
     } catch (err) {
@@ -31,14 +31,14 @@ describe("createErrorStatusMap", () => {
     CONFLICT: 409,
   });
 
-  test("maps known codes to their HTTP status", () => {
+  it("maps known codes to their HTTP status", () => {
     expect(getStatus("NOT_FOUND")).toBe(404);
     expect(getStatus("FORBIDDEN")).toBe(403);
     expect(getStatus("UNAUTHORIZED")).toBe(401);
     expect(getStatus("CONFLICT")).toBe(409);
   });
 
-  test("returns 500 for unknown codes", () => {
+  it("returns 500 for unknown codes", () => {
     expect(getStatus("UNKNOWN_CODE")).toBe(500);
     expect(getStatus("")).toBe(500);
   });

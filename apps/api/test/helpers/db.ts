@@ -24,6 +24,7 @@ export type { Db };
  */
 const CORE_TABLES = [
   // Leaf tables (no dependents)
+  "audit_events",
   "llm_usage",
   "credential_proxy_usage",
   "run_logs",
