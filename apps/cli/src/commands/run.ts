@@ -27,6 +27,7 @@ import {
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import {
+  readBundleFromBuffer,
   readBundleFromFile,
   buildPlatformPromptInputs,
   renderPlatformPrompt,
@@ -110,8 +111,6 @@ export interface RunCommandOptions {
   reportFallback?: ReportFallback;
   /** Requested sink TTL in seconds. Server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
   sinkTtl?: number;
-  /** Bypass the local bundle cache when running an agent by package id. */
-  noCache?: boolean;
   /**
    * Proxy id to associate with the run. For in-process runs this only
    * surfaces in the reported run record — actual outbound proxying is
@@ -224,18 +223,24 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 
   // ─── 3. Load the bundle ────────────────────────────────────────────
   // Two shapes share this path:
-  //   - `appstrate run ./local.afps[-bundle]` → resolve as a path.
+  //   - `appstrate run ./local.afps[-bundle]` → resolve as a path on disk.
   //   - `appstrate run @scope/agent[@spec]` → fetch from the pinned
-  //     instance (with deps inlined) and cache locally. Requires a
-  //     remote provider mode so we already have the bearer token + appId
-  //     in `resolverInputs`. The inherited `versionPin` is applied as
-  //     the spec when the user did not type `@spec` themselves.
+  //     instance (with deps inlined) into memory only. The bytes are
+  //     verified against the server's integrity header and discarded
+  //     when the run finishes — no on-disk cache. Requires a remote
+  //     provider mode so we already have the bearer token + appId in
+  //     `resolverInputs`. The inherited `versionPin` is applied as the
+  //     spec when the user did not type `@spec` themselves.
   const bundleTarget =
     target.kind === "id" && !target.spec && inheritedConfig.versionPin
       ? { ...target, spec: inheritedConfig.versionPin }
       : target;
-  const bundlePath = await resolveBundlePath(bundleTarget, opts, resolverInputs);
-  const bundle = await readBundleFromFile(bundlePath);
+  const bundleSource = await resolveBundleSource(bundleTarget, opts, resolverInputs);
+  const bundle =
+    bundleSource.kind === "path"
+      ? await readBundleFromFile(bundleSource.path)
+      : readBundleFromBuffer(bundleSource.bytes);
+  const bundleLabel = bundleSource.label;
 
   // ─── 3.5 Preflight readiness ─────────────────────────────────────
   // Only meaningful when the user is running an agent by id against a
@@ -392,7 +397,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     const reportNote = reportSession
       ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
       : "";
-    process.stderr.write(`→ running ${path.basename(bundlePath)}${reportNote}\n`);
+    process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
   }
   try {
     const runner = new PiRunner({
@@ -855,11 +860,15 @@ async function maybeFetchRunConfig(
   });
 }
 
-async function resolveBundlePath(
+type BundleSource =
+  | { kind: "path"; path: string; label: string }
+  | { kind: "bytes"; bytes: Uint8Array; label: string };
+
+async function resolveBundleSource(
   target: ReturnType<typeof parseRunTarget>,
   opts: RunCommandOptions,
   resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
-): Promise<string> {
+): Promise<BundleSource> {
   if (target.kind === "path") {
     const abs = path.resolve(target.path);
     try {
@@ -867,7 +876,7 @@ async function resolveBundlePath(
     } catch {
       throw new Error(`Bundle not found: ${abs}`);
     }
-    return abs;
+    return { kind: "path", path: abs, label: path.basename(abs) };
   }
 
   // id mode — needs remote provider context so we have a bearer + appId
@@ -886,21 +895,12 @@ async function resolveBundlePath(
     orgId: resolverInputs.orgId,
     packageId: target.packageId,
     spec: target.spec,
-    noCache: opts.noCache,
-    onLog: (msg) => {
-      if (!opts.json && process.env.APPSTRATE_DEBUG === "1") {
-        process.stderr.write(`[debug] ${msg}\n`);
-      }
-    },
   });
+  const label = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
   if (!opts.json) {
-    process.stderr.write(
-      `→ ${fetched.fromCache ? "using cached" : "fetched"} bundle ${target.packageId}${
-        target.spec ? `@${target.spec}` : ""
-      }\n`,
-    );
+    process.stderr.write(`→ fetched bundle ${label}\n`);
   }
-  return fetched.path;
+  return { kind: "bytes", bytes: fetched.bytes, label };
 }
 
 // Re-export error types for the CLI's formatError pipeline.

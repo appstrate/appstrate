@@ -474,7 +474,7 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 
 Execute an agent locally via the same Pi runner the platform uses for cloud runs. Two argument forms:
 
-- **By package id** — `@scope/agent[@spec]`. The CLI calls `GET /api/agents/{scope}/{name}/bundle` on the pinned instance to download a deterministic `.afps-bundle`, caches it locally by integrity, and runs it.
+- **By package id** — `@scope/agent[@spec]`. The CLI calls `GET /api/agents/{scope}/{name}/bundle` on the pinned instance to download a deterministic `.afps-bundle`, verifies its SRI integrity in memory, and runs it. The bytes are never written to disk — every invocation re-fetches.
 - **By file path** — a local `.afps` or `.afps-bundle` file. No network roundtrip.
 
 ```sh
@@ -504,7 +504,6 @@ Run-config inheritance (model, proxy, agent config, version pin) is fetched from
 | `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                      |
 | `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                 |
 | `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                         |
-| `--no-cache`                 | Bypass the local bundle cache (id mode only).                                                                                                        |
 | `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                       |
 
 The full flag set is documented under `appstrate run --help`.
