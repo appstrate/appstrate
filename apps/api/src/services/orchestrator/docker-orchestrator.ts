@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
+import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import type { ContainerOrchestrator } from "./interface.ts";
 import type {
   WorkloadHandle,
@@ -116,7 +117,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     }
 
     // 2. Fallback: fresh creation (~500-1500ms)
-    const sidecarEnv: Record<string, string> = { PORT: "8080" };
+    // Operator-tunable sidecar caps are read from the API host's
+    // process.env and forwarded into the spawned container so
+    // overrides apply to fresh sidecars (pooled sidecars pick up the
+    // value at pool creation time — see sidecar-pool.ts).
+    const sidecarEnv: Record<string, string> = { PORT: "8080", ...pickOperatorSidecarEnv() };
     if (resolvedConfig.runToken) {
       sidecarEnv.RUN_TOKEN = resolvedConfig.runToken;
       sidecarEnv.PLATFORM_API_URL = resolvedConfig.platformApiUrl;

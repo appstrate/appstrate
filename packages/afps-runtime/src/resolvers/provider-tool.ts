@@ -31,11 +31,25 @@ export const defaultInlineLimit = 256 * 1024;
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
 
 /**
- * Hard upper bound on `{ fromFile }` request bodies. Mirrors
- * `MAX_SUBSTITUTE_BODY_SIZE` on the sidecar — checked client-side so
+ * Hard upper bound on `{ fromFile }` and `{ fromBytes }` request bodies.
+ * Mirrors `MAX_REQUEST_BODY_SIZE` on the sidecar — checked client-side so
  * over-sized uploads fail with a typed error instead of a 413.
+ *
+ * Default 10 MB. Configurable via the `SIDECAR_MAX_REQUEST_BODY_BYTES`
+ * env var, which is read by both the sidecar and the runtime so the two
+ * layers stay aligned. Override is rejected if non-positive or above
+ * 100 MB (the absolute ceiling).
  */
-export const MAX_REQUEST_BODY_SIZE = 5 * 1024 * 1024;
+export const MAX_REQUEST_BODY_SIZE = (() => {
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env?.SIDECAR_MAX_REQUEST_BODY_BYTES;
+  const fallback = 10 * 1024 * 1024;
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) return fallback;
+  if (parsed > 100 * 1024 * 1024) return fallback;
+  return parsed;
+})();
 
 /**
  * Above this size, `{ fromFile }` uploads are streamed from disk to
@@ -62,11 +76,29 @@ const fromFileBodySchema = z.object({
   fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),
 });
 
+/**
+ * Format a byte count for human-readable Zod descriptions. Picks the
+ * largest unit at which the value renders as a positive integer, so a
+ * 10 MB cap shows as "10 MB" rather than "10485760 bytes" and a sub-MB
+ * cap shows as e.g. "512 KB" rather than "0 MB".
+ */
+function formatByteCap(bytes: number): string {
+  if (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0) {
+    return `${bytes / (1024 * 1024)} MB`;
+  }
+  if (bytes >= 1024 && bytes % 1024 === 0) {
+    return `${bytes / 1024} KB`;
+  }
+  return `${bytes} bytes`;
+}
+
+const MAX_REQUEST_BODY_DISPLAY = formatByteCap(MAX_REQUEST_BODY_SIZE);
+
 const fromBytesBodySchema = z.object({
   fromBytes: z
     .string()
     .describe(
-      "Base64-encoded body bytes (for inline binary uploads up to 5 MB). " +
+      `Base64-encoded body bytes (for inline binary uploads up to ${MAX_REQUEST_BODY_DISPLAY}). ` +
         "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
         "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
     ),
@@ -150,7 +182,7 @@ export const providerCallRequestSchema = z.object({
     .optional()
     .describe(
       "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
-        "{ fromBytes, encoding: 'base64' } for inline binary payloads up to 5 MB (standard base64 RFC 4648 §4 only — alphabet `+/`, no URL-safe `-_` or MIME line-folding), " +
+        `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_DISPLAY} (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
         "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
     ),
   responseMode: responseModeSchema,
@@ -729,7 +761,7 @@ export type ResolvedRequestBody =
  * upstream.
  *
  * The total unencoded size of all parts is checked against
- * {@link MAX_REQUEST_BODY_SIZE} (5 MB). Attempting to exceed this limit
+ * {@link MAX_REQUEST_BODY_SIZE}. Attempting to exceed this limit
  * throws {@link ResolverError} `RESOLVER_BODY_TOO_LARGE`. For larger
  * uploads agents must use a single `{ fromFile }` body instead.
  *

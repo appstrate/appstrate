@@ -59,20 +59,11 @@ import {
   filterHeaders,
   isBlockedUrl,
   LLM_PROXY_TIMEOUT_MS,
+  MAX_MCP_ENVELOPE_SIZE,
+  MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  MAX_SUBSTITUTE_BODY_SIZE,
   PROVIDER_ID_RE,
 } from "./helpers.ts";
-
-/**
- * Hard upper bound on `provider_call` request bodies. Aliased here so
- * the limit name reads consistently with the `body.fromBytes` schema.
- * The text path (`body: <string>`) and the binary path
- * (`body: { fromBytes, encoding: "base64" }`) share the same ceiling
- * because both materialise into a buffered ArrayBuffer before
- * `executeProviderCall`.
- */
-const MAX_REQUEST_BODY_SIZE = MAX_SUBSTITUTE_BODY_SIZE;
 
 /**
  * Strict standard base64 decoder (RFC 4648 §4). Refuses URL-safe
@@ -105,14 +96,12 @@ import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.t
 const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
 
 /**
- * Hard cap on the JSON-RPC envelope a single `/mcp` request may carry.
- * The SDK's `WebStandardStreamableHTTPServerTransport.handlePostRequest`
- * calls `await req.json()` unconditionally, so without this guard a
- * misbehaving (or malicious) caller from inside the run network could
- * OOM the sidecar with a multi-GB envelope. 256 KB is generous for any
- * legitimate `tools/call` payload.
+ * Re-exported alias for the JSON-RPC envelope cap so call sites in this
+ * file read consistently. See {@link MAX_MCP_ENVELOPE_SIZE} for the
+ * canonical definition (and the `SIDECAR_MAX_MCP_ENVELOPE_BYTES` env
+ * override).
  */
-const MAX_MCP_REQUEST_BODY_SIZE = 256 * 1024;
+const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
 
 /**
  * Hostnames the agent uses to reach the sidecar. The Docker bridge
@@ -396,9 +385,24 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             content: [
               {
                 type: "text",
-                text: `provider_call: body.fromBytes exceeds ${MAX_REQUEST_BODY_SIZE} bytes (got ${decoded.byteLength}).`,
+                text:
+                  `provider_call: body.fromBytes is ${decoded.byteLength} bytes, ` +
+                  `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
+                  `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
+                  `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
+                  `the JSON-RPC envelope). Files larger than the cap must be split across ` +
+                  `multiple provider_call invocations.`,
               },
             ],
+            structuredContent: {
+              error: {
+                code: "PAYLOAD_TOO_LARGE",
+                scope: "request_body",
+                limit: MAX_REQUEST_BODY_SIZE,
+                actual: decoded.byteLength,
+                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+              },
+            },
             isError: true,
           };
         }
@@ -931,36 +935,39 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     const method = c.req.method.toUpperCase();
     let forwarded: Request = c.req.raw;
     if (method === "POST" || method === "PUT" || method === "PATCH") {
+      const envelopeOversizeError = (actual: number | null) => ({
+        jsonrpc: "2.0" as const,
+        error: {
+          code: -32600,
+          message:
+            actual !== null
+              ? `Request body exceeds ${MAX_MCP_REQUEST_BODY_SIZE} bytes (declared ${actual}).`
+              : `Request body exceeds ${MAX_MCP_REQUEST_BODY_SIZE} bytes.`,
+          data: {
+            reason: "PAYLOAD_TOO_LARGE",
+            scope: "mcp_envelope",
+            limit: MAX_MCP_REQUEST_BODY_SIZE,
+            ...(actual !== null ? { actual } : {}),
+            envVar: "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
+            hint:
+              "Raise the JSON-RPC envelope cap via SIDECAR_MAX_MCP_ENVELOPE_BYTES " +
+              "(remember base64 inflation: ~1.37×). Per-call body size is also bounded " +
+              "by SIDECAR_MAX_REQUEST_BODY_BYTES; both caps must be raised together for " +
+              "larger uploads.",
+          },
+        },
+        id: null,
+      });
       const declared = c.req.header("content-length");
       if (declared !== undefined) {
         const declaredLength = Number(declared);
         if (Number.isFinite(declaredLength) && declaredLength > MAX_MCP_REQUEST_BODY_SIZE) {
-          return c.json(
-            {
-              jsonrpc: "2.0",
-              error: {
-                code: -32600,
-                message: `Request body exceeds ${MAX_MCP_REQUEST_BODY_SIZE} bytes (declared ${declaredLength}).`,
-              },
-              id: null,
-            },
-            413,
-          );
+          return c.json(envelopeOversizeError(declaredLength), 413);
         }
       }
       const bodyBytes = await readRequestBodyBounded(c.req.raw, MAX_MCP_REQUEST_BODY_SIZE);
       if (bodyBytes === "exceeded") {
-        return c.json(
-          {
-            jsonrpc: "2.0",
-            error: {
-              code: -32600,
-              message: `Request body exceeds ${MAX_MCP_REQUEST_BODY_SIZE} bytes.`,
-            },
-            id: null,
-          },
-          413,
-        );
+        return c.json(envelopeOversizeError(null), 413);
       }
       // Reconstruct a Request the SDK can read once. The SDK clones the
       // Request internally on its first read, so a single rebuild here

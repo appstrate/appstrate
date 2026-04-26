@@ -24,8 +24,11 @@ export {
 
 export {
   buildRuntimePiEnv,
+  pickOperatorSidecarEnv,
+  SIDECAR_OPERATOR_ENV_KEYS,
   type RuntimePiEnvOptions,
   type RuntimePiModelConfig,
+  type SidecarOperatorEnvKey,
 } from "./container-env.ts";
 
 export {

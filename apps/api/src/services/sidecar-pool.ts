@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
+import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import { logger } from "../lib/logger.ts";
 import {
   createContainer,
@@ -198,9 +199,13 @@ export async function startSidecarAndHealthCheck(containerId: string): Promise<n
 /** Create a single pooled sidecar container. */
 async function createPooledSidecar(): Promise<PooledSidecar> {
   const configSecret = crypto.randomUUID();
+  // Operator-tunable sidecar caps are forwarded from the API host so
+  // pooled sidecars enforce the same limits as freshly-spawned ones.
+  // The values are frozen at module load inside the sidecar, so an env
+  // change on the API host requires recycling the pool to take effect.
   const containerId = await createContainer(
     crypto.randomUUID().slice(0, 8),
-    { PORT: "8080", CONFIG_SECRET: configSecret },
+    { PORT: "8080", CONFIG_SECRET: configSecret, ...pickOperatorSidecarEnv() },
     {
       image: getSidecarImage(),
       adapterName: "sidecar-pool",

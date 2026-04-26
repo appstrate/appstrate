@@ -13,6 +13,7 @@ import { describe, it, expect, mock } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createApp, type AppDeps } from "../app.ts";
+import { MAX_MCP_ENVELOPE_SIZE, MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
@@ -527,6 +528,49 @@ describe("POST /mcp — provider_call binary body via { fromBytes }", () => {
     expect(result.content[0]!.text).toContain("not standard base64");
   });
 
+  it("rejects body { fromBytes } over the per-request cap with structured error", async () => {
+    // Build a payload just past MAX_REQUEST_BODY_SIZE. Use a small
+    // overage so the test stays cheap; the inflated base64 must still
+    // fit the MCP envelope cap (which is sized to accommodate this).
+    const oversizeBytes = MAX_REQUEST_BODY_SIZE + 1024;
+    const payload = Buffer.alloc(oversizeBytes, 0x42); // arbitrary filler
+    const base64 = payload.toString("base64");
+    const app = createApp(makeProviderDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/upload",
+          method: "POST",
+          body: { fromBytes: base64, encoding: "base64" },
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as {
+      content: Array<{ text: string }>;
+      structuredContent?: {
+        error?: {
+          code?: string;
+          scope?: string;
+          limit?: number;
+          actual?: number;
+          envVar?: string;
+        };
+      };
+      isError?: boolean;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("exceeds the per-request limit");
+    expect(result.structuredContent?.error?.code).toBe("PAYLOAD_TOO_LARGE");
+    expect(result.structuredContent?.error?.scope).toBe("request_body");
+    expect(result.structuredContent?.error?.limit).toBe(MAX_REQUEST_BODY_SIZE);
+    expect(result.structuredContent?.error?.actual).toBe(oversizeBytes);
+    expect(result.structuredContent?.error?.envVar).toBe("SIDECAR_MAX_REQUEST_BODY_BYTES");
+  });
+
   it("rejects substituteBody: true when body is { fromBytes }", async () => {
     const app = createApp(makeProviderDeps());
     const res = await rpc(app, {
@@ -669,21 +713,41 @@ describe("POST /mcp — request body size cap", () => {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
-        "Content-Length": String(10 * 1024 * 1024),
+        "Content-Length": String(MAX_MCP_ENVELOPE_SIZE + 1),
         Host: "localhost",
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(413);
-    const json = (await res.json()) as { error: { message: string } };
+    const json = (await res.json()) as {
+      error: {
+        message: string;
+        data?: {
+          reason?: string;
+          scope?: string;
+          limit?: number;
+          actual?: number;
+          envVar?: string;
+          hint?: string;
+        };
+      };
+    };
     expect(json.error.message).toContain("exceeds");
+    // Structured error payload — agents can act on these fields without
+    // parsing the prose `message`.
+    expect(json.error.data?.reason).toBe("PAYLOAD_TOO_LARGE");
+    expect(json.error.data?.scope).toBe("mcp_envelope");
+    expect(json.error.data?.limit).toBe(MAX_MCP_ENVELOPE_SIZE);
+    expect(json.error.data?.actual).toBe(MAX_MCP_ENVELOPE_SIZE + 1);
+    expect(json.error.data?.envVar).toBe("SIDECAR_MAX_MCP_ENVELOPE_BYTES");
+    expect(json.error.data?.hint).toContain("base64");
   });
 
   it("rejects requests whose streamed body exceeds the cap", async () => {
     const app = createApp(makeDeps());
     // Build an oversized body without a declared Content-Length so the
-    // streaming path is exercised.
-    const giant = "x".repeat(300 * 1024); // 300 KB > 256 KB cap
+    // streaming path is exercised. Pad just past the envelope cap.
+    const giant = "x".repeat(MAX_MCP_ENVELOPE_SIZE + 1024);
     const body = JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -700,6 +764,11 @@ describe("POST /mcp — request body size cap", () => {
       body,
     });
     expect(res.status).toBe(413);
+    const json = (await res.json()) as {
+      error: { data?: { scope?: string; limit?: number } };
+    };
+    expect(json.error.data?.scope).toBe("mcp_envelope");
+    expect(json.error.data?.limit).toBe(MAX_MCP_ENVELOPE_SIZE);
   });
 
   it("accepts a small request just under the cap", async () => {

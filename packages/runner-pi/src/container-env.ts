@@ -147,5 +147,48 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.TRACEPARENT = opts.traceparent;
   }
 
+  // Forward operator-tunable sidecar caps so the agent container's
+  // runtime-side mirror (afps-runtime/.../provider-tool.ts) agrees with
+  // the sidecar on what counts as "too large" — otherwise large uploads
+  // would fail with a 413 from the sidecar instead of a typed
+  // RESOLVER_BODY_TOO_LARGE caught client-side. Only the request-body
+  // cap is forwarded; the envelope cap is sidecar-internal and the
+  // runtime never builds JSON-RPC envelopes itself.
+  Object.assign(env, pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES"]));
+
   return env;
+}
+
+/**
+ * Operator-tunable env vars that the API host forwards from its own
+ * `process.env` into spawned sidecar / agent containers. Sidecar-side
+ * defaults live in `runtime-pi/sidecar/helpers.ts`; absent keys mean
+ * "use the compiled default".
+ */
+export const SIDECAR_OPERATOR_ENV_KEYS = [
+  "SIDECAR_MAX_REQUEST_BODY_BYTES",
+  "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
+] as const;
+
+export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
+
+/**
+ * Read the operator-tunable env vars from the host's `process.env` and
+ * return a record suitable for spreading into a container env. Empty
+ * and undefined values are omitted so the container falls back to the
+ * compiled defaults rather than seeing an empty string (which would
+ * fail `readPositiveByteEnv` validation and crash the sidecar at boot).
+ *
+ * Restrict the returned set with `keys` when only a subset is relevant
+ * (e.g. the agent container only needs the request-body cap).
+ */
+export function pickOperatorSidecarEnv(
+  keys: readonly SidecarOperatorEnvKey[] = SIDECAR_OPERATOR_ENV_KEYS,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value !== undefined && value !== "") out[key] = value;
+  }
+  return out;
 }

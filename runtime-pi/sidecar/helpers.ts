@@ -26,6 +26,69 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
 
+/** Absolute hard-cap for any body-size env override. Above this, raising
+ *  the limit requires real engineering (streaming refactor, chunked
+ *  uploads) rather than a config knob. */
+export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
+
+/**
+ * Resolve a positive-integer byte cap from an env var, falling back to
+ * `defaultValue` when unset/empty. Throws on malformed values or values
+ * above {@link ABSOLUTE_BODY_CEILING} so misconfiguration fails loud at
+ * sidecar boot rather than silently masking the problem at runtime.
+ *
+ * Exported for tests and for the runtime-side mirror in
+ * `packages/afps-runtime/src/resolvers/provider-tool.ts`.
+ */
+export function readPositiveByteEnv(
+  name: string,
+  defaultValue: number,
+  ceiling = ABSOLUTE_BODY_CEILING,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer (bytes), got ${JSON.stringify(raw)}.`);
+  }
+  if (parsed > ceiling) {
+    throw new Error(
+      `${name}=${parsed} exceeds the absolute ceiling of ${ceiling} bytes. ` +
+        `Caps above this require code changes (memory pressure on the sidecar).`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Hard upper bound on `provider_call` request bodies after base64 decode
+ * (binary path) or string materialization (text path). Configurable via
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES`. Default 10 MB.
+ *
+ * Note: the effective user-facing limit is also bounded by
+ * {@link MAX_MCP_ENVELOPE_SIZE} since base64 inflation (~1.37×) plus
+ * JSON-RPC overhead must fit in the MCP envelope.
+ */
+export const MAX_REQUEST_BODY_SIZE = readPositiveByteEnv(
+  "SIDECAR_MAX_REQUEST_BODY_BYTES",
+  10 * 1024 * 1024,
+);
+
+/**
+ * Hard cap on the JSON-RPC envelope a single `/mcp` request may carry.
+ * The SDK's `WebStandardStreamableHTTPServerTransport.handlePostRequest`
+ * calls `await req.json()` unconditionally, so without this guard a
+ * misbehaving caller from inside the run network could OOM the sidecar
+ * with a multi-GB envelope. Configurable via
+ * `SIDECAR_MAX_MCP_ENVELOPE_BYTES`. Default 16 MB — sized to fit a
+ * base64-encoded {@link MAX_REQUEST_BODY_SIZE} (10 MB × ~1.37) plus
+ * JSON-RPC overhead.
+ */
+export const MAX_MCP_ENVELOPE_SIZE = readPositiveByteEnv(
+  "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
+  16 * 1024 * 1024,
+);
+
 /**
  * Below this size, request bodies are buffered in memory so that the
  * 401-refresh-and-retry-once path can replay them with rotated
