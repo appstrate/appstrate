@@ -119,6 +119,20 @@ COPY --from=build /app/apps/web/dist ./apps/web/dist
 # Create mount points for runtime volumes (data + storage)
 RUN mkdir -p data storage && chown -R bun:bun data storage
 
+# `@appstrate/core/tool-bundler` writes scratch builds to
+# `node_modules/.cache/afps-bundler/` so Bun.build resolves
+# bare-specifier imports (ajv, zod, …) against the caller's dep
+# graph. Default permissions on COPYed node_modules belong to root,
+# so the unprivileged `bun` user can't mkdir there. Pre-create the
+# `.cache` dir owned by `bun` for every workspace whose
+# node_modules tree is on the runtime image.
+RUN for ws in packages/core packages/connect packages/db packages/env \
+              packages/shared-types packages/afps-runtime packages/runner-pi \
+              apps/api; do \
+      mkdir -p /app/$ws/node_modules/.cache; \
+    done \
+ && chown -R bun:bun /app/packages /app/apps/api/node_modules
+
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
 COPY --from=build /app/system-packages ./system-packages
