@@ -21,7 +21,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
+import { seedApiKey, seedConnectionProfile } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -180,6 +180,101 @@ describe("Me API (/api/me)", () => {
       for (const m of body.data) {
         expect(m.apiKey).toBeUndefined();
       }
+    });
+  });
+
+  describe("GET/PUT/DELETE /api/me/application-profile", () => {
+    it("returns null when no sticky is set", async () => {
+      const ctx = await createTestContext({ orgSlug: "appprof" });
+      const res = await app.request("/api/me/application-profile", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { profileId: string | null };
+      expect(body.profileId).toBeNull();
+    });
+
+    it("PUT pins a profile owned by the caller and round-trips on GET", async () => {
+      const ctx = await createTestContext({ orgSlug: "appprof" });
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Work",
+        isDefault: false,
+      });
+
+      const putRes = await app.request("/api/me/application-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: profile.id }),
+      });
+      expect(putRes.status).toBe(200);
+
+      const getRes = await app.request("/api/me/application-profile", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await getRes.json()) as { profileId: string | null };
+      expect(body.profileId).toBe(profile.id);
+    });
+
+    it("PUT accepts an app profile of the same application", async () => {
+      const ctx = await createTestContext({ orgSlug: "appprof" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
+        isDefault: false,
+      });
+      const res = await app.request("/api/me/application-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: appProfile.id }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("PUT 400 when the profile is owned by another user", async () => {
+      const ctx = await createTestContext({ orgSlug: "appprof" });
+      const otherUser = await createTestUser();
+      const otherProfile = await seedConnectionProfile({
+        userId: otherUser.id,
+        name: "Not Mine",
+        isDefault: false,
+      });
+      const res = await app.request("/api/me/application-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: otherProfile.id }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("DELETE clears the sticky and is idempotent on absence", async () => {
+      const ctx = await createTestContext({ orgSlug: "appprof" });
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Temp",
+        isDefault: false,
+      });
+      await app.request("/api/me/application-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: profile.id }),
+      });
+      const del1 = await app.request("/api/me/application-profile", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del1.status).toBe(204);
+      const del2 = await app.request("/api/me/application-profile", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del2.status).toBe(204);
+
+      const getRes = await app.request("/api/me/application-profile", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await getRes.json()) as { profileId: string | null };
+      expect(body.profileId).toBeNull();
     });
   });
 });

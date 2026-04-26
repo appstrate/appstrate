@@ -9,6 +9,7 @@ import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
   userAgentProviderProfiles,
+  userApplicationProfiles,
   userProviderConnections,
   appProfileProviderBindings,
   organizationMembers,
@@ -478,6 +479,87 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
     .where(eq(connectionProfiles.id, profileId))
     .limit(1);
   return row ?? null;
+}
+
+// ─── Per-(member, application) sticky default profile ────────
+
+/**
+ * Get the member's pinned default connection profile for an application,
+ * if any. Returns `null` when no sticky is set — the caller's cascade
+ * should fall through to the application default.
+ */
+export async function getMemberApplicationProfileId(
+  userId: string,
+  applicationId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ profileId: userApplicationProfiles.profileId })
+    .from(userApplicationProfiles)
+    .where(
+      and(
+        eq(userApplicationProfiles.userId, userId),
+        eq(userApplicationProfiles.applicationId, applicationId),
+      ),
+    )
+    .limit(1);
+  return row?.profileId ?? null;
+}
+
+/**
+ * Pin a connection profile as the member's default for the given
+ * application. The profile must be one of:
+ *   - a member-owned profile (`connection_profiles.user_id = userId`)
+ *   - an app profile of the same application
+ * Anything else is rejected with `invalidRequest` to prevent a member
+ * from pinning another member's or another app's profile as their own
+ * sticky.
+ */
+export async function setMemberApplicationProfileId(
+  userId: string,
+  applicationId: string,
+  profileId: string,
+): Promise<void> {
+  const [row] = await db
+    .select({
+      userId: connectionProfiles.userId,
+      applicationId: connectionProfiles.applicationId,
+    })
+    .from(connectionProfiles)
+    .where(eq(connectionProfiles.id, profileId))
+    .limit(1);
+  if (!row) {
+    throw notFound("profile");
+  }
+  const ownsAsMember = row.userId === userId;
+  const ownsAsAppProfile = row.applicationId === applicationId;
+  if (!ownsAsMember && !ownsAsAppProfile) {
+    throw invalidRequest("Profile is not owned by the caller and not an app profile of this app");
+  }
+  await db
+    .insert(userApplicationProfiles)
+    .values({ userId, applicationId, profileId })
+    .onConflictDoUpdate({
+      target: [userApplicationProfiles.userId, userApplicationProfiles.applicationId],
+      set: { profileId, updatedAt: new Date() },
+    });
+}
+
+/**
+ * Clear the member's per-app sticky. Idempotent — succeeds even when no
+ * row exists. The cascade then falls through to the app default.
+ */
+export async function clearMemberApplicationProfile(
+  userId: string,
+  applicationId: string,
+): Promise<void> {
+  await db
+    .delete(userApplicationProfiles)
+    .where(
+      and(
+        eq(userApplicationProfiles.userId, userId),
+        eq(userApplicationProfiles.applicationId, applicationId),
+      ),
+    );
 }
 
 // ─── Schedule Profile Resolution ────────────────────────────

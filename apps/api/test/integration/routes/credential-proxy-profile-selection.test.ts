@@ -18,6 +18,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedConnectionProfile } from "../../helpers/seed.ts";
 import { resolveProfileId } from "../../../src/routes/credential-proxy.ts";
+import { setMemberApplicationProfileId } from "../../../src/services/connection-profiles.ts";
 
 describe("credential-proxy resolveProfileId — explicit profile selection", () => {
   let ctx: TestContext;
@@ -91,5 +92,60 @@ describe("credential-proxy resolveProfileId — explicit profile selection", () 
       userId: ctx.user.id,
     });
     expect(resolved).toBe(userDefault.id);
+  });
+
+  it("returns the per-(member, app) sticky over the app default", async () => {
+    // Seed both an app default and a member sticky → sticky must win.
+    await seedConnectionProfile({
+      applicationId: ctx.defaultAppId,
+      name: "App Default",
+      isDefault: true,
+    });
+    const memberPick = await seedConnectionProfile({
+      userId: ctx.user.id,
+      name: "Work",
+      isDefault: false,
+    });
+    await setMemberApplicationProfileId(ctx.user.id, ctx.defaultAppId, memberPick.id);
+
+    const resolved = await resolveProfileId({
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+    });
+    expect(resolved).toBe(memberPick.id);
+  });
+
+  it("falls back to the app default when no sticky is set", async () => {
+    const appDefault = await seedConnectionProfile({
+      applicationId: ctx.defaultAppId,
+      name: "App Default",
+      isDefault: true,
+    });
+    const resolved = await resolveProfileId({
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+    });
+    expect(resolved).toBe(appDefault.id);
+  });
+
+  it("explicit per-run override beats the sticky", async () => {
+    const sticky = await seedConnectionProfile({
+      userId: ctx.user.id,
+      name: "Sticky",
+      isDefault: false,
+    });
+    const oneOff = await seedConnectionProfile({
+      userId: ctx.user.id,
+      name: "One-off",
+      isDefault: false,
+    });
+    await setMemberApplicationProfileId(ctx.user.id, ctx.defaultAppId, sticky.id);
+
+    const resolved = await resolveProfileId({
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      explicitProfileId: oneOff.id,
+    });
+    expect(resolved).toBe(oneOff.id);
   });
 });

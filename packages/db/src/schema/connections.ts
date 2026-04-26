@@ -87,6 +87,33 @@ export const userAgentProviderProfiles = pgTable(
   ],
 );
 
+// Per-(member, application) sticky default connection profile.
+// Cascade in `resolveProfileId`: explicit override → end-user default →
+// THIS sticky → app default → user org-level default.
+// Absence of a row = no sticky; clearing the sticky deletes the row.
+// End-users have their own auto-created default on `connection_profiles`
+// itself, so this table is member-only.
+export const userApplicationProfiles = pgTable(
+  "user_application_profiles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.applicationId] }),
+    index("idx_uap_application_id").on(table.applicationId),
+    index("idx_uap_profile_id").on(table.profileId),
+  ],
+);
+
 // ─── App profile provider bindings (delegation: app profile → user profile) ──
 export const appProfileProviderBindings = pgTable(
   "app_profile_provider_bindings",

@@ -268,6 +268,9 @@ const expectedEndpoints = [
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
   "GET /api/me/models",
+  "GET /api/me/application-profile",
+  "PUT /api/me/application-profile",
+  "DELETE /api/me/application-profile",
 
   // Invitations
   "GET /invite/{token}/info",

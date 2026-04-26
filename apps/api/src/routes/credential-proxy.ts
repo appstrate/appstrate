@@ -43,7 +43,7 @@ const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionProfiles } from "@appstrate/db/schema";
+import { connectionProfiles, userApplicationProfiles } from "@appstrate/db/schema";
 import { filterHeaders } from "@appstrate/connect/proxy-primitives";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -129,6 +129,23 @@ export async function resolveProfileId(args: {
       )
       .limit(1);
     return rows[0]?.id ?? null;
+  }
+  // Member's per-(user, app) sticky default — set via the dashboard
+  // preferences page (or `appstrate connections profile switch` once the
+  // CLI is server-aligned). Wins over the app's shared default but loses
+  // to an explicit per-run override above.
+  if (args.userId) {
+    const stickyRows = await db
+      .select({ id: userApplicationProfiles.profileId })
+      .from(userApplicationProfiles)
+      .where(
+        and(
+          eq(userApplicationProfiles.userId, args.userId),
+          eq(userApplicationProfiles.applicationId, args.applicationId),
+        ),
+      )
+      .limit(1);
+    if (stickyRows[0]) return stickyRows[0].id;
   }
   const appRows = await db
     .select({ id: connectionProfiles.id })
