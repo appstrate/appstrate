@@ -42,6 +42,20 @@ export interface RemoteAppstrateProviderResolverOptions {
    * rollup. Header names are forwarded verbatim; values must be strings.
    */
   extraHeaders?: Record<string, string>;
+  /**
+   * Default connection profile UUID applied to every provider call as
+   * `X-Connection-Profile-Id`. Per-provider overrides
+   * ({@link providerProfileOverrides}) take precedence on a per-call basis.
+   * Both fall back to the platform's implicit-default chain when unset.
+   */
+  connectionProfileId?: string;
+  /**
+   * Per-provider profile id overrides — `{ "@afps/gmail": "<uuid>" }`.
+   * The override wins over {@link connectionProfileId} for that single
+   * provider's `X-Connection-Profile-Id` header. Keys are scoped
+   * provider ids (`@scope/name`).
+   */
+  providerProfileOverrides?: Record<string, string>;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -66,6 +80,8 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
   private readonly extraHeaders: Record<string, string>;
+  private readonly connectionProfileId: string | undefined;
+  private readonly providerProfileOverrides: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: RemoteAppstrateProviderResolverOptions) {
@@ -79,6 +95,8 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
     this.extraHeaders = opts.extraHeaders ?? {};
+    this.connectionProfileId = opts.connectionProfileId;
+    this.providerProfileOverrides = opts.providerProfileOverrides ?? {};
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
@@ -113,6 +131,9 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       // Clone the base headers before the first applyTransportHeaders call
       // so we can re-apply fresh transport headers for the retry path with
       // the retry body's actual size — avoiding stale Content-Length values.
+      // Per-provider override wins over the resolver-level default —
+      // matches the platform's `userAgentProviderProfiles` semantics.
+      const profileForCall = this.providerProfileOverrides[ref.name] ?? this.connectionProfileId;
       const baseHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-App-Id": this.appId,
@@ -121,6 +142,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
         "X-Provider": ref.name,
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
+        ...(profileForCall ? { "X-Connection-Profile-Id": profileForCall } : {}),
         ...this.extraHeaders,
         ...(req.headers ?? {}),
       };

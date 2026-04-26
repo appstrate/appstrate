@@ -71,6 +71,11 @@ import {
   RunConfigFetchError,
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
+import {
+  parseProviderProfileOverrides,
+  resolveConnectionProfileSelection,
+  ConnectionProfileResolutionError,
+} from "./run/connection-profiles.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -118,6 +123,20 @@ export interface RunCommandOptions {
    * must not drift the run.
    */
   noInherit?: boolean;
+  /**
+   * Connection profile id or name. Used as `X-Connection-Profile-Id`
+   * on every credential-proxy call. Falls back to the sticky default
+   * pinned via `appstrate connections profile switch`, then to the
+   * platform's implicit-default chain.
+   */
+  connectionProfile?: string;
+  /**
+   * Per-provider profile overrides — `["@scope/provider=uuid", ...]`.
+   * Each entry is split on `=`; the resolver applies the override only
+   * for that provider's calls, falling back to the default profile for
+   * everything else. Mirrors the dashboard's per-agent override surface.
+   */
+  providerProfile?: string[];
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -142,6 +161,26 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // Build provider resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
   const resolverInputs = await buildResolverInputs(mode, opts);
+
+  // ─── 1b. Connection profile + per-provider overrides ─────────────
+  // Apply the explicit `--connection-profile` flag (or the sticky
+  // default pinned by `appstrate connections profile switch`) and
+  // any `--provider-profile <p>=<ref>` overrides. Names need an API
+  // round-trip; UUIDs pass through verbatim. No-op when not in remote
+  // mode — local/none resolvers don't speak to the credential proxy.
+  const connectionSelection = await resolveConnectionProfileForRun(resolverInputs, opts);
+  const resolverInputsWithProfiles =
+    resolverInputs && "bearerToken" in resolverInputs && connectionSelection
+      ? {
+          ...resolverInputs,
+          ...(connectionSelection.connectionProfileId
+            ? { connectionProfileId: connectionSelection.connectionProfileId }
+            : {}),
+          ...(Object.keys(connectionSelection.providerProfileOverrides).length > 0
+            ? { providerProfileOverrides: connectionSelection.providerProfileOverrides }
+            : {}),
+        }
+      : resolverInputs;
 
   // ─── 1a. Inherited run-config ────────────────────────────────────
   // When the user runs an agent by id with a remote provider context,
@@ -190,9 +229,9 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // ─── 3b. Build the ProviderResolver ────────────────────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
   const effectiveResolverInputs =
-    resolverInputs && reportSession
-      ? appendResolverHeaders(resolverInputs, reportSession.proxyHeaders)
-      : resolverInputs;
+    resolverInputsWithProfiles && reportSession
+      ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
+      : resolverInputsWithProfiles;
   const providerResolver = buildResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input + config ───────────────────────────────────────
@@ -644,6 +683,44 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
 }
 
 /**
+ * Resolve `--connection-profile` + `--provider-profile` flags into the
+ * concrete ids the resolver forwards as `X-Connection-Profile-Id`. The
+ * sticky default (`Profile.connectionProfileId`) acts as the fallback
+ * when the user did not pass `--connection-profile`. No-op when the
+ * provider mode has no remote handle (`local`, `none`).
+ */
+async function resolveConnectionProfileForRun(
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  opts: RunCommandOptions,
+): Promise<{
+  connectionProfileId: string | undefined;
+  providerProfileOverrides: Record<string, string>;
+} | null> {
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) return null;
+
+  const perProvider = parseProviderProfileOverrides(opts.providerProfile);
+  // No flags + no sticky → nothing to do, no need to load profiles.
+  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  const pinnedId = resolved?.profile?.connectionProfileId;
+  if (!opts.connectionProfile && !pinnedId && perProvider.length === 0) {
+    return { connectionProfileId: undefined, providerProfileOverrides: {} };
+  }
+
+  if (!resolved) {
+    throw new ConnectionProfileResolutionError(
+      "--connection-profile / --provider-profile require an active CLI profile",
+      "Run `appstrate login`, or pass --profile.",
+    );
+  }
+  return resolveConnectionProfileSelection({
+    profileName: resolved.profileName,
+    flagRef: opts.connectionProfile,
+    pinnedId,
+    perProvider,
+  });
+}
+
+/**
  * Pull the resolved run-config from the pinned instance when running an
  * agent by id with a remote provider context. Returns a zeroed
  * inheritance record when the call cannot or should not be made — the
@@ -743,6 +820,7 @@ export {
   PackageSpecError,
   BundleFetchError,
   RunConfigFetchError,
+  ConnectionProfileResolutionError,
 };
 
 /**

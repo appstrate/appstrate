@@ -44,6 +44,13 @@ import {
   appCurrentCommand,
   appCreateCommand,
 } from "./commands/app.ts";
+import {
+  connectionsListCommand,
+  connectionsProfileListCommand,
+  connectionsProfileCurrentCommand,
+  connectionsProfileSwitchCommand,
+  connectionsProfileCreateCommand,
+} from "./commands/connections.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -380,6 +387,66 @@ appGroup
     });
   });
 
+// ─── `appstrate connections …` — manage connection profiles + view live connections ────
+
+const connectionsGroup = program
+  .command("connections")
+  .description("Manage connection profiles and inspect existing OAuth/API-key connections");
+
+connectionsGroup
+  .command("list")
+  .description("List active OAuth/API-key connections for the active profile")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsListCommand({ profile: globalOpts.profile });
+  });
+
+const connectionsProfileGroup = connectionsGroup
+  .command("profile")
+  .description("Manage connection profiles (sticky default + pickers)");
+
+connectionsProfileGroup
+  .command("list")
+  .description("List connection profiles owned by the active user")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileListCommand({ profile: globalOpts.profile });
+  });
+
+connectionsProfileGroup
+  .command("current")
+  .description("Print the pinned connection profile id, or exit 1 if none is pinned")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileCurrentCommand({ profile: globalOpts.profile });
+  });
+
+connectionsProfileGroup
+  .command("switch [ref]")
+  .description(
+    "Re-pin the active connection profile (sticky default for `appstrate run`). With no argument, show an interactive picker.",
+  )
+  .action(async (ref: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileSwitchCommand({
+      profile: globalOpts.profile,
+      ref: typeof ref === "string" ? ref : undefined,
+    });
+  });
+
+connectionsProfileGroup
+  .command("create [name]")
+  .description(
+    "Create a new connection profile (and pin it on the CLI profile). With no argument, prompt interactively.",
+  )
+  .action(async (name: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileCreateCommand({
+      profile: globalOpts.profile,
+      name: typeof name === "string" ? name : undefined,
+    });
+  });
+
 // ─── `appstrate models …` — discover model presets on the instance ────
 
 const modelsGroup = program
@@ -711,6 +778,17 @@ program
     "--no-inherit",
     "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
+  .option(
+    "--connection-profile <id|name>",
+    "Connection profile to use for credential-proxy calls (overrides the sticky default pinned via `appstrate connections profile switch`)",
+  )
+  .option("--cp <id|name>", "Alias for --connection-profile")
+  .option(
+    "--provider-profile <kv>",
+    "Per-provider profile override 'providerId=<id|name>' (repeatable)",
+    collect,
+    [],
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -742,6 +820,15 @@ program
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.
       noInherit: opts.inherit === false,
+      // `--cp` is an alias — fall back to it when `--connection-profile`
+      // is not set.
+      connectionProfile:
+        typeof opts.connectionProfile === "string"
+          ? opts.connectionProfile
+          : typeof opts.cp === "string"
+            ? opts.cp
+            : undefined,
+      providerProfile: Array.isArray(opts.providerProfile) ? opts.providerProfile : undefined,
     });
   });
 
