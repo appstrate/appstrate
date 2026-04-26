@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified persistence hooks (ADR-011) — checkpoints + memories.
+ * Unified persistence hooks (ADR-011 + ADR-013) — pinned slots + memories.
  *
  * Reads go through `GET /agents/:id/persistence` with `kind` and optional
  * `runId` filters. The same `usePersistenceQuery` factor backs every read
  * hook so cache keys, scope-filter logic, and `enabled` semantics stay in
  * one place.
+ *
+ * "Pinned slot" = any non-null `key` in `package_persistence`. Includes the
+ * legacy carry-over slot (`key="checkpoint"`) plus Letta-style named blocks
+ * written by `pin({ key, content })`.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  AgentCheckpointItem,
   AgentMemoryItem,
+  AgentPinnedSlotItem,
   PersistenceActorType,
 } from "@appstrate/shared-types";
 import { api } from "../api";
@@ -27,7 +31,7 @@ type ServerMemory = Omit<AgentMemoryItem, "actorType" | "actorId"> & {
 };
 
 interface PersistenceResponse {
-  checkpoints?: AgentCheckpointItem[];
+  pinned?: AgentPinnedSlotItem[];
   memories?: ServerMemory[];
 }
 
@@ -93,31 +97,38 @@ export function useRunMemories(packageId: string | undefined, runId: string | un
 }
 
 /**
- * Checkpoints for an agent.
+ * Pinned slots for an agent (any non-null `key`).
  *
- * Admins see every actor's checkpoint when no scope filter is applied;
- * members see their own actor + shared. The `filter` is then applied
- * client-side identically to memories.
+ * Admins see every actor's slot when no scope filter is applied; members see
+ * their own actor + shared. The `filter` is then applied client-side
+ * identically to memories.
  */
-export function useAgentCheckpoints(
+export function useAgentPinned(
   packageId: string | undefined,
   filter: PersistenceScopeFilter = "all",
 ) {
+  return usePersistenceQuery(packageId, `agent-pinned:${filter}`, { kind: "pinned" }, (res) =>
+    applyScopeFilter(res.pinned ?? [], filter),
+  );
+}
+
+/** Pinned slots written during a specific run. */
+export function useRunPinned(packageId: string | undefined, runId: string | undefined) {
   return usePersistenceQuery(
     packageId,
-    `agent-checkpoints:${filter}`,
-    { kind: "checkpoint" },
-    (res) => applyScopeFilter(res.checkpoints ?? [], filter),
+    `run-pinned:${runId ?? ""}`,
+    { kind: "pinned", runId },
+    (res) => res.pinned ?? [],
   );
 }
 
 // --- Mutations -------------------------------------------------------------
 
-export function useDeleteCheckpoint(packageId: string) {
+export function useDeletePinnedSlot(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (checkpointId: number) => {
-      return api(`/agents/${packageId}/persistence/checkpoints/${checkpointId}`, {
+    mutationFn: async (slotId: number) => {
+      return api(`/agents/${packageId}/persistence/pinned/${slotId}`, {
         method: "DELETE",
       });
     },

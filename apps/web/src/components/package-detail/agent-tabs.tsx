@@ -5,17 +5,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
-import {
-  useAgentCheckpoints,
-  useAgentMemories,
-  useDeleteCheckpoint,
-} from "../../hooks/use-persistence";
-import { ScopeFilter, type PersistenceScopeFilter } from "../persistence/scope-filter";
-import { MemoryRow } from "../persistence/memory-row";
-import { CheckpointCard } from "../persistence/checkpoint-card";
+import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
-import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useAgentReadiness } from "../../hooks/use-agent-readiness";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
@@ -24,7 +16,7 @@ import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
-import { Ban, BrainCircuit, CalendarClock, Play } from "lucide-react";
+import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
 
 export function AgentRunsTab({
@@ -109,72 +101,8 @@ export function AgentConnectorsTab({
   return <AgentProvidersSection packageId={packageId} detail={detail} />;
 }
 
-export function AgentMemoriesTab({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const [scopeFilter, setScopeFilter] = useState<PersistenceScopeFilter>("all");
-  const { data: memories } = useAgentMemories(packageId, scopeFilter);
-  const deleteMemory = useDeleteMemory(packageId);
-
-  return (
-    <>
-      <div className="mb-3">
-        <ScopeFilter value={scopeFilter} onChange={setScopeFilter} />
-      </div>
-      {!memories || memories.length === 0 ? (
-        <EmptyState
-          message={t("detail.emptyMemories")}
-          hint={t("detail.emptyMemoriesHint")}
-          icon={BrainCircuit}
-          compact
-        />
-      ) : (
-        <div className="space-y-1">
-          {memories.map((mem) => (
-            <MemoryRow
-              key={mem.id}
-              memory={mem}
-              onDelete={(id) => deleteMemory.mutate(id)}
-              isDeleting={deleteMemory.isPending}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-export function AgentCheckpointsTab({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "common"]);
-  const [scopeFilter, setScopeFilter] = useState<PersistenceScopeFilter>("all");
-  const { data: checkpoints } = useAgentCheckpoints(packageId, scopeFilter);
-  const deleteCheckpoint = useDeleteCheckpoint(packageId);
-
-  return (
-    <>
-      <div className="mb-3">
-        <ScopeFilter value={scopeFilter} onChange={setScopeFilter} />
-      </div>
-      {!checkpoints || checkpoints.length === 0 ? (
-        <EmptyState
-          message={t("detail.emptyCheckpoints")}
-          hint={t("detail.emptyCheckpointsHint")}
-          icon={BrainCircuit}
-          compact
-        />
-      ) : (
-        <div className="space-y-2">
-          {checkpoints.map((cp) => (
-            <CheckpointCard
-              key={cp.id}
-              checkpoint={cp}
-              onDelete={(id) => deleteCheckpoint.mutate(id)}
-              isDeleting={deleteCheckpoint.isPending}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
+export function AgentMemoryTab({ packageId }: { packageId: string }) {
+  return <MemoryPanel packageId={packageId} />;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

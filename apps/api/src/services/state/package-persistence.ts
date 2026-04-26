@@ -62,8 +62,9 @@ export interface Memory {
   actorId: string | null;
 }
 
-export interface CheckpointRow {
+export interface PinnedSlotRow {
   id: number;
+  key: string;
   content: unknown;
   runId: string | null;
   actorType: "user" | "end_user" | "shared";
@@ -221,8 +222,8 @@ export async function upsertPinned(
   `);
 }
 
-/** Delete a single checkpoint row by id, scoped to (package, app). */
-export async function deleteCheckpointById(
+/** Delete a single pinned slot row by id, scoped to (package, app). Covers any non-null key. */
+export async function deletePinnedSlotById(
   id: number,
   packageId: string,
   applicationId: string,
@@ -234,7 +235,7 @@ export async function deleteCheckpointById(
         eq(packagePersistence.id, id),
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.key, CHECKPOINT_KEY),
+        sql`${packagePersistence.key} IS NOT NULL`,
       ),
     )
     .returning({ id: packagePersistence.id });
@@ -262,18 +263,23 @@ export async function deleteCheckpoint(
 }
 
 /**
- * List every checkpoint row for an agent. Passing `scope: undefined` skips
- * the visibility filter — admin paths use that to inspect checkpoints
- * across every actor.
+ * List every named pinned slot row for an agent (any non-null `key`).
+ * Includes the legacy `checkpoint` carry-over slot alongside Letta-style
+ * named blocks (`persona`, `goals`, …). Passing `scope: undefined` skips
+ * the visibility filter — admin paths use that to inspect pinned slots
+ * across every actor. Optionally narrows to slots written during a
+ * specific run via `runId`.
  */
-export async function listCheckpoints(
+export async function listPinnedSlots(
   packageId: string,
   applicationId: string,
   scope?: PersistenceScope,
-): Promise<CheckpointRow[]> {
+  runId?: string,
+): Promise<PinnedSlotRow[]> {
   const rows = await db
     .select({
       id: packagePersistence.id,
+      key: packagePersistence.key,
       content: packagePersistence.content,
       runId: packagePersistence.runId,
       actorType: packagePersistence.actorType,
@@ -286,13 +292,14 @@ export async function listCheckpoints(
       and(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
-        eq(packagePersistence.key, CHECKPOINT_KEY),
+        sql`${packagePersistence.key} IS NOT NULL`,
         ...(scope ? [buildVisibilityFilter(scope)!] : []),
+        ...(runId ? [eq(packagePersistence.runId, runId)] : []),
       ),
     )
     .orderBy(desc(packagePersistence.updatedAt));
 
-  return rows as CheckpointRow[];
+  return rows as PinnedSlotRow[];
 }
 
 // --- Memories ---------------------------------------------------------------
@@ -340,7 +347,7 @@ export async function listMemories(
  * the function exists so the prompt builder reads from a single,
  * intentional source instead of slicing `listMemories`. Named pinned
  * slots written by `pin({ key, content })` live in a separate column
- * shape (`key IS NOT NULL`) and are surfaced via `listCheckpoints`.
+ * shape (`key IS NOT NULL`) and are surfaced via `listPinnedSlots`.
  */
 export async function listPinnedMemories(
   packageId: string,

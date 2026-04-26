@@ -733,8 +733,8 @@
       "get": {
         "operationId": "listAgentPersistence",
         "tags": ["Agents"],
-        "summary": "List unified agent persistence (checkpoints + memories)",
-        "description": "Returns the agent's checkpoints and memory list visible to the caller's actor scope. Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's checkpoints; members always see their own actor scope plus shared rows. See ADR-011.",
+        "summary": "List unified agent persistence (pinned slots + memories)",
+        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the legacy `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -754,7 +754,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["checkpoint", "memory"]
+              "enum": ["pinned", "memory"]
             },
             "description": "Limit the response to one kind. Omitted → both."
           },
@@ -784,7 +784,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Narrow `memories` to those produced during a specific run. Has no effect on `checkpoints`."
+            "description": "Narrow `memories` and `pinned` to rows touched during a specific run."
           }
         ],
         "responses": {
@@ -803,13 +803,16 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "checkpoints": {
+                    "pinned": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
                           "id": {
                             "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
                           },
                           "content": {},
                           "runId": {
@@ -879,7 +882,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally a checkpoint (when `actorType` + `actorId` resolve to a single scope). Admin-only.",
+        "description": "Wipes memories (always) and optionally the legacy `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -899,7 +902,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["checkpoint", "memory"]
+              "enum": ["pinned", "memory"]
             }
           },
           {
@@ -1023,12 +1026,12 @@
         }
       }
     },
-    "/api/agents/{scope}/{name}/persistence/checkpoints/{id}": {
+    "/api/agents/{scope}/{name}/persistence/pinned/{id}": {
       "delete": {
-        "operationId": "deleteAgentPersistenceCheckpoint",
+        "operationId": "deleteAgentPersistencePinnedSlot",
         "tags": ["Agents"],
-        "summary": "Delete a single checkpoint by id",
-        "description": "Admin-only. The id must belong to the targeted agent in the current app.",
+        "summary": "Delete a single pinned slot by id",
+        "description": "Admin-only. Deletes any named pinned slot (legacy `checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1053,7 +1056,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Checkpoint deleted",
+            "description": "Pinned slot deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8886,6 +8889,94 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/internal/memories": {
+      "get": {
+        "operationId": "recallMemories",
+        "tags": ["Internal"],
+        "summary": "Recall archive memories",
+        "description": "Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max number of memories to return (1-50, default 10).",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recalled memories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["memories"],
+                  "properties": {
+                    "memories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "content", "createdAt", "actorType"],
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "content": {},
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "actorType": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actorId": {
+                            "type": ["string", "null"]
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "memories": [
+                    {
+                      "id": 42,
+                      "content": "User prefers Python over JS for data tasks",
+                      "createdAt": "2026-04-20T10:00:00Z",
+                      "actorType": "user",
+                      "actorId": "usr_abc"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

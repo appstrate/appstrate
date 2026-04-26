@@ -46,8 +46,7 @@ import {
   AgentConnectorsTab,
   AgentRunsTab,
   AgentSchedulesTab,
-  AgentMemoriesTab,
-  AgentCheckpointsTab,
+  AgentMemoryTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
 import { AgentModals } from "../components/package-detail/agent-modals";
@@ -63,8 +62,7 @@ type DetailTab =
   | "runs"
   | "configuration"
   | "schedules"
-  | "memories"
-  | "checkpoints"
+  | "memory"
   | "api"
   | "versions"
   | "diff"
@@ -234,8 +232,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "runs",
     "configuration",
     "schedules",
-    "memories",
-    "checkpoints",
+    "memory",
     "api",
     "versions",
     "diff",
@@ -264,6 +261,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
   }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
+  // Legacy hash redirect: #memories and #checkpoints (split tabs pre-ADR-013)
+  // both fold into the unified #memory tab.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (type === "agent" && (hash === "memories" || hash === "checkpoints")) {
+      setTab("memory");
+    }
+  }, [type, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
@@ -339,8 +344,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
     { id: "schedules", label: t("detail.tabSchedules") },
-    { id: "memories", label: t("detail.tabMemories") },
-    { id: "checkpoints", label: t("detail.tabCheckpoints") },
+    { id: "memory", label: t("detail.tabMemory") },
     { id: "api", label: t("detail.tabApi") },
   ];
 
@@ -540,8 +544,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         />
       )}
       {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
-      {type === "agent" && tab === "memories" && <AgentMemoriesTab packageId={packageId} />}
-      {type === "agent" && tab === "checkpoints" && <AgentCheckpointsTab packageId={packageId} />}
+      {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
       {type !== "agent" && tab === "content" && pkgDetail && (

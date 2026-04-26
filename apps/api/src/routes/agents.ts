@@ -4,12 +4,12 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getRunningRunCounts,
-  listCheckpoints,
+  listPinnedSlots,
   listMemories,
   deleteMemory,
   deleteAllMemories,
   deleteCheckpoint,
-  deleteCheckpointById,
+  deletePinnedSlotById,
   scopeFromActor,
   type PersistenceScope,
 } from "../services/state/index.ts";
@@ -288,19 +288,19 @@ export function createAgentsRouter() {
       const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
       const scope = scopeOverride ?? callerScope;
 
-      const wantsCheckpoint = !kindParam || kindParam === "checkpoint";
+      const wantsPinned = !kindParam || kindParam === "pinned";
       const wantsMemory = !kindParam || kindParam === "memory";
-      if (kindParam && !wantsCheckpoint && !wantsMemory) {
-        throw invalidRequest("kind must be 'checkpoint' or 'memory'");
+      if (kindParam && !wantsPinned && !wantsMemory) {
+        throw invalidRequest("kind must be 'pinned' or 'memory'");
       }
 
       // Admins inspecting at agent-level (no scope override, no runId) see
-      // every actor's checkpoint; everyone else is narrowed to their scope.
-      const checkpointScope = isAdmin && !scopeOverride ? undefined : scope;
+      // every actor's pinned slots; everyone else is narrowed to their scope.
+      const pinnedScope = isAdmin && !scopeOverride ? undefined : scope;
 
-      const [checkpoints, memories] = await Promise.all([
-        wantsCheckpoint
-          ? listCheckpoints(agent.id, applicationId, checkpointScope)
+      const [pinned, memories] = await Promise.all([
+        wantsPinned
+          ? listPinnedSlots(agent.id, applicationId, pinnedScope, runIdParam)
           : Promise.resolve([]),
         wantsMemory
           ? listMemories(agent.id, applicationId, scope, runIdParam)
@@ -308,15 +308,16 @@ export function createAgentsRouter() {
       ]);
 
       return c.json({
-        checkpoints: wantsCheckpoint
-          ? checkpoints.map((cp) => ({
-              id: cp.id,
-              content: cp.content,
-              runId: cp.runId,
-              actorType: cp.actorType,
-              actorId: cp.actorId,
-              createdAt: cp.createdAt?.toISOString() ?? null,
-              updatedAt: cp.updatedAt?.toISOString() ?? null,
+        pinned: wantsPinned
+          ? pinned.map((slot) => ({
+              id: slot.id,
+              key: slot.key,
+              content: slot.content,
+              runId: slot.runId,
+              actorType: slot.actorType,
+              actorId: slot.actorId,
+              createdAt: slot.createdAt?.toISOString() ?? null,
+              updatedAt: slot.updatedAt?.toISOString() ?? null,
             }))
           : undefined,
         memories: wantsMemory
@@ -354,9 +355,9 @@ export function createAgentsRouter() {
     },
   );
 
-  // DELETE /api/agents/:scope/:name/persistence/checkpoints/:id
+  // DELETE /api/agents/:scope/:name/persistence/pinned/:id
   router.delete(
-    "/:scope{@[^/]+}/:name/persistence/checkpoints/:id",
+    "/:scope{@[^/]+}/:name/persistence/pinned/:id",
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
@@ -364,11 +365,11 @@ export function createAgentsRouter() {
       const applicationId = c.get("applicationId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
-        throw invalidRequest("Invalid checkpoint id", "id");
+        throw invalidRequest("Invalid pinned slot id", "id");
       }
-      const deleted = await deleteCheckpointById(result.data, agent.id, applicationId);
+      const deleted = await deletePinnedSlotById(result.data, agent.id, applicationId);
       if (!deleted) {
-        throw notFound("Checkpoint not found");
+        throw notFound("Pinned slot not found");
       }
       return c.json({ deleted: true });
     },
@@ -396,8 +397,10 @@ export function createAgentsRouter() {
       if (!kindParam || kindParam === "memory") {
         memoriesDeleted = await deleteAllMemories(agent.id, applicationId, scope);
       }
-      if ((!kindParam || kindParam === "checkpoint") && scope) {
-        // Checkpoint is upserted per-scope; require an explicit scope here.
+      if ((!kindParam || kindParam === "pinned") && scope) {
+        // Checkpoint slot is upserted per-scope; require an explicit scope here.
+        // (Bulk-delete of every pinned slot key is intentionally not exposed —
+        // each named slot must be deleted individually via DELETE /pinned/:id.)
         checkpointDeleted = await deleteCheckpoint(agent.id, applicationId, scope);
       }
 

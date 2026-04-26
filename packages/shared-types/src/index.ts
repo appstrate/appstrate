@@ -372,9 +372,15 @@ export interface AgentMemoryItem {
   createdAt: string | null;
 }
 
-export interface AgentCheckpointItem {
+export interface AgentPinnedSlotItem {
   id: number;
-  /** Checkpoint payload — agent-defined JSON. */
+  /**
+   * Slot key (Letta-style label). The reserved key `"checkpoint"` is the
+   * legacy carry-over slot; other keys (`"persona"`, `"goals"`, …) are
+   * first-class named pinned blocks. See ADR-013.
+   */
+  key: string;
+  /** Slot content — agent-defined JSON or string. */
   content: unknown;
   /** Run that wrote the latest snapshot, if any. */
   runId: string | null;
