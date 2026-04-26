@@ -180,15 +180,7 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={({ input, overrides }) =>
-            runAgent.mutate({
-              input,
-              version: overrides.version ?? version,
-              ...(overrides.configOverride ? { config: overrides.configOverride } : {}),
-              ...(overrides.modelId ? { modelId: overrides.modelId } : {}),
-              ...(overrides.proxyId ? { proxyId: overrides.proxyId } : {}),
-            })
-          }
+          onSubmit={(input) => runAgent.mutate({ input, version })}
           isPending={runAgent.isPending}
         />
       )}

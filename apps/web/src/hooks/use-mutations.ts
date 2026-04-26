@@ -38,20 +38,9 @@ export function useSaveConfig(packageId: string) {
   });
 }
 
-/**
- * `version` is sent as a query string param (the run route's spec hook),
- * everything else lands in the body. Each override field is omitted from
- * the payload when undefined so a plain "Run" call (no overrides) sends
- * exactly the legacy `{ input }` body — same wire format as before this
- * change.
- */
 export interface RunAgentParams {
   input?: Record<string, unknown>;
   version?: string;
-  /** Per-run config delta deep-merged server-side with `application_packages.config`. */
-  config?: Record<string, unknown>;
-  modelId?: string;
-  proxyId?: string;
 }
 
 export function useRunAgent(packageId: string) {
@@ -59,13 +48,10 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version, config, modelId, proxyId } = params ?? {};
+      const { input, version } = params ?? {};
       const qs = buildQs({ version });
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
-      if (config !== undefined) body.config = config;
-      if (modelId !== undefined) body.modelId = modelId;
-      if (proxyId !== undefined) body.proxyId = proxyId;
       // File fields now carry `upload://upl_xxx` URIs (staged via POST /api/uploads
       // before submit) so the run request is always a plain JSON POST.
       return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
