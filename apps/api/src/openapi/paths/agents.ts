@@ -216,7 +216,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the legacy `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -308,7 +308,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the legacy `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -399,7 +399,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Delete a single pinned slot by id",
       description:
-        "Admin-only. Deletes any named pinned slot (legacy `checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
+        "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

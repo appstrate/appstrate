@@ -95,7 +95,7 @@ const proxyParameters = [
     in: "header",
     required: false,
     description:
-      "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. " +
+      "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. " +
       "Not validated against the principal — a mismatched runId is a reporting oddity, not " +
       "a security boundary.",
     schema: { type: "string" },

@@ -9,7 +9,7 @@
  * one place.
  *
  * "Pinned slot" = any non-null `key` in `package_persistence`. Includes the
- * legacy carry-over slot (`key="checkpoint"`) plus Letta-style named blocks
+ * carry-over slot (`key="checkpoint"`) plus Letta-style named blocks
  * written by `pin({ key, content })`.
  */
 

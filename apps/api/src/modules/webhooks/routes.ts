@@ -225,7 +225,7 @@ export function createWebhooksRouter() {
 
       const { eventId, payload } = buildEventEnvelope({
         eventType: "test.ping",
-        run: { id: "exec_test", packageId: "test", status: "success" },
+        run: { id: "run_test", packageId: "test", status: "success" },
         payloadMode:
           wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
       });

@@ -29,8 +29,8 @@ export interface PinnedSlotCardProps {
  * One pinned slot — header (key tag + scope + timestamp + actions),
  * collapsed-by-default body with an inline preview. Strings render as
  * text; objects/arrays show a compact `{ k1: "v1", … 4 more }` summary
- * when collapsed, full `JsonView` when expanded. The legacy `checkpoint`
- * key gets a "carry-over" annotation to signal its prompt-injection role.
+ * when collapsed, full `JsonView` when expanded. The `checkpoint` key
+ * gets a "carry-over" annotation to signal its prompt-injection role.
  */
 export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardProps) {
   const { t } = useTranslation(["agents", "common"]);

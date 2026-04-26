@@ -4,7 +4,8 @@
  * Unified persistence service — one store covering both agent primitives:
  *
  * - Named pinned slots = `key=<key>`,   `pinned=true`   (single slot per key, upsert)
- *                       — `key='checkpoint'` is the legacy carry-over slot
+ *                       — `key='checkpoint'` is the carry-over slot snapshotted
+ *                         onto `runs.checkpoint` and surfaced via `run_history`.
  * - Pinned memos        = `key IS NULL`, `pinned=true`   (rendered in prompt)
  * - Archive memos       = `key IS NULL`, `pinned=false`  (recall_memory only)
  *
@@ -33,7 +34,7 @@ import type { Actor } from "../../lib/actor.ts";
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_SCOPE = 100;
 
-/** Reserved storage key for the legacy carry-over slot (`pin({ key: "checkpoint" })`). */
+/** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
 /** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
@@ -183,8 +184,8 @@ export async function getCheckpoint(
  *
  * `key` is validated against {@link PINNED_KEY_PATTERN} so a malformed
  * agent payload fails loud here rather than silently corrupting storage.
- * `key === "checkpoint"` is the legacy carry-over slot — every other key
- * is a Letta-style named pinned block.
+ * `key === "checkpoint"` is the carry-over slot snapshotted onto runs.checkpoint;
+ * every other key is a Letta-style named pinned block.
  */
 export async function upsertPinned(
   packageId: string,
@@ -264,7 +265,7 @@ export async function deleteCheckpoint(
 
 /**
  * List every named pinned slot row for an agent (any non-null `key`).
- * Includes the legacy `checkpoint` carry-over slot alongside Letta-style
+ * Includes the `checkpoint` carry-over slot alongside Letta-style
  * named blocks (`persona`, `goals`, …). Passing `scope: undefined` skips
  * the visibility filter — admin paths use that to inspect pinned slots
  * across every actor. Optionally narrows to slots written during a

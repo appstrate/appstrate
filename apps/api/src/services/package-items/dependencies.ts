@@ -8,8 +8,7 @@ import type { Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
-import { extractDepsFromManifest } from "../../lib/manifest-utils.ts";
-import type { Manifest } from "@appstrate/core/validation";
+import { extractDepsFromManifest, parseDraftManifest } from "../../lib/manifest-utils.ts";
 
 // ─────────────────────────────────────────────
 // Dependency resolution from manifest (single source of truth)
@@ -35,7 +34,7 @@ export async function collectAllDepIds(
     .limit(1);
   if (!rootPkg) return { skillIds: [], toolIds: [], providerIds: [] };
 
-  const rootDeps = extractDepsFromManifest(asRecord(rootPkg.draftManifest) as Partial<Manifest>);
+  const rootDeps = extractDepsFromManifest(parseDraftManifest(rootPkg.draftManifest));
   for (const id of rootDeps.skillIds) skills.add(id);
   for (const id of rootDeps.toolIds) tools.add(id);
   for (const id of rootDeps.providerIds) providers.add(id);
@@ -57,7 +56,7 @@ export async function collectAllDepIds(
 
     const nextFrontier: string[] = [];
     for (const row of rows) {
-      const deps = extractDepsFromManifest(asRecord(row.draftManifest) as Partial<Manifest>);
+      const deps = extractDepsFromManifest(parseDraftManifest(row.draftManifest));
       for (const id of deps.skillIds) {
         if (!skills.has(id)) {
           skills.add(id);
