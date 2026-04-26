@@ -76,13 +76,29 @@ const fromFileBodySchema = z.object({
   fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),
 });
 
-const MAX_REQUEST_BODY_MB = Math.floor(MAX_REQUEST_BODY_SIZE / (1024 * 1024));
+/**
+ * Format a byte count for human-readable Zod descriptions. Picks the
+ * largest unit at which the value renders as a positive integer, so a
+ * 10 MB cap shows as "10 MB" rather than "10485760 bytes" and a sub-MB
+ * cap shows as e.g. "512 KB" rather than "0 MB".
+ */
+function formatByteCap(bytes: number): string {
+  if (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0) {
+    return `${bytes / (1024 * 1024)} MB`;
+  }
+  if (bytes >= 1024 && bytes % 1024 === 0) {
+    return `${bytes / 1024} KB`;
+  }
+  return `${bytes} bytes`;
+}
+
+const MAX_REQUEST_BODY_DISPLAY = formatByteCap(MAX_REQUEST_BODY_SIZE);
 
 const fromBytesBodySchema = z.object({
   fromBytes: z
     .string()
     .describe(
-      `Base64-encoded body bytes (for inline binary uploads up to ${MAX_REQUEST_BODY_MB} MB). ` +
+      `Base64-encoded body bytes (for inline binary uploads up to ${MAX_REQUEST_BODY_DISPLAY}). ` +
         "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
         "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
     ),
@@ -166,7 +182,7 @@ export const providerCallRequestSchema = z.object({
     .optional()
     .describe(
       "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
-        `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_MB} MB (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
+        `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_DISPLAY} (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
         "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
     ),
   responseMode: responseModeSchema,

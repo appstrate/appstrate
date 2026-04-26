@@ -2,7 +2,11 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { buildRuntimePiEnv } from "../src/container-env.ts";
+import {
+  buildRuntimePiEnv,
+  pickOperatorSidecarEnv,
+  SIDECAR_OPERATOR_ENV_KEYS,
+} from "../src/container-env.ts";
 
 const model = {
   api: "anthropic-messages",
@@ -138,5 +142,105 @@ describe("buildRuntimePiEnv", () => {
   it("does not emit TRACEPARENT when no parent trace is supplied", () => {
     const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
     expect(env.TRACEPARENT).toBeUndefined();
+  });
+
+  it("forwards SIDECAR_MAX_REQUEST_BODY_BYTES to the agent container when set on the host", () => {
+    const original = process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
+    process.env.SIDECAR_MAX_REQUEST_BODY_BYTES = "20971520";
+    try {
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      expect(env.SIDECAR_MAX_REQUEST_BODY_BYTES).toBe("20971520");
+    } finally {
+      if (original === undefined) delete process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
+      else process.env.SIDECAR_MAX_REQUEST_BODY_BYTES = original;
+    }
+  });
+
+  it("does not emit SIDECAR_MAX_REQUEST_BODY_BYTES when unset on the host", () => {
+    const original = process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
+    delete process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
+    try {
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      expect(env.SIDECAR_MAX_REQUEST_BODY_BYTES).toBeUndefined();
+    } finally {
+      if (original !== undefined) process.env.SIDECAR_MAX_REQUEST_BODY_BYTES = original;
+    }
+  });
+
+  it("does not forward SIDECAR_MAX_MCP_ENVELOPE_BYTES through buildRuntimePiEnv (sidecar-only)", () => {
+    // The envelope cap is a sidecar-internal concern; the agent runtime
+    // never builds JSON-RPC envelopes itself, so forwarding it would be
+    // misleading.
+    const original = process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES;
+    process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES = "33554432";
+    try {
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      expect(env.SIDECAR_MAX_MCP_ENVELOPE_BYTES).toBeUndefined();
+    } finally {
+      if (original === undefined) delete process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES;
+      else process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES = original;
+    }
+  });
+});
+
+describe("pickOperatorSidecarEnv", () => {
+  // Snapshot/restore helper so each test sees a known starting env.
+  function withEnv(values: Record<string, string | undefined>, fn: () => void): void {
+    const originals: Record<string, string | undefined> = {};
+    for (const key of SIDECAR_OPERATOR_ENV_KEYS) originals[key] = process.env[key];
+    try {
+      for (const [k, v] of Object.entries(values)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      fn();
+    } finally {
+      for (const [k, v] of Object.entries(originals)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+
+  it("returns an empty record when no keys are set", () => {
+    withEnv(
+      { SIDECAR_MAX_REQUEST_BODY_BYTES: undefined, SIDECAR_MAX_MCP_ENVELOPE_BYTES: undefined },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({});
+      },
+    );
+  });
+
+  it("forwards all set keys by default", () => {
+    withEnv(
+      { SIDECAR_MAX_REQUEST_BODY_BYTES: "20971520", SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432" },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({
+          SIDECAR_MAX_REQUEST_BODY_BYTES: "20971520",
+          SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432",
+        });
+      },
+    );
+  });
+
+  it("omits empty-string values (would crash sidecar boot)", () => {
+    withEnv(
+      { SIDECAR_MAX_REQUEST_BODY_BYTES: "", SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432" },
+      () => {
+        const out = pickOperatorSidecarEnv();
+        expect(out.SIDECAR_MAX_REQUEST_BODY_BYTES).toBeUndefined();
+        expect(out.SIDECAR_MAX_MCP_ENVELOPE_BYTES).toBe("33554432");
+      },
+    );
+  });
+
+  it("respects the keys argument to filter what is returned", () => {
+    withEnv(
+      { SIDECAR_MAX_REQUEST_BODY_BYTES: "20971520", SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432" },
+      () => {
+        const out = pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES"]);
+        expect(out).toEqual({ SIDECAR_MAX_REQUEST_BODY_BYTES: "20971520" });
+      },
+    );
   });
 });
