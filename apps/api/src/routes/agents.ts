@@ -39,7 +39,10 @@ import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
-import { buildBundleForAgentExport } from "../services/bundle-assembly.ts";
+import {
+  buildBundleForAgentExport,
+  buildBundleFromAgentDraft,
+} from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { resolveAgentReadiness } from "../services/agent-readiness.ts";
@@ -484,6 +487,31 @@ export function createAgentsRouter() {
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId")!;
       const versionQuery = c.req.query("version") ?? null;
+      const sourceQuery = c.req.query("source");
+      // `source=draft` mirrors the dashboard "Run" button: bundle the
+      // agent's current draft state instead of a published version. The
+      // CLI's run-by-id flow uses it so `appstrate run @scope/agent`
+      // works on never-published agents — same UX as clicking Run in
+      // the UI. Default stays `published` so the existing dashboard
+      // export flow (download a published archive) is unchanged.
+      // `version=…` is mutually exclusive with `source=draft`.
+      if (sourceQuery && sourceQuery !== "draft" && sourceQuery !== "published") {
+        throw new ApiError({
+          status: 400,
+          code: "invalid_source",
+          title: "Invalid Source",
+          detail: `?source must be 'draft' or 'published' (got '${sourceQuery}')`,
+        });
+      }
+      const useDraft = sourceQuery === "draft";
+      if (useDraft && versionQuery) {
+        throw new ApiError({
+          status: 400,
+          code: "draft_with_version",
+          title: "Conflicting Query",
+          detail: "?source=draft cannot be combined with ?version — drafts have no published id",
+        });
+      }
 
       const agent = await getPackage(packageId, orgId);
       if (!agent) {
@@ -509,10 +537,12 @@ export function createAgentsRouter() {
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes
       // the export cache-friendly and the determinism contract explicit.
-      const bundle = await buildBundleForAgentExport(agent.id, scope, {
-        versionQuery,
-        metadata: { builder: "appstrate-platform" },
-      });
+      const bundle = useDraft
+        ? await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" })
+        : await buildBundleForAgentExport(agent.id, scope, {
+            versionQuery,
+            metadata: { builder: "appstrate-platform" },
+          });
 
       const bytes = writeBundleToBuffer(bundle);
       const parsed = parseScopedName(agent.id);

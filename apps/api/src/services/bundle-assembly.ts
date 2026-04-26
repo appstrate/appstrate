@@ -26,12 +26,15 @@ import {
   type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./adapters/db-package-catalog.ts";
+import { DraftPackageCatalog } from "./adapters/draft-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { resolveVersion } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions, applicationPackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
-import { notFound } from "../lib/errors.ts";
+import { ApiError, notFound } from "../lib/errors.ts";
+import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
+import type { LoadedPackage } from "../types/index.ts";
 
 export interface BundleAssemblyScope {
   orgId: string;
@@ -169,4 +172,51 @@ export async function buildBundleForAgentExport(
   }
   const root = extractRootFromAfps(new Uint8Array(zip));
   return buildBundleFromDb(root, scope, opts.metadata);
+}
+
+/**
+ * Build a Bundle from the agent's DRAFT state (the `packages.draftManifest`
+ * + `packages.draftContent` columns and on-the-fly draft tool/skill/provider
+ * resolution via {@link DraftPackageCatalog}).
+ *
+ * This mirrors the dashboard "Run" semantic — running an agent that has
+ * never been published, or that has uncommitted edits since its last
+ * publish, must produce the same observable behaviour as clicking Run in
+ * the UI. The CLI's run-by-id flow consumes this path so `appstrate run
+ * @scope/agent` doesn't fail with `no_published_version` when the
+ * dashboard would happily run the same agent.
+ *
+ * Failure mode: if the manifest's `name` / `version` are missing or
+ * malformed (e.g. a half-written draft), throws a 400 — drafts must
+ * still satisfy the AFPS identity contract before we'll bundle them.
+ */
+export async function buildBundleFromAgentDraft(
+  agent: LoadedPackage,
+  scope: BundleAssemblyScope,
+  metadata?: BundleMetadata,
+): Promise<Bundle> {
+  const manifest = agent.manifest as Record<string, unknown>;
+  const name = typeof manifest.name === "string" ? manifest.name : null;
+  const version = typeof manifest.version === "string" ? manifest.version : null;
+  if (!name || !version || !name.startsWith("@") || !name.includes("/")) {
+    throw new ApiError({
+      status: 400,
+      code: "invalid_draft_manifest",
+      title: "Invalid Draft Manifest",
+      detail: `Draft for '${agent.id}' is missing a valid scoped name + version — fix the manifest before running`,
+    });
+  }
+  const rootFiles = new Map<string, Uint8Array>([
+    ["manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2))],
+    ["prompt.md", new TextEncoder().encode(agent.prompt)],
+  ]);
+  const root: BundlePackage = {
+    identity: formatPackageIdentity(name as `@${string}/${string}`, version),
+    manifest,
+    files: rootFiles,
+    integrity: "",
+  };
+  return buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId: scope.orgId }), {
+    metadata,
+  });
 }

@@ -238,8 +238,15 @@ function buildBundleUrl(
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
   // Hono's RegExpRouter matches against the raw (encoded) path. The
   // version spec is encoded because it can include `+`, `>=`, etc.
+  //
+  // No `--version` → `?source=draft`. Mirrors the dashboard "Run"
+  // button: a never-published agent (or one with uncommitted edits)
+  // must run from its current draft on both surfaces. Without this,
+  // `appstrate run @scope/agent` fails with `no_published_version` on
+  // an agent the UI runs happily — breaking the CLI<>UI parity promise.
+  // `--version=X` opts back into the published-archive path.
   const base = `${instance}/api/agents/${scope}/${name}/bundle`;
-  if (!spec) return base;
+  if (!spec) return `${base}?source=draft`;
   return `${base}?version=${encodeURIComponent(spec)}`;
 }
 

@@ -281,6 +281,59 @@ describe("Agents API", () => {
     });
   });
 
+  describe("GET /api/agents/:scope/:name/bundle?source=draft — UI parity path", () => {
+    // Pin the dashboard-Run-button parity contract. A never-published
+    // agent must bundle its draft state via `?source=draft`, otherwise
+    // `appstrate run @scope/agent` fails with `no_published_version`
+    // on agents the dashboard runs happily.
+
+    it("returns 200 + a deterministic .afps-bundle for an installed never-published agent", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/draft-only",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/draft-only/bundle?source=draft", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      // The bundle SRI digest contract: clients (CLI cache) compare it
+      // to a client-side recompute to detect transfer corruption.
+      // Without it, `appstrate run` aborts with `integrity_mismatch`.
+      const integrity = res.headers.get("X-Bundle-Integrity");
+      expect(integrity).toMatch(/^sha256-/);
+      expect(res.headers.get("Content-Type")).toBe("application/zip");
+    });
+
+    it("rejects ?source=draft combined with ?version= (400 draft_with_version)", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/draft-with-version",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request(
+        "/api/agents/@myorg/draft-with-version/bundle?source=draft&version=1.0.0",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("draft_with_version");
+    });
+
+    it("rejects ?source=foo (400 invalid_source)", async () => {
+      const res = await app.request("/api/agents/@myorg/anything/bundle?source=experimental", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("invalid_source");
+    });
+  });
+
   describe("Multi-tenancy isolation", () => {
     it("isolates run counts per org", async () => {
       await seedInstalledAgent({

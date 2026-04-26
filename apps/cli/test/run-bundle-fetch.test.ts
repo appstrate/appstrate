@@ -87,7 +87,15 @@ describe("fetchBundleForRun — happy path", () => {
     // Hono server route `:scope{@[^/]+}` rejects as 404. The CLI's URL
     // builder leaves scope/name unencoded (they're regex-validated to a
     // strict charset upstream).
-    expect(capture.url).toBe("https://app.example.com/api/agents/@system/hello/bundle");
+    //
+    // `?source=draft` mirrors the dashboard Run button: a never-published
+    // agent (or one with uncommitted edits) must run from its current
+    // draft on both surfaces. Pin the query param so a regression silently
+    // flipping back to "published only" doesn't reintroduce the
+    // `no_published_version` UX gap.
+    expect(capture.url).toBe(
+      "https://app.example.com/api/agents/@system/hello/bundle?source=draft",
+    );
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
     expect(capture.headers?.get("X-App-Id")).toBe("app_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
