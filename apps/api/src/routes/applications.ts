@@ -13,6 +13,7 @@ import {
   internalError,
   parseBody,
 } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import {
   createApplication,
   listApplications,
@@ -85,10 +86,7 @@ export function createApplicationsRouter() {
     const authMethod = c.get("authMethod");
     const keyAppId = c.get("applicationId");
     const scoped = authMethod === "api_key" ? apps.filter((a) => a.id === keyAppId) : apps;
-    return c.json({
-      object: "list",
-      data: scoped.map((app) => ({ object: "application", ...app })),
-    });
+    return c.json(listResponse(scoped.map((app) => ({ object: "application", ...app }))));
   });
 
   // POST /api/applications — create a new application
@@ -214,10 +212,7 @@ export function createApplicationsRouter() {
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
     const rows = await listInstalledPackages({ orgId, applicationId: appId }, type);
-    return c.json({
-      object: "list",
-      data: rows.map((row) => ({ object: "application_package", ...row })),
-    });
+    return c.json(listResponse(rows.map((row) => ({ object: "application_package", ...row }))));
   });
 
   // POST /api/applications/:appId/packages — install a package
@@ -385,7 +380,7 @@ export function createApplicationsRouter() {
       appEnabled: row.enabled,
     }));
 
-    return c.json({ object: "list", data: overrides });
+    return c.json(listResponse(overrides));
   });
 
   return router;

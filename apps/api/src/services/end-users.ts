@@ -13,6 +13,7 @@ import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema
 import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
+import { listResponse } from "../lib/list-response.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -163,7 +164,7 @@ export async function listEndUsers(
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map(toEndUserResponse);
 
-  return { object: "list", data, hasMore, limit };
+  return { ...listResponse(data, { hasMore }), limit };
 }
 
 export async function getEndUser(scope: AppScope, endUserId: string): Promise<EndUserInfo> {

@@ -6,7 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api";
+import { api, apiList } from "@/api";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
 import type {
@@ -24,8 +24,8 @@ export function useOAuthClients(level?: "org" | "application") {
   return useQuery({
     queryKey: ["oauth-clients", orgId, isOrg ? "org" : appId],
     queryFn: () =>
-      api<{ object: "list"; data: OAuthClient[] }>("/oauth/clients").then((d) =>
-        level ? d.data.filter((c) => c.level === level) : d.data,
+      apiList<OAuthClient>("/oauth/clients").then((rows) =>
+        level ? rows.filter((c) => c.level === level) : rows,
       ),
     enabled: isOrg ? !!orgId : !!orgId && !!appId,
   });

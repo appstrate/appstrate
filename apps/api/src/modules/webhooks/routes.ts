@@ -20,6 +20,7 @@ import { applications } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
+import { listResponse } from "../../lib/list-response.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import {
   createWebhook,
@@ -169,7 +170,7 @@ export function createWebhooksRouter() {
       // it ignores `opts` and returns only webhooks pinned to the key's app.
       if ("applicationId" in scope) {
         const result = await listWebhooks(scope);
-        return c.json({ object: "list", data: result });
+        return c.json(listResponse(result));
       }
 
       const all = c.req.query("all") === "true";
@@ -181,7 +182,7 @@ export function createWebhooksRouter() {
         await assertAppBelongsToOrg(applicationId, scope.orgId);
       }
       const result = await listWebhooks(scope, { applicationId, all });
-      return c.json({ object: "list", data: result });
+      return c.json(listResponse(result));
     },
   );
 
@@ -278,7 +279,7 @@ export function createWebhooksRouter() {
     async (c) => {
       const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
       const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
-      return c.json({ object: "list", data: result });
+      return c.json(listResponse(result));
     },
   );
 

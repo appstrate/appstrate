@@ -23,6 +23,7 @@ import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
@@ -499,7 +500,7 @@ export function createOidcRouter() {
         orgId,
         appRows.map((a) => a.id),
       );
-      return c.json({ object: "list", data: clients });
+      return c.json(listResponse(clients));
     },
   );
 
@@ -683,7 +684,7 @@ export function createOidcRouter() {
         if (message.includes("SMTP configuration not found")) {
           throw notFound(message);
         }
-        return c.json({ ok: false, error: message }, 400);
+        throw invalidRequest(message);
       }
     },
   );
