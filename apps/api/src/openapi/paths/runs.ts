@@ -257,7 +257,7 @@ export const runsPaths = {
             },
             example: {
               manifest: {
-                $schema: "https://afps.appstrate.dev/schema/v1/agent.schema.json",
+                $schema: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
                 name: "@inline/one-shot",
                 displayName: "One-shot summary",
                 version: "0.0.0",

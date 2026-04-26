@@ -1,5 +1,5 @@
 {
-  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
   "name": "@appstrate/github",
   "version": "1.0.0",
   "type": "provider",

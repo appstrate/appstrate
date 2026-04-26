@@ -58,6 +58,10 @@
       "description": "Organization skills, tools, and package management"
     },
     {
+      "name": "Library",
+      "description": "Consolidated package catalog across an organization's applications (UI-oriented)."
+    },
+    {
       "name": "Notifications",
       "description": "Run notification management"
     },
@@ -2109,7 +2113,7 @@
               },
               "example": {
                 "manifest": {
-                  "$schema": "https://afps.appstrate.dev/schema/v1/agent.schema.json",
+                  "$schema": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
                   "name": "@inline/one-shot",
                   "displayName": "One-shot summary",
                   "version": "0.0.0",
@@ -15450,11 +15454,11 @@
       }
     },
     "/api/credential-proxy/proxy": {
-      "post": {
-        "operationId": "credentialProxy",
+      "get": {
+        "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nThe request method + body are forwarded as-is. URL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the body.",
+        "summary": "Proxy a GET request to a provider with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15505,7 +15509,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted.",
+            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["true", "false"]
@@ -15525,7 +15529,548 @@
             "name": "X-Stream-Request",
             "in": "header",
             "required": false,
-            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`.",
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "headers": {
+              "X-Truncated": {
+                "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "X-Truncated-Size": {
+                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+          },
+          "404": {
+            "description": "No credentials or connection profile for the requested provider."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "credentialProxyPost",
+        "tags": ["Credential Proxy"],
+        "summary": "Proxy a POST request to a provider with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {
+            "bearerJwt": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-App-Id",
+            "in": "header",
+            "required": true,
+            "description": "Application id (app_…) the API key is scoped to.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Provider",
+            "in": "header",
+            "required": true,
+            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Target",
+            "in": "header",
+            "required": true,
+            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": true,
+            "description": "Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Substitute-Body",
+            "in": "header",
+            "required": false,
+            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "Appstrate-User",
+            "in": "header",
+            "required": false,
+            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "schema": {
+              "type": "string",
+              "pattern": "^eu_"
+            }
+          },
+          {
+            "name": "X-Stream-Request",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "headers": {
+              "X-Truncated": {
+                "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "X-Truncated-Size": {
+                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+          },
+          "404": {
+            "description": "No credentials or connection profile for the requested provider."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "Forwarded as-is to the upstream. Optional placeholder substitution via `X-Substitute-Body`.",
+          "content": {
+            "*/*": {}
+          }
+        }
+      },
+      "put": {
+        "operationId": "credentialProxyPut",
+        "tags": ["Credential Proxy"],
+        "summary": "Proxy a PUT request to a provider with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {
+            "bearerJwt": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-App-Id",
+            "in": "header",
+            "required": true,
+            "description": "Application id (app_…) the API key is scoped to.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Provider",
+            "in": "header",
+            "required": true,
+            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Target",
+            "in": "header",
+            "required": true,
+            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": true,
+            "description": "Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Substitute-Body",
+            "in": "header",
+            "required": false,
+            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "Appstrate-User",
+            "in": "header",
+            "required": false,
+            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "schema": {
+              "type": "string",
+              "pattern": "^eu_"
+            }
+          },
+          {
+            "name": "X-Stream-Request",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "headers": {
+              "X-Truncated": {
+                "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "X-Truncated-Size": {
+                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+          },
+          "404": {
+            "description": "No credentials or connection profile for the requested provider."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "Forwarded as-is to the upstream. Optional placeholder substitution via `X-Substitute-Body`.",
+          "content": {
+            "*/*": {}
+          }
+        }
+      },
+      "patch": {
+        "operationId": "credentialProxyPatch",
+        "tags": ["Credential Proxy"],
+        "summary": "Proxy a PATCH request to a provider with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {
+            "bearerJwt": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-App-Id",
+            "in": "header",
+            "required": true,
+            "description": "Application id (app_…) the API key is scoped to.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Provider",
+            "in": "header",
+            "required": true,
+            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Target",
+            "in": "header",
+            "required": true,
+            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": true,
+            "description": "Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Substitute-Body",
+            "in": "header",
+            "required": false,
+            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "Appstrate-User",
+            "in": "header",
+            "required": false,
+            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "schema": {
+              "type": "string",
+              "pattern": "^eu_"
+            }
+          },
+          {
+            "name": "X-Stream-Request",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["0", "1"]
+            }
+          },
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`exec_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated`/`X-Truncated-Size` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry these headers.",
+            "headers": {
+              "X-Truncated": {
+                "description": "Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "X-Truncated-Size": {
+                "description": "Original upstream `Content-Length` (in bytes) when `X-Truncated: true` is set, so the caller can decide whether to retry with `X-Stream-Request: 1` or accept the truncated body.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+          },
+          "404": {
+            "description": "No credentials or connection profile for the requested provider."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "Forwarded as-is to the upstream. Optional placeholder substitution via `X-Substitute-Body`.",
+          "content": {
+            "*/*": {}
+          }
+        }
+      },
+      "delete": {
+        "operationId": "credentialProxyDelete",
+        "tags": ["Credential Proxy"],
+        "summary": "Proxy a DELETE request to a provider with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {
+            "bearerJwt": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-App-Id",
+            "in": "header",
+            "required": true,
+            "description": "Application id (app_…) the API key is scoped to.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Provider",
+            "in": "header",
+            "required": true,
+            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Target",
+            "in": "header",
+            "required": true,
+            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": true,
+            "description": "Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Substitute-Body",
+            "in": "header",
+            "required": false,
+            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "Appstrate-User",
+            "in": "header",
+            "required": false,
+            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "schema": {
+              "type": "string",
+              "pattern": "^eu_"
+            }
+          },
+          {
+            "name": "X-Stream-Request",
+            "in": "header",
+            "required": false,
+            "description": "When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -15792,6 +16337,133 @@
           },
           "502": {
             "description": "Upstream provider returned a non-2xx response; body and status forwarded as-is. No usage recorded."
+          }
+        }
+      }
+    },
+    "/api/library": {
+      "get": {
+        "operationId": "getLibrary",
+        "tags": ["Library"],
+        "summary": "List all packages visible to the org with per-app install state",
+        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `tool`, `provider`). Each package carries an `installedIn` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Library snapshot.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "applications", "packages"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["library"]
+                    },
+                    "applications": {
+                      "type": "array",
+                      "description": "Applications belonging to the caller's organization. The default application (if any) is listed first.",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "name", "isDefault"],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Application id (`app_…`)."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "packages": {
+                      "type": "object",
+                      "description": "Packages grouped by type. Every group is always present (possibly empty).",
+                      "required": ["agent", "skill", "tool", "provider"],
+                      "properties": {
+                        "agent": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "skill": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "tool": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "provider": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "object": "library",
+                  "applications": [
+                    {
+                      "id": "app_default",
+                      "name": "Default",
+                      "isDefault": true
+                    },
+                    {
+                      "id": "app_staging",
+                      "name": "Staging",
+                      "isDefault": false
+                    }
+                  ],
+                  "packages": {
+                    "agent": [
+                      {
+                        "id": "pkg_inbox_triage",
+                        "type": "agent",
+                        "source": "org",
+                        "name": "Inbox Triage",
+                        "description": "Sorts incoming Gmail threads into priority buckets.",
+                        "installedIn": ["app_default"]
+                      }
+                    ],
+                    "skill": [],
+                    "tool": [],
+                    "provider": [
+                      {
+                        "id": "pkg_gmail",
+                        "type": "provider",
+                        "source": "system",
+                        "name": "Gmail",
+                        "description": "Google Mail OAuth provider.",
+                        "installedIn": ["app_default", "app_staging"]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -17884,21 +18556,21 @@
         "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
         "allOf": [
           {
-            "$ref": "https://afps.appstrate.dev/schema/v1/agent.schema.json"
+            "$ref": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json"
           }
         ]
       },
       "SkillManifest": {
         "description": "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/schema/v1/skill.schema.json"
+        "$ref": "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json"
       },
       "ToolManifest": {
         "description": "AFPS Tool manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/schema/v1/tool.schema.json"
+        "$ref": "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json"
       },
       "ProviderManifest": {
         "description": "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/schema/v1/provider.schema.json"
+        "$ref": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json"
       },
       "FileConstraintsMap": {
         "type": "object",
@@ -17926,6 +18598,43 @@
             "placeholder": {
               "type": "string",
               "description": "Hint text shown before the user provides a value"
+            }
+          }
+        }
+      },
+      "LibraryPackageList": {
+        "type": "array",
+        "description": "Packages of a single type visible to the org. Each entry carries an `installedIn` array listing the caller-org applications where the package is currently installed (empty array = not installed in any of the caller's apps).",
+        "items": {
+          "type": "object",
+          "required": ["id", "type", "source", "name", "description", "installedIn"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Package id (`pkg_…`)."
+            },
+            "type": {
+              "type": "string",
+              "enum": ["agent", "skill", "tool", "provider"]
+            },
+            "source": {
+              "type": "string",
+              "description": "Package origin (e.g. `org` for org-owned packages, `system` for built-in system packages)."
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name from the package draft manifest (`displayName`); falls back to the package id."
+            },
+            "description": {
+              "type": "string",
+              "description": "Description from the package draft manifest; empty string when not provided."
+            },
+            "installedIn": {
+              "type": "array",
+              "description": "Application ids (`app_…`) belonging to the caller's org where this package is installed.",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
