@@ -20,14 +20,14 @@
 
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
+import type { ResolvedRunConfig } from "@appstrate/shared-types";
 
-export interface ResolvedRunConfigPayload {
-  config: Record<string, unknown>;
-  modelId: string | null;
-  proxyId: string | null;
-  versionPin: string | null;
-  requiredProviders: string[];
-}
+/**
+ * Wire shape returned by the run-config endpoint. The canonical type
+ * lives in `@appstrate/shared-types`; this alias keeps the legacy
+ * CLI-local name available to existing callers and tests.
+ */
+export type ResolvedRunConfigPayload = ResolvedRunConfig;
 
 export interface InheritedRunConfig {
   /** Resolved agent config (merge of inherited + flag overrides). */

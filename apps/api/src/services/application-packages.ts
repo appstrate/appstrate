@@ -13,7 +13,10 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { asRecord } from "../lib/safe-json.ts";
 import { parseDraftManifest, extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
+
+export type { ResolvedRunConfig };
 
 // ---------------------------------------------------------------------------
 // Internal helper — verify the scope's application belongs to the scope's org.
@@ -266,17 +269,10 @@ export async function getPackageConfig(
 // CLI reads this endpoint after profile resolution to reproduce the UI
 // run byte-for-byte (same model, proxy, config, version pin) unless the
 // user passed an explicit override flag.
+//
+// Wire shape lives in `@appstrate/shared-types` so the CLI consumes the
+// same interface without redeclaring it.
 // ---------------------------------------------------------------------------
-
-export interface ResolvedRunConfig {
-  config: Record<string, unknown>;
-  modelId: string | null;
-  proxyId: string | null;
-  /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
-  versionPin: string | null;
-  /** Provider ids declared as dependencies on the package's manifest. */
-  requiredProviders: string[];
-}
 
 /**
  * Resolve the per-application run configuration for `(applicationId,

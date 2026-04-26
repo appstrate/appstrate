@@ -12,6 +12,13 @@ import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifes
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
+import type {
+  ReadinessProviderEntry,
+  ReadinessReason,
+  ReadinessReport,
+} from "@appstrate/shared-types";
+
+export type { ReadinessProviderEntry, ReadinessReason, ReadinessReport };
 
 export interface AgentReadinessParams {
   agent: LoadedPackage;
@@ -127,18 +134,6 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
 // stays in lockstep with what the run pipeline would actually do.
 // ---------------------------------------------------------------------------
 
-export interface ReadinessProviderEntry {
-  providerId: string;
-  profileId: string | null;
-  reason: "no_connection" | "needs_reconnection" | "scope_insufficient" | "provider_not_enabled";
-  message: string;
-}
-
-export interface ReadinessReport {
-  ready: boolean;
-  missing: ReadinessProviderEntry[];
-}
-
 export interface ReadinessQuery {
   agent: LoadedPackage;
   applicationId: string;
@@ -193,7 +188,7 @@ export async function resolveAgentReadiness(query: ReadinessQuery): Promise<Read
   return { ready: missing.length === 0, missing };
 }
 
-function mapReason(code: string): ReadinessProviderEntry["reason"] {
+function mapReason(code: string): ReadinessReason {
   switch (code) {
     case "needs_reconnection":
       return "needs_reconnection";

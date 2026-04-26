@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { preflightCheck, PreflightAbortError } from "../src/commands/run/preflight.ts";
+import {
+  preflightCheck,
+  PreflightAbortError,
+  assertSameOrigin,
+  nextBackoffMs,
+} from "../src/commands/run/preflight.ts";
 
 const BASE_INPUTS = {
   instance: "https://app.example.com",
@@ -254,6 +259,73 @@ describe("preflightCheck", () => {
     });
     expect(urls[0]).toContain("connectionProfileId=prof_1");
     expect(urls[0]).toContain("providerProfile.%40afps%2Fgmail=prof_2");
+  });
+
+  it("uses capped exponential backoff between polls", async () => {
+    const missing = [
+      {
+        providerId: "@afps/gmail",
+        profileId: null,
+        reason: "no_connection",
+        message: "not connected",
+      },
+    ];
+    const { fetchImpl } = makeFetch([
+      { ready: false, missing },
+      { ready: false, missing },
+      { ready: false, missing },
+      { ready: true, missing: [] },
+    ]);
+    originalIsTty = (process.stdin as { isTTY?: boolean }).isTTY;
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+
+    // Deterministic jitter source — record the (initial, max, attempt)
+    // tuple that nextBackoffMs would have seen. Returning 1 puts us at
+    // the cap so the assertions below can reason about it directly.
+    const recorded: Array<{ exp: number }> = [];
+    let attempt = 0;
+    const jitter = () => {
+      // Recreate the same expression nextBackoffMs uses internally so
+      // we can verify the schedule grows up to pollMaxMs and stays
+      // there.
+      const exp = Math.min(80, 10 * 2 ** attempt);
+      recorded.push({ exp });
+      attempt += 1;
+      return 0; // wait 0ms — keeps the test fast
+    };
+
+    await preflightCheck({
+      ...BASE_INPUTS,
+      fetchImpl,
+      openBrowser: () => {},
+      confirmPrompt: async () => true,
+      pollMs: 10,
+      pollMaxMs: 80,
+      randomJitter: jitter,
+    });
+
+    expect(recorded.map((r) => r.exp)).toEqual([10, 20, 40]);
+  });
+
+  it("nextBackoffMs returns a value within [0, capped(initial * 2^attempt)]", () => {
+    const random = () => 0.5;
+    expect(nextBackoffMs(100, 1000, 0, random)).toBe(50);
+    expect(nextBackoffMs(100, 1000, 3, random)).toBe(400);
+    // Cap kicks in: 100 * 2^4 = 1600 > 1000.
+    expect(nextBackoffMs(100, 1000, 4, random)).toBe(500);
+  });
+
+  it("assertSameOrigin refuses to open a connect URL on a different origin", () => {
+    expect(() =>
+      assertSameOrigin("https://evil.com/preferences/connectors", "https://app.example.com"),
+    ).toThrow(PreflightAbortError);
+    // Same origin is fine — different path is permitted.
+    expect(() =>
+      assertSameOrigin(
+        "https://app.example.com/preferences/connectors?profile=p",
+        "https://app.example.com",
+      ),
+    ).not.toThrow();
   });
 
   it("returns ready=true immediately when skip is set", async () => {

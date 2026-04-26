@@ -5,14 +5,18 @@
  * pinned Appstrate instance, with a content-addressed local cache.
  *
  * Cache layout:
- *   `~/.cache/appstrate/bundles/{instanceHost}/{scope}/{name}/{version}-{integrityShort}.afps-bundle`
+ *   `~/.cache/appstrate/bundles/{instanceHost}/{scopeHash}/{nameHash}/{version}-{integrityShort}.afps-bundle`
  *
  *   - Including the instance host avoids cross-instance leakage when a
  *     user has multiple profiles pointing at different deployments.
+ *   - Scope + name are SHA-256 hashed (truncated) before forming the
+ *     directory path. Hashing — instead of character-replace — ensures
+ *     `@scope/name-with-dashes` and `@scope/name_with_dashes` map to
+ *     distinct directories, eliminating accidental cache collisions.
  *   - The version + first 16 chars of the bundle integrity digest form a
- *     unique key per build. We re-fetch on cache miss but reuse the file
- *     when both match — `X-Bundle-Integrity` is the platform-side SRI
- *     digest of the canonical packages map and is safe to trust.
+ *     unique key per build. The bundle integrity (full SRI) is also
+ *     re-verified on every cache hit — a corrupted or substituted file
+ *     never feeds the run pipeline.
  *   - We deliberately do NOT cache the `spec → version` resolution: a
  *     dist-tag (`@latest`) or range (`@^1`) can resolve to a different
  *     version on the next call; the catalog is the source of truth.
@@ -20,16 +24,18 @@
  * Errors map to four user-facing codes the run command formats:
  *   - `package_not_found`     — 404 on the agent (scope/name).
  *   - `version_not_found`     — 404 with a payload mentioning version.
- *   - `integrity_mismatch`    — server omitted the integrity header.
+ *   - `integrity_mismatch`    — server omitted the integrity header,
+ *                               or the cached file failed re-verify.
  *   - `bundle_fetch_failed`   — anything else (network, 5xx, …).
  */
 
-import { mkdir, writeFile, rename, unlink } from "node:fs/promises";
+import { mkdir, writeFile, rename, unlink, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
+import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 
 export class BundleFetchError extends Error {
   constructor(
@@ -144,11 +150,38 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   const cachePath = computeCachePath(root, host, scope, name, version, integrityShort);
 
   if (!input.noCache && existsSync(cachePath)) {
-    input.onLog?.(`bundle cache hit: ${cachePath}`);
-    return { path: cachePath, integrity, version, fromCache: true };
+    // Re-verify the cached bytes against the server's freshly-issued
+    // integrity digest. Filename-only matching would let a corrupted or
+    // tampered cache feed straight into the run pipeline; an explicit
+    // hash check keeps `bundle-fetch` honest as a content-addressed store.
+    const cachedBytes = await readFile(cachePath);
+    const verdict = verifyArtifactIntegrity(new Uint8Array(cachedBytes), integrity);
+    if (verdict.valid) {
+      input.onLog?.(`bundle cache hit (verified): ${cachePath}`);
+      return { path: cachePath, integrity, version, fromCache: true };
+    }
+    // Drop the poisoned entry and fall through to refetch. A `unlink`
+    // failure (e.g. read-only cache dir) is non-fatal — the rename below
+    // will overwrite it atomically anyway.
+    await unlink(cachePath).catch(() => {});
+    input.onLog?.(
+      `bundle cache invalidated (integrity ${verdict.computed} ≠ ${integrity}): refetching`,
+    );
   }
 
   const buf = new Uint8Array(await res.arrayBuffer());
+  // Defence-in-depth: the bytes we just downloaded must also match the
+  // server-issued integrity. If the network or upstream proxy mangled
+  // them we want to fail loudly instead of seeding the cache with
+  // corrupted content the next run would have to discard.
+  const downloadVerdict = verifyArtifactIntegrity(buf, integrity);
+  if (!downloadVerdict.valid) {
+    throw new BundleFetchError(
+      "integrity_mismatch",
+      `Bundle integrity mismatch: server advertised ${integrity}, downloaded ${downloadVerdict.computed}`,
+      "Retry the command. If the failure persists, the instance or a network proxy is corrupting bundles.",
+    );
+  }
   await mkdir(dirname(cachePath), { recursive: true });
   const tmp = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, buf);
@@ -217,17 +250,30 @@ function computeCachePath(
   version: string,
   integrityShort: string,
 ): string {
-  const safeScope = scope.replace(/[^a-z0-9@_-]/gi, "_");
-  const safeName = name.replace(/[^a-z0-9_-]/gi, "_");
-  const safeVersion = version.replace(/[^a-z0-9._+-]/gi, "_");
+  // Hash scope + name into a fixed-length, filesystem-safe segment.
+  // A naive `replace(/[^a-z0-9_-]/gi, "_")` collapses distinct package
+  // ids into the same path (e.g. `name-with-dashes` and
+  // `name_with_dashes`), which would let one cached bundle serve a
+  // different package on the next call. Hashing closes that window.
+  const scopeKey = hashSegment(scope);
+  const nameKey = hashSegment(name);
+  const safeVersion = version.replace(/[^a-z0-9._+-]/gi, "_") || "unspecified";
   return join(
     root,
     "bundles",
     host,
-    safeScope,
-    safeName,
+    scopeKey,
+    nameKey,
     `${safeVersion}-${integrityShort}.afps-bundle`,
   );
+}
+
+const SEGMENT_HASH_LEN = 24;
+
+function hashSegment(value: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(value);
+  return hasher.digest("hex").slice(0, SEGMENT_HASH_LEN);
 }
 
 async function safeText(res: Response): Promise<string> {

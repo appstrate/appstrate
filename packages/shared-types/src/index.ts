@@ -525,6 +525,50 @@ export interface InstalledPackage {
   draftManifest: Record<string, unknown> | null;
 }
 
+/**
+ * Per-application resolved run-config returned by
+ * `GET /api/applications/{appId}/packages/{scope}/{name}/run-config`.
+ * Single source of truth for both the dashboard's per-app agent run and
+ * the CLI's `appstrate run @scope/agent` invocation — keeping them in
+ * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
+ */
+export interface ResolvedRunConfig {
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
+  versionPin: string | null;
+  /** Provider ids declared as dependencies on the package's manifest. */
+  requiredProviders: string[];
+}
+
+// --- Readiness Types (agent preflight) ---
+
+/**
+ * Provider readiness reasons — single source of truth shared between the
+ * API service that computes them, the CLI that consumes them, and the
+ * OpenAPI enum on `GET /api/agents/{scope}/{name}/readiness`.
+ */
+export const READINESS_REASONS = [
+  "no_connection",
+  "needs_reconnection",
+  "scope_insufficient",
+  "provider_not_enabled",
+] as const;
+export type ReadinessReason = (typeof READINESS_REASONS)[number];
+
+export interface ReadinessProviderEntry {
+  providerId: string;
+  profileId: string | null;
+  reason: ReadinessReason;
+  message: string;
+}
+
+export interface ReadinessReport {
+  ready: boolean;
+  missing: ReadinessProviderEntry[];
+}
+
 // --- End-User Types ---
 
 export interface EndUserInfo {

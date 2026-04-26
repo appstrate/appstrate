@@ -25,18 +25,15 @@ import { spawn } from "node:child_process";
 import { confirm, spinner } from "../../lib/ui.ts";
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
+import type { ReadinessProviderEntry, ReadinessReport } from "@appstrate/shared-types";
 
-export interface ReadinessMissingEntry {
-  providerId: string;
-  profileId: string | null;
-  reason: "no_connection" | "needs_reconnection" | "scope_insufficient" | "provider_not_enabled";
-  message: string;
-}
-
-export interface ReadinessReport {
-  ready: boolean;
-  missing: ReadinessMissingEntry[];
-}
+/**
+ * Backwards-compatible alias for callers that named the missing entry
+ * type after the CLI's array name. Canonical type lives in
+ * `@appstrate/shared-types`.
+ */
+export type ReadinessMissingEntry = ReadinessProviderEntry;
+export type { ReadinessReport };
 
 export class PreflightAbortError extends Error {
   constructor(
@@ -75,8 +72,12 @@ export interface PreflightInputs {
   openBrowser?: (url: string) => void;
   /** Test-only confirm prompt — bypasses clack so tests don't read stdin. */
   confirmPrompt?: (message: string) => Promise<boolean>;
-  /** Polling interval. Default 3s. */
+  /** Initial polling interval. Doubles each attempt up to `pollMaxMs`. Default 2s. */
   pollMs?: number;
+  /** Upper bound on the polling interval after backoff. Default 20s. */
+  pollMaxMs?: number;
+  /** Test-only deterministic jitter source — return value in [0, 1). */
+  randomJitter?: () => number;
 }
 
 export async function preflightCheck(inputs: PreflightInputs): Promise<ReadinessReport> {
@@ -87,7 +88,9 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
   const open = inputs.openBrowser ?? defaultOpenBrowser;
   const confirmFn = inputs.confirmPrompt ?? ((msg) => confirm(msg, true));
   const timeoutMs = (inputs.timeoutSeconds ?? 300) * 1000;
-  const pollMs = inputs.pollMs ?? 3000;
+  const pollInitialMs = inputs.pollMs ?? 2000;
+  const pollMaxMs = inputs.pollMaxMs ?? 20000;
+  const jitter = inputs.randomJitter ?? Math.random;
   const instance = normalizeInstance(inputs.instance);
 
   const fetchReadiness = async (): Promise<ReadinessReport> => {
@@ -163,14 +166,18 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
   const sp = spinner();
   sp.start("Waiting for connections to be ready");
   const startedAt = Date.now();
+  let attempt = 0;
   try {
     while (Date.now() - startedAt < timeoutMs) {
-      await sleep(pollMs);
+      const wait = nextBackoffMs(pollInitialMs, pollMaxMs, attempt, jitter);
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      await sleep(Math.min(wait, Math.max(0, remaining)));
       const report = await fetchReadiness();
       if (report.ready) {
         sp.stop("All required connections are ready.");
         return report;
       }
+      attempt += 1;
     }
     sp.stop("Timed out waiting for connections.");
     throw new PreflightAbortError(
@@ -183,6 +190,22 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
     sp.stop();
     throw err;
   }
+}
+
+/**
+ * Capped exponential backoff with full jitter (AWS architecture blog).
+ * Returns a wait time uniformly chosen in `[0, min(initialMs * 2^attempt,
+ * maxMs)]`. A jittered backoff smooths the request rate the readiness
+ * endpoint sees when many CLIs are waiting on a shared instance.
+ */
+export function nextBackoffMs(
+  initialMs: number,
+  maxMs: number,
+  attempt: number,
+  random: () => number = Math.random,
+): number {
+  const exp = Math.min(maxMs, initialMs * 2 ** attempt);
+  return Math.floor(random() * exp);
 }
 
 // ---------------------------------------------------------------------------
@@ -204,9 +227,42 @@ function buildReadinessUrl(instance: string, inputs: PreflightInputs): string {
   return qs ? `${base}?${qs}` : base;
 }
 
+/**
+ * Build the same-origin connect URL the user is invited to open in
+ * their browser. We construct it via `URL` against the normalized
+ * instance origin so a malformed `instance` (or a future caller that
+ * forgets to normalise) cannot produce a cross-origin redirect that
+ * `defaultOpenBrowser` would faithfully launch.
+ *
+ * `assertSameOrigin` is a belt-and-suspenders guard: if the URL
+ * constructor ever yielded a different origin (e.g. a proto-relative
+ * `//evil.com` slipping through), we refuse rather than open it.
+ */
 function buildConnectUrl(instance: string, profileId: string | undefined): string {
-  const base = `${instance}/preferences/connectors`;
-  return profileId ? `${base}?profile=${encodeURIComponent(profileId)}` : base;
+  const base = new URL("/preferences/connectors", instance);
+  if (profileId) base.searchParams.set("profile", profileId);
+  assertSameOrigin(base.toString(), instance);
+  return base.toString();
+}
+
+export function assertSameOrigin(candidate: string, instance: string): void {
+  let candidateOrigin: string;
+  let instanceOrigin: string;
+  try {
+    candidateOrigin = new URL(candidate).origin;
+    instanceOrigin = new URL(instance).origin;
+  } catch {
+    throw new PreflightAbortError(
+      "preflight_failed",
+      `Refusing to open browser: instance URL "${instance}" is not parseable.`,
+    );
+  }
+  if (candidateOrigin !== instanceOrigin) {
+    throw new PreflightAbortError(
+      "preflight_failed",
+      `Refusing to open browser: connect URL origin (${candidateOrigin}) differs from configured instance origin (${instanceOrigin}).`,
+    );
+  }
 }
 
 function formatMissingMessage(missing: ReadinessMissingEntry[]): string {
