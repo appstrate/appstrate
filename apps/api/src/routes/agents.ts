@@ -43,6 +43,7 @@ import { getAppScope } from "../lib/scope.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
+  resolveExportVersion,
 } from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -603,12 +604,22 @@ export function createAgentsRouter() {
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes
       // the export cache-friendly and the determinism contract explicit.
-      const bundle = useDraft
-        ? await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" })
-        : await buildBundleForAgentExport(agent.id, scope, {
-            versionQuery,
-            metadata: { builder: "appstrate-platform" },
-          });
+      // The resolved version is surfaced in `X-Bundle-Version` so the CLI
+      // can attribute the run to a concrete version label without parsing
+      // the manifest itself (and without trusting a tag that may have moved
+      // between bundle download and run creation).
+      let resolvedVersion: string;
+      let bundle;
+      if (useDraft) {
+        bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
+        resolvedVersion = "draft";
+      } else {
+        resolvedVersion = await resolveExportVersion(agent.id, scope, versionQuery);
+        bundle = await buildBundleForAgentExport(agent.id, scope, {
+          versionQuery: resolvedVersion,
+          metadata: { builder: "appstrate-platform" },
+        });
+      }
 
       const bytes = writeBundleToBuffer(bundle);
       const parsed = parseScopedName(agent.id);
@@ -641,6 +652,7 @@ export function createAgentsRouter() {
           // no quoting hazard here.
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
           "X-Bundle-Integrity": wireIntegrity,
+          "X-Bundle-Version": resolvedVersion,
         },
       });
     },

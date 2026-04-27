@@ -40,6 +40,7 @@ import { notFound } from "../../src/lib/errors.ts";
 import { createAgentsRouter } from "../../src/routes/agents.ts";
 import { createRunsRouter } from "../../src/routes/runs.ts";
 import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
+import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
@@ -204,6 +205,10 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // more-specific `/runs/:runId/events` path wins — mirrors the
   // production wiring in `apps/api/src/index.ts`.
   app.route("/api", createRunsEventsRouter());
+  // Runner-facing remote-run creation (`POST /api/runs/remote` + sink
+  // extension). Mounts under `/api` because the router declares its own
+  // `/runs/...` prefixes — same shape as production.
+  app.route("/api", createRunsRemoteRouter());
   app.route("/api", runsRouter);
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());

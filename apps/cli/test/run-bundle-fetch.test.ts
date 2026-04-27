@@ -46,6 +46,7 @@ describe("fetchBundleForRun — happy path", () => {
     const fetchImpl = stubFetch({
       headers: {
         "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
+        "X-Bundle-Version": "draft",
         "Content-Disposition": 'attachment; filename="system-hello.afps-bundle.zip"',
       },
       capture,
@@ -62,6 +63,12 @@ describe("fetchBundleForRun — happy path", () => {
 
     expect(result.integrity).toBe(FAKE_BUNDLE_SRI);
     expect(result.bytes).toEqual(FAKE_BUNDLE_BYTES);
+    // The CLI propagates the resolved version + source into the
+    // `kind: "registry"` body it posts to /api/runs/remote.
+    // Without this, attribution would have to fall back to fingerprint
+    // reconciliation server-side.
+    expect(result.version).toBe("draft");
+    expect(result.source).toBe("draft");
 
     // Literal `@` — encodeURIComponent would produce `%40system`, which the
     // Hono server route `:scope{@[^/]+}` rejects as 404. The CLI's URL
@@ -84,10 +91,10 @@ describe("fetchBundleForRun — happy path", () => {
   it("threads the spec into the version query parameter", async () => {
     const capture: { url?: string; headers?: Headers } = {};
     const fetchImpl = stubFetch({
-      headers: { "X-Bundle-Integrity": FAKE_BUNDLE_SRI },
+      headers: { "X-Bundle-Integrity": FAKE_BUNDLE_SRI, "X-Bundle-Version": "1.2.3" },
       capture,
     });
-    await fetchBundleForRun({
+    const result = await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
       appId: "app_1",
@@ -96,6 +103,29 @@ describe("fetchBundleForRun — happy path", () => {
       fetchImpl,
     });
     expect(capture.url).toContain("?version=%5E1.2");
+    // Spec means `source: "published"` — even though the CLI asked for a
+    // range, the server resolved to a concrete semver in `X-Bundle-Version`.
+    expect(result.source).toBe("published");
+    expect(result.version).toBe("1.2.3");
+  });
+
+  it("falls back to Content-Disposition then `unspecified` when the version header is absent (older servers)", async () => {
+    const fetchImpl = stubFetch({
+      headers: {
+        "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
+        "Content-Disposition": 'attachment; filename="scope-agent-2.5.0.afps-bundle.zip"',
+      },
+    });
+    const result = await fetchBundleForRun({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      appId: "app_1",
+      packageId: "@scope/agent",
+      spec: "2.5.0",
+      fetchImpl,
+    });
+    // Old-server fallback parses the version from the filename.
+    expect(result.version).toBe("2.5.0");
   });
 
   it("re-fetches on every call — no on-disk cache", async () => {

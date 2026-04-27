@@ -933,6 +933,11 @@ export const agentsPaths = {
                 "Bundle-level SRI digest (`sha256-<base64>`) over the canonical packages map — clients may compare this against a client-side recompute to validate the transfer without unzipping.",
               schema: { type: "string" },
             },
+            "X-Bundle-Version": {
+              description:
+                'Resolved version label of the served bundle: a concrete semver for `source=published`, or `"draft"` for `source=draft`. Lets a CLI/runner attribute its run via `POST /api/runs/remote` `kind: "registry"` without parsing the manifest.',
+              schema: { type: "string" },
+            },
           },
           content: {
             "application/zip": {
