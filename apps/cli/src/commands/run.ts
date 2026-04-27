@@ -27,6 +27,7 @@ import {
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import {
+  readBundleFromBuffer,
   readBundleFromFile,
   buildPlatformPromptInputs,
   renderPlatformPrompt,
@@ -64,6 +65,22 @@ import {
 import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
+import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
+import { fetchBundleForRun, BundleFetchError } from "./run/bundle-fetch.ts";
+import {
+  fetchRunConfigPayload,
+  mergeRunConfig,
+  RunConfigFetchError,
+  type InheritedRunConfig,
+} from "./run/inherit-config.ts";
+import {
+  parseProviderProfileOverrides,
+  resolveConnectionProfileSelection,
+  ConnectionProfileResolutionError,
+} from "./run/connection-profiles.ts";
+import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
+import { validateConfig } from "@appstrate/core/schema-validation";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -95,6 +112,38 @@ export interface RunCommandOptions {
   reportFallback?: ReportFallback;
   /** Requested sink TTL in seconds. Server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
   sinkTtl?: number;
+  /**
+   * Proxy id to associate with the run. For in-process runs this only
+   * surfaces in the reported run record — actual outbound proxying is
+   * handled server-side by the credential proxy. For remote runs the
+   * platform applies the override to the spawned container.
+   */
+  proxy?: string;
+  /**
+   * When true, ignore the per-app `run-config` (config / model / proxy
+   * / versionPin) and rely only on flags + env vars + defaults. Useful
+   * for deterministic CI runs where the application's persisted state
+   * must not drift the run.
+   */
+  noInherit?: boolean;
+  /**
+   * Connection profile id or name. Used as `X-Connection-Profile-Id`
+   * on every credential-proxy call. Falls back to the sticky default
+   * pinned via `appstrate connections profile switch`, then to the
+   * platform's implicit-default chain.
+   */
+  connectionProfile?: string;
+  /**
+   * Per-provider profile overrides — `["@scope/provider=uuid", ...]`.
+   * Each entry is split on `=`; the resolver applies the override only
+   * for that provider's calls, falling back to the default profile for
+   * everything else. Mirrors the dashboard's per-agent override surface.
+   */
+  providerProfile?: string[];
+  /** Skip the readiness preflight entirely (CI mode). */
+  noPreflight?: boolean;
+  /** Override the preflight polling timeout. Default 5 minutes. */
+  preflightTimeout?: number;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -113,30 +162,119 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
-  const modelSource = parseModelSource(opts.modelSource);
+  const target = parseRunTarget(opts.bundle);
+  // Auto-default to `preset` when the user runs an agent by id (the
+  // "UI parity" path) AND has a remote provider context. Path mode
+  // keeps `env` as the default — local file = local execution = local
+  // credentials. The user can always override via --model-source or
+  // APPSTRATE_MODEL_SOURCE.
+  const modelSource = parseModelSource(opts.modelSource, {
+    autoPreset: target.kind === "id" && mode !== "none" && mode !== "local",
+  });
+
+  // Build provider resolver inputs FIRST so preset mode can reuse the
+  // bearer token — they share the same auth surface.
+  const resolverInputs = await buildResolverInputs(mode, opts);
+
+  // ─── 1b. Connection profile + per-provider overrides ─────────────
+  // Apply the explicit `--connection-profile` flag (or the sticky
+  // default pinned by `appstrate connections profile switch`) and
+  // any `--provider-profile <p>=<ref>` overrides. Names need an API
+  // round-trip; UUIDs pass through verbatim. No-op when not in remote
+  // mode — local/none resolvers don't speak to the credential proxy.
+  const connectionSelection = await resolveConnectionProfileForRun(resolverInputs, opts);
+  const resolverInputsWithProfiles =
+    resolverInputs && "bearerToken" in resolverInputs && connectionSelection
+      ? {
+          ...resolverInputs,
+          ...(connectionSelection.connectionProfileId
+            ? { connectionProfileId: connectionSelection.connectionProfileId }
+            : {}),
+          ...(Object.keys(connectionSelection.providerProfileOverrides).length > 0
+            ? { providerProfileOverrides: connectionSelection.providerProfileOverrides }
+            : {}),
+        }
+      : resolverInputs;
+
+  // ─── 1a. Inherited run-config ────────────────────────────────────
+  // When the user runs an agent by id with a remote provider context,
+  // pull the per-app run-config so flags + env vars cascade over the
+  // same persisted state the dashboard "Run" button uses. Skipped for
+  // path-mode (local file, no platform handle) and for `--no-inherit`
+  // (deterministic CI runs).
+  const inheritedConfig = await maybeFetchRunConfig(target, resolverInputs, opts);
+
+  // Apply inherited model id as the default model when the user did not
+  // pass `--model` and there's no APPSTRATE_MODEL env var. This lets the
+  // CLI reproduce a UI run that selected a specific preset.
+  const llmFlagsWithInheritance: RunCommandOptions =
+    inheritedConfig.modelId && !opts.model && !process.env.APPSTRATE_MODEL_ID
+      ? { ...opts, model: inheritedConfig.modelId }
+      : opts;
 
   // ─── 2. Resolve the LLM (fails fast if no key) ─────────────────────
   //   env    — user-supplied credentials, no Appstrate call
   //   preset — preset id resolved via `/api/models`, LLM traffic routed
   //            through `/api/llm-proxy/<api>/*` with the profile's bearer
-  //
-  // Build provider resolver inputs FIRST so preset mode can reuse the
-  // bearer token — they share the same auth surface.
-  const resolverInputs = await buildResolverInputs(mode, opts);
-
-  const { model, apiKey: llmApiKey } = await resolveLlmConfig(modelSource, opts, resolverInputs);
+  const { model, apiKey: llmApiKey } = await resolveLlmConfig(
+    modelSource,
+    llmFlagsWithInheritance,
+    resolverInputs,
+  );
 
   // ─── 3. Load the bundle ────────────────────────────────────────────
-  // Load before building the provider resolver so the reporting layer
-  // (which needs the manifest + prompt to register the run) can run
-  // before any resolver is wired.
-  const bundlePath = path.resolve(opts.bundle);
-  try {
-    await fs.access(bundlePath);
-  } catch {
-    throw new Error(`Bundle not found: ${bundlePath}`);
+  // Two shapes share this path:
+  //   - `appstrate run ./local.afps[-bundle]` → resolve as a path on disk.
+  //   - `appstrate run @scope/agent[@spec]` → fetch from the pinned
+  //     instance (with deps inlined) into memory only. The bytes are
+  //     verified against the server's integrity header and discarded
+  //     when the run finishes — no on-disk cache. Requires a remote
+  //     provider mode so we already have the bearer token + appId in
+  //     `resolverInputs`. The inherited `versionPin` is applied as the
+  //     spec when the user did not type `@spec` themselves.
+  const bundleTarget =
+    target.kind === "id" && !target.spec && inheritedConfig.versionPin
+      ? { ...target, spec: inheritedConfig.versionPin }
+      : target;
+  const bundleSource = await resolveBundleSource(bundleTarget, opts, resolverInputs);
+  const bundle =
+    bundleSource.kind === "path"
+      ? await readBundleFromFile(bundleSource.path)
+      : readBundleFromBuffer(bundleSource.bytes);
+  const bundleLabel = bundleSource.label;
+
+  // ─── 3.5 Preflight readiness ─────────────────────────────────────
+  // Only meaningful when the user is running an agent by id against a
+  // remote instance — in path-mode there's no platform handle, and in
+  // local/none provider modes there are no credentials to be ready
+  // about. The check itself reuses the same dependency-validation
+  // machinery the run pipeline uses, so the answer is in lockstep with
+  // what the run would actually do.
+  if (
+    target.kind === "id" &&
+    resolverInputs &&
+    "bearerToken" in resolverInputs &&
+    !opts.noPreflight
+  ) {
+    await preflightCheck({
+      instance: resolverInputs.instance,
+      bearerToken: resolverInputs.bearerToken,
+      appId: resolverInputs.appId,
+      orgId: resolverInputs.orgId,
+      scope: target.scope,
+      name: target.name,
+      ...(connectionSelection?.connectionProfileId
+        ? { connectionProfileId: connectionSelection.connectionProfileId }
+        : {}),
+      ...(connectionSelection?.providerProfileOverrides &&
+      Object.keys(connectionSelection.providerProfileOverrides).length > 0
+        ? { perProviderOverrides: connectionSelection.providerProfileOverrides }
+        : {}),
+      json: opts.json === true,
+      skip: false,
+      ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
+    });
   }
-  const bundle = await readBundleFromFile(bundlePath);
 
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, resolverInputs);
@@ -144,14 +282,35 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // ─── 3b. Build the ProviderResolver ────────────────────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
   const effectiveResolverInputs =
-    resolverInputs && reportSession
-      ? appendResolverHeaders(resolverInputs, reportSession.proxyHeaders)
-      : resolverInputs;
+    resolverInputsWithProfiles && reportSession
+      ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
+      : resolverInputsWithProfiles;
   const providerResolver = buildResolver(mode, effectiveResolverInputs);
 
-  // ─── 5. Parse input + config ───────────────────────────────────────
+  // ─── 5. Parse input ────────────────────────────────────────────────
+  // The merged config (deep-merge of `--config` over the inherited
+  // per-app value) is already on `inheritedConfig.config` — see
+  // `mergeRunConfig` in inherit-config.ts for the cascade rules.
   const input = await resolveInput(opts);
-  const config = opts.config ? safeParseJson(opts.config, "--config") : {};
+  const config = inheritedConfig.config;
+
+  // Validate the merged config against the bundle's manifest schema
+  // BEFORE launching PiRunner. The platform performs the same gate
+  // server-side via @appstrate/core/schema-validation; running the
+  // check here keeps a CLI run from succeeding where the dashboard
+  // would have rejected the same `(config, schema)` pair.
+  const configSchema = readBundleConfigSchema(bundle);
+  if (configSchema) {
+    const result = validateConfig(config, configSchema);
+    if (!result.valid) {
+      const summary = result.errors.map((e) => `  - ${e.field}: ${e.message}`).join("\n");
+      exitWithError(
+        `Resolved config does not match the agent's manifest schema:\n${summary}\n\n` +
+          `Fix the persisted per-app config in the dashboard, or pass a\n` +
+          `corrected --config <json> override.`,
+      );
+    }
+  }
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / providers /
@@ -256,7 +415,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     const reportNote = reportSession
       ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
       : "";
-    process.stderr.write(`→ running ${path.basename(bundlePath)}${reportNote}\n`);
+    process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
   }
   try {
     const runner = new PiRunner({
@@ -427,12 +586,29 @@ function raceFinalizeAgainstTimeout(p: Promise<void>, timeoutMs: number): Promis
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseModelSource(raw: string | undefined): ModelSource {
-  const value = (raw ?? process.env.APPSTRATE_MODEL_SOURCE ?? "env").toLowerCase();
+/**
+ * Resolve the effective `--model-source`. Exported for unit tests.
+ * Precedence: explicit flag > `APPSTRATE_MODEL_SOURCE` env > auto.
+ * Auto picks `preset` when the caller passes `{ autoPreset: true }`
+ * (id-mode + remote provider context, the UI-parity path) and `env`
+ * otherwise (local file, or any local-credentials run).
+ */
+export function parseModelSource(
+  raw: string | undefined,
+  opts: { autoPreset?: boolean } = {},
+): ModelSource {
+  // Explicit flag wins over env var wins over auto-detection. The auto
+  // default kicks in only when neither is set: id-mode + remote → preset
+  // (UI parity), everything else → env (local credentials).
+  const explicit = raw ?? process.env.APPSTRATE_MODEL_SOURCE;
+  if (!explicit) {
+    return opts.autoPreset ? "preset" : "env";
+  }
+  const value = explicit.toLowerCase();
   if (value === "env" || value === "preset") return value;
   throw new ModelResolutionError(
     `Unknown --model-source "${raw}"`,
-    "Accepted values: env (default), preset.",
+    "Accepted values: env, preset. Default: preset for `appstrate run @scope/agent` against a remote instance, env otherwise.",
   );
 }
 
@@ -697,6 +873,141 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
   return inputs && "bearerToken" in inputs ? inputs.instance : "(local)";
 }
 
+/**
+ * Resolve `--connection-profile` + `--provider-profile` flags into the
+ * concrete ids the resolver forwards as `X-Connection-Profile-Id`. The
+ * sticky default (`Profile.connectionProfileId`) acts as the fallback
+ * when the user did not pass `--connection-profile`. No-op when the
+ * provider mode has no remote handle (`local`, `none`).
+ */
+async function resolveConnectionProfileForRun(
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  opts: RunCommandOptions,
+): Promise<{
+  connectionProfileId: string | undefined;
+  providerProfileOverrides: Record<string, string>;
+} | null> {
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) return null;
+
+  const perProvider = parseProviderProfileOverrides(opts.providerProfile);
+  // No flags + no sticky → nothing to do, no need to load profiles.
+  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  const pinnedId = resolved?.profile?.connectionProfileId;
+  if (!opts.connectionProfile && !pinnedId && perProvider.length === 0) {
+    return { connectionProfileId: undefined, providerProfileOverrides: {} };
+  }
+
+  if (!resolved) {
+    throw new ConnectionProfileResolutionError(
+      "--connection-profile / --provider-profile require an active CLI profile",
+      "Run `appstrate login`, or pass --profile.",
+    );
+  }
+  return resolveConnectionProfileSelection({
+    profileName: resolved.profileName,
+    flagRef: opts.connectionProfile,
+    pinnedId,
+    perProvider,
+  });
+}
+
+/**
+ * Pull the resolved run-config from the pinned instance when running an
+ * agent by id with a remote provider context. Returns a zeroed
+ * inheritance record when the call cannot or should not be made — the
+ * caller treats every field as a no-op merge in that case.
+ */
+async function maybeFetchRunConfig(
+  target: ReturnType<typeof parseRunTarget>,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  opts: RunCommandOptions,
+): Promise<InheritedRunConfig> {
+  // Parse `--config <json>` once so the flag override participates in
+  // the same cascade as inherited / env values. Path-mode and
+  // --no-inherit still benefit from the parsed flag — they just see a
+  // null `inherited`, so the merge collapses to "flagConfig or {}".
+  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
+  const noInherit =
+    opts.noInherit || target.kind !== "id" || !resolverInputs || !("bearerToken" in resolverInputs);
+  if (noInherit) {
+    return mergeRunConfig({
+      inherited: null,
+      flagConfig,
+      flagModel: opts.model,
+      flagProxy: opts.proxy,
+      hasExplicitSpec: target.kind === "id" ? target.spec !== undefined : false,
+      envModel: process.env.APPSTRATE_MODEL_ID,
+      envProxy: process.env.APPSTRATE_PROXY,
+    });
+  }
+
+  // Narrowed by the noInherit short-circuit: target is "id" and
+  // resolverInputs carries a bearerToken.
+  const idTarget = target as Extract<typeof target, { kind: "id" }>;
+  const remoteInputs = resolverInputs as RemoteResolverInputs;
+
+  const payload = await fetchRunConfigPayload({
+    instance: remoteInputs.instance,
+    bearerToken: remoteInputs.bearerToken,
+    appId: remoteInputs.appId,
+    orgId: remoteInputs.orgId,
+    scope: idTarget.scope,
+    name: idTarget.name,
+  });
+  return mergeRunConfig({
+    inherited: payload,
+    flagConfig,
+    flagModel: opts.model,
+    flagProxy: opts.proxy,
+    hasExplicitSpec: idTarget.spec !== undefined,
+    envModel: process.env.APPSTRATE_MODEL_ID,
+    envProxy: process.env.APPSTRATE_PROXY,
+  });
+}
+
+type BundleSource =
+  | { kind: "path"; path: string; label: string }
+  | { kind: "bytes"; bytes: Uint8Array; label: string };
+
+async function resolveBundleSource(
+  target: ReturnType<typeof parseRunTarget>,
+  opts: RunCommandOptions,
+  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+): Promise<BundleSource> {
+  if (target.kind === "path") {
+    const abs = path.resolve(target.path);
+    try {
+      await fs.access(abs);
+    } catch {
+      throw new Error(`Bundle not found: ${abs}`);
+    }
+    return { kind: "path", path: abs, label: path.basename(abs) };
+  }
+
+  // id mode — needs remote provider context so we have a bearer + appId
+  // to authenticate the bundle download against the pinned instance.
+  if (!resolverInputs || !("bearerToken" in resolverInputs)) {
+    throw new PackageSpecError(
+      `Running an agent by id requires a logged-in profile or an API key`,
+      `Run \`appstrate login\`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID. To run a local file, prefix the path with ./`,
+    );
+  }
+
+  const fetched = await fetchBundleForRun({
+    instance: resolverInputs.instance,
+    bearerToken: resolverInputs.bearerToken,
+    appId: resolverInputs.appId,
+    orgId: resolverInputs.orgId,
+    packageId: target.packageId,
+    spec: target.spec,
+  });
+  const label = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
+  if (!opts.json) {
+    process.stderr.write(`→ fetched bundle ${label}\n`);
+  }
+  return { kind: "bytes", bytes: fetched.bytes, label };
+}
+
 // Re-export error types for the CLI's formatError pipeline.
 export {
   ModelResolutionError,
@@ -704,6 +1015,11 @@ export {
   ReportConfigError,
   ReportStartError,
   SnapshotError,
+  PackageSpecError,
+  BundleFetchError,
+  RunConfigFetchError,
+  ConnectionProfileResolutionError,
+  PreflightAbortError,
 };
 
 /**
@@ -717,6 +1033,25 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
+}
+
+/**
+/**
+ * Pull the AFPS 1.x `config.schema` JSON Schema out of the bundle's
+ * root package manifest. Returns `undefined` when the agent declares
+ * no config schema (so validation is a no-op). Mirrors the unexported
+ * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.
+ */
+export function readBundleConfigSchema(
+  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
+): JSONSchemaObject | undefined {
+  const rootPkg = bundle.packages.get(bundle.root);
+  const manifest = rootPkg?.manifest as Record<string, unknown> | undefined;
+  const section = manifest?.config;
+  if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
+  const schema = (section as Record<string, unknown>).schema;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+  return schema as JSONSchemaObject;
 }
 
 /**

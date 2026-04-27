@@ -31,6 +31,13 @@ export interface Profile {
   email: string;
   orgId?: string;
   appId?: string;
+  /**
+   * Sticky default connection profile UUID — applied to every
+   * credential-proxy call as `X-Connection-Profile-Id` unless the user
+   * passes `--connection-profile` on the command line. Set via
+   * `appstrate connections profile switch`.
+   */
+  connectionProfileId?: string;
 }
 
 export interface Config {
@@ -110,6 +117,8 @@ export async function readConfig(): Promise<Config> {
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       appId: typeof row.appId === "string" ? row.appId : undefined,
+      connectionProfileId:
+        typeof row.connectionProfileId === "string" ? row.connectionProfileId : undefined,
     };
   }
   return { defaultProfile, profiles };

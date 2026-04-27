@@ -72,6 +72,10 @@ export function useCreateSchedule(packageId: string) {
       cronExpression: string;
       timezone?: string;
       input?: Record<string, unknown>;
+      configOverride?: Record<string, unknown> | null;
+      modelIdOverride?: string | null;
+      proxyIdOverride?: string | null;
+      versionOverride?: string | null;
     }) => {
       return api<Schedule>(`/agents/${packageId}/schedules`, {
         method: "POST",
@@ -97,6 +101,10 @@ export function useUpdateSchedule() {
       timezone?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
+      configOverride?: Record<string, unknown> | null;
+      modelIdOverride?: string | null;
+      proxyIdOverride?: string | null;
+      versionOverride?: string | null;
     }) => {
       return api<Schedule>(`/schedules/${id}`, {
         method: "PUT",

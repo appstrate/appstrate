@@ -38,18 +38,25 @@ export function useSaveConfig(packageId: string) {
   });
 }
 
+export interface RunAgentParams {
+  input?: Record<string, unknown>;
+  version?: string;
+}
+
 export function useRunAgent(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (params?: { input?: Record<string, unknown>; version?: string }) => {
+    mutationFn: async (params?: RunAgentParams) => {
       const { input, version } = params ?? {};
       const qs = buildQs({ version });
+      const body: Record<string, unknown> = {};
+      if (input !== undefined) body.input = input;
       // File fields now carry `upload://upl_xxx` URIs (staged via POST /api/uploads
       // before submit) so the run request is always a plain JSON POST.
       return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
-        body: JSON.stringify(input ? { input } : {}),
+        body: JSON.stringify(body),
       });
     },
     onSuccess: (data) => {

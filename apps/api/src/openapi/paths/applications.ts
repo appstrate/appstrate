@@ -426,6 +426,54 @@ export const applicationsPaths = {
       },
     },
   },
+  "/api/applications/{appId}/packages/{scope}/{name}/run-config": {
+    get: {
+      operationId: "getApplicationPackageRunConfig",
+      tags: ["Application Packages"],
+      summary: "Get the resolved per-app run configuration",
+      description:
+        "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, pinned version label, and the list of providers required by the package's manifest. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Resolved run configuration",
+          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["config", "modelId", "proxyId", "versionPin", "requiredProviders"],
+                properties: {
+                  config: { type: "object" },
+                  modelId: { type: ["string", "null"] },
+                  proxyId: { type: ["string", "null"] },
+                  versionPin: { type: ["string", "null"] },
+                  requiredProviders: {
+                    type: "array",
+                    items: { type: "string" },
+                  },
+                },
+              },
+              example: {
+                config: { dryRun: true },
+                modelId: "claude-sonnet-4-6",
+                proxyId: null,
+                versionPin: "1.2.3",
+                requiredProviders: ["@afps/gmail", "@afps/clickup"],
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/applications/{appId}/providers": {
     get: {
       operationId: "listAppProviderOverrides",

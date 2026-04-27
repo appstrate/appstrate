@@ -3,11 +3,17 @@
 import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { scopedNameRegex } from "@appstrate/core/validation";
+import { validateConfig as validateConfigCore } from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
 //
 // Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
 // client- and server-side validation agree. See packages/core/src/ajv.ts.
+//
+// `validateConfig` itself lives in `@appstrate/core/schema-validation` so the
+// CLI's local-run path applies the same gate as the platform server before
+// launching PiRunner. `validateInput` and `validateOutput` stay here — they
+// rely on server-only concerns (file-field stripping, output overload).
 const ajv = createAjv({ coerceTypes: true });
 
 // AJV with coerceTypes coerces null → "" for strings, which incorrectly passes
@@ -32,20 +38,18 @@ export interface ValidationResult {
 }
 
 /**
- * Shared AJV validation path for config/input/output.
+ * Shared AJV validation path for input/output.
  *
- * Differences between the three kinds, encoded here:
- * - "config":  validates the raw schema, normalizes empty strings as missing for required fields.
+ * Differences between the two kinds, encoded here:
  * - "input":   filters out file fields (already resolved from upload:// URIs before this runs),
  *              normalizes empty strings for remaining required fields. Accepts undefined input.
  * - "output":  relaxes `additionalProperties: true` (extra fields like state/tokenUsage allowed),
  *              skips normalization, returns errors as pre-formatted strings.
+ *
+ * Config validation lives in `@appstrate/core/schema-validation` so the
+ * CLI uses the same logic; this server path delegates via the
+ * `validateConfig` re-export below.
  */
-function runValidate(
-  kind: "config",
-  data: Record<string, unknown>,
-  schema: JSONSchemaObject,
-): ValidationResult;
 function runValidate(
   kind: "input",
   data: Record<string, unknown> | undefined,
@@ -57,7 +61,7 @@ function runValidate(
   schema: JSONSchemaObject,
 ): { valid: boolean; errors: string[] };
 function runValidate(
-  kind: "config" | "input" | "output",
+  kind: "input" | "output",
   data: Record<string, unknown> | undefined,
   schema: JSONSchemaObject,
 ): ValidationResult | { valid: boolean; errors: string[] } {
@@ -67,18 +71,15 @@ function runValidate(
     return {
       valid: true,
       errors: [],
-      data: kind === "input" ? (data ?? {}) : data,
+      data: data ?? {},
     };
   }
 
   // 2. Per-kind schema + data preparation
-  let effectiveSchema: JSONSchemaObject = schema;
+  let effectiveSchema: JSONSchemaObject;
   let effectiveData: Record<string, unknown> = data ?? {};
 
-  if (kind === "config") {
-    // Treat empty strings as missing for required fields (aligned with frontend validation)
-    effectiveData = stripEmptyRequired(effectiveData, schema.required ?? []);
-  } else if (kind === "input") {
+  if (kind === "input") {
     // Exclude file fields from AJV validation. File inputs are resolved from
     // `upload://upl_xxx` URIs by the input parser BEFORE this runs; the
     // declared schema still uses `format: uri` + `contentMediaType` which
@@ -129,12 +130,10 @@ function runValidate(
   return { valid: false, errors };
 }
 
-export function validateConfig(
-  data: Record<string, unknown>,
-  schema: JSONSchemaObject,
-): ValidationResult {
-  return runValidate("config", data, schema);
-}
+// Re-export the shared config validator so existing call sites
+// (services/agent-readiness.ts, route handlers) keep their import
+// surface unchanged.
+export const validateConfig = validateConfigCore;
 
 export function validateInput(
   input: Record<string, unknown> | undefined,

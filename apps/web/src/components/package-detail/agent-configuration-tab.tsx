@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -163,36 +164,63 @@ function AppProfileSection({ packageId }: { packageId: string }) {
   const { data: appProfiles } = useAppProfiles();
   const { data: detail } = usePackageDetail("agent", packageId);
   const setAgentAppProfile = useSetAgentAppProfile(packageId);
-  if (!appProfiles || appProfiles.length === 0) return null;
-
+  const isEmpty = !appProfiles || appProfiles.length === 0;
   const currentAppProfileId = detail?.agentAppProfileId;
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("detail.configSectionAppProfile")}</h3>
-      <p className="text-muted-foreground text-xs">{t("detail.configAppProfileHint")}</p>
-      <Select
-        value={currentAppProfileId ?? "__none__"}
-        onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
-        disabled={setAgentAppProfile.isPending}
-      >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
-          {appProfiles.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.name}
-              {p.bindingCount > 0 && (
-                <span className="text-muted-foreground ml-1">
-                  ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
-                </span>
-              )}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <p className="text-muted-foreground text-xs">
+        <Trans
+          i18nKey="agents:detail.configAppProfileHint"
+          components={{
+            pref: (
+              <Link
+                to="/preferences/profiles"
+                className="text-primary underline-offset-2 hover:underline"
+              />
+            ),
+          }}
+        />
+      </p>
+      {isEmpty ? (
+        <p className="text-muted-foreground text-xs">
+          <Trans
+            i18nKey="agents:detail.configAppProfileEmpty"
+            components={{
+              admin: (
+                <Link
+                  to="/org-settings/app/profiles"
+                  className="text-primary underline-offset-2 hover:underline"
+                />
+              ),
+            }}
+          />
+        </p>
+      ) : (
+        <Select
+          value={currentAppProfileId ?? "__none__"}
+          onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
+          disabled={setAgentAppProfile.isPending}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
+            {appProfiles.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+                {p.bindingCount > 0 && (
+                  <span className="text-muted-foreground ml-1">
+                    ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
+                  </span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }
@@ -208,6 +236,7 @@ export function AgentConfigurationTab({
   configSchemaOverride?: JSONSchemaObject;
   isHistorical?: boolean;
 }) {
+  const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
   const schema = isHistorical
@@ -217,6 +246,7 @@ export function AgentConfigurationTab({
 
   return (
     <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">{t("detail.tabConfigurationHint")}</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />

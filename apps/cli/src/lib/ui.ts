@@ -122,6 +122,16 @@ export function formatError(err: unknown): string {
   if (err instanceof InsecureInstanceError) return err.message;
   if (err instanceof AuthError) return err.message;
   if (err instanceof ApiError) return `API error (${err.status}): ${err.message}`;
+  // Errors with a `hint` field (PackageSpecError, BundleFetchError, …)
+  // render `<message> — <hint>` so the user sees the action item next to
+  // the error. Avoids importing the error classes here just for instanceof.
+  if (
+    err instanceof Error &&
+    typeof (err as Error & { hint?: unknown }).hint === "string" &&
+    (err as Error & { hint: string }).hint.length > 0
+  ) {
+    return `${err.message} — ${(err as Error & { hint: string }).hint}`;
+  }
   if (err instanceof Error) return err.message;
   return String(err);
 }

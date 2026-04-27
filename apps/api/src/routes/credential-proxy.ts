@@ -43,7 +43,7 @@ const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionProfiles } from "@appstrate/db/schema";
+import { connectionProfiles, userApplicationProfiles } from "@appstrate/db/schema";
 import { filterHeaders } from "@appstrate/connect/proxy-primitives";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -82,11 +82,41 @@ import type { AppEnv } from "../types/index.ts";
  * own connected account; that mismatch would make the CLI remote-run
  * flow unusable unless every admin hand-crafts an app-default profile.
  */
-async function resolveProfileId(args: {
+export async function resolveProfileId(args: {
   applicationId: string;
   endUserId?: string;
   userId?: string;
+  /**
+   * Optional explicit profile id from the `X-Connection-Profile-Id`
+   * header. When set the resolver narrows to that profile after
+   * validating the caller is allowed to use it (own user/end-user
+   * profile, or an app profile in the request's application). Mismatched
+   * ids surface as `null` so the route returns `404 — no credentials`,
+   * keeping the failure mode aligned with the implicit-default path.
+   */
+  explicitProfileId?: string;
 }): Promise<string | null> {
+  if (args.explicitProfileId) {
+    const [row] = await db
+      .select({
+        id: connectionProfiles.id,
+        userId: connectionProfiles.userId,
+        endUserId: connectionProfiles.endUserId,
+        applicationId: connectionProfiles.applicationId,
+      })
+      .from(connectionProfiles)
+      .where(eq(connectionProfiles.id, args.explicitProfileId))
+      .limit(1);
+    if (!row) return null;
+    // Authorisation: the profile must belong to one of three buckets
+    // the caller already owns. Anything else (another user's profile,
+    // another app's profile) surfaces as null → 404.
+    const ownsUser = row.userId !== null && row.userId === args.userId;
+    const ownsEndUser = row.endUserId !== null && row.endUserId === args.endUserId;
+    const ownsAppProfile = row.applicationId !== null && row.applicationId === args.applicationId;
+    if (!ownsUser && !ownsEndUser && !ownsAppProfile) return null;
+    return row.id;
+  }
   if (args.endUserId) {
     const rows = await db
       .select({ id: connectionProfiles.id })
@@ -99,6 +129,23 @@ async function resolveProfileId(args: {
       )
       .limit(1);
     return rows[0]?.id ?? null;
+  }
+  // Member's per-(user, app) sticky default — set via the dashboard
+  // preferences page (or `appstrate connections profile switch` once the
+  // CLI is server-aligned). Wins over the app's shared default but loses
+  // to an explicit per-run override above.
+  if (args.userId) {
+    const stickyRows = await db
+      .select({ id: userApplicationProfiles.profileId })
+      .from(userApplicationProfiles)
+      .where(
+        and(
+          eq(userApplicationProfiles.userId, args.userId),
+          eq(userApplicationProfiles.applicationId, args.applicationId),
+        ),
+      )
+      .limit(1);
+    if (stickyRows[0]) return stickyRows[0].id;
   }
   const appRows = await db
     .select({ id: connectionProfiles.id })
@@ -219,6 +266,12 @@ export function createCredentialProxyRouter() {
       // mismatched runId is a reporting oddity, not a security boundary.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
+      // X-Connection-Profile-Id is optional — when set the route narrows
+      // to that profile (after ownership validation in resolveProfileId);
+      // when absent the implicit default chain still applies.
+      const explicitProfileHeader = c.req.header("X-Connection-Profile-Id");
+      const explicitProfileId =
+        explicitProfileHeader && explicitProfileHeader.length > 0 ? explicitProfileHeader : null;
 
       if (!providerId) throw invalidRequest("Missing X-Provider header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -272,6 +325,7 @@ export function createCredentialProxyRouter() {
           applicationId,
           endUserId: endUser?.id,
           ...(userFallback ? { userId: userFallback } : {}),
+          ...(explicitProfileId ? { explicitProfileId } : {}),
         });
       } catch (err) {
         logger.error("credential-proxy: profile resolution failed", {
@@ -514,6 +568,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-substitute-body",
   "x-run-id",
   "x-app-id",
+  "x-connection-profile-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",
   "x-stream-response",

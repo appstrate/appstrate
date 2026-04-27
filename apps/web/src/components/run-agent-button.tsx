@@ -7,7 +7,7 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { InputModal } from "./input-modal";
+import { RunModal } from "./run-modal";
 import { ConnectionSummaryModal } from "./connection-summary-modal";
 import { useRunAgent } from "../hooks/use-mutations";
 import { api } from "../api";
@@ -69,18 +69,16 @@ export function RunAgentButton({
   const providers = detail?.dependencies?.providers ?? [];
   const hasProviders = providers.length > 0;
   const hasDisconnected = hasDisconnectedProviders(providers);
-  const hasInputSchema = !!(
-    detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0
-  );
 
   /** Called after the connection summary is confirmed (or skipped if no providers). */
   const proceedAfterSummary = () => {
     setSummaryOpen(false);
-    if (hasInputSchema) {
-      setInputOpen(true);
-    } else {
-      runAgent.mutate({ version });
-    }
+    // Always open the run modal — users can override config/model/proxy/version
+    // per run from the collapsed "Paramètres" accordion. The accordion stays
+    // closed by default so the simple "click Run → confirm" flow is one extra
+    // click vs. the legacy fast-path. Power-user overrides previously required
+    // editing the persisted defaults (and reverting), the CLI, or a Re-run.
+    setInputOpen(true);
   };
 
   /** Start the run agent: show summary if providers, otherwise proceed directly. */
@@ -112,15 +110,7 @@ export function RunAgentButton({
       if (agentHasProviders) {
         setSummaryOpen(true);
       } else {
-        const needsInput = !!(
-          data.agent.input?.schema?.properties &&
-          Object.keys(data.agent.input.schema.properties).length > 0
-        );
-        if (needsInput) {
-          setInputOpen(true);
-        } else {
-          runAgent.mutate({});
-        }
+        setInputOpen(true);
       }
     } catch {
       toast.error(t("error.generic", { ns: "common" }));
@@ -181,9 +171,12 @@ export function RunAgentButton({
         />
       )}
 
-      {/* Input modal — shown after summary confirmation if agent has input schema */}
+      {/* Run modal — shown after summary confirmation. Carries the input
+          form (when applicable) plus the per-run override accordion
+          (collapsed by default). One unified entry point regardless of
+          whether the agent has an input schema. */}
       {detail && (
-        <InputModal
+        <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}

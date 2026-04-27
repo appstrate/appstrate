@@ -246,6 +246,92 @@ describe("formatDoctorReport", () => {
   });
 });
 
+describe("connection-profile check", () => {
+  const baseInstall = {
+    pathEntry: "/usr/local/bin",
+    binary: "/usr/local/bin/appstrate",
+    realPath: "/usr/local/bin/appstrate",
+    version: "1.2.3",
+    source: "curl" as const,
+  };
+
+  it("attaches a missing result when the pinned profile id is not found", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      checkConnectionProfile: async () => ({
+        profileId: "abc",
+        status: "missing",
+        hint: "Run `appstrate connections profile switch <name>`.",
+      }),
+    });
+    expect(report.connectionProfile).toEqual({
+      profileId: "abc",
+      status: "missing",
+      hint: "Run `appstrate connections profile switch <name>`.",
+    });
+  });
+
+  it("omits the field when no profile is pinned (check returns null)", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      checkConnectionProfile: async () => null,
+    });
+    expect(report.connectionProfile).toBeUndefined();
+  });
+
+  it("fails soft (no `connectionProfile`) when the check throws", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      checkConnectionProfile: async () => {
+        throw new Error("network down");
+      },
+    });
+    expect(report.connectionProfile).toBeUndefined();
+  });
+
+  it("renders a warning line + hint in the report when status=missing", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [baseInstall],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        connectionProfile: {
+          profileId: "abc",
+          status: "missing",
+          hint: "Run `appstrate connections profile switch <name>`.",
+        },
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).toContain("Connection profile abc is pinned but no longer exists");
+    expect(text).toContain("appstrate connections profile switch");
+  });
+
+  it("renders a neutral line when status=unknown (offline)", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [baseInstall],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        connectionProfile: { profileId: "abc", status: "unknown" },
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).toContain("could not be verified");
+  });
+});
+
 describe("internal info payload", () => {
   it("returns a stable schema so older doctor versions can still parse it", () => {
     const payload = buildInternalInfoPayload();

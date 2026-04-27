@@ -16,7 +16,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
-import { InputModal } from "../components/input-modal";
+import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
@@ -28,6 +28,7 @@ import { Markdown } from "../components/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { MemoryPanel } from "../components/persistence/memory-panel";
+import { Play } from "lucide-react";
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -190,15 +191,18 @@ export function RunDetailPage() {
       </div>
 
       {agent && (
-        <InputModal
+        <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={agent}
           onSubmit={(input) => {
-            runAgent.mutate({ input }, { onSuccess: () => setInputOpen(false) });
+            runAgent.mutate(
+              { input, version: run.versionLabel ?? undefined },
+              { onSuccess: () => setInputOpen(false) },
+            );
           }}
           isPending={runAgent.isPending}
-          initialValues={(run.input as Record<string, unknown>) ?? undefined}
+          initialInput={(run.input as Record<string, unknown>) ?? undefined}
         />
       )}
 
@@ -235,6 +239,12 @@ export function RunDetailPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
+          {!isRunning && !isInline && agent && (
+            <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
+              <Play className="size-3.5" />
+              {t("exec.rerun")}
+            </Button>
+          )}
           {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel
               (server flag + CLI poll) is tracked as a follow-up. */}

@@ -16,6 +16,7 @@ import type {
   userProviderConnections,
   applicationProviderCredentials,
   userAgentProviderProfiles,
+  userApplicationProfiles,
 } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { user, session, account, verification } from "./auth.ts";
@@ -82,6 +83,8 @@ export type Account = InferSelectModel<typeof account>;
 export type Verification = InferSelectModel<typeof verification>;
 
 export type UserAgentProviderProfile = InferSelectModel<typeof userAgentProviderProfiles>;
+
+export type UserApplicationProfile = InferSelectModel<typeof userApplicationProfiles>;
 
 // --- Provider snapshot types (used by runs.providerStatuses JSONB column) ---
 

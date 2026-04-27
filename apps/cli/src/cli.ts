@@ -44,6 +44,13 @@ import {
   appCurrentCommand,
   appCreateCommand,
 } from "./commands/app.ts";
+import {
+  connectionsListCommand,
+  connectionsProfileListCommand,
+  connectionsProfileCurrentCommand,
+  connectionsProfileSwitchCommand,
+  connectionsProfileCreateCommand,
+} from "./commands/connections.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -380,6 +387,66 @@ appGroup
     });
   });
 
+// ─── `appstrate connections …` — manage connection profiles + view live connections ────
+
+const connectionsGroup = program
+  .command("connections")
+  .description("Manage connection profiles and inspect existing OAuth/API-key connections");
+
+connectionsGroup
+  .command("list")
+  .description("List active OAuth/API-key connections for the active profile")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsListCommand({ profile: globalOpts.profile });
+  });
+
+const connectionsProfileGroup = connectionsGroup
+  .command("profile")
+  .description("Manage connection profiles (sticky default + pickers)");
+
+connectionsProfileGroup
+  .command("list")
+  .description("List connection profiles owned by the active user")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileListCommand({ profile: globalOpts.profile });
+  });
+
+connectionsProfileGroup
+  .command("current")
+  .description("Print the pinned connection profile id, or exit 1 if none is pinned")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileCurrentCommand({ profile: globalOpts.profile });
+  });
+
+connectionsProfileGroup
+  .command("switch [ref]")
+  .description(
+    "Re-pin the active connection profile (sticky default for `appstrate run`). With no argument, show an interactive picker.",
+  )
+  .action(async (ref: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileSwitchCommand({
+      profile: globalOpts.profile,
+      ref: typeof ref === "string" ? ref : undefined,
+    });
+  });
+
+connectionsProfileGroup
+  .command("create [name]")
+  .description(
+    "Create a new connection profile (and pin it on the CLI profile). With no argument, prompt interactively.",
+  )
+  .action(async (name: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectionsProfileCreateCommand({
+      profile: globalOpts.profile,
+      name: typeof name === "string" ? name : undefined,
+    });
+  });
+
 // ─── `appstrate models …` — discover model presets on the instance ────
 
 const modelsGroup = program
@@ -657,8 +724,13 @@ program
 
 program
   .command("run")
-  .description("Execute an AFPS bundle locally via PiRunner (CLI mode — no platform preamble)")
-  .argument("<bundle>", "Path to the bundle — .afps (single-package) or .afps-bundle (with deps)")
+  .description(
+    "Execute an agent locally via PiRunner — by package id (downloads + caches the bundle) or from a local file path",
+  )
+  .argument(
+    "<bundle>",
+    "Either @scope/agent[@spec] (id, fetched from the pinned instance) or a path to a .afps / .afps-bundle file",
+  )
   .option(
     "--providers <mode>",
     "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",
@@ -697,6 +769,34 @@ program
     "--sink-ttl <seconds>",
     "Requested sink lifetime in seconds (server clamps to REMOTE_RUN_SINK_MAX_TTL_SECONDS)",
   )
+  .option(
+    "--proxy <id>",
+    "Proxy id to associate with the run (overrides per-app run-config inheritance)",
+  )
+  .option(
+    "--no-inherit",
+    "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
+  )
+  .option(
+    "--connection-profile <id|name>",
+    "Connection profile to use for credential-proxy calls (overrides the sticky default pinned via `appstrate connections profile switch`)",
+  )
+  .option("--cp <id|name>", "Alias for --connection-profile")
+  .option(
+    "--provider-profile <kv>",
+    "Per-provider profile override 'providerId=<id|name>' (repeatable)",
+    collect,
+    [],
+  )
+  .option(
+    "--no-preflight",
+    "Skip the connections-readiness preflight (CI mode; fails fast on missing connections).",
+  )
+  .option(
+    "--preflight-timeout <seconds>",
+    "Maximum seconds to wait for connections during the preflight polling loop (default 300).",
+    parsePreflightTimeout,
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -719,6 +819,24 @@ program
       report: parseReportMode(opts.report),
       reportFallback: parseReportFallback(opts.reportFallback),
       sinkTtl: parseSinkTtl(opts.sinkTtl),
+      proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+      // Same `--no-X` mapping: commander stores the negated flag at
+      // `opts.inherit === false`. Default (no flag) is `undefined` →
+      // inheritance enabled.
+      noInherit: opts.inherit === false,
+      // `--cp` is an alias — fall back to it when `--connection-profile`
+      // is not set.
+      connectionProfile:
+        typeof opts.connectionProfile === "string"
+          ? opts.connectionProfile
+          : typeof opts.cp === "string"
+            ? opts.cp
+            : undefined,
+      providerProfile: Array.isArray(opts.providerProfile) ? opts.providerProfile : undefined,
+      // commander maps `--no-preflight` to `opts.preflight === false`.
+      noPreflight: opts.preflight === false,
+      preflightTimeout:
+        typeof opts.preflightTimeout === "number" ? opts.preflightTimeout : undefined,
     });
   });
 
@@ -732,6 +850,16 @@ function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
   if (typeof raw !== "string") return undefined;
   if (raw === "abort" || raw === "console") return raw;
   throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
+}
+
+function parsePreflightTimeout(raw: unknown): number {
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `Invalid --preflight-timeout "${raw}" (expected a positive integer number of seconds)`,
+    );
+  }
+  return n;
 }
 
 function parseSinkTtl(raw: unknown): number | undefined {

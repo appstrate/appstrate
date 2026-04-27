@@ -21,12 +21,23 @@ export interface ParsedInput {
   uploadedFiles?: UploadedFile[];
   modelId?: string;
   proxyId?: string;
+  /**
+   * Per-run config override. Deep-merged with `application_packages.config`
+   * before the run is executed (see `deepMergeConfig` in
+   * `@appstrate/core/schema-validation`). Mirrors the OpenAI Assistants
+   * `runs.create { instructions, model, tools }` and Argo Workflows
+   * `submitOptions.parameters` SOTA: the merge happens server-side so
+   * UI / CLI / SDK clients all reach the same resolved config for the
+   * same `(persisted, override)` pair.
+   */
+  configOverride?: Record<string, unknown>;
 }
 
 interface RunRequestBody {
   input?: Record<string, unknown>;
   modelId?: string;
   proxyId?: string;
+  config?: Record<string, unknown>;
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -127,10 +138,32 @@ export async function parseRequestInput(
     }
   }
 
+  // `config` in the body is a partial override that is *deep-merged* with
+  // `application_packages.config` by the run route. We pass it through as
+  // an opaque object — validation against the manifest schema runs after
+  // the merge so a client can omit keys the persisted state already
+  // satisfies.
+  //
+  // Reject `null` explicitly: at top-level the merge short-circuits on a
+  // falsy override (`null` would silently inherit defaults) which conflicts
+  // with the schedule-update semantics where `null` clears the override.
+  // Force callers to pick: omit `config` to inherit defaults, send `{}` for
+  // an explicit empty override, send a populated object for a real override.
+  if (
+    body.config !== undefined &&
+    (body.config === null || typeof body.config !== "object" || Array.isArray(body.config))
+  ) {
+    throw invalidRequest(
+      "`config` must be a JSON object — omit the field to inherit persisted defaults",
+      "config",
+    );
+  }
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     modelId: body.modelId,
     proxyId: body.proxyId,
+    configOverride: body.config,
   };
 }

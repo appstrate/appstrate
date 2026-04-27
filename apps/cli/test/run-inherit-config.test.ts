@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Unit tests for `fetchRunConfigPayload` + `mergeRunConfig` — the
+ * per-app run-config inheritance the CLI applies between profile
+ * resolution and bundle download.
+ */
+
+import { describe, it, expect } from "bun:test";
+import {
+  fetchRunConfigPayload,
+  mergeRunConfig,
+  deepMergeConfig,
+  RunConfigFetchError,
+} from "../src/commands/run/inherit-config.ts";
+
+function stubFetch(opts: {
+  status?: number;
+  body?: unknown;
+  capture?: { url?: string; headers?: Headers };
+}): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    if (opts.capture) {
+      opts.capture.url = typeof input === "string" ? input : input.toString();
+      opts.capture.headers = new Headers(init?.headers);
+    }
+    return new Response(JSON.stringify(opts.body ?? {}), {
+      status: opts.status ?? 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+}
+
+describe("fetchRunConfigPayload", () => {
+  it("returns the parsed payload on 200", async () => {
+    const fetchImpl = stubFetch({
+      body: {
+        config: { dryRun: true },
+        modelId: "claude-sonnet",
+        proxyId: null,
+        versionPin: "1.0.0",
+        requiredProviders: ["@afps/gmail"],
+      },
+    });
+    const payload = await fetchRunConfigPayload({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      appId: "app_1",
+      orgId: "org_1",
+      scope: "@scope",
+      name: "agent",
+      fetchImpl,
+    });
+    expect(payload?.modelId).toBe("claude-sonnet");
+    expect(payload?.versionPin).toBe("1.0.0");
+    expect(payload?.requiredProviders).toEqual(["@afps/gmail"]);
+  });
+
+  it("returns null on 404 (no inheritance)", async () => {
+    const fetchImpl = stubFetch({ status: 404, body: { detail: "not installed" } });
+    const payload = await fetchRunConfigPayload({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      appId: "app_1",
+      scope: "@scope",
+      name: "agent",
+      fetchImpl,
+    });
+    expect(payload).toBeNull();
+  });
+
+  it("throws on non-2xx, non-404", async () => {
+    const fetchImpl = stubFetch({ status: 500, body: { detail: "boom" } });
+    await expect(
+      fetchRunConfigPayload({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        appId: "app_1",
+        scope: "@scope",
+        name: "agent",
+        fetchImpl,
+      }),
+    ).rejects.toBeInstanceOf(RunConfigFetchError);
+  });
+
+  it("threads the auth + org + app headers", async () => {
+    const capture: { url?: string; headers?: Headers } = {};
+    const fetchImpl = stubFetch({ body: stubPayload(), capture });
+    await fetchRunConfigPayload({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      appId: "app_1",
+      orgId: "org_1",
+      scope: "@scope",
+      name: "agent",
+      fetchImpl,
+    });
+    expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
+    expect(capture.headers?.get("X-App-Id")).toBe("app_1");
+    expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
+    // Literal `@` — the Hono server route `:scope{@[^/]+}` rejects
+    // `%40scope` as 404. The CLI URL builder leaves scope/name unencoded.
+    expect(capture.url).toContain("/api/applications/app_1/packages/@scope/agent/run-config");
+    expect(capture.url).not.toContain("%40scope");
+  });
+});
+
+describe("mergeRunConfig — priority order", () => {
+  it("flag config shallow-merges over inherited config", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        config: { dryRun: true, retries: 3 },
+        modelId: null,
+        proxyId: null,
+        versionPin: null,
+        requiredProviders: [],
+      },
+      flagConfig: { retries: 5 },
+      hasExplicitSpec: false,
+    });
+    expect(merged.config).toEqual({ dryRun: true, retries: 5 });
+  });
+
+  it("flag model wins over env model wins over inherited model", () => {
+    const inherited = {
+      config: {},
+      modelId: "inherited-model",
+      proxyId: null,
+      versionPin: null,
+      requiredProviders: [],
+    };
+    expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).modelId).toBe("inherited-model");
+    expect(
+      mergeRunConfig({ inherited, hasExplicitSpec: false, envModel: "env-model" }).modelId,
+    ).toBe("env-model");
+    expect(
+      mergeRunConfig({
+        inherited,
+        hasExplicitSpec: false,
+        envModel: "env-model",
+        flagModel: "flag-model",
+      }).modelId,
+    ).toBe("flag-model");
+  });
+
+  it("explicit spec disables versionPin inheritance", () => {
+    const inherited = {
+      config: {},
+      modelId: null,
+      proxyId: null,
+      versionPin: "1.2.3",
+      requiredProviders: [],
+    };
+    expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).versionPin).toBe("1.2.3");
+    expect(mergeRunConfig({ inherited, hasExplicitSpec: true }).versionPin).toBeNull();
+  });
+
+  it("inherited=null produces a no-op merge", () => {
+    const merged = mergeRunConfig({ inherited: null, hasExplicitSpec: false });
+    expect(merged.inherited).toBe(false);
+    expect(merged.config).toEqual({});
+    expect(merged.modelId).toBeNull();
+    expect(merged.proxyId).toBeNull();
+    expect(merged.versionPin).toBeNull();
+    expect(merged.requiredProviders).toEqual([]);
+  });
+
+  it("requiredProviders flows through unchanged", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        config: {},
+        modelId: null,
+        proxyId: null,
+        versionPin: null,
+        requiredProviders: ["@a/p", "@b/p"],
+      },
+      hasExplicitSpec: false,
+    });
+    expect(merged.requiredProviders).toEqual(["@a/p", "@b/p"]);
+  });
+});
+
+describe("deepMergeConfig", () => {
+  it("preserves siblings at every level (no silent nested-key loss)", () => {
+    const merged = deepMergeConfig(
+      { providers: { gmail: { scopes: ["read"] } } },
+      { providers: { slack: { token: "xyz" } } },
+    );
+    expect(merged).toEqual({
+      providers: {
+        gmail: { scopes: ["read"] },
+        slack: { token: "xyz" },
+      },
+    });
+  });
+
+  it("override wins at the leaf for plain values", () => {
+    expect(deepMergeConfig({ a: 1, b: 2 }, { b: 99 })).toEqual({ a: 1, b: 99 });
+  });
+
+  it("arrays are replaced, not concatenated", () => {
+    expect(deepMergeConfig({ tags: ["a", "b"] }, { tags: ["c"] })).toEqual({ tags: ["c"] });
+  });
+
+  it("explicit null clears an inherited leaf", () => {
+    expect(deepMergeConfig({ flag: true }, { flag: null })).toEqual({ flag: null });
+  });
+
+  it("undefined values are skipped (not propagated)", () => {
+    expect(deepMergeConfig({ flag: true }, { flag: undefined })).toEqual({ flag: true });
+  });
+
+  it("undefined override returns a copy of base", () => {
+    const base = { a: 1 };
+    const merged = deepMergeConfig(base, undefined);
+    expect(merged).toEqual({ a: 1 });
+    expect(merged).not.toBe(base);
+  });
+
+  it("mergeRunConfig delegates the config field to deepMergeConfig", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        config: { providers: { gmail: { scopes: ["read"] }, slack: { token: "old" } } },
+        modelId: null,
+        proxyId: null,
+        versionPin: null,
+        requiredProviders: [],
+      },
+      flagConfig: { providers: { slack: { token: "new" } } },
+      hasExplicitSpec: false,
+    });
+    expect(merged.config).toEqual({
+      providers: {
+        gmail: { scopes: ["read"] },
+        slack: { token: "new" },
+      },
+    });
+  });
+});
+
+function stubPayload() {
+  return {
+    config: {},
+    modelId: null,
+    proxyId: null,
+    versionPin: null,
+    requiredProviders: [],
+  };
+}

@@ -191,7 +191,12 @@ export async function runInlinePreflight(params: {
       prompt,
       resolvedDeps,
     );
-    const { defaultUserProfileId } = await resolveActorProfileContext(actor, probeAgent.id);
+    const { defaultUserProfileId } = await resolveActorProfileContext(
+      actor,
+      probeAgent.id,
+      null,
+      applicationId,
+    );
 
     try {
       providerProfiles = await resolveProviderProfiles(

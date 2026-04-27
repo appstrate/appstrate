@@ -39,6 +39,7 @@ const CORE_APP_SCOPED_KEYS = [
   "available-providers",
   "user-connections",
   "profile-connections",
+  "my-application-profile",
   "unread-count",
   "unread-counts-by-agent",
   "app-connection-profiles",

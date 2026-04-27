@@ -54,7 +54,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
       getAgentAppProfile(scope, agent.id),
-      resolveActorProfileContext(actor, agent.id),
+      resolveActorProfileContext(actor, agent.id, null, applicationId),
       getPackageConfig(applicationId, agent.id),
     ]);
   const agentAppProfileId = agentAppProfile?.id ?? null;

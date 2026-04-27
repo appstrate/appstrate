@@ -79,6 +79,7 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
   "GET /api/agents/{scope}/{name}/bundle",
+  "GET /api/agents/{scope}/{name}/readiness",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",
@@ -267,6 +268,9 @@ const expectedEndpoints = [
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
   "GET /api/me/models",
+  "GET /api/me/application-profile",
+  "PUT /api/me/application-profile",
+  "DELETE /api/me/application-profile",
 
   // Invitations
   "GET /invite/{token}/info",
@@ -324,6 +328,7 @@ const expectedEndpoints = [
   "GET /api/applications/{appId}/packages/{scope}/{name}",
   "PUT /api/applications/{appId}/packages/{scope}/{name}",
   "DELETE /api/applications/{appId}/packages/{scope}/{name}",
+  "GET /api/applications/{appId}/packages/{scope}/{name}/run-config",
 
   // Application Providers
   "GET /api/applications/{appId}/providers",

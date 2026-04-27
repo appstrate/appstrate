@@ -223,6 +223,126 @@ describe("Agents API", () => {
     });
   });
 
+  describe("GET /api/agents/:scope/:name/bundle — 404 distinction", () => {
+    // The bundle route deliberately distinguishes "agent doesn't exist in
+    // this org" from "agent exists in org but isn't installed in the
+    // pinned application" — the CLI's run-by-id flow needs to tell the
+    // user whether to fix the spelling or run an install. Pin both
+    // branches so the contract holds across refactors.
+
+    it("returns 404 agent_not_found when the package isn't in the org catalog", async () => {
+      const res = await app.request("/api/agents/@myorg/does-not-exist/bundle", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_not_found");
+    });
+
+    it("returns 404 agent_not_installed_in_app when the package exists in org but is not installed in the pinned app", async () => {
+      // Seed the agent at the org level, but DON'T install it into the app.
+      await seedAgent({
+        id: "@myorg/uninstalled-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/agents/@myorg/uninstalled-agent/bundle", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_not_installed_in_app");
+      // The detail names the application and the install endpoint so the
+      // CLI's hint can quote it back to the user verbatim.
+      expect(body.detail).toContain(ctx.defaultAppId);
+      expect(body.detail).toContain("/api/applications/");
+    });
+
+    it("passes the access gate when the package is installed (subsequent failures are version/artifact, not access)", async () => {
+      // The 200/version-resolution path requires a published artifact in
+      // storage that the seed helpers don't set up. The relevant contract
+      // for *this* gate is that we don't surface `agent_not_installed_in_app`
+      // for an installed package — version-resolution failures throw
+      // `not_found`, a different code.
+      await seedInstalledAgent({
+        id: "@myorg/installed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/installed-agent/bundle", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).not.toBe("agent_not_installed_in_app");
+      expect(body.code).not.toBe("agent_not_found");
+    });
+  });
+
+  describe("GET /api/agents/:scope/:name/bundle?source=draft — UI parity path", () => {
+    // Pin the dashboard-Run-button parity contract. A never-published
+    // agent must bundle its draft state via `?source=draft`, otherwise
+    // `appstrate run @scope/agent` fails with `no_published_version`
+    // on agents the dashboard runs happily.
+
+    it("returns 200 + a deterministic .afps-bundle for an installed never-published agent", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/draft-only",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/agents/@myorg/draft-only/bundle?source=draft", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const integrity = res.headers.get("X-Bundle-Integrity");
+      expect(integrity).toMatch(/^sha256-/);
+      expect(res.headers.get("Content-Type")).toBe("application/zip");
+
+      // X-Bundle-Integrity contract: SHA256 over the wire bytes, NOT the
+      // in-archive `bundle.integrity` field (which is the canonical
+      // packages-map JSON SRI). The CLI recomputes the wire digest after
+      // download to detect proxy/CDN corruption — a regression that ever
+      // sends `bundle.integrity` instead trips `integrity_mismatch` on
+      // every clean run, which is the exact bug we just fixed.
+      const body = new Uint8Array(await res.arrayBuffer());
+      const hasher = new Bun.CryptoHasher("sha256");
+      hasher.update(body);
+      const computed = `sha256-${hasher.digest("base64")}`;
+      expect(integrity).toBe(computed);
+    });
+
+    it("rejects ?source=draft combined with ?version= (400 draft_with_version)", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/draft-with-version",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request(
+        "/api/agents/@myorg/draft-with-version/bundle?source=draft&version=1.0.0",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("draft_with_version");
+    });
+
+    it("rejects ?source=foo (400 invalid_source)", async () => {
+      const res = await app.request("/api/agents/@myorg/anything/bundle?source=experimental", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("invalid_source");
+    });
+  });
+
   describe("Multi-tenancy isolation", () => {
     it("isolates run counts per org", async () => {
       await seedInstalledAgent({

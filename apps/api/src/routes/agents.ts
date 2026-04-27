@@ -19,7 +19,9 @@ import {
   listAccessiblePackages,
   updateInstalledPackage,
   getPackageConfig,
+  hasPackageAccess,
 } from "../services/application-packages.ts";
+import { getPackage } from "../services/agent-service.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -30,15 +32,21 @@ import {
   removeUserAgentProviderOverride,
   getUserAgentProviderOverrides,
   getAccessibleProfile,
+  resolveActorProfileContext,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
-import { buildBundleForAgentExport } from "../services/bundle-assembly.ts";
+import {
+  buildBundleForAgentExport,
+  buildBundleFromAgentDraft,
+} from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { resolveAgentReadiness } from "../services/agent-readiness.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
@@ -409,29 +417,146 @@ export function createAgentsRouter() {
     },
   );
 
-  // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
-  // (multi-package archive with pinned versions of every transitive dep).
+  // GET /api/agents/:scope/:name/readiness — preflight inspector
+  // Returns the unsatisfied provider list under the given profile context
+  // (default or explicit `connectionProfileId` + per-provider overrides).
+  // Used by the CLI to decide whether to prompt the user to open the
+  // browser and connect missing providers before triggering a run.
   router.get(
-    "/:scope{@[^/]+}/:name/bundle",
-    rateLimit(30),
+    "/:scope{@[^/]+}/:name/readiness",
     requireAgent(),
     requirePermission("agents", "read"),
     async (c) => {
       const agent = c.get("agent");
-      const scope = getAppScope(c);
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+
+      const explicitProfileId = c.req.query("connectionProfileId");
+      const queryEntries = Object.entries(c.req.query());
+      // `providerProfile.<id>=<uuid>` — flatten to a Record<string,string>
+      // for the readiness resolver. Unknown / malformed entries are
+      // ignored; the resolver narrows to known providers anyway.
+      const perProviderOverrides: Record<string, string> = {};
+      for (const [key, value] of queryEntries) {
+        if (!key.startsWith("providerProfile.")) continue;
+        const providerId = key.slice("providerProfile.".length);
+        if (providerId && typeof value === "string" && value.length > 0) {
+          perProviderOverrides[providerId] = value;
+        }
+      }
+
+      // Default profile id: explicit override → actor's default → app
+      // profile. Mirrors the run pipeline's actor → app cascade so the
+      // preflight + run paths agree on the answer.
+      let defaultUserProfileId: string | null = null;
+      if (explicitProfileId && explicitProfileId.length > 0) {
+        defaultUserProfileId = explicitProfileId;
+      } else if (actor) {
+        const ctx = await resolveActorProfileContext(actor, agent.id, null, applicationId);
+        defaultUserProfileId = ctx.defaultUserProfileId;
+      }
+
+      const report = await resolveAgentReadiness({
+        agent,
+        applicationId,
+        orgId,
+        defaultUserProfileId,
+        perProviderOverrides,
+      });
+      return c.json(report);
+    },
+  );
+
+  // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
+  // (multi-package archive with pinned versions of every transitive dep).
+  //
+  // We deliberately don't use `requireAgent()` here: that middleware folds
+  // "doesn't exist in org" and "exists in org but not installed in app"
+  // into a single opaque 404. The CLI's run-by-id flow needs to tell the
+  // two cases apart so it can prompt the user to install rather than
+  // suggest the package is mistyped. Inline check below distinguishes
+  // them via `agent_not_installed_in_app`.
+  router.get(
+    "/:scope{@[^/]+}/:name/bundle",
+    rateLimit(30),
+    requirePermission("agents", "read"),
+    async (c) => {
+      const scopeParam = c.req.param("scope")!;
+      const nameParam = c.req.param("name")!;
+      const packageId = `${scopeParam}/${nameParam}`;
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId")!;
       const versionQuery = c.req.query("version") ?? null;
+      const sourceQuery = c.req.query("source");
+      // `source=draft` mirrors the dashboard "Run" button: bundle the
+      // agent's current draft state instead of a published version. The
+      // CLI's run-by-id flow uses it so `appstrate run @scope/agent`
+      // works on never-published agents — same UX as clicking Run in
+      // the UI. Default stays `published` so the existing dashboard
+      // export flow (download a published archive) is unchanged.
+      // `version=…` is mutually exclusive with `source=draft`.
+      if (sourceQuery && sourceQuery !== "draft" && sourceQuery !== "published") {
+        throw new ApiError({
+          status: 400,
+          code: "invalid_source",
+          title: "Invalid Source",
+          detail: `?source must be 'draft' or 'published' (got '${sourceQuery}')`,
+        });
+      }
+      const useDraft = sourceQuery === "draft";
+      if (useDraft && versionQuery) {
+        throw new ApiError({
+          status: 400,
+          code: "draft_with_version",
+          title: "Conflicting Query",
+          detail: "?source=draft cannot be combined with ?version — drafts have no published id",
+        });
+      }
+
+      const agent = await getPackage(packageId, orgId);
+      if (!agent) {
+        throw new ApiError({
+          status: 404,
+          code: "agent_not_found",
+          title: "Agent Not Found",
+          detail: `Agent '${packageId}' not found in this organization`,
+        });
+      }
+      if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+        throw new ApiError({
+          status: 404,
+          code: "agent_not_installed_in_app",
+          title: "Agent Not Installed",
+          detail:
+            `Agent '${packageId}' exists in this organization but is not installed in application '${applicationId}'. ` +
+            `Install it via POST /api/applications/${applicationId}/packages, or pick a different application.`,
+        });
+      }
+      const scope = getAppScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes
       // the export cache-friendly and the determinism contract explicit.
-      const bundle = await buildBundleForAgentExport(agent.id, scope, {
-        versionQuery,
-        metadata: { builder: "appstrate-platform" },
-      });
+      const bundle = useDraft
+        ? await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" })
+        : await buildBundleForAgentExport(agent.id, scope, {
+            versionQuery,
+            metadata: { builder: "appstrate-platform" },
+          });
 
       const bytes = writeBundleToBuffer(bundle);
       const parsed = parseScopedName(agent.id);
       const safeName = parsed ? `${parsed.scope}-${parsed.name}` : "bundle";
+
+      // X-Bundle-Integrity is the SHA256 of the wire bytes — the CLI
+      // recomputes the same digest on the downloaded archive to detect
+      // transport-level corruption (proxies, CDN, partial reads). The
+      // in-archive `bundle.integrity` field is a different, AFPS-spec
+      // contract (canonical packages-map JSON SRI) and intentionally
+      // does not equal the zip-bytes SHA — sending it as the header
+      // would always trip `integrity_mismatch` on a clean download.
+      const wireIntegrity = computeIntegrity(new Uint8Array(bytes));
 
       return new Response(new Uint8Array(bytes), {
         status: 200,
@@ -450,7 +575,7 @@ export function createAgentsRouter() {
           // from the scoped agent id which is `[a-z0-9-/_]` only, so
           // no quoting hazard here.
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
-          "X-Bundle-Integrity": bundle.integrity,
+          "X-Bundle-Integrity": wireIntegrity,
         },
       });
     },

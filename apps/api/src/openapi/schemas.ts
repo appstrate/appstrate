@@ -421,6 +421,18 @@ export const schemas = {
         description: "Snapshot of the effective agent config (merged overrides) at run creation",
         additionalProperties: true,
       },
+      configOverride: {
+        type: ["object", "null"],
+        description:
+          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
+        additionalProperties: true,
+      },
+      modelOverridden: {
+        type: "boolean",
+        description: "True when the caller's modelId differed from the persisted default.",
+      },
+      proxyOverridden: { type: "boolean" },
+      versionOverridden: { type: "boolean" },
       dashboardUserName: {
         type: ["string", "null"],
         description:
@@ -516,6 +528,10 @@ export const schemas = {
       cronExpression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: "object" },
+      configOverride: { type: ["object", "null"] },
+      modelIdOverride: { type: ["string", "null"] },
+      proxyIdOverride: { type: ["string", "null"] },
+      versionOverride: { type: ["string", "null"] },
       lastRunAt: { type: ["string", "null"], format: "date-time" },
       nextRunAt: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },

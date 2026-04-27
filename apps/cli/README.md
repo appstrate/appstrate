@@ -32,17 +32,19 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 
 ## Commands
 
-| Command             | Purpose                                                                        |
-| ------------------- | ------------------------------------------------------------------------------ |
-| `appstrate install` | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).   |
-| `appstrate login`   | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring. |
-| `appstrate logout`  | Revoke the active session server-side and wipe local credentials.              |
-| `appstrate whoami`  | Print the identity attached to the active profile.                             |
-| `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
-| `appstrate org`     | List, switch, or create organizations pinned on the active profile.            |
-| `appstrate app`     | List, switch, or create applications pinned on the active profile.             |
-| `appstrate api`     | Authenticated HTTP passthrough to the Appstrate API.                           |
-| `appstrate openapi` | Explore the active profile's OpenAPI schema without flooding stdout.           |
+| Command                 | Purpose                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `appstrate install`     | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
+| `appstrate login`       | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
+| `appstrate logout`      | Revoke the active session server-side and wipe local credentials.               |
+| `appstrate whoami`      | Print the identity attached to the active profile.                              |
+| `appstrate token`       | Print metadata about the stored access + refresh tokens (debug).                |
+| `appstrate org`         | List, switch, or create organizations pinned on the active profile.             |
+| `appstrate app`         | List, switch, or create applications pinned on the active profile.              |
+| `appstrate api`         | Authenticated HTTP passthrough to the Appstrate API.                            |
+| `appstrate openapi`     | Explore the active profile's OpenAPI schema without flooding stdout.            |
+| `appstrate run`         | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
+| `appstrate connections` | Manage connection profiles (default + alternates) on the active profile.        |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -467,6 +469,62 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 - **`--connect-timeout` is wall-clock, not per-attempt under `--retry`**: the timer starts once at the first fetch and aborts the whole run if response headers haven't arrived. curl resets it per attempt. In practice this only differs when the first attempt partially succeeds then fails mid-body (rare); retries on DNS / network errors that never touch the socket are unaffected.
 - **`--retry` disabled automatically on stdin bodies**: `-d @-`, `-T -`, `--data-urlencode @-` can't be replayed after the stream is consumed. The CLI warns on stderr and falls back to a single attempt instead of silently replaying an empty body.
 - **`Retry-After` delta-seconds values capped at 1 hour**: server-suggested delays above 3600 seconds are ignored and fall back to exponential backoff. A hostile / misconfigured origin can't stall a CI job overnight.
+
+### `appstrate run`
+
+Execute an agent locally via the same Pi runner the platform uses for cloud runs. Two argument forms:
+
+- **By package id** — `@scope/agent[@spec]`. The CLI calls `GET /api/agents/{scope}/{name}/bundle` on the pinned instance to download a deterministic `.afps-bundle`, verifies its SRI integrity in memory, and runs it. The bytes are never written to disk — every invocation re-fetches.
+- **By file path** — a local `.afps` or `.afps-bundle` file. No network roundtrip.
+
+```sh
+# Run the latest version of an installed agent
+appstrate run @scope/triage
+
+# Pin an exact version
+appstrate run @scope/triage@1.2.0
+
+# Resolve via dist-tag
+appstrate run @scope/triage@beta
+
+# Run a local bundle without hitting the instance
+appstrate run ./out/triage-1.2.0.afps-bundle --providers local --creds-file ./creds.json
+```
+
+Run-config inheritance (model, proxy, agent config, version pin) is fetched from `/api/applications/{appId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
+
+**Selected flags**
+
+| Flag                         | Purpose                                                                                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--connection-profile <ref>` | Connection profile to use for credential-proxy calls (UUID or name). Overrides the sticky default pinned via `appstrate connections profile switch`. |
+| `--cp <ref>`                 | Alias for `--connection-profile`.                                                                                                                    |
+| `--provider-profile <kv>`    | Per-provider override `providerId=<id\|name>`. Repeatable.                                                                                           |
+| `--proxy <id>`               | Proxy id to associate with the run (overrides the per-app inherited value).                                                                          |
+| `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                      |
+| `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                 |
+| `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                         |
+| `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                       |
+
+The full flag set is documented under `appstrate run --help`.
+
+**Preflight readiness**
+
+Before launching, the CLI calls `GET /api/agents/{scope}/{name}/readiness` to check that every required provider has a healthy connection under the resolved profile context. Missing or expired connections in an interactive terminal trigger a prompt to open `${instance}/preferences/connectors` in a browser, then poll until ready or `--preflight-timeout` is reached. In `--json` or non-TTY contexts, the run aborts with exit code 1 and a structured error containing `{ code: "connections_missing", missing, connectUrl }` on stdout.
+
+### `appstrate connections`
+
+Manage connection profiles for the active CLI profile. Profiles let you keep parallel sets of provider credentials (e.g. "personal Gmail" vs "work Gmail") and switch between them per run.
+
+```sh
+appstrate connections list                           # List connections for the current profile
+appstrate connections profile list                   # List all profiles owned by the user
+appstrate connections profile current                # Print the pinned default
+appstrate connections profile switch work            # Pin "work" as the default for credential-proxy calls
+appstrate connections profile create "freelance"     # Create a new non-default profile
+```
+
+`switch` writes the resolved profile UUID to `connectionProfileId` in `~/.config/appstrate/config.toml`. `appstrate run` and any other credential-proxy callers honour it via the `X-Connection-Profile-Id` header until overridden by `--connection-profile`.
 
 ## Profiles
 
