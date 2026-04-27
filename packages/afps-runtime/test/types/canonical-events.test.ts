@@ -22,6 +22,7 @@ describe("isCanonicalRunEvent", () => {
       { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
+      { ...baseEnvelope, type: "report.appended", content: "# Report\n\nMarkdown body" },
       { ...baseEnvelope, type: "appstrate.progress", message: "running" },
       { ...baseEnvelope, type: "appstrate.error", message: "boom" },
       {
@@ -107,6 +108,14 @@ describe("isCanonicalRunEvent", () => {
     expect(isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.progress" } as RunEvent)).toBe(
       false,
     );
+    // report.appended without content
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended" } as RunEvent)).toBe(
+      false,
+    );
+    // report.appended with non-string content
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: 42 } as RunEvent),
+    ).toBe(false);
     // appstrate.metric with non-object usage
     expect(
       isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric", usage: 42 } as RunEvent),
@@ -273,9 +282,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 7 reserved namespaces (memory/pinned/output/log + appstrate.{progress,error,metric})
+    // 8 reserved namespaces (memory/pinned/output/log/report + appstrate.{progress,error,metric})
     // + 5 run lifecycle events (run.{started,success,failed,timeout,cancelled}, #278 item I).
-    expect(arr.length).toBe(12);
+    expect(arr.length).toBe(13);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

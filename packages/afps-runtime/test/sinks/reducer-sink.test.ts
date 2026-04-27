@@ -52,6 +52,19 @@ describe("createReducerSink", () => {
     ]);
   });
 
+  it("concatenates report.appended events into result.report (newline-joined)", async () => {
+    const { sink, snapshot } = createReducerSink();
+    await sink.handle(event("report.appended", { content: "# Title" }));
+    await sink.handle(event("report.appended", { content: "Second paragraph." }));
+    expect(snapshot().report).toBe("# Title\nSecond paragraph.");
+  });
+
+  it("leaves result.report undefined when no report.appended events are emitted", async () => {
+    const { sink, snapshot } = createReducerSink();
+    await sink.handle(event("output.emitted", { data: { ok: true } }));
+    expect(snapshot().report).toBeUndefined();
+  });
+
   it("ignores third-party event types in the snapshot", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("custom.thing", { payload: 42 }));

@@ -73,6 +73,14 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         timestamp: canonical.timestamp,
       });
       return;
+    case "report.appended":
+      // Append-only markdown channel — each emit appends to the
+      // accumulated report. Joined with `\n` (not `\n\n`) so the runtime
+      // does not impose paragraph spacing on raw chunks; emitters that
+      // want blank lines include them in their own content.
+      result.report =
+        result.report === undefined ? canonical.content : `${result.report}\n${canonical.content}`;
+      return;
     case "appstrate.progress":
     case "appstrate.error":
     case "appstrate.metric":

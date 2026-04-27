@@ -66,6 +66,8 @@ export class ConsoleSink implements EventSink {
           return `${seq} ◆ output: ${truncate(safeStringify(canonical.data), 200)}`;
         case "log.written":
           return `${seq} ${logMarker(canonical.level)} ${canonical.message}`;
+        case "report.appended":
+          return `${seq} ¶ report: ${truncate(canonical.content, 200)}`;
         case "appstrate.progress":
           return `${seq} → ${canonical.message}`;
         case "appstrate.error":

@@ -57,20 +57,37 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 
 /**
  * Transform raw run logs into LogEntry[], merging consecutive text-only
- * progress entries and extracting structured output data.
+ * progress entries and extracting structured output + report data.
+ *
+ * The platform persists each `report.appended` event from the
+ * `@appstrate/report` system tool as `run_logs(type='result',
+ * event='report', data={ content })`. We pull the markdown content out
+ * here so `RunDetailPage` can render it as Markdown in a dedicated tab
+ * — without this extraction, the report would only surface as a
+ * truncated "Tool: report" line in the generic log viewer.
  */
 export function buildLogEntries(rawLogs: RawLog[]): {
   entries: LogEntry[];
   output: Record<string, unknown> | null;
+  report: string | null;
 } {
   const entries: LogEntry[] = [];
   let output: Record<string, unknown> | null = null;
+  const reportChunks: string[] = [];
   let lastWasPlainText = false;
 
   for (const log of rawLogs) {
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
+      lastWasPlainText = false;
+    } else if (log.event === "report" && log.type === "result") {
+      // `data.content` is the markdown chunk emitted by one
+      // `report.appended` event. Skip silently when the field is
+      // missing/non-string so a malformed row never breaks the rest of
+      // the log viewer.
+      const content = (log.data as { content?: unknown } | null | undefined)?.content;
+      if (typeof content === "string") reportChunks.push(content);
       lastWasPlainText = false;
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
@@ -100,7 +117,11 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     }
   }
 
-  return { entries, output };
+  return {
+    entries,
+    output,
+    report: reportChunks.length > 0 ? reportChunks.join("\n") : null,
+  };
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {
