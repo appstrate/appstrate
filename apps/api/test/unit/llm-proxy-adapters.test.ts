@@ -150,6 +150,60 @@ describe("anthropicMessagesAdapter", () => {
     expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
   });
 
+  it("OAuth tokens (sk-ant-oat-…) switch to Bearer + Claude-Code identity", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers(),
+      "sk-ant-oat-01-AbCdEf-1234",
+    );
+    // OAuth tokens MUST go in Authorization, never x-api-key — Anthropic
+    // returns 401 `invalid x-api-key` otherwise.
+    expect(headers["Authorization"]).toBe("Bearer sk-ant-oat-01-AbCdEf-1234");
+    expect(headers["x-api-key"]).toBeUndefined();
+    // Claude-Code identity headers are mandatory for OAuth.
+    expect(headers["x-app"]).toBe("cli");
+    expect(headers["user-agent"]).toMatch(/^claude-cli\/\d+\.\d+\.\d+$/);
+    expect(headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
+    // Required betas are auto-injected.
+    const betas = headers["anthropic-beta"]!.split(",");
+    expect(betas).toContain("oauth-2025-04-20");
+    expect(betas).toContain("claude-code-20250219");
+    expect(betas).toContain("fine-grained-tool-streaming-2025-05-14");
+  });
+
+  it("OAuth path merges caller-supplied anthropic-beta into the required set", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({ "anthropic-beta": "prompt-caching-2024-07-31,extended-thinking-2025-05-14" }),
+      "sk-ant-oat-token",
+    );
+    const betas = headers["anthropic-beta"]!.split(",");
+    // Required betas still present.
+    expect(betas).toContain("oauth-2025-04-20");
+    expect(betas).toContain("claude-code-20250219");
+    // Caller's betas appended (not overriding).
+    expect(betas).toContain("prompt-caching-2024-07-31");
+    expect(betas).toContain("extended-thinking-2025-05-14");
+    // No duplicates if caller already passes a required one.
+    const headers2 = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({ "anthropic-beta": "oauth-2025-04-20,foo" }),
+      "sk-ant-oat-token",
+    );
+    const betas2 = headers2["anthropic-beta"]!.split(",");
+    expect(betas2.filter((b) => b === "oauth-2025-04-20")).toHaveLength(1);
+  });
+
+  it("API-key path does not inject Claude-Code identity (or OAuth betas)", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({ "anthropic-beta": "prompt-caching-2024-07-31" }),
+      "sk-ant-api03-AbCd",
+    );
+    expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCd");
+    expect(headers["Authorization"]).toBeUndefined();
+    expect(headers["x-app"]).toBeUndefined();
+    expect(headers["user-agent"]).toBeUndefined();
+    // Caller's beta forwarded as-is, no OAuth markers.
+    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+  });
+
   it("parses non-streaming JSON usage with cache tokens", () => {
     const usage = anthropicMessagesAdapter.parseJsonUsage({
       usage: {
