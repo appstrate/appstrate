@@ -4,10 +4,11 @@
  * LLM proxy endpoints — server-side model injection for remote-backed
  * AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
  *
- * Two protocol families ship today; each gets its own concrete endpoint
+ * Three protocol families ship today; each gets its own concrete endpoint
  * so callers hit the upstream shape they already know (OpenAI Chat
- * Completions, Anthropic Messages). Additional families land as new
- * path entries — the route surface stays concrete per the spec.
+ * Completions, Anthropic Messages, Mistral Chat Completions). Additional
+ * families land as new path entries — the route surface stays concrete
+ * per the spec.
  */
 
 const baseParameters = [
@@ -169,6 +170,56 @@ export const llmProxyPaths = {
                 messages: { type: "array", items: { type: "object" } },
                 system: { oneOf: [{ type: "string" }, { type: "array" }] },
                 max_tokens: { type: "integer" },
+                stream: { type: "boolean" },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      responses: baseResponses,
+    },
+  },
+  "/api/llm-proxy/mistral-conversations/v1/chat/completions": {
+    post: {
+      operationId: "llmProxyMistralChatCompletions",
+      tags: ["LLM Proxy"],
+      summary: "Mistral Chat Completions — with server-side model injection",
+      description:
+        "Wire-compatible with the Mistral `/v1/chat/completions` endpoint. " +
+        "Despite the protocol family name (`mistral-conversations`, inherited " +
+        "from pi-ai's registry), this endpoint targets Mistral's standard " +
+        "OpenAI-compatible chat-completions API — NOT the Beta Conversations " +
+        "agentic API at `/v1/conversations`. The caller supplies `body.model` " +
+        "as an Appstrate **model preset id**; the platform resolves the " +
+        "preset, substitutes the real upstream model id, injects the upstream " +
+        "API key as `Authorization: Bearer`, and forwards the request. All " +
+        "other fields (`messages`, `tools`, `tool_choice`, `temperature`, " +
+        "`stream`, …) pass through untouched.\n\n" +
+        "Streaming responses pass through unchanged; usage is tapped in " +
+        "parallel for accounting when the caller opts in (terminal SSE frame " +
+        "with `usage`, same convention as OpenAI).\n\n" +
+        "Authentication: bearer only — API key with the `llm-proxy:call` " +
+        "scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, " +
+        "dashboard access token). Cookie sessions are rejected.",
+      security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
+      parameters: baseParameters,
+      requestBody: {
+        description:
+          "Mistral Chat Completions payload, with `model` replaced by an " +
+          "Appstrate model preset id. All other fields pass through untouched.",
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["model", "messages"],
+              properties: {
+                model: {
+                  type: "string",
+                  description: "Appstrate model preset id (NOT an upstream model id).",
+                },
+                messages: { type: "array", items: { type: "object" } },
                 stream: { type: "boolean" },
               },
               additionalProperties: true,

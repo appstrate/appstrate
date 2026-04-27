@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the two ships-today LLM-proxy adapters.
+ * Unit tests for the three ships-today LLM-proxy adapters.
  *
  * Covers the pure transformations each adapter performs — model
  * substitution, upstream-header construction, and usage extraction from
@@ -15,6 +15,7 @@
 import { describe, it, expect } from "bun:test";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
+import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -187,6 +188,97 @@ describe("anthropicMessagesAdapter", () => {
     expect(
       anthropicMessagesAdapter.parseSseUsage([
         'event: content_block_delta\ndata: {"type":"content_block_delta"}',
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("mistralConversationsAdapter", () => {
+  it("api discriminator matches the /api/llm-proxy/mistral-conversations/ route", () => {
+    expect(mistralConversationsAdapter.api).toBe("mistral-conversations");
+  });
+
+  it("rewrites body.model while preserving the rest of the payload verbatim", () => {
+    const original = {
+      model: "m_preset_mistral",
+      messages: [{ role: "user", content: "salut" }],
+      stream: true,
+      temperature: 0.7,
+      max_tokens: 512,
+      tools: [{ type: "function", function: { name: "echo", parameters: {} } }],
+    };
+    const rewritten = mistralConversationsAdapter.substituteModel(
+      enc.encode(JSON.stringify(original)),
+      "mistral-large-latest",
+    );
+    const parsed = JSON.parse(dec.decode(rewritten));
+    expect(parsed.model).toBe("mistral-large-latest");
+    expect(parsed.messages).toEqual(original.messages);
+    expect(parsed.stream).toBe(true);
+    expect(parsed.temperature).toBe(0.7);
+    expect(parsed.max_tokens).toBe(512);
+    expect(parsed.tools).toEqual(original.tools);
+  });
+
+  it("injects Authorization: Bearer <upstreamApiKey> and forwards no extra headers", () => {
+    const headers = mistralConversationsAdapter.buildUpstreamHeaders(
+      new Headers({
+        "x-affinity": "session-123",
+        authorization: "Bearer caller-bearer-must-not-leak",
+      }),
+      "mistral-upstream-key",
+    );
+    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
+    expect(headers["Content-Type"]).toBe("application/json");
+    // No equivalent of openai-organization / anthropic-beta — nothing
+    // should be forwarded from the caller. The Mistral SDK's `x-affinity`
+    // sticky-session header is intentionally dropped.
+    expect(headers["x-affinity"]).toBeUndefined();
+    // The caller's Appstrate bearer (Authorization) must NOT replace
+    // the upstream key we just set.
+    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
+  });
+
+  it("parses non-streaming JSON usage with prompt/completion tokens", () => {
+    const usage = mistralConversationsAdapter.parseJsonUsage({
+      usage: {
+        prompt_tokens: 200,
+        completion_tokens: 80,
+        total_tokens: 280,
+      },
+    });
+    expect(usage).toEqual({
+      inputTokens: 200,
+      outputTokens: 80,
+    });
+  });
+
+  it("returns null when usage is missing or malformed", () => {
+    expect(mistralConversationsAdapter.parseJsonUsage({ id: "x" })).toBeNull();
+    expect(mistralConversationsAdapter.parseJsonUsage(null)).toBeNull();
+    expect(mistralConversationsAdapter.parseJsonUsage({ usage: { foo: "bar" } })).toBeNull();
+  });
+
+  it("parses SSE usage from the final data frame", () => {
+    const frames = [
+      `data: {"id":"x","choices":[{"delta":{"content":"sa"}}]}`,
+      `data: {"id":"x","choices":[{"delta":{"content":"lut"}}]}`,
+      `data: {"id":"x","usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}`,
+      `data: [DONE]`,
+    ];
+    const usage = mistralConversationsAdapter.parseSseUsage(frames);
+    expect(usage).toEqual({
+      inputTokens: 12,
+      outputTokens: 7,
+    });
+  });
+
+  it("returns null when no SSE frame carries usage", () => {
+    expect(mistralConversationsAdapter.parseSseUsage([])).toBeNull();
+    expect(
+      mistralConversationsAdapter.parseSseUsage([
+        `data: {"id":"x","choices":[{"delta":{"content":"hi"}}]}`,
+        `data: [DONE]`,
       ]),
     ).toBeNull();
   });

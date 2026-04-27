@@ -231,15 +231,21 @@ function buildProxyBaseUrl(instance: string, api: string): string {
   //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`.
   //   - Anthropic SDK appends `/v1/messages`   → baseUrl is the bare
   //     route prefix (no `/v1`).
+  //   - Mistral SDK appends `/chat/completions` → baseUrl carries `/v1`,
+  //     same convention as OpenAI (Mistral's `chat.stream` targets
+  //     `/v1/chat/completions`, not the Beta `/v1/conversations` API).
   if (api === "openai-completions") {
     return `${trimmed}/api/llm-proxy/openai-completions/v1`;
   }
   if (api === "anthropic-messages") {
     return `${trimmed}/api/llm-proxy/anthropic-messages`;
   }
+  if (api === "mistral-conversations") {
+    return `${trimmed}/api/llm-proxy/mistral-conversations/v1`;
+  }
   throw new ModelResolutionError(
     `CLI preset mode does not yet route protocol "${api}"`,
-    `Supported today: ${Array.from(["openai-completions", "anthropic-messages"]).join(", ")}. Pick a compatible preset or use --model-source env.`,
+    `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. Pick a compatible preset or use --model-source env.`,
   );
 }
 
