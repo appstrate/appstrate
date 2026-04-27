@@ -174,4 +174,106 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).toBe("");
     expect(streams.stderr).toBe("");
   });
+
+  it("renders report.appended content as a stdout line", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle({
+      type: "report.appended",
+      timestamp: 0,
+      runId: RUN_ID,
+      content: "## Section header",
+    } as RunEvent);
+    expect(streams.stdout).toContain("## Section header");
+  });
+
+  it("trims double newlines on report.appended (no extra blank line)", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle({
+      type: "report.appended",
+      timestamp: 0,
+      runId: RUN_ID,
+      content: "trailing newline\n",
+    } as RunEvent);
+    // Exactly one newline at the end — the sink must not double it.
+    expect(streams.stdout).toBe("trailing newline\n");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeStdout injection — bridge anti-recursion contract
+// ---------------------------------------------------------------------------
+//
+// The CLI's `run.ts` installs an `attachStdoutBridge` around the runner's
+// sink. The bridge intercepts `process.stdout.write` to capture canonical
+// events emitted by system tools as JSONL. Without `writeStdout`, the
+// console sink would write `--json` envelopes directly to stdout and the
+// bridge would re-aspirate them, dispatching every event twice. The
+// `writeStdout` injection lets `run.ts` route console output through
+// `bridge.writeRaw`, bypassing the interceptor.
+
+describe("createConsoleSink — writeStdout injection", () => {
+  it("routes JSONL emissions through the injected writer (not process.stdout)", async () => {
+    const captured: string[] = [];
+    const streams = captureStreams();
+    try {
+      const sink = createConsoleSink({
+        json: true,
+        writeStdout: (chunk) => {
+          captured.push(chunk);
+        },
+      });
+      await sink.handle(progressEvent("hello"));
+      await sink.finalize(emptyResult());
+      // Two writes captured by the injected writer; nothing leaked to
+      // the actual process.stdout (the captureStreams patch confirms it).
+      expect(captured).toHaveLength(2);
+      expect(captured[0]!.includes('"hello"')).toBe(true);
+      expect(captured[1]!.includes("appstrate.finalize")).toBe(true);
+      expect(streams.stdout).toBe("");
+    } finally {
+      streams.restore();
+    }
+  });
+
+  it("routes human-mode emissions through the injected writer", async () => {
+    const captured: string[] = [];
+    const streams = captureStreams();
+    try {
+      const sink = createConsoleSink({
+        writeStdout: (chunk) => {
+          captured.push(chunk);
+        },
+      });
+      await sink.handle(progressEvent("doing stuff"));
+      await sink.finalize(emptyResult());
+      expect(captured.join("")).toContain("doing stuff");
+      expect(captured.join("")).toContain("run complete");
+      expect(streams.stdout).toBe("");
+    } finally {
+      streams.restore();
+    }
+  });
+
+  it("keeps appstrate.error on real stderr (writeStdout is stdout-only)", async () => {
+    const captured: string[] = [];
+    const streams = captureStreams();
+    try {
+      const sink = createConsoleSink({
+        writeStdout: (chunk) => {
+          captured.push(chunk);
+        },
+      });
+      await sink.handle({
+        type: "appstrate.error",
+        timestamp: 0,
+        runId: RUN_ID,
+        message: "boom",
+      } as RunEvent);
+      // The injected writer is stdout-scoped; errors still hit real stderr.
+      expect(captured).toHaveLength(0);
+      expect(streams.stderr).toContain("boom");
+    } finally {
+      streams.restore();
+    }
+  });
 });
