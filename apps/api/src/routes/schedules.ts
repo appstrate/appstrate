@@ -24,18 +24,19 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/index.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
   cronExpression: z.string().min(1, "cronExpression is required"),
   timezone: z.string().default("UTC"),
-  input: z.record(z.string(), z.unknown()).default({}),
+  input: scheduleInputSchema.default({}),
   // Per-schedule override layer — frozen at create/update and deep-merged
   // with the application's persisted config every time the schedule
   // fires. Mirrors the per-run override pipeline (POST /run body) so a
   // schedule is "a recurring run with frozen overrides".
-  configOverride: z.record(z.string(), z.unknown()).optional(),
+  configOverride: runConfigOverrideSchema.optional(),
   modelIdOverride: z.string().optional(),
   proxyIdOverride: z.string().optional(),
   versionOverride: z.string().optional(),
@@ -46,10 +47,10 @@ export const updateScheduleSchema = z.object({
   name: z.string().optional(),
   cronExpression: z.string().optional(),
   timezone: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
+  input: scheduleInputSchema.optional(),
   enabled: z.boolean().optional(),
   // `null` clears the override; omitted leaves it untouched.
-  configOverride: z.record(z.string(), z.unknown()).nullable().optional(),
+  configOverride: runConfigOverrideSchema.nullable().optional(),
   modelIdOverride: z.string().nullable().optional(),
   proxyIdOverride: z.string().nullable().optional(),
   versionOverride: z.string().nullable().optional(),
