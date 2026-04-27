@@ -83,7 +83,10 @@ const CreateRemoteRunBodySchema = z
       z.object({
         kind: z.literal("registry"),
         packageId: z.string().min(1),
-        source: z.enum(["draft", "published"]).default("published"),
+        // `stage` discriminates draft vs published — kept distinct from
+        // the parent `source` discriminator (which selects inline vs
+        // registry) to avoid the `source.source` collision.
+        stage: z.enum(["draft", "published"]).default("published"),
         spec: z.string().optional(),
         /**
          * SRI digest the runner received with the bundle download
@@ -156,6 +159,11 @@ export function createRunsRemoteRouter() {
       let effectiveConfig: Record<string, unknown>;
       let modelIdOverride: string | null;
       let proxyIdOverride: string | null;
+      // Attribution path counter — emitted once per request so we can
+      // track inline/registry/fallback share over time. The deprecated
+      // identity-resolver path is only safe to delete once the inline
+      // share trends to zero, so this metric is the tombstone gate.
+      let attributionPath: "registry" | "inline_attributed" | "inline_shadow";
 
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
@@ -165,28 +173,13 @@ export function createRunsRemoteRouter() {
           orgId,
           applicationId,
           packageId: src.packageId,
-          source: src.source,
+          stage: src.stage,
           spec: src.spec,
+          ...(src.integrity ? { integrityHint: src.integrity } : {}),
         });
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
-
-        // Optional drift signal — the runner's bundle was downloaded under
-        // an integrity hash; if our resolved version produces a different
-        // artifact (the dist-tag moved, the draft was edited mid-flight),
-        // log it but don't reject. The bundle is already on the runner; a
-        // 4xx here would waste the work for no security benefit.
-        if (src.integrity && src.integrity !== "") {
-          // We don't recompute the artifact here — that requires re-zipping
-          // the bundle. The integrity is recorded on the run row by the
-          // runner anyway. Surface a debug breadcrumb for ops correlation.
-          logger.debug("registry run integrity hint received", {
-            runIdHint: "pending",
-            packageId: src.packageId,
-            versionLabel: resolved.versionLabel,
-            integrity: src.integrity,
-          });
-        }
+        attributionPath = "registry";
 
         // Body-supplied providerProfiles already validated as
         // Record<string,string> by the discriminated-union schema above.
@@ -288,11 +281,14 @@ export function createRunsRemoteRouter() {
           if (real) {
             agentForRun = real;
             overrideVersionLabel = resolved.versionLabel;
+            attributionPath = "inline_attributed";
           } else {
             agentForRun = await createShadowAgent(preflight);
+            attributionPath = "inline_shadow";
           }
         } else {
           agentForRun = await createShadowAgent(preflight);
+          attributionPath = "inline_shadow";
         }
 
         providerProfiles = preflight.providerProfiles;
@@ -361,6 +357,15 @@ export function createRunsRemoteRouter() {
           detail: "Remote run created without sink credentials — please retry",
         });
       }
+
+      logger.info("runs.remote.attribution", {
+        runId: result.runId,
+        orgId,
+        applicationId,
+        path: attributionPath,
+        packageId: agentForRun.id,
+        versionLabel: overrideVersionLabel ?? null,
+      });
 
       c.status(201);
       return c.json({

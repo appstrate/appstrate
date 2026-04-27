@@ -5,7 +5,7 @@
  * concrete `LoadedPackage` + version label.
  *
  * The CLI (or any remote runner) tells us which package it's running
- * — `{ packageId, source: "draft" | "published", spec? }` — instead of
+ * — `{ packageId, stage: "draft" | "published", spec? }` — instead of
  * shipping the manifest+prompt blob and relying on fingerprint
  * reconciliation. This produces:
  *   - deterministic attribution (no hash-equality games),
@@ -14,11 +14,11 @@
  *     storage; the runner cannot impersonate `@official/agent`).
  *
  * Resolution mirrors the bundle export route (`GET .../bundle`):
- *   - `source: "draft"`   → `getPackage` reads `draftManifest`/`draftContent`.
- *                           `versionLabel = "draft"`. `spec` is rejected.
- *   - `source: "published"` → `resolveExportVersion` (explicit `spec` →
- *                           pinned-in-app version → `latest` dist-tag).
- *                           Manifest + prompt loaded from `package_versions`.
+ *   - `stage: "draft"`     → `getPackage` reads `draftManifest`/`draftContent`.
+ *                            `versionLabel = "draft"`. `spec` is rejected.
+ *   - `stage: "published"` → `resolveExportVersion` (explicit `spec` →
+ *                            pinned-in-app version → `latest` dist-tag).
+ *                            Manifest + prompt loaded from `package_versions`.
  *
  * Access control: the package must exist in the org's catalog AND be
  * installed in the calling application — same 404 semantics the bundle
@@ -30,15 +30,24 @@ import { hasPackageAccess } from "./application-packages.ts";
 import { getVersionDetail } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
-import { asRecord } from "@appstrate/core/safe-json";
+import { logger } from "../lib/logger.ts";
+import { validateManifest } from "@appstrate/core/validation";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
 export interface RegistrySourceInput {
   orgId: string;
   applicationId: string;
   packageId: string;
-  source: "draft" | "published";
+  stage: "draft" | "published";
   spec?: string | undefined;
+  /**
+   * SRI digest the runner received with the bundle download. Optional;
+   * surfaces a structured warn-log when it diverges from the artifact
+   * the resolved version stores (catches dist-tag drift, mid-flight
+   * draft edits). Never a rejection signal — bundle bytes already live
+   * on the runner, so wasting that work on a 4xx is no security gain.
+   */
+  integrityHint?: string;
 }
 
 export interface ResolvedRegistryAgent {
@@ -50,14 +59,14 @@ export interface ResolvedRegistryAgent {
 export async function resolveRegistryAgent(
   input: RegistrySourceInput,
 ): Promise<ResolvedRegistryAgent> {
-  const { orgId, applicationId, packageId, source, spec } = input;
+  const { orgId, applicationId, packageId, stage, spec, integrityHint } = input;
 
-  if (source === "draft" && spec) {
+  if (stage === "draft" && spec) {
     throw new ApiError({
       status: 400,
       code: "draft_with_spec",
       title: "Conflicting Source",
-      detail: "source: 'draft' cannot be combined with a spec — drafts have no published id",
+      detail: "stage: 'draft' cannot be combined with a spec — drafts have no published id",
     });
   }
 
@@ -82,22 +91,33 @@ export async function resolveRegistryAgent(
     });
   }
 
-  if (source === "draft") {
+  if (stage === "draft") {
     // `getPackage` already returned the draft state (`draftManifest`/
-    // `draftContent`). Validate the manifest carries the AFPS identity
-    // contract before handing it to the run pipeline — same shape check
-    // the bundle export performs.
-    const draftManifest = pkg.manifest as Record<string, unknown>;
-    const name = typeof draftManifest.name === "string" ? draftManifest.name : null;
-    const version = typeof draftManifest.version === "string" ? draftManifest.version : null;
-    if (!name || !version || !name.startsWith("@") || !name.includes("/")) {
+    // `draftContent`). Run the full AFPS structural validation —
+    // type-dispatched so an agent with a corrupt `dependencies` shape,
+    // missing `schemaVersion`, etc. fails cleanly here instead of
+    // crashing deeper in the run pipeline with a less actionable error.
+    const draftValidation = validateManifest(pkg.manifest);
+    if (!draftValidation.valid) {
       throw new ApiError({
         status: 400,
         code: "invalid_draft_manifest",
         title: "Invalid Draft Manifest",
-        detail: `Draft for '${pkg.id}' is missing a valid scoped name + version — fix the manifest before running`,
+        detail: `Draft for '${pkg.id}' is invalid: ${draftValidation.errors.slice(0, 3).join("; ")}`,
       });
     }
+
+    if (integrityHint) {
+      // Drafts mutate freely — any hint the runner saw on download is
+      // structurally racy. Log unconditionally (no comparison; we'd need
+      // to re-zip to check), so ops can correlate "draft edited mid-run".
+      logger.warn("registry run integrity hint on draft (best-effort observability)", {
+        packageId: pkg.id,
+        versionLabel: "draft",
+        integrityHint,
+      });
+    }
+
     return { agent: pkg, versionLabel: "draft" };
   }
 
@@ -125,7 +145,49 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const manifest = asRecord(detail.manifest) as AgentManifest;
+  // Validate the snapshotted manifest from the catalog row. Anything
+  // malformed here is a service invariant violation (bad publish, manual
+  // SQL edit) — surface as 500 rather than letting an unchecked cast
+  // through to the run pipeline.
+  const manifestValidation = validateManifest(detail.manifest);
+  if (!manifestValidation.valid) {
+    logger.error("stored published manifest failed AFPS validation", {
+      packageId,
+      version: detail.version,
+      errors: manifestValidation.errors.slice(0, 5),
+    });
+    throw new ApiError({
+      status: 500,
+      code: "invalid_stored_manifest",
+      title: "Invalid Stored Manifest",
+      detail: `Catalog row for '${packageId}@${detail.version}' has a malformed manifest`,
+    });
+  }
+  if (manifestValidation.manifest.type !== "agent") {
+    throw new ApiError({
+      status: 400,
+      code: "not_an_agent",
+      title: "Not An Agent",
+      detail: `Package '${packageId}' is a ${manifestValidation.manifest.type}, not an agent`,
+    });
+  }
+  const manifest = manifestValidation.manifest as AgentManifest;
+
+  if (integrityHint && integrityHint !== detail.integrity) {
+    // The runner downloaded under one digest; we resolved a row with a
+    // different artifact digest. Most likely cause: the dist-tag the
+    // runner pointed at (often `latest`) moved between bundle download
+    // and `runs/remote` POST. We accept the run regardless (the bundle
+    // still lives on the runner, server-side bytes aren't loaded), but
+    // emit a structured warn so ops can correlate.
+    logger.warn("registry run integrity hint diverges from resolved artifact", {
+      packageId,
+      versionLabel: detail.version,
+      hint: integrityHint,
+      resolved: detail.integrity,
+    });
+  }
+
   const prompt = detail.textContent ?? "";
   const deps = await resolveManifestCatalogDeps(manifest, orgId);
 

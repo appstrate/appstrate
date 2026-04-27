@@ -119,7 +119,8 @@ export type ReportSource =
       kind: "registry";
       bundle: Bundle;
       packageId: string;
-      source: "draft" | "published";
+      /** Lifecycle stage of the package the runner downloaded — wire field is `stage`. */
+      stage: "draft" | "published";
       spec?: string | undefined;
       integrity?: string | undefined;
     };
@@ -169,7 +170,7 @@ export async function startReportSession(
       source: {
         kind: "registry" as const,
         packageId: reportSource.packageId,
-        source: reportSource.source,
+        stage: reportSource.stage,
         ...(reportSource.spec ? { spec: reportSource.spec } : {}),
         ...(reportSource.integrity ? { integrity: reportSource.integrity } : {}),
       },
@@ -197,7 +198,7 @@ export async function startReportSession(
   // any other 4xx (auth, rate limit, real validation error) — those
   // would loop or mask the real failure.
   if (!res.ok && res.status === 400 && reportSource.kind === "registry") {
-    const peek = await peekBody(res);
+    const peek = await peekProblemBody(res);
     if (looksLikeUnknownRegistryKind(peek)) {
       process.stderr.write(
         "warn: server doesn't support kind: 'registry' source — falling back to inline (run will show as Inline in the dashboard)\n",
@@ -332,38 +333,69 @@ async function readSnippet(res: Response): Promise<string | null> {
   }
 }
 
+interface PeekedProblem {
+  raw: string;
+  code: string | null;
+  detail: string | null;
+}
+
 /**
- * Peek a response body once for fallback heuristics, leaving a clone for
- * downstream `readSnippet` if we end up surfacing the error to the user.
- * Returns the raw text, capped at the same 512-char window as
- * {@link readSnippet} for consistency.
+ * Peek a response body once for fallback heuristics, leaving the
+ * original Response cloned so a downstream {@link readSnippet} can
+ * still read the body when we surface the error. Parses RFC 9457
+ * problem+json fields when present so the heuristic doesn't have to
+ * guess at the shape.
  */
-async function peekBody(res: Response): Promise<string> {
+async function peekProblemBody(res: Response): Promise<PeekedProblem> {
   try {
     const text = await res.clone().text();
-    return text.length > 512 ? `${text.slice(0, 512)}…` : text;
+    const raw = text.length > 512 ? `${text.slice(0, 512)}…` : text;
+    let code: string | null = null;
+    let detail: string | null = null;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const obj = parsed as Record<string, unknown>;
+        if (typeof obj["code"] === "string") code = obj["code"] as string;
+        if (typeof obj["detail"] === "string") detail = obj["detail"] as string;
+      }
+    } catch {
+      // Non-JSON body — code/detail stay null, raw still serves the heuristic.
+    }
+    return { raw, code, detail };
   } catch {
-    return "";
+    return { raw: "", code: null, detail: null };
   }
 }
 
 /**
- * Heuristic: does this 400 body look like the server rejected the
+ * Heuristic: does this 400 look like the server rejected the
  * `kind: "registry"` discriminator (i.e. an old build before the
- * registry source landed)? We accept either the Zod default message
- * surface ("Invalid discriminator value", "Invalid input") or the
- * RFC 9457 problem+json `code: "invalid_request"`. The check is
- * deliberately generous — false positives degrade to a one-time
- * inline retry with a visible warning, which is fine.
+ * registry source landed)? Two signals, both required:
+ *   1. RFC 9457 `code` is `invalid_request` (Hono's `parseBody`
+ *      validation surface — anything else like rate-limit, auth, app
+ *      context errors carry distinct codes).
+ *   2. The detail/raw mentions the source field path or the registry
+ *      kind explicitly.
+ *
+ * Without (1) we'd false-positive on rate-limit JSON bodies that
+ * happen to mention `source`. Without (2) we'd false-positive on any
+ * unrelated invalid_request (e.g. a malformed `applicationId`).
  */
-function looksLikeUnknownRegistryKind(body: string): boolean {
-  if (!body) return false;
-  const lc = body.toLowerCase();
+function looksLikeUnknownRegistryKind(peek: PeekedProblem): boolean {
+  if (!peek.raw) return false;
+  if (peek.code !== "invalid_request") return false;
+  // Use the structured `detail` when present, otherwise fall back to the
+  // raw body. The substring set is intentionally narrow — we only match
+  // path/value tokens that a Zod error from the `source` discriminator
+  // would emit ("source.kind", "Invalid discriminator value").
+  const haystack = (peek.detail ?? peek.raw).toLowerCase();
   return (
-    lc.includes("registry") ||
-    lc.includes("discriminator") ||
-    lc.includes("invalid_request") ||
-    lc.includes("invalid input")
+    haystack.includes("source.kind") ||
+    haystack.includes("'source'") ||
+    haystack.includes('"source"') ||
+    haystack.includes("discriminator") ||
+    haystack.includes("registry")
   );
 }
 

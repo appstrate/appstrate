@@ -68,7 +68,7 @@ describe("fetchBundleForRun — happy path", () => {
     // Without this, attribution would have to fall back to fingerprint
     // reconciliation server-side.
     expect(result.version).toBe("draft");
-    expect(result.source).toBe("draft");
+    expect(result.stage).toBe("draft");
 
     // Literal `@` — encodeURIComponent would produce `%40system`, which the
     // Hono server route `:scope{@[^/]+}` rejects as 404. The CLI's URL
@@ -105,7 +105,7 @@ describe("fetchBundleForRun — happy path", () => {
     expect(capture.url).toContain("?version=%5E1.2");
     // Spec means `source: "published"` — even though the CLI asked for a
     // range, the server resolved to a concrete semver in `X-Bundle-Version`.
-    expect(result.source).toBe("published");
+    expect(result.stage).toBe("published");
     expect(result.version).toBe("1.2.3");
   });
 

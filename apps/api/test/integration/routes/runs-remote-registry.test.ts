@@ -95,7 +95,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       source: {
         kind: "registry",
         packageId: "@acme/briefing",
-        source: "published",
+        stage: "published",
         spec: "1.2.3",
       },
       applicationId: ctx.defaultAppId,
@@ -124,7 +124,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPublishedAgent(ctx, "1.0.0");
 
     const res = await post({
-      source: { kind: "registry", packageId: "@acme/briefing", source: "published" },
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
       applicationId: ctx.defaultAppId,
       input: {},
     });
@@ -142,6 +142,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       type: "agent",
       draftManifest: {
         name: "@acme/draft-only",
+        displayName: "Draft-only Agent",
         version: "0.0.1",
         type: "agent",
         schemaVersion: "1.0",
@@ -152,7 +153,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/draft-only");
 
     const res = await post({
-      source: { kind: "registry", packageId: "@acme/draft-only", source: "draft" },
+      source: { kind: "registry", packageId: "@acme/draft-only", stage: "draft" },
       applicationId: ctx.defaultAppId,
       input: {},
     });
@@ -164,9 +165,42 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.versionLabel).toBe("draft");
   });
 
+  it("rejects a malformed draft manifest with 400", async () => {
+    // Seed a draft that's missing required AFPS fields (no `displayName`,
+    // no `schemaVersion`). The full-AFPS validator must catch this here
+    // instead of letting the run pipeline crash later with a less
+    // actionable error.
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/broken-draft",
+      type: "agent",
+      draftManifest: {
+        name: "@acme/broken-draft",
+        version: "0.0.1",
+        type: "agent",
+        // displayName + schemaVersion intentionally omitted
+        dependencies: { skills: {}, tools: {}, providers: {} },
+      } as unknown as Record<string, unknown>,
+      draftContent: "draft prompt",
+    });
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@acme/broken-draft",
+    );
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/broken-draft", stage: "draft" },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("invalid_draft_manifest");
+  });
+
   it("rejects a missing package with 404", async () => {
     const res = await post({
-      source: { kind: "registry", packageId: "@acme/does-not-exist", source: "published" },
+      source: { kind: "registry", packageId: "@acme/does-not-exist", stage: "published" },
       applicationId: ctx.defaultAppId,
       input: {},
     });
@@ -193,7 +227,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     const res = await post({
-      source: { kind: "registry", packageId: "@acme/briefing", source: "published" },
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
       applicationId: ctx.defaultAppId,
       input: {},
     });
@@ -208,7 +242,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       source: {
         kind: "registry",
         packageId: "@acme/briefing",
-        source: "published",
+        stage: "published",
         spec: "9.9.9",
       },
       applicationId: ctx.defaultAppId,
@@ -233,7 +267,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       source: {
         kind: "registry",
         packageId: "@acme/briefing",
-        source: "published",
+        stage: "published",
         spec: "1.0.0",
       },
       applicationId: ctx.defaultAppId,
@@ -244,13 +278,13 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(body.code).toBe("version_yanked");
   });
 
-  it("rejects `source: draft` combined with a spec (400)", async () => {
+  it("rejects `stage: draft` combined with a spec (400)", async () => {
     await seedPublishedAgent(ctx, "1.0.0");
     const res = await post({
       source: {
         kind: "registry",
         packageId: "@acme/briefing",
-        source: "draft",
+        stage: "draft",
         spec: "1.0.0",
       },
       applicationId: ctx.defaultAppId,
@@ -267,7 +301,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       source: {
         kind: "registry",
         packageId: "@acme/briefing",
-        source: "published",
+        stage: "published",
         spec: "1.2.3",
         integrity: "sha256-totally-bogus-hint",
       },

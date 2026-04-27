@@ -124,12 +124,12 @@ describe("startReportSession — source discrimination", () => {
     expect(src.prompt).toBe("Hello.");
   });
 
-  it("posts kind: registry with packageId+source for id-mode bundles (no manifest leak)", async () => {
+  it("posts kind: registry with packageId+stage for id-mode bundles (no manifest leak)", async () => {
     const reportSource: ReportSource = {
       kind: "registry",
       bundle: makeBundle(),
       packageId: "@scope/agent",
-      source: "published",
+      stage: "published",
       spec: "1.0.0",
       integrity: "sha256-bundle-hash",
     };
@@ -146,7 +146,7 @@ describe("startReportSession — source discrimination", () => {
         source: {
           kind: string;
           packageId: string;
-          source: string;
+          stage: string;
           spec?: string;
           integrity?: string;
           manifest?: unknown;
@@ -156,7 +156,7 @@ describe("startReportSession — source discrimination", () => {
     ).source;
     expect(src.kind).toBe("registry");
     expect(src.packageId).toBe("@scope/agent");
-    expect(src.source).toBe("published");
+    expect(src.stage).toBe("published");
     expect(src.spec).toBe("1.0.0");
     expect(src.integrity).toBe("sha256-bundle-hash");
     // Critical: registry path must NOT leak the bundle's manifest/prompt
@@ -170,7 +170,7 @@ describe("startReportSession — source discrimination", () => {
       kind: "registry",
       bundle: makeBundle(),
       packageId: "@scope/agent",
-      source: "draft",
+      stage: "draft",
     };
     await startReportSession(
       reportSource,
@@ -179,8 +179,8 @@ describe("startReportSession — source discrimination", () => {
       SNAPSHOT,
     );
 
-    const src = stub.calls[0]!.body.source as { source: string; spec?: string };
-    expect(src.source).toBe("draft");
+    const src = stub.calls[0]!.body.source as { stage: string; spec?: string };
+    expect(src.stage).toBe("draft");
     expect(src.spec).toBeUndefined();
   });
 });
@@ -213,7 +213,7 @@ describe("startReportSession — old-server fallback", () => {
       kind: "registry",
       bundle: makeBundle(),
       packageId: "@scope/agent",
-      source: "published",
+      stage: "published",
       spec: "1.0.0",
     };
     const session = await startReportSession(
@@ -252,7 +252,7 @@ describe("startReportSession — old-server fallback", () => {
       kind: "registry",
       bundle: makeBundle(),
       packageId: "@scope/agent",
-      source: "published",
+      stage: "published",
     };
     await expect(
       startReportSession(reportSource, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT),
@@ -260,6 +260,35 @@ describe("startReportSession — old-server fallback", () => {
 
     // Single attempt — no retry because the 400 body didn't match the
     // unknown-discriminator heuristic.
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("does not retry on invalid_request that targets a different field", async () => {
+    // A 400 with `code: invalid_request` but pointing at `applicationId`
+    // (or any non-`source` field) must NOT trigger the inline fallback —
+    // retrying inline would mask a real client bug. This locks in the
+    // structural part of the tightened heuristic.
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            code: "invalid_request",
+            detail: "applicationId: must be a non-empty string",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    const reportSource: ReportSource = {
+      kind: "registry",
+      bundle: makeBundle(),
+      packageId: "@scope/agent",
+      stage: "published",
+      spec: "1.0.0",
+    };
+    await expect(
+      startReportSession(reportSource, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT),
+    ).rejects.toMatchObject({ name: "ReportStartError" });
     expect(stub.calls).toHaveLength(1);
   });
 });

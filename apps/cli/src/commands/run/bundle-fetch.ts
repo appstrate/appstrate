@@ -64,10 +64,10 @@ export interface BundleFetchResult {
   version: string;
   /**
    * Whether the served bundle came from the package's draft state or a
-   * published version. Drives the `source` field on `POST /api/runs/remote`
+   * published version. Drives the `stage` field on `POST /api/runs/remote`
    * `kind: "registry"`.
    */
-  source: "draft" | "published";
+  stage: "draft" | "published";
 }
 
 /**
@@ -151,7 +151,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   // `?source=draft` was sent ⇔ the server returned the draft. We don't
   // trust `versionHeader === "draft"` alone for this — the request shape
   // is the authoritative signal, and the response is a sanity check.
-  const source: "draft" | "published" = input.spec === undefined ? "draft" : "published";
+  const stage: "draft" | "published" = input.spec === undefined ? "draft" : "published";
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.
@@ -166,7 +166,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     );
   }
 
-  return { bytes, integrity, version, source };
+  return { bytes, integrity, version, stage };
 }
 
 // ---------------------------------------------------------------------------

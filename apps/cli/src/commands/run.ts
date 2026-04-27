@@ -883,7 +883,7 @@ async function resolveReportSession(
           kind: "registry",
           bundle,
           packageId: bundleSource.packageId,
-          source: bundleSource.registrySource,
+          stage: bundleSource.registryStage,
           ...(bundleSource.spec ? { spec: bundleSource.spec } : {}),
           ...(bundleSource.integrity ? { integrity: bundleSource.integrity } : {}),
         }
@@ -1031,7 +1031,7 @@ type BundleSource =
       /** Resolved version (from `X-Bundle-Version`) — concrete semver or `"draft"`. */
       version: string;
       /** Whether the fetched bundle came from draft state or a published release. */
-      registrySource: "draft" | "published";
+      registryStage: "draft" | "published";
       /** Spec the user/inheritance asked for (only set for published). */
       spec: string | undefined;
       /** SRI digest (`sha256-…`) the server reported for the artifact. */
@@ -1080,7 +1080,7 @@ async function resolveBundleSource(
     label,
     packageId: target.packageId,
     version: fetched.version,
-    registrySource: fetched.source,
+    registryStage: fetched.stage,
     spec: target.spec,
     integrity: fetched.integrity,
   };
