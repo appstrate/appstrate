@@ -243,13 +243,29 @@ describe("webhooks service", () => {
   // ── rotateSecret ──────────────────────────────────────────
 
   describe("rotateSecret", () => {
-    it("returns a new secret different from the original", async () => {
+    it("opens a dual-signature rotation window", async () => {
       const created = await createWebhook(appLevel({ url: "https://example.com/rotate" }));
 
-      const { secret: newSecret } = await rotateSecret({ orgId }, created.id);
+      const result = await rotateSecret({ orgId }, created.id);
 
-      expect(newSecret).toStartWith("whsec_");
-      expect(newSecret).not.toBe(created.secret);
+      expect(result.secret).toStartWith("whsec_");
+      expect(result.secret).not.toBe(created.secret);
+      // Previous secret remains valid for the window — consumers verify with it
+      // until they migrate to the new one.
+      expect(result.secretPrevious).toBe(created.secret);
+      // Default 7-day window — sanity check the deadline lands in the future.
+      expect(new Date(result.rotationWindowEndsAt).getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it("respects an explicit windowSeconds override", async () => {
+      const created = await createWebhook(appLevel({ url: "https://example.com/rotate-window" }));
+
+      const result = await rotateSecret({ orgId }, created.id, { windowSeconds: 60 });
+
+      const deadline = new Date(result.rotationWindowEndsAt).getTime();
+      // Allow ±5s slack for execution time.
+      expect(deadline).toBeGreaterThan(Date.now() + 55_000);
+      expect(deadline).toBeLessThan(Date.now() + 65_000);
     });
   });
 

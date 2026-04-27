@@ -24,6 +24,21 @@ export interface WebhookCreateResponse extends WebhookInfo {
   secret: string;
 }
 
+/**
+ * Response from `POST /api/webhooks/:id/rotate`.
+ *
+ * `secret` is the freshly-minted next secret (consumer should migrate
+ * to it). `secretPrevious` is the value that was on the row before
+ * rotation — it remains valid for delivery verification until
+ * `rotationWindowEndsAt`. After the window closes, the next delivery
+ * inline-promotes the new secret and the previous one is retired.
+ */
+export interface WebhookRotateResponse {
+  secret: string;
+  secretPrevious: string;
+  rotationWindowEndsAt: string;
+}
+
 export interface WebhookDelivery {
   id: string;
   eventId: string;

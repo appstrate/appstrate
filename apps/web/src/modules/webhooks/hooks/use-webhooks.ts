@@ -120,7 +120,10 @@ export function useRotateWebhookSecret() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      return api<{ secret: string }>(`/webhooks/${id}/rotate`, { method: "POST" });
+      return api<{ secret: string; secretPrevious: string; rotationWindowEndsAt: string }>(
+        `/webhooks/${id}/rotate`,
+        { method: "POST" },
+      );
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["webhooks"] });

@@ -27,6 +27,14 @@ const RUNNER_KIND_HEADER = "x-appstrate-runner-kind";
 const RUNNER_NAME_MAX_LENGTH = 120;
 const RUNNER_KIND_MAX_LENGTH = 32;
 
+/**
+ * Format constraint for `runner_kind`: lowercase ASCII letters, digits,
+ * and hyphens — the kebab-case slug shape of a tool identifier. Documented
+ * as the wire contract for `X-Appstrate-Runner-Kind`. Values that don't
+ * match are dropped to `null` so the column never carries arbitrary text.
+ */
+const RUNNER_KIND_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
 interface ResolvedRunnerContext {
   name: string | null;
   kind: string | null;
@@ -39,10 +47,16 @@ function clamp(value: string | null | undefined, max: number): string | null {
   return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
 }
 
+function normalizeKind(value: string | null): string | null {
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  return RUNNER_KIND_RE.test(lower) ? lower : null;
+}
+
 export async function resolveRunnerContext(c: Context): Promise<ResolvedRunnerContext> {
   const headerName = clamp(c.req.header(RUNNER_NAME_HEADER), RUNNER_NAME_MAX_LENGTH);
   const headerKindRaw = clamp(c.req.header(RUNNER_KIND_HEADER), RUNNER_KIND_MAX_LENGTH);
-  const headerKind = headerKindRaw?.toLowerCase() ?? null;
+  const headerKind = normalizeKind(headerKindRaw);
 
   // The OIDC strategy stamps the CLI family id here when a Bearer JWT
   // carrying `cli_family_id` resolves successfully — see

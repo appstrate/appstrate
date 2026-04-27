@@ -76,3 +76,14 @@ export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
 export const zLlmUsageSourceEnum = z.enum(llmUsageSourceValues);
 export type LlmUsageSource = z.infer<typeof zLlmUsageSourceEnum>;
+
+/**
+ * Distinguishes WHO controls the runner process — `platform` for
+ * platform-managed Pi containers, `remote` for caller-managed runners
+ * (CLI, GitHub Action, self-hosted). Closed set: every event-ingestion
+ * code path branches on it, so adding a value is intentional.
+ */
+export const runOriginValues = ["platform", "remote"] as const;
+export const runOriginEnum = pgEnum("run_origin", runOriginValues);
+export const zRunOriginEnum = z.enum(runOriginValues);
+export type RunOrigin = z.infer<typeof zRunOriginEnum>;

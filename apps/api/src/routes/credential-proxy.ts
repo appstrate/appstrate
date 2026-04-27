@@ -195,44 +195,12 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "oauth2-dashboard",
 ]);
 
-/** Defaults aligned with the spec §10.3. Override via env var. */
-interface CredentialProxyLimits {
-  rate_per_min: number;
-  max_request_bytes: number;
-  max_response_bytes: number;
-  session_ttl_seconds: number;
-}
-
-function parseLimits(): CredentialProxyLimits {
-  const raw = process.env.CREDENTIAL_PROXY_LIMITS;
-  const defaults: CredentialProxyLimits = {
-    rate_per_min: 100,
-    max_request_bytes: 10 * 1024 * 1024,
-    max_response_bytes: 50 * 1024 * 1024,
-    session_ttl_seconds: 3600,
-  };
-  if (!raw) return defaults;
-  try {
-    const parsed = JSON.parse(raw) as Partial<CredentialProxyLimits>;
-    return {
-      rate_per_min: parsed.rate_per_min ?? defaults.rate_per_min,
-      max_request_bytes: parsed.max_request_bytes ?? defaults.max_request_bytes,
-      max_response_bytes: parsed.max_response_bytes ?? defaults.max_response_bytes,
-      session_ttl_seconds: parsed.session_ttl_seconds ?? defaults.session_ttl_seconds,
-    };
-  } catch (err) {
-    logger.warn("CREDENTIAL_PROXY_LIMITS is not valid JSON — using defaults", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return defaults;
-  }
-}
-
 import { getCookieJarStore } from "../services/credential-proxy/cookie-jar.ts";
+import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
 export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
-  const limits = parseLimits();
+  const limits = getCredentialProxyLimits();
 
   router.use("/*", requireAppContext());
 

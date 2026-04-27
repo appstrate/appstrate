@@ -24,7 +24,7 @@ import { getAppScope } from "../lib/scope.ts";
 
 export const createEndUserSchema = z.object({
   name: z.string().max(200).nullable().optional(),
-  email: z.string().email().nullable().optional(),
+  email: z.email().nullable().optional(),
   externalId: z.string().max(255).nullable().optional(),
   metadata: z
     .record(
@@ -37,7 +37,7 @@ export const createEndUserSchema = z.object({
 
 export const updateEndUserSchema = z.object({
   name: z.string().max(200).nullable().optional(),
-  email: z.string().email().nullable().optional(),
+  email: z.email().nullable().optional(),
   externalId: z.string().max(255).nullable().optional(),
   metadata: z
     .record(

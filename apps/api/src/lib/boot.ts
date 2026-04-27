@@ -29,6 +29,7 @@ import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
+import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
   initSystemPackages,
   getSystemPackages,
@@ -160,6 +161,10 @@ export async function boot(): Promise<void> {
   // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
   // Throws at boot on invalid shape — no run can start without them.
   initRunLimits();
+
+  // Parse + validate proxy limits (LLM_PROXY_LIMITS, CREDENTIAL_PROXY_LIMITS).
+  // Same fail-fast contract as initRunLimits — strict Zod, unknown keys reject.
+  initProxyLimits();
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();

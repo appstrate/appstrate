@@ -38,6 +38,14 @@ export const webhooks = pgTable(
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)
+    // Dual-signature rotation window. When `secretNext` is non-null and
+    // `secretNextExpiresAt` is in the future, every outbound delivery is
+    // signed with BOTH secrets in a space-separated `webhook-signature`
+    // header (Standard Webhooks multi-signature spec). Once the deadline
+    // passes, the delivery worker promotes `secret_next` → `secret` and
+    // clears these columns inline. Null on both = no rotation in flight.
+    secretNext: text("secret_next"),
+    secretNextExpiresAt: timestamp("secret_next_expires_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
