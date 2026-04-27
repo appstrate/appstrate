@@ -10,7 +10,7 @@
  *   3. The run produces the same RunResult a runtime consumer would get
  *      from `reduceEvents` over the same stream.
  *   4. run_logs rows + the sink's projected aggregate reflect the expected
- *      DB side-effects (output + report + progress rows; memories
+ *      DB side-effects (output + progress rows; memories
  *      captured in-memory for persistence by the caller).
  */
 
@@ -70,7 +70,6 @@ describe("Parity E2E — full adapter stack", () => {
         key: "checkpoint",
         content: { counter: 7 },
       },
-      { type: "report.appended", timestamp: Date.now(), runId, content: "work done" },
     ];
 
     const sink = new AggregatingEventSink({
@@ -98,10 +97,9 @@ describe("Parity E2E — full adapter stack", () => {
     expect(snap.output).toEqual({ deliverable: "shipped" });
     expect(snap.pinned!.checkpoint).toEqual({ content: { counter: 7 } });
     expect(snap.memories).toEqual([{ content: "learned A" }, { content: "learned B" }]);
-    expect(snap.report).toBe("work done");
 
     // DB side-effect: run_logs received one row per observable event
-    // (output + report + progress).
+    // (output + progress).
     const logs = await db
       .select()
       .from(runLogs)
@@ -110,7 +108,6 @@ describe("Parity E2E — full adapter stack", () => {
 
     const events = logs.map((l) => l.event);
     expect(events).toContain("output");
-    expect(events).toContain("report");
     expect(events).toContain("progress");
   });
 });

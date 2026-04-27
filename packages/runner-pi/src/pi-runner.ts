@@ -322,7 +322,7 @@ export interface BridgeableSession {
  * is speculative UX; the message-level granularity suffices.
  *
  * Structured canonical events (memory.added, pinned.set, output.emitted,
- * report.appended, log.written) are produced by tool extensions that
+ * log.written) are produced by tool extensions that
  * call an EventSink directly — this bridge handles only the Pi SDK
  * framing, not payload emission.
  */

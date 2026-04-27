@@ -34,7 +34,6 @@ describe("buildCloudEventEnvelope", () => {
       "memory.added",
       "pinned.set",
       "output.emitted",
-      "report.appended",
       "log.written",
       "@my-org/audit.logged",
     ];

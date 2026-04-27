@@ -93,7 +93,6 @@
   "exec.tabResult": "Data",
   "exec.tabMemory": "Memory",
   "exec.memoryEmpty": "No memory was written or updated during this run",
-  "exec.tabReport": "Report",
   "run.emptyLogs": "No public logs",
   "exec.breadcrumb": "Run #{{number}}",
   "exec.draft": "draft",

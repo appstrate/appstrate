@@ -49,7 +49,6 @@ describe("FileSink", () => {
       memories: [{ content: "hi" }],
       pinned: { checkpoint: { content: { n: 1 } } },
       output: null,
-      report: null,
       logs: [],
     });
 

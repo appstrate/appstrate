@@ -26,11 +26,10 @@
  * Event routing (identical for both sinks):
  *
  *   AFPS canonical (reserved domains) → reducer snapshot (aggregating only):
- *     memory.added / pinned.set / output.emitted / report.appended / log.written
+ *     memory.added / pinned.set / output.emitted / log.written
  *
  *   Platform write-through (always, both sinks):
  *     output.emitted  → run_logs (result/output)
- *     report.appended → run_logs (result/report)
  *     log.written     → run_logs (progress/progress) with level
  *
  *   Platform-specific (`appstrate.*` namespace):
@@ -123,21 +122,6 @@ export class PersistingEventSink implements EventSink {
           (event.data as Record<string, unknown> | null | undefined) ?? null,
           "info",
         );
-        break;
-      }
-
-      case "report.appended": {
-        if (typeof event.content === "string") {
-          await appendRunLog(
-            this.scope,
-            this.runId,
-            "result",
-            "report",
-            null,
-            { content: event.content },
-            "info",
-          );
-        }
         break;
       }
 
@@ -247,7 +231,7 @@ export class AggregatingEventSink extends PersistingEventSink {
 
   /**
    * Live snapshot of the runtime reducer — memories, state, output,
-   * report, logs. The native {@link RunResult} shape, no platform
+   * logs. The native {@link RunResult} shape, no platform
    * projection. Total: never throws.
    */
   snapshot(): RunResult {

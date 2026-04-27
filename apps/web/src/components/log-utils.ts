@@ -62,23 +62,15 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 export function buildLogEntries(rawLogs: RawLog[]): {
   entries: LogEntry[];
   output: Record<string, unknown> | null;
-  report: string | null;
 } {
   const entries: LogEntry[] = [];
   let output: Record<string, unknown> | null = null;
-  let report: string | null = null;
   let lastWasPlainText = false;
 
   for (const log of rawLogs) {
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
-      lastWasPlainText = false;
-    } else if (log.event === "report" && log.data) {
-      const content = (log.data as { content?: string }).content;
-      if (content) {
-        report = report ? report + "\n\n" + content : content;
-      }
       lastWasPlainText = false;
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
@@ -108,7 +100,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     }
   }
 
-  return { entries, output, report };
+  return { entries, output };
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {

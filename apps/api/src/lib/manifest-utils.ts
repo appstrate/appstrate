@@ -2,7 +2,7 @@
 
 import type { Manifest } from "@appstrate/core/validation";
 import type { AgentProviderRequirement } from "../types/index.ts";
-import { asRecord } from "./safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 

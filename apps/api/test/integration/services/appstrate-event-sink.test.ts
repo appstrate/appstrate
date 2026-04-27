@@ -111,19 +111,6 @@ describe("AggregatingEventSink", () => {
     expect(sink.snapshot().output).toEqual([1, 2, 3]);
   });
 
-  it("concatenates report.appended events with \\n + writes a run log per line", async () => {
-    const sink = newSink();
-    await sink.handle(event("report.appended", { content: "line one" }));
-    await sink.handle(event("report.appended", { content: "line two" }));
-
-    expect(sink.snapshot().report).toBe("line one\nline two");
-
-    const logs = await loadLogs();
-    const reportLogs = logs.filter((l) => l.event === "report");
-    expect(reportLogs).toHaveLength(2);
-    expect(reportLogs[0]!.data).toEqual({ content: "line one" });
-  });
-
   it("maps log.written into run_logs with the original level + message", async () => {
     const sink = newSink();
     await sink.handle(event("log.written", { level: "info", message: "booting" }));
@@ -227,7 +214,6 @@ describe("AggregatingEventSink", () => {
     expect(sink.snapshot().memories).toEqual([]);
     expect(sink.snapshot().pinned).toBeUndefined();
     expect(sink.snapshot().output).toBeNull();
-    expect(sink.snapshot().report).toBeNull();
     expect(sink.usage.input_tokens).toBe(0);
     expect(sink.cost).toBe(0);
     expect(sink.lastError).toBeNull();

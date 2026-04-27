@@ -144,7 +144,7 @@ const sink = new HttpSink({
 // tools still emit canonical events via `process.stdout.write`; we
 // intercept those lines, fold them into an aggregator together with
 // PiRunner's session events, and merge the aggregate into the finalize
-// POST so `result.report` / `result.output` / `result.pinned` /
+// POST so `result.output` / `result.pinned` /
 // `result.memories` are complete when the platform ingests the run.
 const tee = attachTeeSink({ sink, runId: AGENT_RUN_ID });
 const teeSink = tee.sink;

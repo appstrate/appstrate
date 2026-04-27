@@ -79,14 +79,7 @@ export {
   type RemoteAppstrateProviderResolverOptions,
 } from "./remote-appstrate-provider-resolver.ts";
 
-// Spec-compliant platform tools (note, pin, output, report, log) — the
+// Spec-compliant platform tools (note, pin, output, log) — the
 // runtime no longer hardcodes these internally; agents declare them in
 // dependencies.tools[] and a BundledToolResolver loads them.
-export {
-  noteTool,
-  pinTool,
-  outputTool,
-  reportTool,
-  logTool,
-  PLATFORM_TOOLS,
-} from "./platform-tools.ts";
+export { noteTool, pinTool, outputTool, logTool, PLATFORM_TOOLS } from "./platform-tools.ts";

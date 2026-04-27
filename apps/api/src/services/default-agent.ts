@@ -20,7 +20,7 @@ const HELLO_WORLD_MANIFEST = {
   keywords: ["demo", "example", "getting-started"],
 };
 
-const HELLO_WORLD_TOOL_DEPS = ["@appstrate/report"] as const;
+const HELLO_WORLD_TOOL_DEPS = ["@appstrate/output"] as const;
 
 const HELLO_WORLD_PROMPT = `# Hello World
 

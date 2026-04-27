@@ -419,7 +419,6 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
       result: {
         memories: [],
         output: null,
-        report: null,
         logs: [],
         status: "success",
       },

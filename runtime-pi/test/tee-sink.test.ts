@@ -59,7 +59,7 @@ function makeFakeStdout() {
 
 describe("looksLikeRunEvent", () => {
   it("accepts objects with a string type", () => {
-    expect(looksLikeRunEvent({ type: "report.appended" })).toBe(true);
+    expect(looksLikeRunEvent({ type: "output.emitted" })).toBe(true);
   });
   it("rejects primitives, arrays, null, and untyped objects", () => {
     expect(looksLikeRunEvent(null)).toBe(false);
@@ -81,14 +81,12 @@ describe("mergeTerminalResult", () => {
       memories: [{ content: "hello" }],
       pinned: { checkpoint: { content: { step: 2 } } },
       output: { foo: "bar" },
-      report: "# Report\nline",
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: RunResult = {
       memories: [{ content: "old" }],
       pinned: { checkpoint: { content: { step: 1 } } },
       output: { foo: "baz" },
-      report: "fallback",
       logs: [{ level: "info", message: "y", timestamp: 50 }],
       status: "success",
       durationMs: 123,
@@ -97,7 +95,6 @@ describe("mergeTerminalResult", () => {
     expect(merged.memories).toEqual([{ content: "hello" }]);
     expect(merged.pinned!.checkpoint).toEqual({ content: { step: 2 } });
     expect(merged.output).toEqual({ foo: "bar" });
-    expect(merged.report).toBe("# Report\nline");
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
     // Terminal metadata always comes from the runner.
     expect(merged.status).toBe("success");
@@ -110,7 +107,6 @@ describe("mergeTerminalResult", () => {
       memories: [{ content: "r" }],
       pinned: { checkpoint: { content: { ok: true } } },
       output: { answer: 42 },
-      report: "runner-report",
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
       status: "failed",
       error: { message: "boom" },
@@ -119,7 +115,6 @@ describe("mergeTerminalResult", () => {
     expect(merged.memories).toEqual([{ content: "r" }]);
     expect(merged.pinned!.checkpoint).toEqual({ content: { ok: true } });
     expect(merged.output).toEqual({ answer: 42 });
-    expect(merged.report).toBe("runner-report");
     expect(merged.logs).toHaveLength(1);
     expect(merged.status).toBe("failed");
     expect(merged.error).toEqual({ message: "boom" });
@@ -193,7 +188,7 @@ describe("attachTeeSink — stdout bridge", () => {
     const tee = attachTeeSink({ sink: underlying, runId: "run_abc", stdout });
 
     // System-tool-style emission: JSON + newline.
-    stdout.write.call(null as never, '{"type":"report.appended","content":"hello"}\n');
+    stdout.write.call(null as never, '{"type":"output.emitted","data":{"hello":true}}\n');
 
     // Yield a microtask so the fire-and-forget dispatch resolves.
     await Promise.resolve();
@@ -201,7 +196,7 @@ describe("attachTeeSink — stdout bridge", () => {
 
     expect(underlying.handled).toHaveLength(1);
     const event = underlying.handled[0]!;
-    expect(event.type).toBe("report.appended");
+    expect(event.type).toBe("output.emitted");
     expect((event as { runId: string }).runId).toBe("run_abc");
     // Non-event writes were NOT passed through — the bridge consumed the line.
     expect(stdout.writes).toHaveLength(0);
@@ -227,14 +222,14 @@ describe("attachTeeSink — stdout bridge", () => {
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
 
-    stdout.write.call(null as never, '{"type":"report.appe');
-    stdout.write.call(null as never, 'nded","content":"chunk"}\n');
+    stdout.write.call(null as never, '{"type":"output.emi');
+    stdout.write.call(null as never, 'tted","data":{"chunk":true}}\n');
 
     await Promise.resolve();
     await Promise.resolve();
 
     expect(underlying.handled).toHaveLength(1);
-    expect(underlying.handled[0]!.type).toBe("report.appended");
+    expect(underlying.handled[0]!.type).toBe("output.emitted");
     tee.restore();
   });
 
@@ -270,7 +265,7 @@ describe("attachTeeSink — stdout bridge", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachTeeSink — aggregation via finalize", () => {
-  it("aggregates report.appended + output.emitted + pinned.set across session + stdout", async () => {
+  it("aggregates output.emitted + pinned.set across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const tee = attachTeeSink({ sink: underlying, runId: "r", stdout });
@@ -287,13 +282,8 @@ describe("attachTeeSink — aggregation via finalize", () => {
     // Stdout-style: tool writes a JSON line.
     stdout.write.call(
       null as never,
-      '{"type":"report.appended","content":"## Header","timestamp":2}\n',
-    );
-    stdout.write.call(
-      null as never,
       '{"type":"output.emitted","data":{"answer":42},"timestamp":3}\n',
     );
-    stdout.write.call(null as never, '{"type":"report.appended","content":"body","timestamp":4}\n');
 
     // Let the fire-and-forget dispatches resolve.
     await Promise.resolve();
@@ -309,7 +299,6 @@ describe("attachTeeSink — aggregation via finalize", () => {
 
     expect(underlying.finalized).not.toBeNull();
     const final = underlying.finalized!;
-    expect(final.report).toBe("## Header\nbody");
     expect(final.output).toEqual({ answer: 42 });
     expect(final.pinned!.checkpoint).toEqual({ content: { step: 1 } });
     expect(final.status).toBe("success");

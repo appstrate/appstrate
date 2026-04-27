@@ -24,7 +24,6 @@ import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
 import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
-import { Markdown } from "../components/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { MemoryPanel } from "../components/persistence/memory-panel";
@@ -92,20 +91,18 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId!);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput, reportContent } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], structuredOutput: null, reportContent: null };
-    const { entries, output, report } = buildLogEntries(logs as RawLog[]);
-    return { historicalLogs: entries, structuredOutput: output, reportContent: report };
+  const { historicalLogs, structuredOutput } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredOutput: null };
+    const { entries, output } = buildLogEntries(logs as RawLog[]);
+    return { historicalLogs: entries, structuredOutput: output };
   }, [logs]);
 
   const execResult = run?.result as {
     output?: Record<string, unknown>;
-    report?: string;
   } | null;
   const finalOutput = structuredOutput || execResult?.output || null;
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
-  const finalReport = reportContent || execResult?.report || null;
-  const hasResult = hasOutput || !!finalReport;
+  const hasResult = !!hasOutput;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -121,13 +118,6 @@ export function RunDetailPage() {
     ["result", "logs", "memory", "info"] as const,
     defaultTab,
   );
-
-  // Sub-tab state: report by default if available, otherwise data.
-  // Auto-default is derived; user override is tracked separately.
-  const autoSubTab = finalReport ? "report" : hasOutput ? "data" : null;
-  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
-  const resultSubTab = userSubTab ?? autoSubTab ?? "data";
-  const setResultSubTab = (v: "report" | "data") => setUserSubTab(v);
 
   // Subscribe to SSE for instant local status feedback
   useRunRealtime(
@@ -261,29 +251,7 @@ export function RunDetailPage() {
       </div>
 
       {activeTab === "result" && hasResult && (
-        <div className="space-y-4">
-          {finalReport && hasOutput && (
-            <Tabs
-              value={resultSubTab}
-              onValueChange={(v) => setResultSubTab(v as "report" | "data")}
-            >
-              <TabsList>
-                <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>
-                <TabsTrigger value="data">{t("exec.tabResult")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-
-          {(resultSubTab === "report" || !hasOutput) && finalReport && (
-            <div className="border-border bg-muted/30 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground overflow-x-auto rounded-lg border p-6">
-              <Markdown>{finalReport}</Markdown>
-            </div>
-          )}
-
-          {(resultSubTab === "data" || !finalReport) && hasOutput && (
-            <JsonView data={finalOutput!} />
-          )}
-        </div>
+        <div className="space-y-4">{hasOutput && <JsonView data={finalOutput!} />}</div>
       )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}

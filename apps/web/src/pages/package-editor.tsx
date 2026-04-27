@@ -97,7 +97,7 @@ function AgentEditorInner({
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
   const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
-  // Pre-populate the platform's "stdlib" tools (log/output/report/pin/note)
+  // Pre-populate the platform's "stdlib" tools (log/output/pin/note)
   // once on first mount in create mode, after the registry's package list
   // resolves. We resolve caret ranges from the canonical version here
   // instead of hardcoding `*` placeholders in `defaultEditorState` and

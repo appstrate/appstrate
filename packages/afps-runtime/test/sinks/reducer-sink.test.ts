@@ -42,13 +42,6 @@ describe("createReducerSink", () => {
     expect(snapshot().output).toEqual([1, 2, 3]);
   });
 
-  it("concatenates report.appended with \\n", async () => {
-    const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("report.appended", { content: "line one" }));
-    await sink.handle(event("report.appended", { content: "line two" }));
-    expect(snapshot().report).toBe("line one\nline two");
-  });
-
   it("captures log.written entries", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("log.written", { level: "info", message: "booting" }));
@@ -82,8 +75,6 @@ describe("createReducerSink", () => {
       event("pinned.set", { key: "checkpoint", content: { c: 1 } }),
       event("output.emitted", { data: { a: 1 } }),
       event("output.emitted", { data: { b: 2 } }),
-      event("report.appended", { content: "part one" }),
-      event("report.appended", { content: "part two" }),
       event("log.written", { level: "info", message: "done" }),
     ];
     const { sink, snapshot } = createReducerSink();

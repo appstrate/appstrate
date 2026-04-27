@@ -93,7 +93,6 @@
   "exec.tabResult": "Data",
   "exec.tabMemory": "Mémoire",
   "exec.memoryEmpty": "Aucune mémoire écrite ou modifiée pendant ce run",
-  "exec.tabReport": "Rapport",
   "run.emptyLogs": "Aucun log public",
   "exec.breadcrumb": "Run #{{number}}",
   "exec.draft": "brouillon",

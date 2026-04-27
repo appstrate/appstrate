@@ -92,7 +92,6 @@ const EVENTS = [
     data: { summary: "AFPS ships a portable runtime.", partial: true },
   },
   { type: "output.emitted", timestamp: 0, runId: REF_RUN_ID, data: { partial: false } },
-  { type: "report.appended", timestamp: 0, runId: REF_RUN_ID, content: "All checks executed." },
 ];
 
 const CONTEXT = { runId: "ref_run_001", input: { topic: "AFPS conformance" } };

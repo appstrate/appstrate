@@ -46,7 +46,6 @@ export function caretRange(version: string): string {
 export const DEFAULT_SYSTEM_TOOL_IDS: readonly string[] = [
   "@appstrate/log",
   "@appstrate/output",
-  "@appstrate/report",
   "@appstrate/pin",
   "@appstrate/note",
 ];

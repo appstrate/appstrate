@@ -3011,7 +3011,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
                 "properties": {
                   "memories": {
                     "type": "array"
@@ -3020,9 +3020,6 @@
                     "type": "object"
                   },
                   "output": {},
-                  "report": {
-                    "type": ["string", "null"]
-                  },
                   "logs": {
                     "type": "array"
                   },
