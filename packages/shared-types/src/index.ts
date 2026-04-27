@@ -87,6 +87,12 @@ export interface ResourceEntry {
 
 import { runStatusEnum } from "@appstrate/db/schema";
 export type RunStatus = (typeof runStatusEnum.enumValues)[number];
+export {
+  TERMINAL_RUN_STATUSES,
+  TERMINAL_RUN_EVENT_TYPES,
+  terminalRunStatusValues,
+} from "@appstrate/db/schema";
+export type { TerminalRunStatus } from "@appstrate/db/schema";
 
 // --- Schedule Types ---
 

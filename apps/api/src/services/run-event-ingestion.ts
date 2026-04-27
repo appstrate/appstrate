@@ -24,7 +24,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -90,14 +90,6 @@ export interface FinalizeRunInput {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Terminal RunEvent types — flush ordering buffer unconditionally. */
-const TERMINAL_EVENT_TYPES = new Set([
-  "run.completed",
-  "run.failed",
-  "run.timeout",
-  "run.cancelled",
-]);
 
 /** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
@@ -188,7 +180,7 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
   await bufferEvent(run.id, sequence, event);
 
   // Terminal events flush unconditionally (accept gaps).
-  if (TERMINAL_EVENT_TYPES.has(event.type)) {
+  if (TERMINAL_RUN_EVENT_TYPES.has(event.type)) {
     await drainBufferedEvents(run, { allowGaps: true });
     return { status: "persisted", sequence };
   }

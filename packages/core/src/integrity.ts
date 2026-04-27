@@ -1,6 +1,8 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
+import { stripScope } from "./naming.ts";
+
 /**
  * Compute a Subresource Integrity (SRI) hash for binary data.
  * @param data - Binary content to hash
@@ -40,8 +42,7 @@ export function verifyArtifactIntegrity(
 
 /** Build a consistent download filename: scope-name-version.afps */
 function buildDownloadFilename(scope: string, name: string, version: string): string {
-  const cleanScope = scope.replace(/^@/, "");
-  return `${cleanScope}-${name}-${version}.afps`;
+  return `${stripScope(scope)}-${name}-${version}.afps`;
 }
 
 // ─────────────────────────────────────────────

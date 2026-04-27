@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { stripScope } from "@appstrate/core/naming";
 import { api, apiList, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
@@ -133,7 +134,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${scope.replace(/^@/, "")}-${name}-${version}.afps`;
+        a.download = `${stripScope(scope)}-${name}-${version}.afps`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -166,7 +167,7 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${scope.replace(/^@/, "")}-${name}.afps-bundle`;
+        a.download = `${stripScope(scope)}-${name}.afps-bundle`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

@@ -31,6 +31,27 @@ export const runStatusEnum = pgEnum("run_status", runStatusValues);
 export const zRunStatusEnum = z.enum(runStatusValues);
 export type RunStatus = z.infer<typeof zRunStatusEnum>;
 
+/**
+ * Terminal run statuses — runs in any of these states are no longer
+ * progressing. Used by event-ingestion ordering, SSE invalidation,
+ * and any caller that needs to short-circuit polling.
+ */
+export const terminalRunStatusValues = ["success", "failed", "timeout", "cancelled"] as const;
+export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(terminalRunStatusValues);
+export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
+
+/**
+ * RunEvent types that mark a run as terminal — `run.completed`, `run.failed`,
+ * `run.timeout`, `run.cancelled`. Mirrors `terminalRunStatusValues` but for
+ * the event-stream side of the boundary.
+ */
+export const TERMINAL_RUN_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
+]);
+
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
 export const zInvitationStatusEnum = z.enum(invitationStatusValues);
