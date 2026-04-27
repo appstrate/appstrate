@@ -3,39 +3,6 @@
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
 
-// ─── Helpers ─────────────────────────────────────────────────
-
-/**
- * Coalesce an empty string or `undefined` to the supplied fallback BEFORE
- * Zod string validation runs. This matters for Docker Compose's
- * `${VAR:-}` pattern: when the variable is unset on the host, compose
- * forwards it to the container as an empty string (`VAR=`) rather than
- * dropping it — so Zod sees `""` instead of `undefined` and `.default()`
- * never triggers. Without this, every refined string env (booleans,
- * enums, regex-validated kid IDs) would reject the empty value with a
- * cryptic "must be …" error at boot.
- */
-function emptyToDefault<T extends string>(fallback: T) {
-  return (v: unknown): unknown => (v === "" || v === undefined ? fallback : v);
-}
-
-/**
- * Boolean env var: accepts `"true"` | `"false"` | empty | unset.
- * Empty/unset both fall back to `defaultValue`.
- */
-function envBoolean(defaultValue: boolean): z.ZodType<boolean, unknown> {
-  const fallback = defaultValue ? "true" : "false";
-  return z.preprocess(
-    emptyToDefault(fallback),
-    z
-      .string()
-      .refine((v) => v === "true" || v === "false", {
-        message: "must be 'true' or 'false'",
-      })
-      .transform((v) => v === "true"),
-  );
-}
-
 // ─── Schema ──────────────────────────────────────────────────
 
 const envSchema = z
@@ -43,14 +10,12 @@ const envSchema = z
     // Node environment — gates production-only invariants (e.g. APP_URL https)
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
     // Trust proxy hops: "false" (default, ignore XFF) | "true" (=1) | "N" (N trusted hops)
-    TRUST_PROXY: z.preprocess(
-      emptyToDefault("false"),
-      z
-        .string()
-        .refine((v) => v === "false" || v === "true" || (/^\d+$/.test(v) && Number(v) >= 0), {
-          message: "TRUST_PROXY must be 'false', 'true', or a non-negative integer",
-        }),
-    ),
+    TRUST_PROXY: z
+      .string()
+      .default("false")
+      .refine((v) => v === "false" || v === "true" || (/^\d+$/.test(v) && Number(v) >= 0), {
+        message: "TRUST_PROXY must be 'false', 'true', or a non-negative integer",
+      }),
     // Database (optional — falls back to PGlite embedded Postgres when absent)
     DATABASE_URL: z.string().optional(),
     // PGlite data directory (used when DATABASE_URL is absent)
@@ -361,11 +326,23 @@ const envSchema = z
     //   1. Email matches a pending+non-expired invitation in `org_invitations`.
     //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
     //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL (1st run only).
-    AUTH_DISABLE_SIGNUP: envBoolean(false),
+    AUTH_DISABLE_SIGNUP: z
+      .string()
+      .default("false")
+      .refine((v) => v === "true" || v === "false", {
+        message: "AUTH_DISABLE_SIGNUP must be 'true' or 'false'",
+      })
+      .transform((v) => v === "true"),
     // AUTH_DISABLE_ORG_CREATION — when true, only platform admins (see
     // AUTH_PLATFORM_ADMIN_EMAILS) may call POST /api/orgs. Org-less users
     // see a "waiting for invitation" page instead of /onboarding/create.
-    AUTH_DISABLE_ORG_CREATION: envBoolean(false),
+    AUTH_DISABLE_ORG_CREATION: z
+      .string()
+      .default("false")
+      .refine((v) => v === "true" || v === "false", {
+        message: "AUTH_DISABLE_ORG_CREATION must be 'true' or 'false'",
+      })
+      .transform((v) => v === "true"),
     // AUTH_ALLOWED_SIGNUP_DOMAINS — comma-separated email domain allowlist.
     // When set, signups (outside the 3 exceptions above) are limited to
     // emails whose domain matches one entry. Empty / unset = no domain
@@ -453,9 +430,34 @@ const envSchema = z
 
 // ─── Getter ──────────────────────────────────────────────────
 
+/**
+ * Universal "empty string → unset" preprocessing.
+ *
+ * Docker Compose's `${VAR:-}` pattern forwards an unset host variable to
+ * the container as an empty string (`VAR=`), not as a missing key. Zod's
+ * `.default(...)` only fires on `undefined`, so without this preprocess
+ * any refined-string field (booleans, regex-validated kid IDs, enums)
+ * would crash boot on a literal `VAR=` with a cryptic "must be …" error.
+ *
+ * Coalescing `""` to `undefined` once, at the schema root, makes
+ * `.default(...)` the single source of truth for fallback behavior on
+ * EVERY field — no per-field opt-in helper, no behavioral drift between
+ * fields. For env vars, "explicitly empty" and "unset" are conceptually
+ * identical anyway (the host never sets a variable to a meaningful empty
+ * string).
+ */
+const sanitizedEnvSchema = z.preprocess((raw) => {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    out[k] = v === "" ? undefined : v;
+  }
+  return out;
+}, envSchema);
+
 export type Env = z.infer<typeof envSchema>;
 
-const { getEnv, resetCache } = createEnvGetter(envSchema);
+const { getEnv, resetCache } = createEnvGetter(sanitizedEnvSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;

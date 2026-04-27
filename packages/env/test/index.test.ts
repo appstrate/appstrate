@@ -87,6 +87,41 @@ describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
   });
 });
 
+describe("empty string is universally treated as unset (compose `${VAR:-}` pattern)", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it('BETTER_AUTH_ACTIVE_KID: empty string falls back to default `"k1"`', () => {
+    process.env.BETTER_AUTH_ACTIVE_KID = "";
+    expect(getEnv().BETTER_AUTH_ACTIVE_KID).toBe("k1");
+  });
+
+  it("BETTER_AUTH_ACTIVE_KID: explicit value passes through", () => {
+    process.env.BETTER_AUTH_ACTIVE_KID = "k7";
+    expect(getEnv().BETTER_AUTH_ACTIVE_KID).toBe("k7");
+  });
+
+  it("BETTER_AUTH_ACTIVE_KID: invalid value (non-matching regex) still fails fast", () => {
+    process.env.BETTER_AUTH_ACTIVE_KID = "bad/kid";
+    expect(() => getEnv()).toThrow(/BETTER_AUTH_ACTIVE_KID/);
+  });
+
+  it('NODE_ENV: empty string falls back to default `"development"`', () => {
+    process.env.NODE_ENV = "";
+    expect(getEnv().NODE_ENV).toBe("development");
+  });
+});
+
 describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", () => {
   let s: Snap;
 
