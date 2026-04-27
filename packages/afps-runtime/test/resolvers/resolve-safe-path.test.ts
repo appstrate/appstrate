@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { resolveSafeFile, resolveSafePath } from "../../src/resolvers/provider-tool.ts";
@@ -33,7 +33,12 @@ describe("resolveSafePath", () => {
 
   beforeEach(() => {
     workspace = realpathSync(mkdtempSync(join(tmpdir(), "rsp-ws-")));
-    outside = realpathSync(mkdtempSync(join(tmpdir(), "rsp-out-")));
+    // `outside` must canonicalize outside *every* allowed root (workspace
+    // and `/tmp`). On Linux, `tmpdir()` IS `/tmp`, so anchoring `outside`
+    // there would land it inside an allowed root and break the symlink-
+    // escape test. Use the home directory, which is guaranteed outside
+    // both `/tmp` and the workspace on every platform.
+    outside = realpathSync(mkdtempSync(join(homedir(), "rsp-out-")));
   });
 
   afterEach(() => {
