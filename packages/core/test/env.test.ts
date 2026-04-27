@@ -62,4 +62,56 @@ describe("createEnvGetter", () => {
     const { getEnv } = createEnvGetter(schema);
     expect(getEnv().WITH_DEFAULT).toBe("fallback");
   });
+
+  describe("empty-string sanitization (compose `${VAR:-}` pattern)", () => {
+    it("treats empty string as unset so `.default()` fires", () => {
+      process.env.WITH_DEFAULT = "";
+      const schema = z.object({
+        WITH_DEFAULT: z.string().default("fallback"),
+      });
+      const { getEnv } = createEnvGetter(schema);
+      expect(getEnv().WITH_DEFAULT).toBe("fallback");
+    });
+
+    it("treats empty string as unset for refined-string fields", () => {
+      process.env.MODE = "";
+      const schema = z.object({
+        MODE: z
+          .string()
+          .default("auto")
+          .refine((v) => v === "auto" || v === "manual", {
+            message: "MODE must be 'auto' or 'manual'",
+          }),
+      });
+      const { getEnv } = createEnvGetter(schema);
+      expect(getEnv().MODE).toBe("auto");
+    });
+
+    it("treats empty string as unset for enum fields", () => {
+      process.env.LOG_LEVEL = "";
+      const schema = z.object({
+        LOG_LEVEL: z.enum(["debug", "info", "warn"]).default("info"),
+      });
+      const { getEnv } = createEnvGetter(schema);
+      expect(getEnv().LOG_LEVEL).toBe("info");
+    });
+
+    it("makes empty string indistinguishable from unset for `.optional()`", () => {
+      process.env.OPTIONAL_VAR = "";
+      const schema = z.object({
+        OPTIONAL_VAR: z.string().optional(),
+      });
+      const { getEnv } = createEnvGetter(schema);
+      expect(getEnv().OPTIONAL_VAR).toBeUndefined();
+    });
+
+    it("preserves non-empty values verbatim", () => {
+      process.env.NAMED_VAR = "actual-value";
+      const schema = z.object({
+        NAMED_VAR: z.string().default("fallback"),
+      });
+      const { getEnv } = createEnvGetter(schema);
+      expect(getEnv().NAMED_VAR).toBe("actual-value");
+    });
+  });
 });

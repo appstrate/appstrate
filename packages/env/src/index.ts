@@ -51,8 +51,24 @@ const envSchema = z
       .string()
       .default("{}")
       .transform((s, ctx) => {
+        // Empty string == unset (compose `${VAR:-}` defaults to ""); fall back
+        // to "{}" so the JSON parse below succeeds.
+        const raw = s === "" ? "{}" : s;
         try {
-          return JSON.parse(s) as unknown;
+          const parsed = JSON.parse(raw) as unknown;
+          // ── Namespace-collision scrub ─────────────────────────────────────
+          // better-auth 1.6+ ships its own `BETTER_AUTH_SECRETS` env var with
+          // a different format (CSV `v1:secret,v2:secret`). It is read
+          // unconditionally inside `betterAuth()` regardless of whether we
+          // pass an explicit `secret:` option, so a non-CSV value (incl. our
+          // JSON `{}` default) crashes boot with `BetterAuthError: Invalid
+          // BETTER_AUTH_SECRETS entry`. We never want better-auth's own
+          // multi-secret rotation feature — `auth.ts` always passes `secret`
+          // explicitly via `env.BETTER_AUTH_SECRETS[…] ?? BETTER_AUTH_SECRET`
+          // — so unconditionally remove the raw env so better-auth falls back
+          // to its legacy single-secret path.
+          delete process.env.BETTER_AUTH_SECRETS;
+          return parsed;
         } catch {
           ctx.addIssue({
             code: "custom",
@@ -416,6 +432,10 @@ const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
+// `createEnvGetter` coalesces `""` → `undefined` across the entire
+// process.env snapshot before validating, so `.default(...)` fires
+// uniformly for compose's `${VAR:-}` pattern. No per-field opt-in
+// needed; see `@appstrate/core/env::sanitizeEnv` for the rationale.
 const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };

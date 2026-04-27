@@ -166,7 +166,12 @@ services:
       - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-Default}
       # ── Credential / auth secret rotation (optional) ──
       - BETTER_AUTH_ACTIVE_KID=${BETTER_AUTH_ACTIVE_KID:-k1}
-      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-{}}
+      # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
+      # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes
+      # boot on a non-CSV value. Empty string is falsy for better-auth and
+      # treated as `{}` by `@appstrate/env`. Set this in `.env` only when
+      # rotating the kid map; see env docstring in `packages/env/src/index.ts`.
+      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-}
       - CONNECTION_ENCRYPTION_KEY_ID=${CONNECTION_ENCRYPTION_KEY_ID:-k1}
       - CONNECTION_ENCRYPTION_KEYS=${CONNECTION_ENCRYPTION_KEYS:-{}}
       # ── AFPS bundle signing (optional) ──
