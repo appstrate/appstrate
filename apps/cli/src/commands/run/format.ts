@@ -72,8 +72,96 @@ export function formatToolArgsVerbose(args: unknown): string {
 }
 
 /**
+ * MCP `CallToolResult` envelope — `{ content: [{type:"text",text:"..."}, ...] }`.
+ * Every tool registered through Pi or the sidecar's MCP layer returns this
+ * shape, so 95% of `tool_execution_end` results in a real run carry it.
+ * Rendering the envelope verbatim leaks `{"content":[{"type":"text","text":"...`
+ * into the user's screen for every single tool call.
+ *
+ * Returns the concatenated text from every `text` block when the input
+ * matches the MCP shape; `null` otherwise (caller falls back to JSON).
+ */
+export function unwrapMcpContent(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const content = (value as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  const texts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const type = (block as { type?: unknown }).type;
+    const text = (block as { text?: unknown }).text;
+    if (type === "text" && typeof text === "string") texts.push(text);
+  }
+  return texts.length > 0 ? texts.join("\n") : null;
+}
+
+/**
+ * Detect the bridge's truncation marker — emitted by
+ * `truncateToolResult` in `@appstrate/runner-pi` when a tool result
+ * exceeds the wire-transport ceiling. The marker is a structured
+ * payload (`{ __truncated: true, bytes, limit, preview, reason }`)
+ * intentionally serialisable so platform/web consumers can render it
+ * uniformly.
+ */
+interface TruncationMarker {
+  __truncated: true;
+  bytes: number;
+  limit: number;
+  preview?: string;
+  reason?: string;
+}
+
+export function isTruncationMarker(v: unknown): v is TruncationMarker {
+  if (!v || typeof v !== "object") return false;
+  const m = v as Record<string, unknown>;
+  return m.__truncated === true && typeof m.bytes === "number" && typeof m.limit === "number";
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Render a truncation marker as a human-readable preview. Tries to
+ * unwrap a JSON-encoded MCP envelope inside `preview` (the bridge
+ * stringifies the original payload before truncating, so a tool
+ * returning `{content:[{type:"text",text:"..."}]}` lands here as a
+ * string `'{"content":[{"type":"text","text":"..."}]}'`).
+ */
+function formatTruncationMarker(m: TruncationMarker): string {
+  const sizeBlurb = `(truncated ${formatBytes(m.bytes)} > ${formatBytes(m.limit)})`;
+  const preview = m.preview ?? "";
+  if (!preview) return sizeBlurb;
+  // Best-effort: try to peel an MCP envelope out of the JSON-encoded
+  // preview so the user sees the agent-facing text instead of escaped
+  // JSON. Any parse failure is fine — we fall back to the raw preview.
+  let body = preview;
+  try {
+    const parsed: unknown = JSON.parse(preview);
+    const unwrapped = unwrapMcpContent(parsed);
+    if (unwrapped) body = unwrapped;
+    else if (typeof parsed === "string") body = parsed;
+  } catch {
+    /* preview was not JSON — render verbatim */
+  }
+  return `${sizeBlurb} ${body}`;
+}
+
+/**
  * Format a tool result for display. `verbose` switches between the
  * single-line preview and a multi-line JSON dump.
+ *
+ * Three rendering paths, tried in order:
+ *   1. Bridge truncation marker → `(truncated 12.0 KB > 2 KB) <preview>`
+ *      with the preview itself unwrapped if it carries an MCP envelope.
+ *   2. MCP `CallToolResult` envelope → just the joined `text` blocks,
+ *      no JSON framing leaked to the user.
+ *   3. Anything else → JSON-stringify (compact in normal, pretty in
+ *      verbose) so structured payloads (numbers, arrays of objects)
+ *      stay legible.
  *
  * The result has already been truncated by the bridge — this layer
  * never sees more than ~2 KB. We additionally cap to a smaller preview
@@ -84,10 +172,17 @@ export function formatToolResult(result: unknown, verbosity: Exclude<Verbosity, 
   const limit = verbosity === "verbose" ? RESULT_VERBOSE_CHARS : RESULT_PREVIEW_CHARS;
   if (result === undefined || result === null) return "";
   let text: string;
-  if (typeof result === "string") {
+  if (isTruncationMarker(result)) {
+    text = formatTruncationMarker(result);
+  } else if (typeof result === "string") {
     text = result;
   } else {
-    text = safeJSON(result, verbosity === "verbose" ? 2 : 0);
+    const unwrapped = unwrapMcpContent(result);
+    if (unwrapped !== null) {
+      text = unwrapped;
+    } else {
+      text = safeJSON(result, verbosity === "verbose" ? 2 : 0);
+    }
   }
   // Newlines wreck single-line displays; in compact mode swap them for
   // a visible glyph so the user still sees there were multiple lines.

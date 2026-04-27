@@ -164,6 +164,22 @@ describe("installSessionBridge — tool_execution_start", () => {
 
     expect((sink.events[0] as unknown as { message: string }).message).toBe("Tool: unknown");
   });
+
+  it("forwards toolCallId on tool_execution_start when provided", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "tool_execution_start",
+      toolName: "bash",
+      toolCallId: "call_xyz789",
+      args: { command: "ls" },
+    });
+
+    const ev = sink.events[0] as unknown as { data: { toolCallId?: string } };
+    expect(ev.data.toolCallId).toBe("call_xyz789");
+  });
 });
 
 describe("installSessionBridge — tool_execution_end", () => {
@@ -296,6 +312,39 @@ describe("installSessionBridge — tool_execution_end", () => {
 
     const ev = sink.events[0] as unknown as { data: { result: typeof small } };
     expect(ev.data.result).toEqual(small);
+  });
+
+  it("forwards toolCallId on tool_execution_end when provided", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "bash",
+      toolCallId: "call_abc123",
+      result: "ok",
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as { data: { toolCallId?: string } };
+    expect(ev.data.toolCallId).toBe("call_abc123");
+  });
+
+  it("omits toolCallId from data when absent on the SDK event", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "bash",
+      result: "ok",
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as { data: Record<string, unknown> };
+    expect("toolCallId" in ev.data).toBe(false);
   });
 
   it("preserves null and undefined results without truncation", () => {
