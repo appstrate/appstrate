@@ -116,11 +116,6 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Config — resolved snapshot. The badge distinguishes "ran with the
-          persisted defaults" from "caller sent a per-run override delta",
-          and when an override exists we highlight which top-level keys
-          differed (the same keys that would replay via "Re-run with
-          these settings"). */}
       {config && Object.keys(config).length > 0 && (
         <SectionCard title={t("exec.infoConfig")}>
           <JsonView data={config} />

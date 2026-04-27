@@ -73,11 +73,12 @@ export function RunAgentButton({
   /** Called after the connection summary is confirmed (or skipped if no providers). */
   const proceedAfterSummary = () => {
     setSummaryOpen(false);
-    // Always open the run modal — users can override config/model/proxy/version
-    // per run from the collapsed "Paramètres" accordion. The accordion stays
-    // closed by default so the simple "click Run → confirm" flow is one extra
-    // click vs. the legacy fast-path. Power-user overrides previously required
-    // editing the persisted defaults (and reverting), the CLI, or a Re-run.
+    const agentHasInput =
+      !!detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
+    if (!agentHasInput) {
+      runAgent.mutate({ version });
+      return;
+    }
     setInputOpen(true);
   };
 
@@ -171,10 +172,6 @@ export function RunAgentButton({
         />
       )}
 
-      {/* Run modal — shown after summary confirmation. Carries the input
-          form (when applicable) plus the per-run override accordion
-          (collapsed by default). One unified entry point regardless of
-          whether the agent has an input schema. */}
       {detail && (
         <RunModal
           open={inputOpen}

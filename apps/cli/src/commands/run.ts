@@ -64,7 +64,13 @@ import {
   type ReportSession,
   type ReportSource,
 } from "./run/report.ts";
-import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
+import {
+  attachStdoutBridge,
+  CompositeSink,
+  type HttpSink,
+  type StdoutBridgeHandle,
+} from "@appstrate/afps-runtime/sinks";
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
 import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
@@ -361,6 +367,18 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     else process.env.OUTPUT_SCHEMA = priorOutputSchema;
   };
 
+  // System tools (`@appstrate/output`, `@appstrate/report`, …) read
+  // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
+  // The stdout bridge installed below re-stamps events with the canonical
+  // `runId` regardless, but exporting the var keeps any tool-side log
+  // output (debug prints, error messages) consistent with the run record.
+  const priorAgentRunId = process.env.AGENT_RUN_ID;
+  process.env.AGENT_RUN_ID = runId;
+  const restoreAgentRunId = (): void => {
+    if (priorAgentRunId === undefined) delete process.env.AGENT_RUN_ID;
+    else process.env.AGENT_RUN_ID = priorAgentRunId;
+  };
+
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
   const prepared = await prepareBundleForPi(bundle, {
@@ -424,10 +442,35 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     quiet: opts.quiet,
     envValue: process.env.APPSTRATE_VERBOSE,
   });
+  // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
+  // rationale). System tools (`@appstrate/output`, `@appstrate/report`,
+  // `@appstrate/note`, `@appstrate/pin`) emit canonical events via
+  // `process.stdout.write(JSON+\n)`. Without the bridge these events
+  // never reach the configured sink — they're printed as raw JSON noise
+  // and lost. The bridge intercepts stdout, parses canonical events,
+  // and folds them into the runner's sink stream so:
+  //   - `--report` mode POSTs `output.emitted` / `report.appended` to
+  //     the platform → `run_logs` populated, finalize body carries
+  //     `result.output` / `result.pinned` / `result.report`.
+  //   - Offline mode (no `--report`) still aggregates the events so
+  //     `--output <file>` writes the actual `result.output` and the
+  //     human/JSONL console sink renders the report.
+  //
+  // `writeStdout` trampoline: the console sink needs a writer that
+  // bypasses the bridge (otherwise `--json` would re-emit canonical
+  // events on stdout and the bridge would re-aspirate them, dispatching
+  // every event a second time). The bridge needs the composite sink to
+  // attach its forwarder. Both circular dependencies are resolved with
+  // late binding — defaultWriteStdout up-front, swapped to
+  // `bridge.writeRaw` after the bridge attaches.
+  let writeStdout: (chunk: string) => void = (chunk) => {
+    process.stdout.write(chunk);
+  };
   const consoleSink = createConsoleSink({
     json: opts.json,
     outputPath: opts.output,
     verbosity,
+    writeStdout: (chunk) => writeStdout(chunk),
   });
   // Track whether finalize was already sent to the HttpSink so the
   // CLI's safety-net finalize in the cleanup doesn't double-post.
@@ -437,9 +480,16 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
   const wasHttpSinkFinalized = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
-  const sink = reportSession
+  const composite: EventSink = reportSession
     ? new CompositeSink([consoleSink, reportSession.httpSink])
     : consoleSink;
+  const bridge: StdoutBridgeHandle = attachStdoutBridge({ sink: composite, runId });
+  // Bridge is attached: route the console sink's writes through its
+  // escape hatch so `--json` mode's JSONL output isn't re-parsed.
+  writeStdout = (chunk) => {
+    bridge.writeRaw(chunk);
+  };
+  const sink: EventSink = bridge.sink;
   if (!opts.json) {
     const reportNote = reportSession
       ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
@@ -493,7 +543,13 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
           }
         });
       }
+      // Tear down env-var + stdout-bridge mutations in the reverse order
+      // they were installed. `bridge.restore()` swaps `process.stdout.write`
+      // back to the original — required for tests; production processes
+      // exit immediately after cleanup but the symmetry costs nothing.
+      bridge.restore();
       restoreOutputSchema();
+      restoreAgentRunId();
       await prepared.cleanup().catch(() => {});
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();

@@ -57,7 +57,7 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
-import { attachTeeSink } from "./tee-sink.ts";
+import { attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 
@@ -139,15 +139,15 @@ const sink = new HttpSink({
   traceparent: env.traceparent,
 });
 
-// --- 0a. Tee sink + stdout bridge ---
-// See `tee-sink.ts` for the full design rationale. In short: system
-// tools still emit canonical events via `process.stdout.write`; we
-// intercept those lines, fold them into an aggregator together with
-// PiRunner's session events, and merge the aggregate into the finalize
-// POST so `result.output` / `result.pinned` /
-// `result.memories` are complete when the platform ingests the run.
-const tee = attachTeeSink({ sink, runId: AGENT_RUN_ID });
-const teeSink = tee.sink;
+// --- 0a. Stdout-JSONL bridge ---
+// See `@appstrate/afps-runtime/sinks/stdout-bridge` for the full design
+// rationale. In short: system tools still emit canonical events via
+// `process.stdout.write`; we intercept those lines, fold them into an
+// aggregator together with PiRunner's session events, and merge the
+// aggregate into the finalize POST so `result.output`, `result.pinned`,
+// and `result.memories` are complete when the platform ingests the run.
+const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
+const bridgedSink = bridge.sink;
 
 /**
  * Emit a best-effort `appstrate.error` event for a bootstrap failure. We
@@ -334,10 +334,10 @@ if (mcpClient) {
       // else.
       workspace: WORKSPACE,
       emitProvider: (event) => {
-        void teeSink.handle(event as RunEvent);
+        void bridgedSink.handle(event as RunEvent);
       },
       emit: (event) => {
-        void teeSink.handle(event as RunEvent);
+        void bridgedSink.handle(event as RunEvent);
       },
     });
     extensionFactories.push(...factories);
@@ -412,7 +412,7 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // imports are all done. It also gives the dashboard a first log line
 // immediately on cold starts (Docker pull can take seconds) instead of
 // a silent gap between `pending` and the first tool call.
-await emitRuntimeReady(teeSink, AGENT_RUN_ID, {
+await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
   extensions: extensionFactories.length,
   bootDurationMs: Date.now() - BOOT_STARTED_AT,
@@ -462,7 +462,7 @@ try {
     bundle: runnerBundle,
     context,
     providerResolver,
-    eventSink: teeSink,
+    eventSink: bridgedSink,
   });
   heartbeat.stop();
   if (mcpClient) await mcpClient.close().catch(() => {});

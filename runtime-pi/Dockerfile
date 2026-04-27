@@ -143,7 +143,6 @@ RUN mkdir -p node_modules/@mariozechner \
 COPY --chown=pi:pi runtime-pi/extensions/          ./extensions/
 COPY --chown=pi:pi runtime-pi/mcp/                 ./mcp/
 COPY --chown=pi:pi runtime-pi/extension-wrapper.ts ./extension-wrapper.ts
-COPY --chown=pi:pi runtime-pi/tee-sink.ts          ./tee-sink.ts
 COPY --chown=pi:pi runtime-pi/env.ts               ./env.ts
 COPY --chown=pi:pi runtime-pi/entrypoint.ts        ./entrypoint.ts
 

@@ -287,7 +287,47 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
   if (isStreamBody) {
     fetchInit.duplex = "half";
   }
-  const res = await fetchImpl(target, fetchInit as RequestInit);
+  let res = await fetchImpl(target, fetchInit as RequestInit);
+
+  // Reactive 401-refresh-retry — mirror of the sidecar
+  // (runtime-pi/sidecar/credential-proxy.ts:259-285). The public route is
+  // used by CLI / GitHub Action / self-hosted runners, which were silently
+  // 401-ing whenever the stored OAuth access_token expired because the
+  // refresh logic only fired on streaming bodies. Buffered bodies can be
+  // replayed safely → refresh + retry once. Streaming bodies fall through
+  // to the authRefreshed escape-hatch below (caller must re-issue with a
+  // fresh body stream).
+  if (res.status === 401 && !isStreamBody) {
+    try {
+      const refreshed = await forceRefreshCredentials(
+        db,
+        input.profileId,
+        input.providerId,
+        input.orgId,
+        credentialId,
+      );
+      if (refreshed) {
+        // Rebuild the credential header from the rotated token. We drop
+        // the previous injected header first so `applyInjectedCredentialHeaderToHeaders`
+        // re-installs the new value (its caller-override-wins semantics
+        // would otherwise keep the stale Bearer).
+        if (refreshed.credentialHeaderName) {
+          headers.delete(refreshed.credentialHeaderName);
+        }
+        applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+        normalizeAuthSchemeOnHeaders(headers);
+        res = await fetchImpl(target, {
+          ...fetchInit,
+          headers,
+        } as RequestInit);
+      }
+    } catch {
+      // Refresh itself failed (invalid_grant, revoked token, network
+      // hiccup, …) — surface the original 401 as-is; the caller will
+      // handle re-authentication. `forceRefresh` already flips
+      // `needsReconnection` on revocation.
+    }
+  }
 
   if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();

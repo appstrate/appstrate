@@ -18,6 +18,16 @@
  *
  * The sinks never touch the network and swallow no errors silently —
  * any thrown exception bubbles up to the run command's top-level handler.
+ *
+ * **`writeStdout` injection.** All stdout output is routed through the
+ * caller-supplied `writeStdout` (defaulting to `process.stdout.write`).
+ * The `appstrate run` command installs a stdout-JSONL bridge around the
+ * runner's sink to capture canonical events emitted by system tools
+ * via `process.stdout.write(JSON+\n)` — without `writeStdout`, this
+ * sink's JSONL mode would re-emit canonical events directly to stdout
+ * and the bridge would re-aspirate them, dispatching every event a
+ * second time. Routing through the bridge's `writeRaw` escape hatch
+ * bypasses the interceptor and breaks the loop.
  */
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
@@ -42,6 +52,14 @@ export interface SinkOptions {
    * still print so the run is never silent).
    */
   verbosity?: Verbosity;
+  /**
+   * Writer used for all stdout output. Defaults to
+   * `process.stdout.write`. The CLI passes the stdout-bridge's
+   * `writeRaw` so JSONL emissions bypass the bridge's interceptor and
+   * don't recurse through the tool-event parser. See module docstring
+   * for the full rationale.
+   */
+  writeStdout?: (chunk: string) => void;
 }
 
 const USE_COLOR = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
@@ -55,9 +73,14 @@ const green = (s: string) => colorise("32", s);
 const yellow = (s: string) => colorise("33", s);
 const cyan = (s: string) => colorise("36", s);
 
+const defaultWriteStdout = (chunk: string): void => {
+  process.stdout.write(chunk);
+};
+
 export function createConsoleSink(opts: SinkOptions = {}): EventSink {
-  if (opts.json) return createJsonlSink(opts);
-  return createHumanSink(opts);
+  const writeStdout = opts.writeStdout ?? defaultWriteStdout;
+  if (opts.json) return createJsonlSink(opts, writeStdout);
+  return createHumanSink(opts, writeStdout);
 }
 
 /**
@@ -71,6 +94,10 @@ export function createConsoleSink(opts: SinkOptions = {}): EventSink {
  * Args and results never appear on the same emit — start events carry
  * args, end events carry result. Splitting the rendering keeps each
  * line self-explanatory and scrollback-friendly.
+ *
+ * Routes every write through the injected `writeStdout` so the
+ * stdout-bridge interceptor doesn't re-aspirate our own output (see
+ * module docstring).
  */
 function renderToolEvent(
   data: {
@@ -80,6 +107,7 @@ function renderToolEvent(
     isError?: boolean;
   },
   verbosity: Verbosity,
+  writeStdout: (chunk: string) => void,
 ): void {
   if (verbosity === "quiet") return;
   const tool = data.tool ?? "unknown";
@@ -89,12 +117,12 @@ function renderToolEvent(
   // other, never both.
   if (data.result === undefined && data.args === undefined) {
     // Defensive: no args, no result — emit just the name.
-    process.stdout.write(cyan(`→ tool: ${tool}\n`));
+    writeStdout(cyan(`→ tool: ${tool}\n`));
     return;
   }
 
   if (data.result === undefined) {
-    process.stdout.write(cyan(`→ tool: ${tool}\n`));
+    writeStdout(cyan(`→ tool: ${tool}\n`));
     if (data.args !== undefined && data.args !== null) {
       const argsText =
         verbosity === "verbose"
@@ -108,9 +136,9 @@ function renderToolEvent(
             .split("\n")
             .map((line, idx) => (idx === 0 ? `  args  ${line}` : `        ${line}`))
             .join("\n");
-          process.stdout.write(dim(indented + "\n"));
+          writeStdout(dim(indented + "\n"));
         } else {
-          process.stdout.write(dim(`  args  ${argsText}\n`));
+          writeStdout(dim(`  args  ${argsText}\n`));
         }
       }
     }
@@ -123,7 +151,7 @@ function renderToolEvent(
   const label = isError ? "error " : "result";
   const resultText = formatToolResult(data.result, verbosity);
   if (!resultText) {
-    process.stdout.write(`${glyph} ${label} ${dim(`(${tool})`)}\n`);
+    writeStdout(`${glyph} ${label} ${dim(`(${tool})`)}\n`);
     return;
   }
   if (verbosity === "verbose" && resultText.includes("\n")) {
@@ -131,27 +159,27 @@ function renderToolEvent(
       .split("\n")
       .map((line, idx) => (idx === 0 ? `${glyph} ${label} ${line}` : `         ${line}`))
       .join("\n");
-    process.stdout.write(indented + "\n");
+    writeStdout(indented + "\n");
   } else {
-    process.stdout.write(`${glyph} ${label} ${dim(resultText)}\n`);
+    writeStdout(`${glyph} ${label} ${dim(resultText)}\n`);
   }
 }
 
-function createJsonlSink(opts: SinkOptions): EventSink {
+function createJsonlSink(opts: SinkOptions, writeStdout: (chunk: string) => void): EventSink {
   return {
     async handle(event: RunEvent): Promise<void> {
-      process.stdout.write(JSON.stringify(event) + "\n");
+      writeStdout(JSON.stringify(event) + "\n");
     },
     async finalize(result: RunResult): Promise<void> {
       // Emit finalize as a terminal envelope so downstream jq pipelines
       // can pick the boundary without process-exit polling.
-      process.stdout.write(JSON.stringify({ type: "appstrate.finalize", result }) + "\n");
+      writeStdout(JSON.stringify({ type: "appstrate.finalize", result }) + "\n");
       await writeOutputIfRequested(opts.outputPath, result);
     },
   };
 }
 
-function createHumanSink(opts: SinkOptions): EventSink {
+function createHumanSink(opts: SinkOptions, writeStdout: (chunk: string) => void): EventSink {
   const verbosity: Verbosity = opts.verbosity ?? "normal";
   return {
     async handle(event: RunEvent): Promise<void> {
@@ -167,18 +195,20 @@ function createHumanSink(opts: SinkOptions): EventSink {
               }
             | undefined;
           if (data?.tool) {
-            renderToolEvent(data, verbosity);
+            renderToolEvent(data, verbosity, writeStdout);
           } else if (msg) {
             // Prepend `→` for visual consistency with the rest of the
             // CLI output ("→ running ...", "→ tool: ..."). Messages
             // that already carry a leading glyph (e.g. emitted by a
             // third-party tool) are left untouched.
             const glyphed = /^[→✓✗⚠]/.test(msg) ? msg : `→ ${msg}`;
-            process.stdout.write(glyphed.endsWith("\n") ? glyphed : glyphed + "\n");
+            writeStdout(glyphed.endsWith("\n") ? glyphed : glyphed + "\n");
           }
           return;
         }
         case "appstrate.error": {
+          // stderr bypasses the stdout bridge entirely — no need to
+          // route through `writeStdout`.
           process.stderr.write(red(`✗ ${event.message ?? "error"}\n`));
           return;
         }
@@ -196,15 +226,26 @@ function createHumanSink(opts: SinkOptions): EventSink {
           const cost = typeof event.cost === "number" ? event.cost : 0;
           const input = u?.input_tokens ?? 0;
           const output = u?.output_tokens ?? 0;
-          process.stdout.write(dim(`∑ tokens in=${input} out=${output}  $${cost.toFixed(4)}\n`));
+          writeStdout(dim(`∑ tokens in=${input} out=${output}  $${cost.toFixed(4)}\n`));
           return;
         }
         case "memory.added": {
-          process.stdout.write(yellow(`+ memory: ${String(event.content ?? "")}\n`));
+          writeStdout(yellow(`+ memory: ${String(event.content ?? "")}\n`));
           return;
         }
         case "output.emitted": {
-          process.stdout.write(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
+          writeStdout(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
+          return;
+        }
+        case "report.appended": {
+          // Surface the human-readable report content — same channel
+          // as `output.emitted` so users can see what the agent wrote
+          // without parsing JSONL. One line per emit, no prefix glyph
+          // (the content is the message).
+          const content = String(event.content ?? "");
+          if (content.length > 0) {
+            writeStdout(content.endsWith("\n") ? content : content + "\n");
+          }
           return;
         }
         default: {
@@ -218,7 +259,7 @@ function createHumanSink(opts: SinkOptions): EventSink {
       const line = result.error
         ? red(`\n[run failed] ${result.error.message}\n`)
         : green(`\n[run complete]\n`);
-      process.stdout.write(line);
+      writeStdout(line);
       await writeOutputIfRequested(opts.outputPath, result);
     },
   };
