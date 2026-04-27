@@ -30,7 +30,12 @@
  */
 
 import type { LlmProxyAdapter } from "./types.ts";
-import { logger } from "../../lib/logger.ts";
+import {
+  extractUsageObject,
+  numberOrUndefined,
+  parseSseDataFrame,
+  substituteModelJson,
+} from "./helpers.ts";
 
 export const mistralConversationsAdapter: LlmProxyAdapter = {
   api: "mistral-conversations",
@@ -72,47 +77,3 @@ export const mistralConversationsAdapter: LlmProxyAdapter = {
     return null;
   },
 };
-
-function substituteModelJson(rawBody: Uint8Array, realModelId: string): Uint8Array {
-  const text = new TextDecoder().decode(rawBody);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    logger.warn("llm-proxy: mistral request body is not JSON — forwarding as-is", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return rawBody;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return rawBody;
-  }
-  (parsed as Record<string, unknown>)["model"] = realModelId;
-  return new TextEncoder().encode(JSON.stringify(parsed));
-}
-
-function extractUsageObject(body: unknown): Record<string, unknown> | null {
-  if (!body || typeof body !== "object") return null;
-  const u = (body as Record<string, unknown>)["usage"];
-  if (!u || typeof u !== "object") return null;
-  return u as Record<string, unknown>;
-}
-
-function numberOrUndefined(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function parseSseDataFrame(chunk: string): unknown | null {
-  const lines = chunk.split("\n");
-  const data: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("data:")) data.push(line.slice(5).trim());
-  }
-  const payload = data.join("");
-  if (!payload || payload === "[DONE]") return null;
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return null;
-  }
-}
