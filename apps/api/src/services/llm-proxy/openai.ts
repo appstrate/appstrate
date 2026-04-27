@@ -12,7 +12,12 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import { logger } from "../../lib/logger.ts";
+import {
+  extractUsageObject,
+  numberOrUndefined,
+  parseSseDataFrame,
+  substituteModelJson,
+} from "./helpers.ts";
 
 /** Forwarded untouched. We never manipulate cache-control / prompt caching hints. */
 const HEADERS_TO_FORWARD = new Set(["openai-organization", "openai-beta"]);
@@ -66,56 +71,3 @@ export const openaiCompletionsAdapter: LlmProxyAdapter = {
     return null;
   },
 };
-
-/**
- * Rewrite `body.model` in-place without parsing + re-serialising the
- * whole payload when possible. Falls back to full re-serialise if the
- * body isn't a JSON object the regex can target — safer than silently
- * forwarding the wrong model.
- */
-function substituteModelJson(rawBody: Uint8Array, realModelId: string): Uint8Array {
-  const text = new TextDecoder().decode(rawBody);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    logger.warn("llm-proxy: request body is not JSON — forwarding as-is", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return rawBody;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return rawBody;
-  }
-  (parsed as Record<string, unknown>)["model"] = realModelId;
-  return new TextEncoder().encode(JSON.stringify(parsed));
-}
-
-function extractUsageObject(body: unknown): Record<string, unknown> | null {
-  if (!body || typeof body !== "object") return null;
-  const u = (body as Record<string, unknown>)["usage"];
-  if (!u || typeof u !== "object") return null;
-  return u as Record<string, unknown>;
-}
-
-function numberOrUndefined(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function parseSseDataFrame(chunk: string): unknown | null {
-  // SSE frames separated by blank lines; each frame's `data: …` lines
-  // are concatenated per RFC. We only need the payload on each line
-  // prefixed with `data:`.
-  const lines = chunk.split("\n");
-  const data: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("data:")) data.push(line.slice(5).trim());
-  }
-  const payload = data.join("");
-  if (!payload || payload === "[DONE]") return null;
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return null;
-  }
-}

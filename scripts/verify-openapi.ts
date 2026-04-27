@@ -357,6 +357,7 @@ const expectedEndpoints = [
   // LLM proxy (Remote CLI execution — Phase 3)
   "POST /api/llm-proxy/openai-completions/v1/chat/completions",
   "POST /api/llm-proxy/anthropic-messages/v1/messages",
+  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
 
   // Library (consolidated package catalog across an org's applications)
   "GET /api/library",

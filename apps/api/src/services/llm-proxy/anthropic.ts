@@ -4,12 +4,25 @@
  * Anthropic-messages adapter for `/api/llm-proxy/anthropic-messages/*`.
  *
  * Protocol specifics:
- *   - Auth: `x-api-key` header (Bearer form also accepted by upstream for
- *     OAuth long-lived tokens — we stick to `x-api-key` since that is what
- *     `ResolvedProxyModel.upstreamApiKey` holds in practice).
+ *   - Auth (two flavours, decided by upstream key prefix):
+ *       1. Standard API keys (`sk-ant-…`)        → `x-api-key: <key>`.
+ *       2. OAuth long-lived tokens (`sk-ant-oat-…`) → `Authorization:
+ *          Bearer <key>` + Claude-Code identity headers
+ *          (`anthropic-beta: claude-code-20250219,oauth-2025-04-20,…`,
+ *          `user-agent: claude-cli/<v>`, `x-app: cli`,
+ *          `anthropic-dangerous-direct-browser-access: true`). Anthropic
+ *          gates OAuth tokens to Claude-Code identity server-side, so
+ *          omitting any of these returns 401 `invalid x-api-key`. We
+ *          mirror what `pi-ai`'s anthropic provider sends when it
+ *          detects an OAuth token locally — the runner-pi path works
+ *          because pi-ai sees the raw key; the proxy path needs the
+ *          same wire format because pi-ai sees only the Appstrate
+ *          bearer placeholder and skips the OAuth branch.
  *   - `anthropic-version` and `anthropic-beta` are forwarded verbatim
  *     from the caller so `prompt-caching-2024-07-31`, `extended-thinking`
- *     and similar beta headers pass through untouched.
+ *     and similar beta headers pass through untouched. For OAuth tokens
+ *     the caller's beta list is appended to the OAuth-required betas
+ *     rather than replacing them.
  *   - `cache_control` blocks in the request body MUST pass through
  *     unaltered — we only rewrite `body.model`, never touch `messages`,
  *     `system`, or `metadata`.
@@ -22,13 +35,36 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import { logger } from "../../lib/logger.ts";
+import {
+  extractUsageObject,
+  numberOrUndefined,
+  parseSseDataFrame,
+  substituteModelJson,
+} from "./helpers.ts";
 
-const HEADERS_TO_FORWARD = new Set([
-  "anthropic-version",
-  "anthropic-beta",
-  "anthropic-dangerous-direct-browser-access",
-]);
+/**
+ * Mirrors `pi-ai`'s OAuth path
+ * (`@mariozechner/pi-ai/dist/providers/anthropic.js`). Anthropic enforces
+ * Claude-Code identity for OAuth tokens — bumping the version requires
+ * verifying pi-ai still ships the same `claudeCodeVersion` constant.
+ */
+const CLAUDE_CODE_VERSION = "2.1.75";
+const OAUTH_REQUIRED_BETAS = [
+  "claude-code-20250219",
+  "oauth-2025-04-20",
+  "fine-grained-tool-streaming-2025-05-14",
+];
+
+function isOAuthToken(apiKey: string): boolean {
+  return apiKey.includes("sk-ant-oat");
+}
+
+function readForwardedHeader(incoming: Headers, name: string): string | null {
+  for (const [k, v] of incoming) {
+    if (k.toLowerCase() === name) return v;
+  }
+  return null;
+}
 
 export const anthropicMessagesAdapter: LlmProxyAdapter = {
   api: "anthropic-messages",
@@ -39,18 +75,45 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
 
   buildUpstreamHeaders(incoming, upstreamApiKey) {
     const headers: Record<string, string> = {
-      "x-api-key": upstreamApiKey,
       "Content-Type": "application/json",
     };
-    // Default anthropic-version if the caller omitted one — upstream
-    // returns 400 without it.
-    const hasVersion = Array.from(incoming.keys()).some(
-      (k) => k.toLowerCase() === "anthropic-version",
-    );
-    if (!hasVersion) headers["anthropic-version"] = "2023-06-01";
-    for (const [k, v] of incoming) {
-      if (HEADERS_TO_FORWARD.has(k.toLowerCase())) headers[k] = v;
+
+    if (isOAuthToken(upstreamApiKey)) {
+      // OAuth: Bearer auth + Claude-Code identity. Caller-supplied
+      // betas are merged into (not overriding) the OAuth-required set
+      // so things like `prompt-caching-2024-07-31` keep working.
+      headers["Authorization"] = `Bearer ${upstreamApiKey}`;
+      headers["user-agent"] = `claude-cli/${CLAUDE_CODE_VERSION}`;
+      headers["x-app"] = "cli";
+      headers["anthropic-dangerous-direct-browser-access"] = "true";
+      const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
+      const callerBetas = callerBeta ? callerBeta.split(",").map((s) => s.trim()) : [];
+      const merged = Array.from(new Set([...OAUTH_REQUIRED_BETAS, ...callerBetas])).filter(
+        (s) => s.length > 0,
+      );
+      headers["anthropic-beta"] = merged.join(",");
+    } else {
+      headers["x-api-key"] = upstreamApiKey;
+      const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
+      if (callerBeta) headers["anthropic-beta"] = callerBeta;
     }
+
+    // Default anthropic-version if the caller omitted one — upstream
+    // returns 400 without it. Applies to both auth flavours.
+    const callerVersion = readForwardedHeader(incoming, "anthropic-version");
+    headers["anthropic-version"] = callerVersion ?? "2023-06-01";
+
+    // `anthropic-dangerous-direct-browser-access` from the caller wins
+    // over our OAuth default if present (rare, but explicit caller
+    // intent should not be silently dropped).
+    const callerBrowserHeader = readForwardedHeader(
+      incoming,
+      "anthropic-dangerous-direct-browser-access",
+    );
+    if (callerBrowserHeader) {
+      headers["anthropic-dangerous-direct-browser-access"] = callerBrowserHeader;
+    }
+
     return headers;
   },
 
@@ -116,53 +179,4 @@ function merge(a: UpstreamUsage | null, b: UpstreamUsage): UpstreamUsage {
     cacheReadTokens: b.cacheReadTokens ?? a.cacheReadTokens,
     cacheWriteTokens: b.cacheWriteTokens ?? a.cacheWriteTokens,
   };
-}
-
-function substituteModelJson(rawBody: Uint8Array, realModelId: string): Uint8Array {
-  const text = new TextDecoder().decode(rawBody);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    logger.warn("llm-proxy: anthropic request body is not JSON — forwarding as-is", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return rawBody;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return rawBody;
-  }
-  (parsed as Record<string, unknown>)["model"] = realModelId;
-  return new TextEncoder().encode(JSON.stringify(parsed));
-}
-
-function extractUsageObject(body: unknown): Record<string, unknown> | null {
-  if (!body || typeof body !== "object") return null;
-  const u = (body as Record<string, unknown>)["usage"];
-  if (!u || typeof u !== "object") return null;
-  return u as Record<string, unknown>;
-}
-
-function numberOrUndefined(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function parseSseDataFrame(chunk: string): unknown | null {
-  // Anthropic frames look like:
-  //   event: message_start
-  //   data: {"type":"message_start", …}
-  //
-  // We only need the payload from `data: …` lines.
-  const lines = chunk.split("\n");
-  const data: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("data:")) data.push(line.slice(5).trim());
-  }
-  const payload = data.join("");
-  if (!payload) return null;
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return null;
-  }
 }

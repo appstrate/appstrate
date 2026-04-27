@@ -204,6 +204,11 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     api: "anthropic-messages",
     isDefault: false,
   });
+  const PRESET_MISTRAL = makePreset({
+    id: "preset_mistral",
+    api: "mistral-conversations",
+    isDefault: false,
+  });
 
   it("routes openai-completions through /api/llm-proxy/openai-completions/v1", async () => {
     const { model, apiKey } = await resolvePresetModel({
@@ -241,6 +246,76 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(model.headers?.["X-Org-Id"]).toBe("org_1");
     expect(apiKey).not.toBe("ask_test_bearer");
     expect(apiKey.length).toBeGreaterThan(0);
+  });
+
+  it("routes mistral-conversations through /api/llm-proxy/mistral-conversations", async () => {
+    const { model, apiKey } = await resolvePresetModel({
+      profileName: "default",
+      modelId: "preset_mistral",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test_mistral",
+      orgId: "org_1",
+      presetsLoader: async () => [PRESET_MISTRAL],
+    });
+    // Mistral SDK appends `/v1/chat/completions` → baseUrl is the bare
+    // route prefix (no `/v1`), same convention as Anthropic.
+    expect(model.baseUrl).toBe("https://app.example.com/api/llm-proxy/mistral-conversations");
+    // Mistral's SDK natively sends `Authorization: Bearer <apiKey>` —
+    // no header side-channel needed (unlike Anthropic).
+    expect(apiKey).toBe("ask_test_mistral");
+    expect(model.headers).toEqual({ "X-Org-Id": "org_1" });
+    expect(model.provider).toBe("mistral");
+  });
+
+  it("uses an OAuth-shaped placeholder for keyKind=oauth Anthropic presets", async () => {
+    // pi-ai detects OAuth via `apiKey.includes("sk-ant-oat")` and reshapes
+    // the body locally (Claude-Code system prompt + tool renaming) — that
+    // reshape only happens when the placeholder mirrors the prefix. The
+    // SDK then tries to set `Authorization: Bearer <oauth-placeholder>`,
+    // but `defaultHeaders` (= our `model.headers`) is applied AFTER the
+    // auth header in `buildHeaders`, so our `Authorization: Bearer
+    // ask_test_oauth` overrides it before the request leaves the process.
+    const { model, apiKey } = await resolvePresetModel({
+      profileName: "default",
+      modelId: "preset_anthropic_oauth",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test_oauth",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_anthropic_oauth",
+          api: "anthropic-messages",
+          isDefault: false,
+          keyKind: "oauth",
+        }),
+      ],
+    });
+    expect(apiKey).toBe("sk-ant-oat-placeholder");
+    expect(model.headers?.["Authorization"]).toBe("Bearer ask_test_oauth");
+    expect(model.headers?.["X-Org-Id"]).toBe("org_1");
+  });
+
+  it("uses the non-OAuth placeholder for keyKind=api-key Anthropic presets", async () => {
+    const { apiKey } = await resolvePresetModel({
+      profileName: "default",
+      modelId: "preset_anthropic_apikey",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test_apikey",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_anthropic_apikey",
+          api: "anthropic-messages",
+          isDefault: false,
+          keyKind: "api-key",
+        }),
+      ],
+    });
+    // `keyKind: "api-key"` MUST NOT trigger pi-ai's OAuth branch —
+    // body reshaping with a non-OAuth upstream would be sent to the wrong
+    // shape (renamed tools, injected Claude-Code system prompt) and the
+    // upstream would reject it.
+    expect(apiKey).not.toContain("sk-ant-oat");
   });
 
   it("rejects unsupported protocols with an actionable hint", async () => {

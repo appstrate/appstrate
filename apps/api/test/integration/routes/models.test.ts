@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { encrypt } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedOrgProviderKey, seedOrgModel } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -46,6 +48,89 @@ describe("Models API", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/models");
       expect(res.status).toBe(401);
+    });
+
+    it("flags Anthropic OAuth credentials with keyKind='oauth'", async () => {
+      // The CLI relies on this field to mirror the `sk-ant-oat-` prefix
+      // in pi-ai's placeholder. Anthropic gates OAuth tokens to Claude
+      // Code identity at the body level, so the body reshape must happen
+      // locally before the request reaches the proxy. Mis-flagging here
+      // breaks `appstrate run` against any OAuth-keyed preset with an
+      // opaque 429 from Anthropic.
+      const providerKey = await seedOrgProviderKey({
+        orgId: ctx.orgId,
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        apiKeyEncrypted: encrypt("sk-ant-oat-real-token-xyz"),
+      });
+      await seedOrgModel({
+        orgId: ctx.orgId,
+        providerKeyId: providerKey.id,
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        modelId: "claude-sonnet-4-6",
+        label: "Sonnet OAuth",
+      });
+
+      const res = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ label: string; keyKind?: string | null }>;
+      };
+      const sonnet = body.data.find((m) => m.label === "Sonnet OAuth");
+      expect(sonnet).toBeDefined();
+      expect(sonnet!.keyKind).toBe("oauth");
+    });
+
+    it("flags Anthropic API-key credentials with keyKind='api-key'", async () => {
+      const providerKey = await seedOrgProviderKey({
+        orgId: ctx.orgId,
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        apiKeyEncrypted: encrypt("sk-ant-api03-real-key-xyz"),
+      });
+      await seedOrgModel({
+        orgId: ctx.orgId,
+        providerKeyId: providerKey.id,
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com",
+        modelId: "claude-sonnet-4-6",
+        label: "Sonnet API Key",
+      });
+
+      const res = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        data: Array<{ label: string; keyKind?: string | null }>;
+      };
+      const sonnet = body.data.find((m) => m.label === "Sonnet API Key");
+      expect(sonnet!.keyKind).toBe("api-key");
+    });
+
+    it("returns keyKind=null for non-Anthropic protocols", async () => {
+      const providerKey = await seedOrgProviderKey({
+        orgId: ctx.orgId,
+        api: "openai-completions",
+        baseUrl: "https://api.openai.com/v1",
+        apiKeyEncrypted: encrypt("sk-openai-anything"),
+      });
+      await seedOrgModel({
+        orgId: ctx.orgId,
+        providerKeyId: providerKey.id,
+        api: "openai-completions",
+        baseUrl: "https://api.openai.com/v1",
+        modelId: "gpt-4o",
+        label: "OpenAI Preset",
+      });
+
+      const res = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        data: Array<{ label: string; keyKind?: string | null }>;
+      };
+      const openai = body.data.find((m) => m.label === "OpenAI Preset");
+      // keyKind is Anthropic-only; other protocols MUST report null so
+      // the CLI never tries to drive non-existent OAuth detection paths
+      // for OpenAI/Mistral/etc.
+      expect(openai!.keyKind ?? null).toBeNull();
     });
   });
 

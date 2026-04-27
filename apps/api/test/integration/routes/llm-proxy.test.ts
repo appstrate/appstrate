@@ -359,3 +359,82 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
     expect(row!.api).toBe("anthropic-messages");
   });
 });
+
+describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  it("forwards with Authorization: Bearer and substitutes the model id", async () => {
+    const h = await buildHarness({
+      api: "mistral-conversations",
+      baseUrl: "https://api.mistral.test",
+      modelId: "mistral-large-latest",
+      upstreamKey: "mistral-upstream-99",
+    });
+
+    let captured: { url: string; headers: Headers; bodyBytes: Uint8Array } | null = null;
+
+    mockUpstream(async (input, init) => {
+      captured = {
+        url: typeof input === "string" ? input : (input as URL).toString(),
+        headers: new Headers(init?.headers as Record<string, string>),
+        bodyBytes: init?.body as Uint8Array,
+      };
+      return new Response(
+        JSON.stringify({
+          id: "x",
+          object: "chat.completion",
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const res = await app.request(
+      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: "salut" }],
+          temperature: 0.5,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(captured).not.toBeNull();
+    expect(captured!.url).toBe("https://api.mistral.test/v1/chat/completions");
+    expect(captured!.headers.get("Authorization")).toBe("Bearer mistral-upstream-99");
+    const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
+    expect(forwardedBody.model).toBe("mistral-large-latest");
+    expect(forwardedBody.temperature).toBe(0.5);
+
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row).toBeDefined();
+    expect(row!.api).toBe("mistral-conversations");
+    expect(row!.inputTokens).toBe(200);
+    expect(row!.outputTokens).toBe(80);
+  });
+
+  it("returns 400 when the preset uses a different protocol family", async () => {
+    const h = await buildHarness({ api: "openai-completions" });
+    const res = await app.request(
+      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+});
