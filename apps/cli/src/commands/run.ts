@@ -537,8 +537,31 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     });
   } finally {
     unregisterCleanup();
-    await runCleanup();
+    // Swallow cleanup failures: every async op inside `runCleanup` has
+    // its own `.catch`, so the only way the IIFE rejects is a sync throw
+    // from `heartbeat?.stop()` or `restoreOutputSchema()`. If that
+    // happens on the signal path, propagating the rejection would race
+    // with — and beat, since commander's path has fewer microtask hops —
+    // the coordinator's `process.exit(130)`, silently turning a user
+    // cancel into exit 1. Surface the failure on stderr instead so it
+    // remains visible, but don't compete for the exit code.
+    await runCleanup().catch((err) => {
+      if (!opts.json) {
+        process.stderr.write(
+          `warn: cleanup failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    });
   }
+
+  // Defense in depth: the coordinator owns the exit on the signal path
+  // (it awaits `runCleanup` via the registered hook, then calls
+  // `process.exit(130)`), and a microtask analysis says its exit fires
+  // before node's natural exit. But that ordering is fragile — a future
+  // change inside `coordinator.trigger` that adds an extra `await` could
+  // flip the race. This guard is a no-op if the coordinator already
+  // exited, and a backstop if it hasn't.
+  if (shutdownSignal.aborted) process.exit(130);
 }
 
 /**
