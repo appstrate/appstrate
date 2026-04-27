@@ -306,6 +306,57 @@ describe("formatToolResult — truncation marker", () => {
     const out = formatToolResult({ __truncated: true, bytes: 5_500_000, limit: 2048 }, "normal");
     expect(out).toContain("5.2 MB");
   });
+
+  it("rescues MCP text from truncated mid-string JSON preview", () => {
+    // Real shape from a large MCP result truncated by the bridge:
+    // serialised JSON gets cut mid-string, JSON.parse fails, but the
+    // envelope prefix is still recognisable.
+    const truncatedJson = '{"content":[{"type":"text","text":"Logged [info]: Je vais récupé';
+    const out = formatToolResult(
+      { __truncated: true, bytes: 6895, limit: 2048, preview: truncatedJson },
+      "normal",
+    );
+    expect(out).toContain("Logged [info]: Je vais récupé");
+    expect(out).not.toContain('"content"');
+    expect(out).not.toContain('"type"');
+    expect(out).not.toContain('\\"');
+  });
+
+  it("decodes JSON escapes in rescued MCP text", () => {
+    // `\n` and `\"` should land as literal newline + quote, not escaped chars.
+    const truncatedJson = '{"content":[{"type":"text","text":"---\\nname: agent\\nversion: \\"1';
+    const out = formatToolResult(
+      { __truncated: true, bytes: 9000, limit: 2048, preview: truncatedJson },
+      "normal",
+    );
+    expect(out).toContain("---");
+    expect(out).toContain("name: agent");
+    expect(out).not.toContain("\\n");
+    expect(out).not.toContain('\\"');
+  });
+
+  it("handles truncation cut mid escape sequence", () => {
+    // Trailing dangling backslash (cut before the escape body lands).
+    const truncatedJson = '{"content":[{"type":"text","text":"abc\\';
+    const out = formatToolResult(
+      { __truncated: true, bytes: 4000, limit: 2048, preview: truncatedJson },
+      "normal",
+    );
+    // Must not crash, must not leak the envelope.
+    expect(out).toContain("abc");
+    expect(out).not.toContain('"content"');
+  });
+
+  it("falls back to raw preview when shape is JSON-invalid AND not MCP-shaped", () => {
+    const garbage = '{"foo":[{"bar":"baz';
+    const out = formatToolResult(
+      { __truncated: true, bytes: 4000, limit: 2048, preview: garbage },
+      "normal",
+    );
+    // Regex extractor returns null → render raw garbage so the user
+    // still sees something rather than nothing.
+    expect(out).toContain(garbage);
+  });
 });
 
 describe("resolveVerbosity", () => {

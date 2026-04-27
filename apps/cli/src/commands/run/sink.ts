@@ -112,13 +112,12 @@ function renderToolEvent(
 ): void {
   if (verbosity === "quiet") return;
   const tool = data.tool ?? "unknown";
-  // Short call-id tag appended only in verbose mode. The Pi SDK
-  // dispatches parallel tool calls — the suffix lets users match a
-  // start event with its (possibly out-of-order) result. Hidden in
-  // normal mode to keep the default output uncluttered for the common
-  // sequential case.
+  // Short call-id tag appended whenever Pi forwards one. Lets users
+  // match a start event with its (possibly out-of-order) result when
+  // the SDK dispatches parallel tool calls. The dim treatment keeps
+  // it from cluttering the eye in the common sequential case.
   const callTag =
-    verbosity === "verbose" && typeof data.toolCallId === "string" && data.toolCallId.length > 0
+    typeof data.toolCallId === "string" && data.toolCallId.length > 0
       ? ` ${dim(`#${data.toolCallId.slice(-8)}`)}`
       : "";
 

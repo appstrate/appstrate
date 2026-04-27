@@ -328,7 +328,7 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).not.toContain('\\"content\\"');
   });
 
-  it("hides toolCallId suffix in normal mode", async () => {
+  it("shows short toolCallId suffix in normal mode for parallel correlation", async () => {
     const sink = createConsoleSink({});
     await sink.handle(
       progressEvent("Tool: bash", {
@@ -338,8 +338,22 @@ describe("createConsoleSink — human mode", () => {
       }),
     );
     expect(streams.stdout).toContain("→ tool: bash");
+    // Last-8 short form is visible in both normal and verbose modes —
+    // the long-form id never leaks.
+    expect(streams.stdout).toContain("#efgh5678");
+    expect(streams.stdout).not.toContain("call_abcd");
+  });
+
+  it("omits toolCallId suffix entirely when Pi did not forward one", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool: bash", {
+        tool: "bash",
+        args: { command: "ls" },
+      }),
+    );
+    expect(streams.stdout).toContain("→ tool: bash");
     expect(streams.stdout).not.toContain("#");
-    expect(streams.stdout).not.toContain("abcd1234");
   });
 
   it("appends short toolCallId suffix (last 8 chars) in verbose mode", async () => {

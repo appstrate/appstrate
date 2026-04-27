@@ -125,19 +125,61 @@ function formatBytes(n: number): string {
 }
 
 /**
+ * Best-effort MCP-text extractor for truncated JSON previews.
+ *
+ * The bridge serialises the tool result *then* truncates the byte
+ * stream, so a real-world large MCP envelope arrives here as an
+ * invalid JSON fragment like:
+ *
+ *   `{"content":[{"type":"text","text":"---\\nname: agent...`
+ *
+ * `JSON.parse` rightfully rejects that. We pattern-match the MCP
+ * envelope prefix, capture the partial JSON-string body (respecting
+ * escape sequences so we don't truncate mid-`\u`), and decode it as a
+ * standalone JSON string (`JSON.parse('"<captured>"')`). When the
+ * decoded suffix is a stray escape we couldn't close, we fall back to
+ * the raw captured bytes — still better than leaking the envelope.
+ *
+ * Returns `null` when the preview doesn't look like an MCP envelope.
+ */
+function extractMcpTextFromTruncatedJson(preview: string): string | null {
+  const m = preview.match(
+    /^\s*\{\s*"content"\s*:\s*\[\s*\{\s*"type"\s*:\s*"text"\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\[\s\S])*)/,
+  );
+  if (!m || m[1] === undefined) return null;
+  const captured = m[1];
+  try {
+    return JSON.parse(`"${captured}"`) as string;
+  } catch {
+    // Trailing dangling backslash from a chopped escape sequence —
+    // drop it and retry, otherwise return raw captured bytes.
+    const trimmed = captured.replace(/\\+$/, "");
+    try {
+      return JSON.parse(`"${trimmed}"`) as string;
+    } catch {
+      return trimmed;
+    }
+  }
+}
+
+/**
  * Render a truncation marker as a human-readable preview. Tries to
  * unwrap a JSON-encoded MCP envelope inside `preview` (the bridge
  * stringifies the original payload before truncating, so a tool
  * returning `{content:[{type:"text",text:"..."}]}` lands here as a
  * string `'{"content":[{"type":"text","text":"..."}]}'`).
+ *
+ * Two unwrapping paths, tried in order:
+ *   1. `JSON.parse` succeeds → standard `unwrapMcpContent` walk.
+ *   2. `JSON.parse` fails (truncated mid-string) → regex-based
+ *      `extractMcpTextFromTruncatedJson` rescue.
+ *
+ * Both paths fall back to the raw preview if no MCP shape is detected.
  */
 function formatTruncationMarker(m: TruncationMarker): string {
   const sizeBlurb = `(truncated ${formatBytes(m.bytes)} > ${formatBytes(m.limit)})`;
   const preview = m.preview ?? "";
   if (!preview) return sizeBlurb;
-  // Best-effort: try to peel an MCP envelope out of the JSON-encoded
-  // preview so the user sees the agent-facing text instead of escaped
-  // JSON. Any parse failure is fine — we fall back to the raw preview.
   let body = preview;
   try {
     const parsed: unknown = JSON.parse(preview);
@@ -145,7 +187,10 @@ function formatTruncationMarker(m: TruncationMarker): string {
     if (unwrapped) body = unwrapped;
     else if (typeof parsed === "string") body = parsed;
   } catch {
-    /* preview was not JSON — render verbatim */
+    // Preview is invalid JSON — most likely truncated mid-string. Try
+    // the regex rescue before giving up and rendering raw.
+    const rescued = extractMcpTextFromTruncatedJson(preview);
+    if (rescued !== null) body = rescued;
   }
   return `${sizeBlurb} ${body}`;
 }
