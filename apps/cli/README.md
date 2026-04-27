@@ -495,16 +495,30 @@ Run-config inheritance (model, proxy, agent config, version pin) is fetched from
 
 **Selected flags**
 
-| Flag                         | Purpose                                                                                                                                              |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--connection-profile <ref>` | Connection profile to use for credential-proxy calls (UUID or name). Overrides the sticky default pinned via `appstrate connections profile switch`. |
-| `--cp <ref>`                 | Alias for `--connection-profile`.                                                                                                                    |
-| `--provider-profile <kv>`    | Per-provider override `providerId=<id\|name>`. Repeatable.                                                                                           |
-| `--proxy <id>`               | Proxy id to associate with the run (overrides the per-app inherited value).                                                                          |
-| `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                      |
-| `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                 |
-| `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                         |
-| `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                       |
+| Flag                         | Purpose                                                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--connection-profile <ref>` | Connection profile to use for credential-proxy calls (UUID or name). Overrides the sticky default pinned via `appstrate connections profile switch`.   |
+| `--cp <ref>`                 | Alias for `--connection-profile`.                                                                                                                      |
+| `--provider-profile <kv>`    | Per-provider override `providerId=<id\|name>`. Repeatable.                                                                                             |
+| `--proxy <id>`               | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
+| `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
+| `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                   |
+| `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                           |
+| `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                         |
+| `-v, --verbose`              | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
+| `-q, --quiet`                | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+
+**Tool-call rendering**
+
+In human mode (no `--json`), each tool call surfaces as one to three lines:
+
+```
+→ tool: bash
+  args  command: "ls -la /tmp", timeout: 5000
+✓ result total 8 ↵ drwxr-xr-x 3 root ...
+```
+
+Defaults match the dashboard log viewer: args truncated at 200 chars, result preview at 100 chars (newlines collapsed to `↵`). Pass `-v` to pretty-print args as multi-line JSON and reveal the full ~2 KB result; pass `-q` to suppress tool lines entirely (errors + summary always print). The bridge truncates oversized results to ~2 KB before transport — a `__truncated: true` marker stays visible in either mode so silent data loss is impossible.
 
 The full flag set is documented under `appstrate run --help`.
 

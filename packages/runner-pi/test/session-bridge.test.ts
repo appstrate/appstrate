@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { installSessionBridge, type InternalSink } from "../src/pi-runner.ts";
+import { installSessionBridge, truncateToolResult, type InternalSink } from "../src/pi-runner.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 
 const RUN_ID = "run_bridge_test";
@@ -163,6 +163,240 @@ describe("installSessionBridge — tool_execution_start", () => {
     session.emit({ type: "tool_execution_start" });
 
     expect((sink.events[0] as unknown as { message: string }).message).toBe("Tool: unknown");
+  });
+});
+
+describe("installSessionBridge — tool_execution_end", () => {
+  it("emits appstrate.progress with tool + result data on success", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "read_file",
+      result: "file contents here",
+      isError: false,
+    });
+
+    expect(sink.events).toHaveLength(1);
+    const ev = sink.events[0] as unknown as {
+      type: string;
+      message: string;
+      data: { tool: string; result: unknown; isError: boolean };
+    };
+    expect(ev.type).toBe("appstrate.progress");
+    expect(ev.message).toBe("Tool result: read_file");
+    expect(ev.data).toEqual({
+      tool: "read_file",
+      result: "file contents here",
+      isError: false,
+    });
+  });
+
+  it("emits with isError=true and 'Tool error:' prefix on error", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "bash",
+      result: "command not found",
+      isError: true,
+    });
+
+    const ev = sink.events[0] as unknown as {
+      message: string;
+      data: { isError: boolean };
+    };
+    expect(ev.message).toBe("Tool error: bash");
+    expect(ev.data.isError).toBe(true);
+  });
+
+  it("falls back to 'unknown' when toolName is missing", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "tool_execution_end", result: "x" });
+
+    expect((sink.events[0] as unknown as { message: string }).message).toBe("Tool result: unknown");
+  });
+
+  it("normalises missing isError to false", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "tool_execution_end", toolName: "t", result: 1 });
+
+    const ev = sink.events[0] as unknown as { data: { isError: boolean } };
+    expect(ev.data.isError).toBe(false);
+  });
+
+  it("truncates oversized string results before emit", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    const big = "x".repeat(5000);
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "bash",
+      result: big,
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as { data: { result: string } };
+    expect(typeof ev.data.result).toBe("string");
+    expect(ev.data.result.length).toBeLessThan(big.length);
+    expect(ev.data.result).toContain("(truncated, 5000 bytes)");
+  });
+
+  it("truncates oversized object results into a structured marker", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // 4 KB JSON payload — well above the 2 KB ceiling.
+    const huge = { lines: Array.from({ length: 200 }, (_, i) => `line ${i} `.repeat(2)) };
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "read_file",
+      result: huge,
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as {
+      data: {
+        result: { __truncated: true; reason: string; bytes: number; preview: string };
+      };
+    };
+    expect(ev.data.result).toMatchObject({
+      __truncated: true,
+      reason: "size",
+    });
+    expect(ev.data.result.bytes).toBeGreaterThan(2048);
+    expect(typeof ev.data.result.preview).toBe("string");
+  });
+
+  it("passes small object results through untouched", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    const small = { ok: true, count: 42 };
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "noop",
+      result: small,
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as { data: { result: typeof small } };
+    expect(ev.data.result).toEqual(small);
+  });
+
+  it("preserves null and undefined results without truncation", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "tool_execution_end", toolName: "a", result: null });
+    session.emit({ type: "tool_execution_end", toolName: "b", result: undefined });
+
+    expect((sink.events[0] as unknown as { data: { result: unknown } }).data.result).toBe(null);
+    expect((sink.events[1] as unknown as { data: { result: unknown } }).data.result).toBe(
+      undefined,
+    );
+  });
+
+  it("handles non-serialisable (circular) results with a structured marker", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    const circ: Record<string, unknown> = {};
+    circ.self = circ;
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "loopy",
+      result: circ,
+      isError: false,
+    });
+
+    const ev = sink.events[0] as unknown as { data: { result: unknown } };
+    expect(ev.data.result).toEqual({ __truncated: true, reason: "non_serialisable" });
+  });
+});
+
+describe("truncateToolResult", () => {
+  it("returns null/undefined verbatim", () => {
+    expect(truncateToolResult(null)).toBe(null);
+    expect(truncateToolResult(undefined)).toBe(undefined);
+  });
+
+  it("returns primitives verbatim regardless of size", () => {
+    expect(truncateToolResult(42)).toBe(42);
+    expect(truncateToolResult(true)).toBe(true);
+    expect(truncateToolResult(false)).toBe(false);
+  });
+
+  it("returns short strings unchanged", () => {
+    expect(truncateToolResult("hello")).toBe("hello");
+  });
+
+  it("truncates strings exceeding the byte limit with a marker", () => {
+    const out = truncateToolResult("a".repeat(3000)) as string;
+    expect(out.length).toBeLessThan(3000);
+    expect(out).toContain("(truncated, 3000 bytes)");
+  });
+
+  it("respects a custom byte limit", () => {
+    const out = truncateToolResult("hello world", 5) as string;
+    expect(out).toContain("(truncated, ");
+    // Boundary safety: content before the marker must be ≤ limit bytes.
+    const head = out.split("…")[0];
+    expect(Buffer.byteLength(head!, "utf8")).toBeLessThanOrEqual(5);
+  });
+
+  it("never produces invalid UTF-8 when truncating multibyte strings", () => {
+    // 3-byte UTF-8 chars repeated past the limit — the truncator must
+    // step back to a code-point boundary.
+    const s = "日".repeat(2000);
+    const out = truncateToolResult(s, 100) as string;
+    expect(() => new TextEncoder().encode(out)).not.toThrow();
+    // Round-trip via Buffer to check no replacement chars.
+    const head = out.split("…")[0]!;
+    expect(head.length).toBeGreaterThan(0);
+    // Each character must be the original 3-byte ideograph.
+    for (const ch of head) expect(ch).toBe("日");
+  });
+
+  it("returns small objects unchanged", () => {
+    const obj = { a: 1, b: "two" };
+    expect(truncateToolResult(obj)).toBe(obj);
+  });
+
+  it("returns a structured marker for oversized objects", () => {
+    const big = { data: "x".repeat(3000) };
+    const out = truncateToolResult(big) as Record<string, unknown>;
+    expect(out.__truncated).toBe(true);
+    expect(out.reason).toBe("size");
+    expect(typeof out.bytes).toBe("number");
+    expect((out.bytes as number) > 2048).toBe(true);
+    expect(out.limit).toBe(2048);
+    expect(typeof out.preview).toBe("string");
+  });
+
+  it("returns a structured marker for non-serialisable inputs", () => {
+    const circ: Record<string, unknown> = {};
+    circ.self = circ;
+    expect(truncateToolResult(circ)).toEqual({
+      __truncated: true,
+      reason: "non_serialisable",
+    });
   });
 });
 

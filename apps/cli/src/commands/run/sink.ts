@@ -10,6 +10,12 @@
  *     Colours via ANSI escapes — disabled automatically when stdout is
  *     not a TTY or when the user sets `NO_COLOR` (standard contract).
  *
+ * Human-mode tool output is verbosity-controlled:
+ *   - `quiet`   → tool name + args + result all hidden (errors still print)
+ *   - `normal`  → name + args (200 chars) + result (100 chars), parity
+ *                 with the web log viewer
+ *   - `verbose` → name + pretty-printed args + result up to ~2 KB
+ *
  * The sinks never touch the network and swallow no errors silently —
  * any thrown exception bubbles up to the run command's top-level handler.
  */
@@ -17,12 +23,25 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  formatToolArgsCompact,
+  formatToolArgsVerbose,
+  formatToolResult,
+  type Verbosity,
+} from "./format.ts";
 
 export interface SinkOptions {
   /** Emit JSONL on stdout. When false, human-readable output is used. */
   json?: boolean;
   /** Write the final RunResult JSON to this path. Optional. */
   outputPath?: string;
+  /**
+   * Tool-call rendering verbosity. `normal` (default) matches the web
+   * log viewer's level of detail; `verbose` reveals full args + result;
+   * `quiet` suppresses tool lines entirely (assistant text + errors
+   * still print so the run is never silent).
+   */
+  verbosity?: Verbosity;
 }
 
 const USE_COLOR = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
@@ -41,6 +60,83 @@ export function createConsoleSink(opts: SinkOptions = {}): EventSink {
   return createHumanSink(opts);
 }
 
+/**
+ * Render a tool-related `appstrate.progress` event for the human sink.
+ *
+ * One emit produces one to three stdout lines:
+ *   1. `→ tool: <name>`                          (always, unless quiet)
+ *   2. `  args  <key: value, …>` or pretty JSON  (when args present)
+ *   3. `✓ result <preview>` / `✗ error <preview>` (when result present)
+ *
+ * Args and results never appear on the same emit — start events carry
+ * args, end events carry result. Splitting the rendering keeps each
+ * line self-explanatory and scrollback-friendly.
+ */
+function renderToolEvent(
+  data: {
+    tool?: string;
+    args?: unknown;
+    result?: unknown;
+    isError?: boolean;
+  },
+  verbosity: Verbosity,
+): void {
+  if (verbosity === "quiet") return;
+  const tool = data.tool ?? "unknown";
+
+  // Start-of-call: print the tool name + args. The `result` field
+  // discriminates start vs end — the bridge guarantees one or the
+  // other, never both.
+  if (data.result === undefined && data.args === undefined) {
+    // Defensive: no args, no result — emit just the name.
+    process.stdout.write(cyan(`→ tool: ${tool}\n`));
+    return;
+  }
+
+  if (data.result === undefined) {
+    process.stdout.write(cyan(`→ tool: ${tool}\n`));
+    if (data.args !== undefined && data.args !== null) {
+      const argsText =
+        verbosity === "verbose"
+          ? formatToolArgsVerbose(data.args)
+          : formatToolArgsCompact(data.args as Record<string, unknown>);
+      if (argsText) {
+        // Verbose mode renders multi-line JSON — indent every line so
+        // the `args` glyph stays aligned. Compact mode is single-line.
+        if (verbosity === "verbose" && argsText.includes("\n")) {
+          const indented = argsText
+            .split("\n")
+            .map((line, idx) => (idx === 0 ? `  args  ${line}` : `        ${line}`))
+            .join("\n");
+          process.stdout.write(dim(indented + "\n"));
+        } else {
+          process.stdout.write(dim(`  args  ${argsText}\n`));
+        }
+      }
+    }
+    return;
+  }
+
+  // End-of-call: result line. Prefix glyph + colour signals success/error.
+  const isError = data.isError === true;
+  const glyph = isError ? red("✗") : green("✓");
+  const label = isError ? "error " : "result";
+  const resultText = formatToolResult(data.result, verbosity);
+  if (!resultText) {
+    process.stdout.write(`${glyph} ${label} ${dim(`(${tool})`)}\n`);
+    return;
+  }
+  if (verbosity === "verbose" && resultText.includes("\n")) {
+    const indented = resultText
+      .split("\n")
+      .map((line, idx) => (idx === 0 ? `${glyph} ${label} ${line}` : `         ${line}`))
+      .join("\n");
+    process.stdout.write(indented + "\n");
+  } else {
+    process.stdout.write(`${glyph} ${label} ${dim(resultText)}\n`);
+  }
+}
+
 function createJsonlSink(opts: SinkOptions): EventSink {
   return {
     async handle(event: RunEvent): Promise<void> {
@@ -56,14 +152,22 @@ function createJsonlSink(opts: SinkOptions): EventSink {
 }
 
 function createHumanSink(opts: SinkOptions): EventSink {
+  const verbosity: Verbosity = opts.verbosity ?? "normal";
   return {
     async handle(event: RunEvent): Promise<void> {
       switch (event.type) {
         case "appstrate.progress": {
           const msg = String(event.message ?? "");
-          const data = event.data as { tool?: string } | undefined;
+          const data = event.data as
+            | {
+                tool?: string;
+                args?: unknown;
+                result?: unknown;
+                isError?: boolean;
+              }
+            | undefined;
           if (data?.tool) {
-            process.stdout.write(cyan(`→ tool: ${data.tool}\n`));
+            renderToolEvent(data, verbosity);
           } else if (msg) {
             // Prepend `→` for visual consistency with the rest of the
             // CLI output ("→ running ...", "→ tool: ..."). Messages

@@ -311,7 +311,8 @@ export interface BridgeableSession {
  * Mapping:
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
- *   - `tool_execution_start`                   → `appstrate.progress` + data
+ *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
+ *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError }
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -349,7 +350,92 @@ interface PiToolExecutionStartEvent {
   toolName?: string;
   args?: unknown;
 }
+interface PiToolExecutionEndEvent {
+  type: "tool_execution_end";
+  toolName?: string;
+  result?: unknown;
+  isError?: boolean;
+}
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
+
+/**
+ * Hard ceiling on the byte size of a tool result payload forwarded as
+ * `appstrate.progress.data.result`. Anything beyond this is replaced
+ * with a `__truncated: true` marker so downstream sinks (HTTP POST to
+ * the platform, JSONL stdout, web `run_logs` row) stay bounded —
+ * filesystem/HTTP reads can produce MB-sized strings that have no
+ * business sitting in a log row. Sinks render their own per-mode
+ * preview length on top of this hard cap.
+ *
+ * Default sized for the typical "tail of a stack trace + a few JSON
+ * blobs" — large enough to keep useful detail, small enough that 100
+ * tool calls per run × 2KB = 200KB stays well below the platform's
+ * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` defaults and a single `run_logs`
+ * row stays cheap.
+ */
+const TOOL_RESULT_BYTE_LIMIT = 2048;
+
+/**
+ * Truncate an arbitrary tool result for safe transport on the event
+ * sink. Strategy:
+ *   - `string` payloads: byte-aware truncation with a single trailing
+ *     "...(truncated, N bytes)" marker so the rendered output stays
+ *     valid UTF-8 and self-documents the truncation.
+ *   - everything else: serialise to JSON, apply the same cap; on
+ *     overflow return a structured marker preserving the original type
+ *     hint and original byte size so sinks can render "[truncated …]"
+ *     without re-serialising.
+ *
+ * Exposed for tests; not part of the bridge's public surface.
+ */
+export function truncateToolResult(
+  result: unknown,
+  limitBytes: number = TOOL_RESULT_BYTE_LIMIT,
+): unknown {
+  if (result === undefined || result === null) return result;
+  if (typeof result === "string") {
+    return truncateString(result, limitBytes);
+  }
+  // Booleans / numbers / bigint / symbols never trigger truncation.
+  if (typeof result !== "object") return result;
+  let serialised: string;
+  try {
+    serialised = JSON.stringify(result);
+  } catch {
+    // Circular / non-serialisable — replace with a structured marker.
+    return { __truncated: true, reason: "non_serialisable" };
+  }
+  if (serialised === undefined) return result;
+  const byteLength = Buffer.byteLength(serialised, "utf8");
+  if (byteLength <= limitBytes) return result;
+  // Re-parse so the sink still receives a structured payload (the
+  // canonical event validators only accept plain JSON values, never
+  // arbitrary class instances). Fallback to the marker on parse error.
+  return {
+    __truncated: true,
+    reason: "size",
+    bytes: byteLength,
+    limit: limitBytes,
+    preview: truncateString(serialised, Math.min(512, limitBytes)),
+  };
+}
+
+function truncateString(s: string, limitBytes: number): string {
+  const byteLength = Buffer.byteLength(s, "utf8");
+  if (byteLength <= limitBytes) return s;
+  // Walk back from the byte limit so the returned slice is a valid
+  // UTF-8 boundary (Buffer.toString handles partial code points but
+  // produces a replacement char — cheaper to land on a clean boundary).
+  let cut = limitBytes;
+  const buf = Buffer.from(s, "utf8");
+  // UTF-8 continuation bytes have the bit pattern 10xxxxxx — walk
+  // back until we land on a leading byte (or the start of the
+  // buffer). `buf[cut]` may be undefined if `cut === buf.length`,
+  // which is fine — `?? 0` short-circuits the loop in that case.
+  while (cut > 0 && ((buf[cut] ?? 0) & 0xc0) === 0x80) cut -= 1;
+  const head = buf.subarray(0, cut).toString("utf8");
+  return `${head}…(truncated, ${byteLength} bytes)`;
+}
 
 export function installSessionBridge(
   session: BridgeableSession,
@@ -423,6 +509,33 @@ export function installSessionBridge(
           runId,
           message: `Tool: ${e.toolName ?? "unknown"}`,
           data: { tool: e.toolName, args: e.args },
+        });
+        break;
+      }
+
+      case "tool_execution_end": {
+        // Symmetric counterpart of `tool_execution_start`. Forwards the
+        // tool's result (truncated to TOOL_RESULT_BYTE_LIMIT) and an
+        // explicit `isError` flag so sinks can colour-code success vs
+        // error paths without re-parsing the result. Same `appstrate.
+        // progress` envelope as the start event — adding a new canonical
+        // type would force a migration on every consumer (web, run_logs,
+        // JSONL, HTTP sink) for marginal gain over the discriminator
+        // `data.result !== undefined`.
+        const e = event as PiToolExecutionEndEvent;
+        const tool = e.toolName ?? "unknown";
+        const isError = e.isError === true;
+        const truncatedResult = truncateToolResult(e.result);
+        fire({
+          type: "appstrate.progress",
+          timestamp: Date.now(),
+          runId,
+          message: `${isError ? "Tool error" : "Tool result"}: ${tool}`,
+          data: {
+            tool: e.toolName,
+            result: truncatedResult,
+            isError,
+          },
         });
         break;
       }

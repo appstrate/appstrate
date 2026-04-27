@@ -800,6 +800,14 @@ program
     "Maximum seconds to wait for connections during the preflight polling loop (default 300).",
     parsePreflightTimeout,
   )
+  .option(
+    "-v, --verbose",
+    "Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without --json).",
+  )
+  .option(
+    "-q, --quiet",
+    "Suppress per-tool output lines (name, args, result). Errors and final summary still print.",
+  )
   .action(async (bundle: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await runCommand({
@@ -840,6 +848,8 @@ program
       noPreflight: opts.preflight === false,
       preflightTimeout:
         typeof opts.preflightTimeout === "number" ? opts.preflightTimeout : undefined,
+      verbose: opts.verbose === true,
+      quiet: opts.quiet === true,
     });
   });
 

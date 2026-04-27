@@ -43,6 +43,7 @@ import {
   type ModelSource,
 } from "./run/model.ts";
 import { createConsoleSink } from "./run/sink.ts";
+import { resolveVerbosity } from "./run/format.ts";
 import {
   buildResolver,
   parseProviderMode,
@@ -146,6 +147,18 @@ export interface RunCommandOptions {
   noPreflight?: boolean;
   /** Override the preflight polling timeout. Default 5 minutes. */
   preflightTimeout?: number;
+  /**
+   * Verbose tool-call rendering — pretty-print args + emit the full
+   * truncated result (~2 KB). Mutually exclusive with `--quiet`.
+   * Honoured only in human (non-`--json`) mode.
+   */
+  verbose?: boolean;
+  /**
+   * Quiet tool-call rendering — suppress per-tool name/args/result lines
+   * entirely. Errors and final summary still print so the run is never
+   * silent. Mutually exclusive with `--verbose`.
+   */
+  quiet?: boolean;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -401,7 +414,21 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 9. Run ───────────────────────────────────────────────────────
-  const consoleSink = createConsoleSink({ json: opts.json, outputPath: opts.output });
+  // `--verbose` / `--quiet` are mutually exclusive (commander does not
+  // enforce this for us — we treat the combination as user error).
+  if (opts.verbose && opts.quiet) {
+    throw new Error("--verbose and --quiet are mutually exclusive");
+  }
+  const verbosity = resolveVerbosity({
+    verbose: opts.verbose,
+    quiet: opts.quiet,
+    envValue: process.env.APPSTRATE_VERBOSE,
+  });
+  const consoleSink = createConsoleSink({
+    json: opts.json,
+    outputPath: opts.output,
+    verbosity,
+  });
   // Track whether finalize was already sent to the HttpSink so the
   // CLI's safety-net finalize in the cleanup doesn't double-post.
   // PiRunner finalises itself on success and on non-abort errors, but

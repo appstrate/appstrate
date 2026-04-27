@@ -124,6 +124,152 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).toContain("read_file");
   });
 
+  it("writes args line when start event carries args (normal verbosity)", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool: read_file", {
+        tool: "read_file",
+        args: { path: "/tmp/x", limit: 10 },
+      }),
+    );
+    expect(streams.stdout).toContain("→ tool: read_file");
+    expect(streams.stdout).toContain("args");
+    expect(streams.stdout).toContain("path: /tmp/x");
+    expect(streams.stdout).toContain("limit: 10");
+  });
+
+  it("truncates args at the compact limit (200 chars)", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(progressEvent("Tool: t", { tool: "t", args: { data: "x".repeat(500) } }));
+    // The truncation marker '...' must appear, and the line must not
+    // contain the full 500-char string.
+    expect(streams.stdout).toContain("...");
+    expect(streams.stdout.includes("x".repeat(500))).toBe(false);
+  });
+
+  it("writes a result line on tool_execution_end (success)", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool result: bash", {
+        tool: "bash",
+        result: "total 8",
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toContain("✓");
+    expect(streams.stdout).toContain("result");
+    expect(streams.stdout).toContain("total 8");
+  });
+
+  it("writes a result line with ✗ glyph on tool error", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool error: bash", {
+        tool: "bash",
+        result: "command not found",
+        isError: true,
+      }),
+    );
+    expect(streams.stdout).toContain("✗");
+    expect(streams.stdout).toContain("error");
+    expect(streams.stdout).toContain("command not found");
+  });
+
+  it("collapses multi-line results to a single line in normal mode", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool result: bash", {
+        tool: "bash",
+        result: "line1\nline2\nline3",
+        isError: false,
+      }),
+    );
+    // Result line must contain ↵ instead of literal newlines so the
+    // event prints on one line. There should be exactly one trailing
+    // newline (the line terminator).
+    const lines = streams.stdout.split("\n").filter((l) => l.includes("result"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("↵");
+  });
+
+  it("preserves multi-line results in verbose mode (indented)", async () => {
+    const sink = createConsoleSink({ verbosity: "verbose" });
+    await sink.handle(
+      progressEvent("Tool result: bash", {
+        tool: "bash",
+        result: "line1\nline2\nline3",
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toContain("line1");
+    expect(streams.stdout).toContain("line2");
+    expect(streams.stdout).toContain("line3");
+    expect(streams.stdout).not.toContain("↵");
+  });
+
+  it("pretty-prints args as multi-line JSON in verbose mode", async () => {
+    const sink = createConsoleSink({ verbosity: "verbose" });
+    await sink.handle(
+      progressEvent("Tool: read_file", {
+        tool: "read_file",
+        args: { path: "/tmp/x", nested: { a: 1 } },
+      }),
+    );
+    expect(streams.stdout).toContain('"path"');
+    expect(streams.stdout).toContain('"nested"');
+    // Verbose JSON spans multiple lines — at least one indented line.
+    expect(streams.stdout).toMatch(/\n {4,}"a": 1/);
+  });
+
+  it("suppresses tool name, args, and result in quiet mode", async () => {
+    const sink = createConsoleSink({ verbosity: "quiet" });
+    await sink.handle(
+      progressEvent("Tool: read_file", {
+        tool: "read_file",
+        args: { path: "/tmp/x" },
+      }),
+    );
+    await sink.handle(
+      progressEvent("Tool result: read_file", {
+        tool: "read_file",
+        result: "data",
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toBe("");
+  });
+
+  it("quiet mode still routes appstrate.error to stderr", async () => {
+    const sink = createConsoleSink({ verbosity: "quiet" });
+    await sink.handle({
+      type: "appstrate.error",
+      timestamp: 0,
+      runId: RUN_ID,
+      message: "boom",
+    } as RunEvent);
+    expect(streams.stderr).toContain("boom");
+  });
+
+  it("renders tool with no args and no result as just the name", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(progressEvent("Tool: ping", { tool: "ping" }));
+    expect(streams.stdout).toContain("→ tool: ping");
+    expect(streams.stdout.split("\n").filter(Boolean)).toHaveLength(1);
+  });
+
+  it("renders the bridge's truncation marker on oversized results", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool result: read_file", {
+        tool: "read_file",
+        result: { __truncated: true, reason: "size", bytes: 9999, limit: 2048 },
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toContain("__truncated");
+    expect(streams.stdout).toContain("size");
+  });
+
   it("routes appstrate.error to stderr", async () => {
     const sink = createConsoleSink({});
     await sink.handle({
