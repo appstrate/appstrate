@@ -24,12 +24,14 @@ const INHERIT = "__inherit__";
 const NONE = "__none__";
 
 export interface RunOverridesValue {
-  /** Override delta — passed verbatim as the request body's `config` field. */
+  /** Override delta — deep-merged with persisted config on the server. */
   configOverride?: Record<string, unknown>;
-  modelId?: string;
-  proxyId?: string;
-  /** Version label or dist-tag. */
-  version?: string;
+  /** Per-run model id override. */
+  modelIdOverride?: string;
+  /** Per-run proxy id override. */
+  proxyIdOverride?: string;
+  /** Per-run version label or dist-tag override. */
+  versionOverride?: string;
 }
 
 export interface RunOverridesPanelProps {
@@ -98,31 +100,31 @@ export function RunOverridesPanel({
 
   const setModel = (next: string) => {
     if (next === INHERIT || next === persistedModelId) {
-      const { modelId: _omit, ...rest } = value;
+      const { modelIdOverride: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, modelId: next });
+      onChange({ ...value, modelIdOverride: next });
     }
   };
 
   const setProxy = (next: string) => {
     if (next === INHERIT || next === (persistedProxyId ?? INHERIT)) {
-      const { proxyId: _omit, ...rest } = value;
+      const { proxyIdOverride: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, proxyId: next });
+      onChange({ ...value, proxyIdOverride: next });
     }
   };
 
   const setVersion = (next: string) => {
     if (next === INHERIT || next === (persistedVersion ?? "latest")) {
-      const { version: _omit, ...rest } = value;
+      const { versionOverride: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, version: next });
+      onChange({ ...value, versionOverride: next });
     }
   };
 
@@ -141,9 +143,9 @@ export function RunOverridesPanel({
   const orgDefaultModel = orgModels?.find((m) => m.isDefault && m.enabled);
   const orgDefaultProxy = orgProxies?.find((p) => p.isDefault && p.enabled);
 
-  const modelSelectValue = value.modelId ?? persistedModelId ?? INHERIT;
-  const proxySelectValue = value.proxyId ?? persistedProxyId ?? INHERIT;
-  const versionSelectValue = value.version ?? persistedVersion ?? INHERIT;
+  const modelSelectValue = value.modelIdOverride ?? persistedModelId ?? INHERIT;
+  const proxySelectValue = value.proxyIdOverride ?? persistedProxyId ?? INHERIT;
+  const versionSelectValue = value.versionOverride ?? persistedVersion ?? INHERIT;
 
   return (
     <div className="space-y-4">
