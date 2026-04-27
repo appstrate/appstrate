@@ -62,22 +62,10 @@ export interface RunWatchdogConfig {
   readonly maxFinalizesPerTick: number;
 }
 
-export const DEFAULT_WATCHDOG_CONFIG: RunWatchdogConfig = {
-  // Defaults match `packages/env` so test code that constructs a config
-  // without going through env stays in sync with production behaviour.
-  // See `RUN_*` envs for the rationale (cooperative finalize is the
-  // primary path; this watchdog is the crash-only backstop).
-  intervalSeconds: 15,
-  stallThresholdSeconds: 60,
-  maxFinalizesPerTick: 200,
-};
-
 let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
 
-export async function startRunWatchdog(
-  config: RunWatchdogConfig = DEFAULT_WATCHDOG_CONFIG,
-): Promise<void> {
+export async function startRunWatchdog(config: RunWatchdogConfig): Promise<void> {
   stopped = false;
   logger.info("run watchdog started", {
     intervalSeconds: config.intervalSeconds,
@@ -110,9 +98,7 @@ function scheduleNext(config: RunWatchdogConfig): void {
  * return the number of rows finalized. Exported for tests — production
  * code calls {@link startRunWatchdog} which schedules ticks on a loop.
  */
-export async function runWatchdogTick(
-  config: RunWatchdogConfig = DEFAULT_WATCHDOG_CONFIG,
-): Promise<number> {
+export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number> {
   // Candidate collection is always a SELECT — in PostgreSQL mode we
   // wrap it in a transaction that tries the xact-lock first so
   // concurrent replicas don't duplicate scans. Session-scoped locks
