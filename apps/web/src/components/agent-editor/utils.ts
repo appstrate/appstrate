@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentEditorState, ProviderEntry, ResourceEntry } from "./types";
+import type { AgentEditorState, ResourceEntry } from "./types";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
 import {
@@ -16,6 +16,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { parseManifestProviders, writeManifestProviders } from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -179,40 +180,8 @@ export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
 
-export function getProviderEntries(m: Record<string, unknown>): ProviderEntry[] {
-  const deps = getDeps(m);
-  const providers = (deps.providers ?? {}) as Record<string, string>;
-  const config = (m.providersConfiguration ?? {}) as Record<string, Record<string, unknown>>;
-  return Object.entries(providers).map(([id, version]) => {
-    const cfg = config[id] ?? {};
-    return {
-      id,
-      version: version || "*",
-      scopes: Array.isArray(cfg.scopes) ? (cfg.scopes as string[]) : [],
-    };
-  });
-}
-
-export function setProviderEntries(m: Record<string, unknown>, entries: ProviderEntry[]): void {
-  if (!m.dependencies) m.dependencies = { providers: {} };
-  const deps = m.dependencies as Record<string, unknown>;
-  const providers: Record<string, string> = {};
-  const config: Record<string, Record<string, unknown>> = {};
-  for (const e of entries) {
-    if (!e.id) continue;
-    providers[e.id] = e.version;
-    const cfg: Record<string, unknown> = {};
-    const scopes = e.scopes.filter(Boolean);
-    if (scopes.length > 0) cfg.scopes = scopes;
-    if (Object.keys(cfg).length > 0) config[e.id] = cfg;
-  }
-  deps.providers = providers;
-  if (Object.keys(config).length > 0) {
-    m.providersConfiguration = config;
-  } else {
-    delete m.providersConfiguration;
-  }
-}
+export const getProviderEntries = parseManifestProviders;
+export const setProviderEntries = writeManifestProviders;
 
 export function getResourceEntries(
   m: Record<string, unknown>,

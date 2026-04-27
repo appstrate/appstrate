@@ -5,6 +5,7 @@ import type { AgentProviderRequirement } from "../types/index.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { parseManifestProviders } from "@appstrate/core/dependencies";
 
 /** Narrow a JSONB-stored manifest column (`unknown`) to the typed shape. */
 export function parseDraftManifest(value: unknown): Partial<Manifest> {
@@ -26,16 +27,9 @@ export function extractDepsFromManifest(manifest: Partial<Manifest>) {
 
 /** Merge dependencies.providers + providersConfiguration into AgentProviderRequirement[]. */
 export function resolveManifestProviders(manifest: Partial<Manifest>): AgentProviderRequirement[] {
-  const dependencies = asRecord(manifest.dependencies);
-  const providersRecord = asRecord(dependencies.providers) as Record<string, string>;
-  const config = asRecord((manifest as Record<string, unknown>).providersConfiguration) as Record<
-    string,
-    { scopes?: string[] }
-  >;
-
-  return Object.entries(providersRecord).map(([providerId, _version]) => ({
-    id: providerId,
-    scopes: config[providerId]?.scopes,
+  return parseManifestProviders(manifest as Record<string, unknown>).map(({ id, scopes }) => ({
+    id,
+    scopes: scopes.length > 0 ? scopes : undefined,
   }));
 }
 

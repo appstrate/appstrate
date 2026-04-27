@@ -6,7 +6,7 @@ import { Badge as UIBadge } from "@/components/ui/badge";
 import { ProviderConnectionCard } from "./provider-connection-card";
 import { useAppProfileBindings } from "../hooks/use-connection-profiles";
 
-export interface ProviderEntry {
+export interface RequiredProviderEntry {
   id: string;
   scopesRequired?: string[];
   scopesMissing?: string[];
@@ -18,7 +18,7 @@ interface AppProfileProvidersBlockProps {
   /** App profile display name */
   appProfileName: string;
   /** Providers to display — either simple IDs or rich entries with scope info */
-  providers: string[] | ProviderEntry[];
+  providers: string[] | RequiredProviderEntry[];
   /** Agent package ID (enables per-provider profile overrides) */
   packageId?: string;
 }
@@ -38,10 +38,10 @@ export function AppProfileProvidersBlock({
 
   if (providers.length === 0) return null;
 
-  const entries: ProviderEntry[] =
+  const entries: RequiredProviderEntry[] =
     typeof providers[0] === "string"
       ? (providers as string[]).map((id) => ({ id }))
-      : (providers as ProviderEntry[]);
+      : (providers as RequiredProviderEntry[]);
 
   const hasUnboundProviders =
     bindings !== undefined &&
