@@ -62,6 +62,7 @@ import {
   runDualInstallCheck,
   shouldSkipDualInstallCheck,
 } from "./lib/dual-install-check.ts";
+import { installSignalHandlers, onShutdown } from "./lib/shutdown.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -71,8 +72,15 @@ import { CLI_VERSION } from "./lib/version.ts";
 // is open (crash, SIGINT, the Bun macOS keypress regression in #199)
 // the terminal is left unusable and only `reset` fixes it. Registering
 // a cooked-mode restore on every exit path is cheap and catches the
-// edge cases clack's own cleanup misses. Must be registered BEFORE the
-// error handlers below so a synchronous crash in startup still runs it.
+// edge cases clack's own cleanup misses.
+//
+// Wired through both `process.on("exit", …)` (covers normal completion
+// + sync crashes routed through `exitWithError`) and the shutdown
+// coordinator (covers signal-driven exits, where the coordinator awaits
+// hooks before calling `process.exit`). The coordinator route is what
+// lets subcommands like `appstrate run` complete their cooperative
+// cancellation (AbortController flip + safety-net finalize POST +
+// workspace teardown) before the process dies.
 const restoreCookedMode = (): void => {
   try {
     if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
@@ -86,18 +94,8 @@ const restoreCookedMode = (): void => {
   }
 };
 process.on("exit", restoreCookedMode);
-process.on("SIGINT", () => {
-  restoreCookedMode();
-  process.exit(130);
-});
-process.on("SIGTERM", () => {
-  restoreCookedMode();
-  process.exit(143);
-});
-process.on("SIGHUP", () => {
-  restoreCookedMode();
-  process.exit(129);
-});
+onShutdown(restoreCookedMode);
+installSignalHandlers();
 
 /**
  * Commander's idiomatic "collect repeated option into array" — needed

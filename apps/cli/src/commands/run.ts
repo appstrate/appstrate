@@ -81,6 +81,7 @@ import {
 import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
 import { validateConfig } from "@appstrate/core/schema-validation";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { onShutdown, shutdownSignal } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -382,26 +383,26 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
-  // SIGINT (Ctrl-C) and SIGTERM (docker stop / kubectl delete / supervisor kill)
-  // both cancel the run cooperatively. The handlers only flip the
-  // AbortController — the actual notification to the platform is sent
-  // from the `finally` below as an explicit finalize POST, so the
-  // server stops the run immediately instead of waiting for the
-  // heartbeat watchdog (~60s).
-  const controller = new AbortController();
-  const onCancel = (signalName: string) => () => {
-    if (!opts.json) process.stderr.write(`\n${signalName} cancelling...\n`);
-    controller.abort(new Error(`user cancelled (${signalName})`));
-  };
-  const onSigint = onCancel("^C");
-  const onSigterm = onCancel("SIGTERM");
-  process.on("SIGINT", onSigint);
-  process.on("SIGTERM", onSigterm);
+  // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
+  // and exposes a single AbortSignal we pass to the runner. Cleanup
+  // (heartbeat stop, safety-net finalize POST, workspace teardown) is
+  // factored into one idempotent function and registered as a shutdown
+  // hook AND awaited from the `finally` below. The coordinator awaits
+  // the hook before exiting, so the platform sees an explicit
+  // `cancelled` finalize instead of waiting on the heartbeat watchdog
+  // (~60s). On the success / non-signal-error path the `finally` runs
+  // the same cleanup; the idempotency guard makes both paths safe.
+  if (!opts.json) {
+    const onAbort = (): void => {
+      process.stderr.write(`\nshutdown received, cancelling run...\n`);
+    };
+    shutdownSignal.addEventListener("abort", onAbort, { once: true });
+  }
 
   // ─── 9. Run ───────────────────────────────────────────────────────
   const consoleSink = createConsoleSink({ json: opts.json, outputPath: opts.output });
   // Track whether finalize was already sent to the HttpSink so the
-  // CLI's safety-net finalize in the `finally` doesn't double-post.
+  // CLI's safety-net finalize in the cleanup doesn't double-post.
   // PiRunner finalises itself on success and on non-abort errors, but
   // explicitly does NOT on cancellation — and any throw during setup
   // (provider extension build, runtime-ready emit, …) bypasses
@@ -417,6 +418,62 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       : "";
     process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
   }
+
+  // Heartbeat is lifted out of the `try` so the cleanup hook can stop
+  // it whether or not the runner ever started. The shutdown coordinator
+  // can fire during setup (between here and `runner.run`).
+  let heartbeat: SinkHeartbeatHandle | null = null;
+
+  let cleanupPromise: Promise<void> | null = null;
+  const runCleanup = (): Promise<void> => {
+    // Idempotency: both the shutdown coordinator (on signal) and the
+    // outer `finally` (on completion / error) call this. Returning the
+    // same promise to both keeps each call site awaiting the real work,
+    // even when they overlap.
+    if (cleanupPromise !== null) return cleanupPromise;
+    cleanupPromise = (async (): Promise<void> => {
+      heartbeat?.stop();
+      // Safety-net finalize: notify the platform immediately on cancel
+      // or setup-time failure. Cheap (single signed POST), idempotent
+      // (server CAS on `sink_closed_at IS NULL`), and turns a 60-second
+      // watchdog wait into an instant transition. Best-effort — if it
+      // fails, the watchdog still backs us up.
+      //
+      // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS` because HttpSink
+      // retries 4× with exponential backoff and Bun's `fetch` has no
+      // default timeout — an unreachable platform would otherwise hang
+      // the CLI for tens of seconds after Ctrl-C. The coordinator's
+      // own 10-s ceiling is the outer bound; this 5-s cap leaves
+      // headroom for the filesystem teardown that follows.
+      if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
+        const aborted = shutdownSignal.aborted;
+        const result: RunResult = emptyRunResult();
+        result.status = aborted ? "cancelled" : "failed";
+        result.error = {
+          message: aborted
+            ? "Runner cancelled by user (CLI received signal)."
+            : "Runner exited before completion (CLI bootstrap or teardown error).",
+        };
+        await raceFinalizeAgainstTimeout(
+          reportSession.httpSink.finalize(result),
+          SAFETY_NET_FINALIZE_TIMEOUT_MS,
+        ).catch((err) => {
+          if (!opts.json) {
+            process.stderr.write(
+              `warn: finalize on cancel failed: ${err instanceof Error ? err.message : String(err)}\n`,
+            );
+          }
+        });
+      }
+      restoreOutputSchema();
+      await prepared.cleanup().catch(() => {});
+      await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+    })();
+    return cleanupPromise;
+  };
+
+  const unregisterCleanup = onShutdown(runCleanup);
+
   try {
     const runner = new PiRunner({
       model,
@@ -457,7 +514,6 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     // watchdog sweeps rows whose heartbeat slipped past the threshold
     // and finalises them as `failed`. A local-only CLI run (no
     // reportSession) has no platform to talk to — skip.
-    let heartbeat: SinkHeartbeatHandle | null = null;
     if (reportSession) {
       heartbeat = startSinkHeartbeat({
         url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
@@ -472,61 +528,40 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       });
     }
 
-    try {
-      await runner.run({
-        bundle,
-        context,
-        providerResolver,
-        eventSink: sink,
-        signal: controller.signal,
-      });
-    } finally {
-      heartbeat?.stop();
-    }
+    await runner.run({
+      bundle,
+      context,
+      providerResolver,
+      eventSink: sink,
+      signal: shutdownSignal,
+    });
   } finally {
-    process.removeListener("SIGINT", onSigint);
-    process.removeListener("SIGTERM", onSigterm);
-    // Safety-net finalize: notify the platform immediately on cancel
-    // or setup-time failure. Cheap (single signed POST), idempotent
-    // (server CAS on `sink_closed_at IS NULL`), and turns a 60-second
-    // watchdog wait into an instant transition. Best-effort — if it
-    // fails, the watchdog still backs us up.
-    //
-    // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS` because HttpSink
-    // retries 4× with exponential backoff and Bun's `fetch` has no
-    // default timeout — an unreachable platform would otherwise hang
-    // the CLI for tens of seconds after Ctrl-C, exactly the UX problem
-    // this whole change is trying to eliminate. Industry guidance for
-    // graceful-shutdown cleanup is 5–10s; we sit at 5s and rely on the
-    // watchdog (60s by default) for the abandoned cases.
-    if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
-      const aborted = controller.signal.aborted;
-      const result: RunResult = emptyRunResult();
-      result.status = aborted ? "cancelled" : "failed";
-      result.error = {
-        message: aborted
-          ? "Runner cancelled by user (CLI received signal)."
-          : "Runner exited before completion (CLI bootstrap or teardown error).",
-      };
-      await raceFinalizeAgainstTimeout(
-        reportSession.httpSink.finalize(result),
-        SAFETY_NET_FINALIZE_TIMEOUT_MS,
-      ).catch((err) => {
-        if (!opts.json) {
-          process.stderr.write(
-            `warn: finalize on cancel failed: ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-      });
-    }
-    restoreOutputSchema();
-    await prepared.cleanup().catch(() => {});
-    await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+    unregisterCleanup();
+    // Swallow cleanup failures: every async op inside `runCleanup` has
+    // its own `.catch`, so the only way the IIFE rejects is a sync throw
+    // from `heartbeat?.stop()` or `restoreOutputSchema()`. If that
+    // happens on the signal path, propagating the rejection would race
+    // with — and beat, since commander's path has fewer microtask hops —
+    // the coordinator's `process.exit(130)`, silently turning a user
+    // cancel into exit 1. Surface the failure on stderr instead so it
+    // remains visible, but don't compete for the exit code.
+    await runCleanup().catch((err) => {
+      if (!opts.json) {
+        process.stderr.write(
+          `warn: cleanup failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    });
   }
 
-  if (controller.signal.aborted) {
-    process.exit(130);
-  }
+  // Defense in depth: the coordinator owns the exit on the signal path
+  // (it awaits `runCleanup` via the registered hook, then calls
+  // `process.exit(130)`), and a microtask analysis says its exit fires
+  // before node's natural exit. But that ordering is fragile — a future
+  // change inside `coordinator.trigger` that adds an extra `await` could
+  // flip the race. This guard is a no-op if the coordinator already
+  // exited, and a backstop if it hasn't.
+  if (shutdownSignal.aborted) process.exit(130);
 }
 
 /**
