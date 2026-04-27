@@ -394,18 +394,15 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
       );
     });
 
-    const res = await app.request(
-      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
-      {
-        method: "POST",
-        headers: authHeaders(h),
-        body: JSON.stringify({
-          model: h.presetId,
-          messages: [{ role: "user", content: "salut" }],
-          temperature: 0.5,
-        }),
-      },
-    );
+    const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "salut" }],
+        temperature: 0.5,
+      }),
+    });
 
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
@@ -415,6 +412,11 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
     expect(forwardedBody.model).toBe("mistral-large-latest");
     expect(forwardedBody.temperature).toBe(0.5);
 
+    // The proxy fires `recordUsage` as a void promise after returning the
+    // response (see core.ts:154) — same as the OpenAI/Anthropic paths.
+    // Give the async insert a tick to land before reading the ledger,
+    // otherwise this test races the DB write.
+    await new Promise((r) => setTimeout(r, 50));
     const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(row).toBeDefined();
     expect(row!.api).toBe("mistral-conversations");
@@ -424,17 +426,14 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
   it("returns 400 when the preset uses a different protocol family", async () => {
     const h = await buildHarness({ api: "openai-completions" });
-    const res = await app.request(
-      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
-      {
-        method: "POST",
-        headers: authHeaders(h),
-        body: JSON.stringify({
-          model: h.presetId,
-          messages: [{ role: "user", content: "hi" }],
-        }),
-      },
-    );
+    const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
     expect(res.status).toBe(400);
   });
 });

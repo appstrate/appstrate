@@ -176,7 +176,14 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
 
     const integrityHeader = res.headers.get("X-Bundle-Integrity");
     expect(integrityHeader).not.toBeNull();
-    expect(bundle.integrity).toBe(integrityHeader!);
+    // `X-Bundle-Integrity` is the SHA256 of the *wire bytes* — used by
+    // clients to detect transport-level corruption against the bytes they
+    // just received. The in-archive `bundle.integrity` field is a
+    // different AFPS-spec contract (canonical packages-map JSON SRI) and
+    // intentionally does NOT equal the zip-bytes SHA — see the route
+    // comment in `routes/agents.ts`. The contract under test here is the
+    // header-vs-bytes invariant.
+    expect(integrityHeader).toBe(computeIntegrity(bytes));
   });
 
   it("returns byte-identical bodies on two consecutive calls (determinism)", async () => {
