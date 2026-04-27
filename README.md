@@ -343,9 +343,9 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `REMOTE_RUN_SINK_MAX_TTL_SECONDS`     | No       | `86400`                                       | Hard ceiling on caller-requested sink TTL                                                             |
 | `REMOTE_RUN_REPLAY_WINDOW_SECONDS`    | No       | `600`                                         | Redis dedup window for webhook-id replay detection                                                    |
 | `REMOTE_RUN_BUFFER_FLUSH_MS`          | No       | `5000`                                        | Out-of-order event buffer flush window (terminal events flush immediately)                            |
-| `RUN_HEARTBEAT_INTERVAL_SECONDS`      | No       | `30`                                          | Runner-side heartbeat cadence                                                                         |
-| `RUN_STALL_THRESHOLD_SECONDS`         | No       | `120`                                         | Watchdog stall threshold (rule of thumb: ≥ 3 × heartbeat interval)                                    |
-| `RUN_WATCHDOG_INTERVAL_SECONDS`       | No       | `30`                                          | Watchdog sweep interval                                                                               |
+| `RUN_HEARTBEAT_INTERVAL_SECONDS`      | No       | `15`                                          | Runner-side heartbeat cadence                                                                         |
+| `RUN_STALL_THRESHOLD_SECONDS`         | No       | `60`                                          | Watchdog stall threshold (rule of thumb: ≥ 3 × heartbeat interval) — backstop for hard runner crashes |
+| `RUN_WATCHDOG_INTERVAL_SECONDS`       | No       | `15`                                          | Watchdog sweep interval                                                                               |
 
 ## Development
 

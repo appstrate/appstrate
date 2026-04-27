@@ -36,7 +36,7 @@ export interface StartSinkHeartbeatOptions {
   readonly url: string;
   /** Raw run secret used by HttpSink. The only cross-call shared secret. */
   readonly runSecret: string;
-  /** Interval in milliseconds (default 30_000 — 30s). */
+  /** Interval in milliseconds (default 15_000 — 15s, matches `RUN_HEARTBEAT_INTERVAL_SECONDS`). */
   readonly intervalMs?: number;
   /** Jitter fraction applied symmetrically (default 0.15 — ±15%). */
   readonly jitter?: number;
@@ -89,7 +89,7 @@ export interface SinkHeartbeatHandle {
  * sub-heartbeat-interval run completes cleanly without ever pinging.
  */
 export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbeatHandle {
-  const intervalMs = opts.intervalMs ?? 30_000;
+  const intervalMs = opts.intervalMs ?? 15_000;
   const jitter = opts.jitter ?? 0.15;
   const fetchImpl = opts.fetch ?? fetch;
   const now = opts.now ?? Date.now;

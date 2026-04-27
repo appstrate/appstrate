@@ -10,6 +10,9 @@
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
 
+import * as fsPromises from "node:fs/promises";
+import * as nodePath from "node:path";
+
 import { z } from "zod";
 import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
@@ -105,25 +108,64 @@ const fromBytesBodySchema = z.object({
   encoding: z.literal("base64"),
 });
 
-const multipartTextPartSchema = z.object({
-  name: z.string(),
-  value: z.string(),
+// Multipart part header fields (`name`, `filename`, `contentType`) are
+// emitted verbatim into the part headers (`Content-Disposition`,
+// `Content-Type`). A CR, LF, or NUL byte in any of them would let a
+// caller inject arbitrary headers — or split the multipart envelope —
+// from purely text input. Reject these eagerly at the schema layer so
+// the transport never has to think about it.
+const headerSafeString = z.string().refine((s) => !/[\r\n\0]/.test(s), {
+  message: "Must not contain CR, LF, or NUL characters",
 });
 
-const multipartFilePartSchema = z.object({
-  name: z.string(),
-  fromFile: z.string().describe("Workspace-relative path to a file"),
-  filename: z.string().optional(),
-  contentType: z.string().optional(),
-});
+const multipartTextPartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    value: z.string().describe("UTF-8 string value for this field"),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part (e.g. `application/json; charset=UTF-8`). " +
+          "When omitted, FormData defaults to `text/plain` with no explicit part header. " +
+          "Required for upload patterns where the server inspects per-part Content-Type, " +
+          "such as Google Drive's multipart resumable upload metadata part.",
+      ),
+  })
+  .strict();
 
-const multipartBytesPartSchema = z.object({
-  name: z.string(),
-  fromBytes: z.string().describe("Base64-encoded part bytes (standard RFC 4648 §4 only)"),
-  encoding: z.literal("base64"),
-  filename: z.string().optional(),
-  contentType: z.string().optional(),
-});
+const multipartFilePartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    fromFile: z.string().describe("Workspace-relative path to a file"),
+    filename: headerSafeString
+      .optional()
+      .describe(
+        "Optional override for the `filename` attribute in `Content-Disposition`. " +
+          "Defaults to the basename of `fromFile`.",
+      ),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part. Defaults to `application/octet-stream`.",
+      ),
+  })
+  .strict();
+
+const multipartBytesPartSchema = z
+  .object({
+    name: headerSafeString.describe("Form field name"),
+    fromBytes: z.string().describe("Base64-encoded part bytes (standard RFC 4648 §4 only)"),
+    encoding: z.literal("base64"),
+    filename: headerSafeString
+      .optional()
+      .describe("Optional `filename` attribute for `Content-Disposition`."),
+    contentType: headerSafeString
+      .optional()
+      .describe(
+        "Optional `Content-Type` header for this part. Defaults to `application/octet-stream`.",
+      ),
+  })
+  .strict();
 
 const multipartPartSchema = z.union([
   multipartTextPartSchema,
@@ -553,11 +595,123 @@ function providerToolName(providerId: string): string {
 }
 
 /**
- * Resolve a workspace-relative path under {@link workspace}, refusing
- * absolute paths, parent-traversal, and symlinks whose target escapes
- * the workspace. Throws {@link ResolverError} with
- * `RESOLVER_PATH_OUTSIDE_WORKSPACE` (or `RESOLVER_PATH_INVALID`) on
- * violation.
+ * Absolute roots beyond the workspace under which `{ fromFile }` and
+ * `responseMode.toFile` paths are permitted to resolve. The workspace
+ * itself is always the primary root; this list adds container-private
+ * scratch directories the agent can legitimately write to before
+ * uploading.
+ *
+ * `/tmp` is included because every agent that writes a file then
+ * uploads it via `provider_call` defaults to `/tmp/output.xlsx` (Python
+ * `tempfile`, bash `mktemp`, …). The agent container is isolated
+ * (per-run, no host bind-mount) and the sidecar — which performs the
+ * actual upstream call — has no workspace mount, so the file is read
+ * locally by the resolver running inside the agent. There is no
+ * exfiltration path beyond what the workspace itself already exposes.
+ */
+const ABSOLUTE_ALLOWED_ROOTS: readonly string[] = ["/tmp"];
+
+/**
+ * Realpath `p`, falling back to its lexical absolute form if the path
+ * doesn't exist. Used to canonicalize the allowed roots once at the
+ * start of every {@link resolveSafePath} call.
+ */
+async function realpathOrAbs(p: string): Promise<string> {
+  const abs = nodePath.resolve(p);
+  try {
+    return await fsPromises.realpath(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * Canonicalize the workspace and {@link ABSOLUTE_ALLOWED_ROOTS} into a
+ * deduplicated list of realpaths. The workspace is always position 0 —
+ * relative paths resolve under it.
+ *
+ * Realpath is required because on macOS `/tmp` is a symlink to
+ * `/private/tmp`; a lexical-only comparison would treat resolved
+ * descendants (which come back through realpath) as outside the root.
+ */
+async function getAllowedRoots(workspace: string): Promise<readonly string[]> {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of [workspace, ...ABSOLUTE_ALLOWED_ROOTS]) {
+    const real = await realpathOrAbs(r);
+    if (!seen.has(real)) {
+      seen.add(real);
+      out.push(real);
+    }
+  }
+  return out;
+}
+
+function isUnderAnyRoot(candidate: string, roots: readonly string[]): boolean {
+  return roots.some((root) => {
+    if (candidate === root) return true;
+    const withSep = root.endsWith(nodePath.sep) ? root : root + nodePath.sep;
+    return candidate.startsWith(withSep);
+  });
+}
+
+/**
+ * Canonicalize an input path. Existing paths are realpathed end-to-end
+ * (so symlinks land at their true target); for non-existent paths the
+ * closest existing ancestor is realpathed and the unresolved suffix is
+ * reattached, so write-targets get the same canonical treatment.
+ *
+ * Authorization is decided by {@link isUnderAnyRoot} on the returned
+ * value; symlink-aware diagnostics are computed at the call site by
+ * comparing the result to the lexical candidate.
+ */
+async function canonicalizePath(candidate: string): Promise<string> {
+  try {
+    return await fsPromises.realpath(candidate);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code !== "ENOENT") throw err;
+  }
+  // Walk up to the closest existing ancestor, realpath it, reattach
+  // the unresolved suffix. `path.resolve` has already collapsed `..`
+  // segments in the candidate, so the lexical form is canonical for
+  // ancestors that don't exist either.
+  let cursor = candidate;
+  let suffix = "";
+  while (true) {
+    const parent = nodePath.dirname(cursor);
+    if (parent === cursor) return candidate; // fully synthetic chain
+    suffix = nodePath.join(nodePath.basename(cursor), suffix);
+    cursor = parent;
+    try {
+      const realParent = await fsPromises.realpath(cursor);
+      return nodePath.join(realParent, suffix);
+    } catch (innerErr) {
+      const ie = innerErr as NodeJS.ErrnoException;
+      if (ie.code === "ENOENT") continue;
+      throw innerErr;
+    }
+  }
+}
+
+/**
+ * Resolve a path safely under one of the allowed roots — primarily the
+ * workspace, secondarily the container-private scratch dirs declared in
+ * {@link ABSOLUTE_ALLOWED_ROOTS} (currently `/tmp`).
+ *
+ * Behavior:
+ *  - Relative paths (e.g. `"output.xlsx"`) resolve under the workspace.
+ *  - Absolute paths (e.g. `"/tmp/output.xlsx"`) are accepted only if
+ *    they canonicalize under one of the allowed roots.
+ *  - Parent-traversal (`"../etc/passwd"`) is rejected: `path.resolve`
+ *    collapses `..` segments and the result trips the root check.
+ *  - Symlink escape (a path that exists but realpath-s outside every
+ *    allowed root) is rejected.
+ *
+ * Throws {@link ResolverError} with `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS`
+ * (or `RESOLVER_PATH_INVALID`) on violation. The error message names
+ * the offending path, the resolved canonical path, and the allowed
+ * roots so the agent can self-correct without trial and error.
  *
  * Used by both the request-body `{ fromFile }` resolver and the
  * response-body `responseMode.toFile` writer.
@@ -570,108 +724,66 @@ export async function resolveSafePath(workspace: string, relative: string): Prom
       { workspace, relative },
     );
   }
-  const path = await import("node:path");
-  if (path.isAbsolute(relative)) {
+  const roots = await getAllowedRoots(workspace);
+  const wsRoot = roots[0]!;
+  const candidate = nodePath.isAbsolute(relative)
+    ? nodePath.resolve(relative)
+    : nodePath.resolve(wsRoot, relative);
+  const canonical = await canonicalizePath(candidate);
+  if (!isUnderAnyRoot(canonical, roots)) {
+    const viaSymlink = canonical !== candidate;
     throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `resolveSafePath: absolute paths are not allowed (got ${JSON.stringify(relative)})`,
-      { workspace, relative },
+      "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
+      formatOutsideRootsError(relative, canonical, roots, viaSymlink),
+      { workspace, relative, resolved: canonical, allowedRoots: roots, viaSymlink },
     );
   }
-  const fs = await import("node:fs/promises");
-  // Canonicalize the workspace too — on macOS `/tmp` is a symlink to
-  // `/private/tmp`, so a lexical-only check would treat resolved paths
-  // (which come back through realpath) as outside the workspace.
-  let wsAbs: string;
-  try {
-    wsAbs = await fs.realpath(path.resolve(workspace));
-  } catch {
-    wsAbs = path.resolve(workspace);
-  }
-  const candidate = path.resolve(wsAbs, relative);
-  const wsWithSep = wsAbs.endsWith(path.sep) ? wsAbs : wsAbs + path.sep;
-  if (candidate !== wsAbs && !candidate.startsWith(wsWithSep)) {
-    throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `resolveSafePath: ${JSON.stringify(relative)} resolves outside the workspace`,
-      { workspace, relative, resolved: candidate },
-    );
-  }
-  // If the candidate exists and is a symlink (or descends through one),
-  // realpath it and re-check. This guards against symlink escape after
-  // the lexical check.
-  try {
-    const real = await fs.realpath(candidate);
-    if (real !== wsAbs && !real.startsWith(wsWithSep)) {
-      throw new ResolverError(
-        "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-        `resolveSafePath: ${JSON.stringify(relative)} resolves to a symlink target outside the workspace`,
-        { workspace, relative, resolved: real },
-      );
-    }
-    return real;
-  } catch (err) {
-    if (err instanceof ResolverError) throw err;
-    // ENOENT is fine — caller may be writing a new file. Walk up the
-    // directory chain looking for the closest existing ancestor and
-    // realpath that, then verify the still-lexical descendant remains
-    // under the workspace.
-    const e = err as NodeJS.ErrnoException;
-    if (e.code === "ENOENT") {
-      let cursor = candidate;
-      let suffix = "";
-      while (true) {
-        const parent = path.dirname(cursor);
-        if (parent === cursor) break; // reached root
-        suffix = path.join(path.basename(cursor), suffix);
-        cursor = parent;
-        try {
-          const realParent = await fs.realpath(cursor);
-          if (realParent !== wsAbs && !realParent.startsWith(wsWithSep)) {
-            throw new ResolverError(
-              "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-              `resolveSafePath: ${JSON.stringify(relative)} resolves outside the workspace via ${realParent}`,
-              { workspace, relative, resolved: realParent },
-            );
-          }
-          return path.join(realParent, suffix);
-        } catch (innerErr) {
-          if (innerErr instanceof ResolverError) throw innerErr;
-          const ie = innerErr as NodeJS.ErrnoException;
-          if (ie.code === "ENOENT") continue; // walk further up
-          throw innerErr;
-        }
-      }
-      // Reached root without finding any existing ancestor — fall
-      // through to the lexical candidate (already validated).
-      return candidate;
-    }
-    throw err;
-  }
+  return canonical;
+}
+
+function formatOutsideRootsError(
+  relative: string,
+  resolved: string,
+  roots: readonly string[],
+  viaSymlink: boolean,
+): string {
+  const extraRoots = roots.slice(1).join(", ");
+  const suffix = extraRoots ? ` or an absolute path under ${extraRoots}` : "";
+  // Generic "path" rather than "fromFile" — this same resolver gates
+  // `{ fromFile }` uploads, `responseMode.toFile` writes, and multipart
+  // file parts. The structured `details` payload carries the call-site
+  // context for callers that need to distinguish.
+  return (
+    `path ${viaSymlink ? "resolves through a symlink to a target" : "resolved"} outside the allowed roots.\n` +
+    `  got:      ${JSON.stringify(relative)}\n` +
+    `  resolved: ${resolved}\n` +
+    `  allowed:  ${roots.join(", ")}\n` +
+    `  hint:     pass a workspace-relative path (e.g. "output.xlsx")${suffix}.`
+  );
 }
 
 /**
- * Resolve a workspace-relative OUTPUT path safely. Delegates workspace
- * rooting and traversal checks to {@link resolveSafePath}. Additionally
- * refuses to write through a pre-existing symlink at the destination —
- * guards against an attacker pre-placing a symlink to redirect writes
- * outside the workspace.
+ * Resolve an OUTPUT path safely. Delegates root-membership and
+ * traversal checks to {@link resolveSafePath}, then refuses to write
+ * through a pre-existing symlink at the destination — guards against an
+ * attacker pre-placing a symlink to redirect writes outside the
+ * destination dir.
  *
- * For a path that does not yet exist, the parent directory is checked.
  * ENOENT on the file itself is fine (we are creating it); any other
- * error is re-thrown.
+ * lstat error is re-thrown.
  *
- * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` on
- * traversal or symlink violation.
+ * Throws {@link ResolverError} with `RESOLVER_PATH_SYMLINK_REFUSED` for
+ * the symlink case, or `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS` /
+ * `RESOLVER_PATH_INVALID` for root violations propagated from
+ * {@link resolveSafePath}.
  */
 async function resolveSafeOutputPath(workspace: string, rel: string): Promise<string> {
   const absPath = await resolveSafePath(workspace, rel);
-  const fs = await import("node:fs/promises");
   try {
-    const stat = await fs.lstat(absPath);
+    const stat = await fsPromises.lstat(absPath);
     if (stat.isSymbolicLink()) {
       throw new ResolverError(
-        "RESOLVER_PATH_OUTSIDE_WORKSPACE",
+        "RESOLVER_PATH_SYMLINK_REFUSED",
         `Refusing to write through symlink: ${rel}`,
         { workspace, rel, resolved: absPath },
       );
@@ -686,30 +798,31 @@ async function resolveSafeOutputPath(workspace: string, rel: string): Promise<st
 }
 
 /**
- * Resolve and stat a workspace-relative path in a single step, refusing
- * symlinks at the final path (in addition to the traversal check
- * performed by {@link resolveSafePath}).
+ * Resolve and stat a path in a single step, refusing symlinks at the
+ * final path (in addition to the root-membership check performed by
+ * {@link resolveSafePath}).
  *
- * Using a single helper eliminates the TOCTOU window that would exist if
- * callers independently called `resolveSafePath` then `lstat` — the stat
- * here is of the same resolved path returned by the function.
+ * Using a single helper eliminates the TOCTOU window that would exist
+ * if callers independently called `resolveSafePath` then `lstat` — the
+ * stat here is of the same resolved path returned by the function.
  *
- * Throws {@link ResolverError} `RESOLVER_PATH_OUTSIDE_WORKSPACE` when
- * the path is a symlink or escapes the workspace.
+ * Throws {@link ResolverError} with `RESOLVER_PATH_SYMLINK_REFUSED` for
+ * the symlink case, or `RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS` /
+ * `RESOLVER_PATH_INVALID` for root violations propagated from
+ * {@link resolveSafePath}.
  */
 export async function resolveSafeFile(
   workspace: string,
   rel: string,
 ): Promise<{ absPath: string; stat: import("node:fs").Stats }> {
   const absPath = await resolveSafePath(workspace, rel);
-  const fs = await import("node:fs/promises");
-  const stat = await fs.lstat(absPath);
+  const stat = await fsPromises.lstat(absPath);
   if (stat.isSymbolicLink()) {
-    throw new ResolverError(
-      "RESOLVER_PATH_OUTSIDE_WORKSPACE",
-      `Refusing to follow symlink: ${rel}`,
-      { workspace, rel, resolved: absPath },
-    );
+    throw new ResolverError("RESOLVER_PATH_SYMLINK_REFUSED", `Refusing to follow symlink: ${rel}`, {
+      workspace,
+      rel,
+      resolved: absPath,
+    });
   }
   return { absPath, stat };
 }
@@ -791,8 +904,16 @@ async function buildMultipartBytes(
   for (const part of parts) {
     if ("value" in part) {
       // Plain text field — byte-count via Buffer.byteLength so multi-byte
-      // Unicode characters (emoji, CJK, …) are counted correctly.
-      fd.append(part.name, part.value);
+      // Unicode characters (emoji, CJK, …) are counted correctly. When the
+      // caller supplies an explicit contentType (e.g. JSON metadata for
+      // Drive resumable upload), wrap the value in a Blob so FormData
+      // emits the correct `Content-Type` part header instead of defaulting
+      // to `text/plain`.
+      if (part.contentType) {
+        fd.append(part.name, new Blob([part.value], { type: part.contentType }));
+      } else {
+        fd.append(part.name, part.value);
+      }
       totalSize += Buffer.byteLength(part.value, "utf8");
     } else if ("fromFile" in part) {
       // Workspace file reference.
