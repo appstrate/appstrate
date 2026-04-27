@@ -183,11 +183,19 @@ jobs:
             src/cli.ts \
             --outfile=${{ matrix.asset }}
 
-      - name: Smoke-test binary (--help + --version)
+      - name: Smoke-test binary (--help + --version) in clean dir
         working-directory: apps/cli
         run: |
-          ./${{ matrix.asset }} --help
-          REPORTED=$(./${{ matrix.asset }} --version)
+          # MUST run from a directory with no sibling package.json — otherwise
+          # bugs in transitive deps that resolve `dirname(process.execPath)/package.json`
+          # at module top-level (e.g. `@mariozechner/pi-coding-agent`) are masked
+          # by `apps/cli/package.json` and only crash on the user's machine.
+          # See `apps/cli/src/lib/pi-binary-shim.ts` for the post-mortem.
+          TMP="$(mktemp -d)"
+          cp "./${{ matrix.asset }}" "$TMP/appstrate"
+          "$TMP/appstrate" --help
+          REPORTED=$("$TMP/appstrate" --version)
+          rm -rf "$TMP"
           EXPECTED="${GITHUB_REF_NAME#v}"
           echo "Binary reports: $REPORTED / expected: $EXPECTED"
           if [ "$REPORTED" != "$EXPECTED" ]; then

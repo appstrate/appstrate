@@ -25,6 +25,11 @@
  * with user-actionable text rather than raw stack traces.
  */
 
+// MUST be the first import — sets PI_PACKAGE_DIR before any module that
+// transitively loads `@mariozechner/pi-coding-agent` runs its top-level
+// `JSON.parse(readFileSync(...package.json...))`. Without this, the
+// curl-installed standalone binary crashes at startup with ENOENT.
+import "./lib/pi-binary-shim.ts";
 import { Command, InvalidArgumentError } from "commander";
 import { installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
