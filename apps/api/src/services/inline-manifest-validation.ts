@@ -22,7 +22,7 @@
 
 import { validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { extractDepsFromManifest } from "./../lib/manifest-utils.ts";
 import type { InlineRunLimits } from "./run-limits.ts";
 

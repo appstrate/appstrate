@@ -6,7 +6,7 @@ import { packages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractDepsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./application-packages.ts";

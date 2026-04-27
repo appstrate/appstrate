@@ -22,7 +22,7 @@ import {
   hasPackageAccess,
 } from "../services/application-packages.ts";
 import { getPackage } from "../services/agent-service.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";

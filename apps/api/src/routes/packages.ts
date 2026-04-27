@@ -57,7 +57,7 @@ import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../midd
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";

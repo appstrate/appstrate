@@ -10,7 +10,7 @@ import { db } from "@appstrate/db/client";
 import { applicationPackages, packages, applications, packageVersions } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { parseDraftManifest, extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";

@@ -15,7 +15,7 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
-import { asRecordOrNull } from "../lib/safe-json.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./agent-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {

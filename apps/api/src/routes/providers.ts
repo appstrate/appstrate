@@ -28,7 +28,7 @@ import {
 import { getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import {
   getProvider,
   getAppProviderCredentials,

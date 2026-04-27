@@ -6,7 +6,7 @@ import { db } from "@appstrate/db/client";
 import { packages, applicationPackages, applications } from "@appstrate/db/schema";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import type { AppEnv } from "../types/index.ts";
 
 export function createLibraryRouter() {

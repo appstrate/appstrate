@@ -9,7 +9,7 @@ import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
-import { asRecord } from "../../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,

@@ -26,7 +26,7 @@ import { buildDependencies } from "./package-items/dependencies.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
-import { asRecord, asRecordOrNull } from "../lib/safe-json.ts";
+import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { toISO } from "../lib/date-helpers.ts";
 

@@ -41,7 +41,7 @@ import {
   type PackageIdentity,
   type ResolvedPackage,
 } from "@appstrate/afps-runtime/bundle";
-import { asRecord } from "../../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "../package-items/storage.ts";
 import { ToolBundleCache } from "./tool-bundle-cache.ts";
 

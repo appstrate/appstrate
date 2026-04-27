@@ -8,7 +8,7 @@ import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 import { installPackage } from "./application-packages.ts";
 import { logger } from "../lib/logger.ts";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
