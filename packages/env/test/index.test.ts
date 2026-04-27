@@ -9,6 +9,9 @@ const TRACKED = [
   "UPLOAD_SIGNING_SECRET",
   "APP_URL",
   "NODE_ENV",
+  "AUTH_DISABLE_SIGNUP",
+  "AUTH_DISABLE_ORG_CREATION",
+  "TRUST_PROXY",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -81,5 +84,70 @@ describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
   it("rejects non-JSON value with a clear error (e.g. better-auth's CSV format)", () => {
     process.env.BETTER_AUTH_SECRETS = "v1:some-secret,v2:another";
     expect(() => getEnv()).toThrow(/BETTER_AUTH_SECRETS must be valid JSON/);
+  });
+});
+
+describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("AUTH_DISABLE_SIGNUP: empty string falls back to default `false`", () => {
+    process.env.AUTH_DISABLE_SIGNUP = "";
+    expect(getEnv().AUTH_DISABLE_SIGNUP).toBe(false);
+  });
+
+  it("AUTH_DISABLE_SIGNUP: unset falls back to default `false`", () => {
+    delete process.env.AUTH_DISABLE_SIGNUP;
+    expect(getEnv().AUTH_DISABLE_SIGNUP).toBe(false);
+  });
+
+  it('AUTH_DISABLE_SIGNUP: `"true"` parses to true', () => {
+    process.env.AUTH_DISABLE_SIGNUP = "true";
+    expect(getEnv().AUTH_DISABLE_SIGNUP).toBe(true);
+  });
+
+  it('AUTH_DISABLE_SIGNUP: `"false"` parses to false', () => {
+    process.env.AUTH_DISABLE_SIGNUP = "false";
+    expect(getEnv().AUTH_DISABLE_SIGNUP).toBe(false);
+  });
+
+  it("AUTH_DISABLE_SIGNUP: invalid value fails fast with a clear error", () => {
+    process.env.AUTH_DISABLE_SIGNUP = "yes";
+    expect(() => getEnv()).toThrow(/AUTH_DISABLE_SIGNUP/);
+  });
+
+  it("AUTH_DISABLE_ORG_CREATION: empty string falls back to default `false`", () => {
+    process.env.AUTH_DISABLE_ORG_CREATION = "";
+    expect(getEnv().AUTH_DISABLE_ORG_CREATION).toBe(false);
+  });
+
+  it('AUTH_DISABLE_ORG_CREATION: `"true"` parses to true', () => {
+    process.env.AUTH_DISABLE_ORG_CREATION = "true";
+    expect(getEnv().AUTH_DISABLE_ORG_CREATION).toBe(true);
+  });
+
+  it('TRUST_PROXY: empty string falls back to default `"false"`', () => {
+    process.env.TRUST_PROXY = "";
+    expect(getEnv().TRUST_PROXY).toBe("false");
+  });
+
+  it("TRUST_PROXY: integer string passes through", () => {
+    process.env.TRUST_PROXY = "2";
+    expect(getEnv().TRUST_PROXY).toBe("2");
+  });
+
+  it("TRUST_PROXY: invalid value fails fast", () => {
+    process.env.TRUST_PROXY = "maybe";
+    expect(() => getEnv()).toThrow(/TRUST_PROXY/);
   });
 });
