@@ -3,6 +3,7 @@
 import { createApp } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse } from "./helpers.ts";
+import { logger } from "./logger.ts";
 
 // Mutable config — can be set via env vars at startup or updated at runtime
 // via POST /configure (used by sidecar pool for pre-warmed containers).
@@ -63,6 +64,6 @@ const app = createApp({
   preConfigured,
 });
 
-console.log(`Sidecar proxy listening on :${port}`);
+logger.info("Sidecar proxy listening", { port });
 
 export default { port, fetch: app.fetch };

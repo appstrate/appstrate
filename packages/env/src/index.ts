@@ -167,6 +167,22 @@ const envSchema = z
       .default("{}")
       .transform((s) => JSON.parse(s) as Record<string, unknown>),
 
+    // LLM proxy limits — caps on `/api/llm-proxy/*` (per-call rate, body size).
+    // Empty object means defaults apply. Validated strictly at boot via
+    // `apps/api/src/services/proxy-limits.ts`; unknown keys fail-fast.
+    LLM_PROXY_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
+    // Credential proxy limits — caps on `/api/credential-proxy/proxy`
+    // (per-call rate, request/response body size, cookie-jar TTL). Same
+    // strict-Zod validation as LLM_PROXY_LIMITS.
+    CREDENTIAL_PROXY_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
     // Unified runner protocol — governs the event-ingestion surface shared
     // by platform containers and remote CLIs. See
     // docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md.

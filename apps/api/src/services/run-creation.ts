@@ -37,12 +37,13 @@ import { createRun as createRunRow } from "./state/index.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
+import type { RunOrigin } from "@appstrate/db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type RunOrigin = "platform" | "remote";
+export type { RunOrigin };
 
 export interface SinkRequest {
   /** Client-requested TTL in seconds. Clamped to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */

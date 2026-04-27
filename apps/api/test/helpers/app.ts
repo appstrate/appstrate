@@ -30,6 +30,7 @@ import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
+import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
@@ -88,6 +89,7 @@ let cachedApp: Hono<AppEnv> | null = null;
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
+initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**

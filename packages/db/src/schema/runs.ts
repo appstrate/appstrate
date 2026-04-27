@@ -15,7 +15,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { runStatusEnum, llmUsageSourceEnum } from "./enums.ts";
+import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations } from "./organizations.ts";
@@ -122,7 +122,7 @@ export const runs = pgTable(
     //
     // `run_origin` distinguishes WHO controls the process (we do vs customer
     // does), not which protocol is used — the protocol is the same.
-    runOrigin: text("run_origin").notNull().default("platform").$type<"platform" | "remote">(),
+    runOrigin: runOriginEnum("run_origin").notNull().default("platform"),
     // AES-256-GCM ciphertext of the 32-byte run secret (via @appstrate/connect
     // encryption). Returned once in the run-creation response, then lives
     // encrypted at rest for the event-ingestion middleware to decrypt and
@@ -154,10 +154,15 @@ export const runs = pgTable(
     // claim) → null. Denormalized so a run keeps its label even after the CLI
     // session is revoked or the device is renamed.
     runnerName: text("runner_name"),
-    // Free-form classifier driving icon selection in the UI: `cli`,
-    // `github-action`, or any other tag a future runner declares via
-    // `X-Appstrate-Runner-Kind`. Stamped at INSERT alongside `runner_name`
-    // and never updated.
+    // Open-set classifier driving icon selection in the UI. Known values
+    // emitted by first-party runners: `cli`, `github-action`. The column
+    // is intentionally `text` (not pgEnum) so third-party runners can
+    // declare their own kind via `X-Appstrate-Runner-Kind` without a DB
+    // migration; the format is enforced at the auth/header boundary by
+    // `lib/runner-context.ts` (lowercase ASCII, 1–32 chars, kebab/digits/
+    // letters only). Unknown kinds render with the generic "remote" badge
+    // in the dashboard. Stamped at INSERT alongside `runner_name` and
+    // never updated.
     runnerKind: text("runner_kind"),
   },
   (table) => [
@@ -187,7 +192,6 @@ export const runs = pgTable(
       "runs_at_most_one_actor",
       sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
     ),
-    check("runs_run_origin_valid", sql`run_origin IN ('platform', 'remote')`),
     // Invariant: an open sink row (has an expires_at) must have a secret to
     // verify against. Enforced for every origin so platform and remote share
     // the same ingestion code path without any conditional branches.

@@ -10,6 +10,7 @@ import {
   HOP_BY_HOP_HEADERS,
   type SidecarConfig,
 } from "./helpers.ts";
+import { logger } from "./logger.ts";
 
 export interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -41,11 +42,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       const url = new URL(config.proxyUrl);
       // HTTPS upstream proxies are not supported — the forward proxy connects via plain TCP.
       if (url.protocol === "https:") {
-        console.error(
-          JSON.stringify({
-            msg: "HTTPS upstream proxy not supported, connection will use plain TCP — proxy may reject",
-            proxyUrl: url.origin,
-          }),
+        logger.warn(
+          "HTTPS upstream proxy not supported, connection will use plain TCP — proxy may reject",
+          { proxyUrl: url.origin },
         );
       }
       return {
@@ -57,9 +56,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           : null,
       };
     } catch {
-      console.error(
-        JSON.stringify({ msg: "Invalid proxy URL, ignoring", proxyUrl: config.proxyUrl }),
-      );
+      logger.warn("Invalid proxy URL, ignoring", { proxyUrl: config.proxyUrl });
       return null;
     }
   }
@@ -210,9 +207,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       proxyReq.destroy();
     });
     proxyReq.on("error", (err) => {
-      console.error(
-        JSON.stringify({ msg: "Forward proxy HTTP error", target: targetUrl, error: err.message }),
-      );
+      logger.error("Forward proxy HTTP error", { target: targetUrl, error: err.message });
       if (!res.headersSent) res.writeHead(502);
       res.end("Proxy error");
     });
@@ -282,13 +277,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
         // Guard against oversized headers from misbehaving upstream
         if (bufferSize > MAX_CONNECT_HEADER_SIZE) {
-          console.error(
-            JSON.stringify({
-              msg: "CONNECT header too large from upstream",
-              target,
-              size: bufferSize,
-            }),
-          );
+          logger.error("CONNECT header too large from upstream", { target, size: bufferSize });
           proxySocket.off("data", onData);
           clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           clientSocket.destroy();
@@ -312,7 +301,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           if (head.length) proxySocket.write(head);
           relay(clientSocket, proxySocket);
         } else {
-          console.error(JSON.stringify({ msg: "Upstream CONNECT rejected", target, status }));
+          logger.warn("Upstream CONNECT rejected", { target, status });
           clientSocket.write(`HTTP/1.1 ${status} Upstream Rejected\r\n\r\n`);
           clientSocket.destroy();
           proxySocket.destroy();
@@ -320,9 +309,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       };
       proxySocket.on("data", onData);
       proxySocket.on("error", (err) => {
-        console.error(
-          JSON.stringify({ msg: "CONNECT upstream error", target, error: err.message }),
-        );
+        logger.error("CONNECT upstream error", { target, error: err.message });
         clientSocket.destroy();
       });
       clientSocket.on("error", () => proxySocket.destroy());
@@ -334,7 +321,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         relay(clientSocket, targetSocket);
       });
       targetSocket.on("error", (err) => {
-        console.error(JSON.stringify({ msg: "CONNECT direct error", target, error: err.message }));
+        logger.error("CONNECT direct error", { target, error: err.message });
         clientSocket.destroy();
       });
       clientSocket.on("error", () => targetSocket.destroy());
@@ -342,7 +329,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   });
 
   server.on("error", (err) => {
-    console.error(JSON.stringify({ msg: "Forward proxy server error", error: err.message }));
+    logger.error("Forward proxy server error", { error: err.message });
   });
 
   let readySyncFlag = false;

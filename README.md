@@ -339,6 +339,8 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `OIDC_INSTANCE_CLIENTS`               | No       | `[]`                                          | JSON array of instance-level OAuth clients (admin dashboards, satellite apps) — reconciled at boot    |
 | `PLATFORM_RUN_LIMITS`                 | No       | `{}`                                          | JSON caps applied to EVERY run (timeout ceiling, per-org rate, max concurrent)                        |
 | `INLINE_RUN_LIMITS`                   | No       | `{}`                                          | JSON caps for `POST /api/runs/inline` (manifest size, prompt size, skill/tool counts, retention)      |
+| `LLM_PROXY_LIMITS`                    | No       | `{}`                                          | JSON caps for `/api/llm-proxy/*` (per-call rate, max request bytes)                                   |
+| `CREDENTIAL_PROXY_LIMITS`             | No       | `{}`                                          | JSON caps for `/api/credential-proxy/proxy` (per-call rate, request/response body, cookie-jar TTL)    |
 | `REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS` | No       | `7200`                                        | Default sink TTL when caller doesn't request one                                                      |
 | `REMOTE_RUN_SINK_MAX_TTL_SECONDS`     | No       | `86400`                                       | Hard ceiling on caller-requested sink TTL                                                             |
 | `REMOTE_RUN_REPLAY_WINDOW_SECONDS`    | No       | `600`                                         | Redis dedup window for webhook-id replay detection                                                    |

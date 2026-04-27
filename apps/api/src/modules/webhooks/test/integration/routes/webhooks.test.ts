@@ -187,7 +187,7 @@ describe("Webhooks API", () => {
   });
 
   describe("POST /api/webhooks/:id/rotate", () => {
-    it("rotates secret and returns new secret", async () => {
+    it("opens a rotation window and returns both secrets + deadline", async () => {
       const created = await createWebhook();
 
       const res = await app.request(`/api/webhooks/${created.id}/rotate`, {
@@ -197,9 +197,14 @@ describe("Webhooks API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.secret).toBeDefined();
       expect(typeof body.secret).toBe("string");
       expect(body.secret.length).toBeGreaterThan(0);
+      // Previous secret is exposed so callers can finish in-flight verification.
+      expect(typeof body.secretPrevious).toBe("string");
+      expect(body.secretPrevious).not.toBe(body.secret);
+      // Window deadline is an RFC 3339 timestamp in the future.
+      expect(typeof body.rotationWindowEndsAt).toBe("string");
+      expect(new Date(body.rotationWindowEndsAt).getTime()).toBeGreaterThan(Date.now());
     });
   });
 

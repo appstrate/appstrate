@@ -54,6 +54,13 @@ const DELIVERY_TIMEOUT_MS = 15_000;
 const MAX_WEBHOOKS_PER_SCOPE = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
 
+/** Default dual-signature rotation window. Consumers have this long to
+ * accept the new secret before the old one is retired. 7 days mirrors
+ * Stripe / Standard Webhooks reference deployments. */
+const DEFAULT_ROTATION_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+/** Hard ceiling on caller-requested rotation windows. */
+const MAX_ROTATION_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -152,14 +159,31 @@ async function sign(secret: string, content: string): Promise<string> {
   return `v1,${Buffer.from(hasher.digest()).toString("base64")}`;
 }
 
+/**
+ * Build the `webhook-signature` header value for a delivery, signing
+ * with one or more secrets. During a rotation window the header carries
+ * both signatures separated by a single space — Standard Webhooks
+ * verifiers iterate the list and accept the first match, giving
+ * consumers a buffer to migrate to the new secret.
+ */
+async function buildSignatureHeader(
+  eventId: string,
+  timestamp: number,
+  body: string,
+  secrets: readonly string[],
+): Promise<string> {
+  const content = `${eventId}.${timestamp}.${body}`;
+  const signatures = await Promise.all(secrets.map((s) => sign(s, content)));
+  return signatures.join(" ");
+}
+
 async function buildSignedHeaders(
   eventId: string,
   timestamp: number,
   body: string,
-  secret: string,
+  secrets: readonly string[],
 ): Promise<Record<string, string>> {
-  const content = `${eventId}.${timestamp}.${body}`;
-  const signature = await sign(secret, content);
+  const signature = await buildSignatureHeader(eventId, timestamp, body, secrets);
 
   return {
     "webhook-id": eventId,
@@ -365,16 +389,64 @@ export async function deleteWebhook(scope: OrgScope | AppScope, webhookId: strin
   );
 }
 
+/**
+ * Rotate the webhook signing secret.
+ *
+ * Stages the new secret in `secret_next` and opens a dual-signature
+ * delivery window. During the window, every delivery is signed with
+ * BOTH secrets so consumers can swap to the new value without dropping
+ * a single event. After `secret_next_expires_at`, the delivery worker
+ * promotes `secret_next` → `secret` inline on the next delivery and the
+ * old secret is retired.
+ *
+ * Calling rotate while a window is already open replaces the staged
+ * secret and resets the deadline — useful when the new secret was
+ * leaked before consumers started using it. The old `secret` column is
+ * left untouched until promotion, so already-deployed consumers keep
+ * verifying.
+ *
+ * `windowSeconds` is bounded to {@link MAX_ROTATION_WINDOW_SECONDS}.
+ */
 export async function rotateSecret(
   scope: OrgScope | AppScope,
   webhookId: string,
-): Promise<{ secret: string }> {
-  await getWebhook(scope, webhookId);
+  opts: { windowSeconds?: number } = {},
+): Promise<{
+  secret: string;
+  secretPrevious: string;
+  rotationWindowEndsAt: string;
+}> {
+  // Verify the row is in scope; we need the current secret for the
+  // response payload so consumers can keep verifying with it during the
+  // rotation window.
+  const [row] = await db
+    .select({ secret: webhooks.secret })
+    .from(webhooks)
+    .where(
+      scopedWhere(webhooks, {
+        orgId: scope.orgId,
+        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
+      }),
+    )
+    .limit(1);
+  if (!row) throw notFound(`Webhook '${webhookId}' not found`);
+
+  const requested = opts.windowSeconds ?? DEFAULT_ROTATION_WINDOW_SECONDS;
+  if (!Number.isFinite(requested) || requested <= 0) {
+    throw invalidRequest("windowSeconds must be a positive integer", "windowSeconds");
+  }
+  const windowSeconds = Math.min(requested, MAX_ROTATION_WINDOW_SECONDS);
 
   const newSecret = generateSecret();
+  const expiresAt = new Date(Date.now() + windowSeconds * 1000);
+
   await db
     .update(webhooks)
-    .set({ secret: newSecret, updatedAt: new Date() })
+    .set({
+      secretNext: newSecret,
+      secretNextExpiresAt: expiresAt,
+      updatedAt: new Date(),
+    })
     .where(
       scopedWhere(webhooks, {
         orgId: scope.orgId,
@@ -382,7 +454,11 @@ export async function rotateSecret(
       }),
     );
 
-  return { secret: newSecret };
+  return {
+    secret: newSecret,
+    secretPrevious: row.secret,
+    rotationWindowEndsAt: toISORequired(expiresAt),
+  };
 }
 
 export async function listDeliveries(
@@ -521,7 +597,12 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
   const [wh] = await db
-    .select({ url: webhooks.url, secret: webhooks.secret })
+    .select({
+      url: webhooks.url,
+      secret: webhooks.secret,
+      secretNext: webhooks.secretNext,
+      secretNextExpiresAt: webhooks.secretNextExpiresAt,
+    })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
     .limit(1);
@@ -531,8 +612,34 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
     return; // Don't retry — webhook is gone
   }
 
+  // Resolve the active secret set + handle inline promotion when the
+  // rotation window has expired. We do not block the delivery on the
+  // promotion update — the worst case is a future delivery doing the
+  // same swap idempotently.
+  const now = Date.now();
+  let activeSecrets: string[] = [wh.secret];
+  if (wh.secretNext && wh.secretNextExpiresAt) {
+    if (wh.secretNextExpiresAt.getTime() > now) {
+      // Rotation window still open — sign with both.
+      activeSecrets = [wh.secret, wh.secretNext];
+    } else {
+      // Window expired — promote and continue with the new secret only.
+      await db
+        .update(webhooks)
+        .set({
+          secret: wh.secretNext,
+          secretNext: null,
+          secretNextExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(webhooks.id, webhookId));
+      activeSecrets = [wh.secretNext];
+      logger.info("Webhook rotation window closed, secret promoted", { webhookId });
+    }
+  }
+
   const timestamp = Math.floor(Date.now() / 1000);
-  const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
+  const headers = await buildSignedHeaders(eventId, timestamp, payload, activeSecrets);
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();

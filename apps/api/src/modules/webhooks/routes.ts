@@ -254,18 +254,28 @@ export function createWebhooksRouter() {
     },
   );
 
-  // POST /api/webhooks/:id/rotate — rotate secret
+  // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.
+  // Body is optional: `{ windowSeconds?: number }` overrides the default
+  // 7-day window (capped at 30 days). The response carries both the new
+  // secret (for consumer migration) and the previous one (still valid
+  // until the window closes), plus the deadline.
+  const rotateSecretSchema = z.object({
+    windowSeconds: z.number().int().positive().optional(),
+  });
   router.post(
     "/api/webhooks/:id/rotate",
     rateLimit(5),
     requireModulePermission("webhooks", "write"),
     async (c) => {
       const id = c.req.param("id")!;
-      const result = await rotateSecret(webhookScope(c), id);
+      const body = await c.req.json().catch(() => ({}));
+      const parsed = parseBody(rotateSecretSchema, body);
+      const result = await rotateSecret(webhookScope(c), id, parsed);
       await recordAuditFromContext(c, {
         action: "webhook.secret_rotated",
         resourceType: "webhook",
         resourceId: id,
+        after: { rotationWindowEndsAt: result.rotationWindowEndsAt },
       });
       return c.json(result);
     },

@@ -97,7 +97,7 @@ export const updateOrgSchema = z.object({
 });
 
 export const addMemberSchema = z.object({
-  email: z.string().email("Email is required"),
+  email: z.email("Email is required"),
   role: z.enum(ASSIGNABLE_ROLES).default("member"),
 });
 

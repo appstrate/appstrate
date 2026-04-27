@@ -46,6 +46,7 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
+import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /** Accepted auth methods — mirrors credential-proxy. */
@@ -55,35 +56,9 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "oauth2-dashboard",
 ]);
 
-interface LlmProxyLimits {
-  rate_per_min: number;
-  max_request_bytes: number;
-}
-
-function parseLimits(): LlmProxyLimits {
-  const defaults: LlmProxyLimits = {
-    rate_per_min: 60,
-    max_request_bytes: 10 * 1024 * 1024,
-  };
-  const raw = process.env.LLM_PROXY_LIMITS;
-  if (!raw) return defaults;
-  try {
-    const parsed = JSON.parse(raw) as Partial<LlmProxyLimits>;
-    return {
-      rate_per_min: parsed.rate_per_min ?? defaults.rate_per_min,
-      max_request_bytes: parsed.max_request_bytes ?? defaults.max_request_bytes,
-    };
-  } catch (err) {
-    logger.warn("LLM_PROXY_LIMITS is not valid JSON — using defaults", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return defaults;
-  }
-}
-
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
-  const limits = parseLimits();
+  const limits = getLlmProxyLimits();
 
   // Protocol family → (adapter, upstream path). Keep one entry per API;
   // the route surface stays concrete per the spec.

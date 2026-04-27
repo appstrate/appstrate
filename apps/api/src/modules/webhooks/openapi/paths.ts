@@ -373,14 +373,33 @@ export const webhooksPaths = {
       operationId: "rotateWebhookSecret",
       tags: ["Webhooks"],
       summary: "Rotate webhook secret",
-      description: "Generate a new secret. The previous secret is immediately invalidated.",
+      description:
+        "Stage a new signing secret and open a dual-signature delivery window. During the window, every delivery is signed with BOTH the previous and new secrets in a space-separated `webhook-signature` header (Standard Webhooks multi-signature spec) so consumers can migrate without dropping events. After `rotationWindowEndsAt`, the next delivery promotes the new secret inline and the previous one is retired.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                windowSeconds: {
+                  type: "integer",
+                  minimum: 1,
+                  description:
+                    "Override the default 7-day rotation window. Capped server-side at 30 days.",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "200": {
-          description: "New secret generated",
+          description: "Rotation window opened",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -389,11 +408,31 @@ export const webhooksPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["secret", "secretPrevious", "rotationWindowEndsAt"],
                 properties: {
-                  secret: { type: "string", description: "New webhook secret (whsec_ prefix)" },
+                  secret: {
+                    type: "string",
+                    description:
+                      "New webhook secret (whsec_ prefix). Consumers should migrate to this value before `rotationWindowEndsAt`.",
+                  },
+                  secretPrevious: {
+                    type: "string",
+                    description:
+                      "Previous secret. Remains valid for delivery verification until the rotation window closes.",
+                  },
+                  rotationWindowEndsAt: {
+                    type: "string",
+                    format: "date-time",
+                    description:
+                      "After this timestamp, the next delivery promotes `secret` and retires `secretPrevious`.",
+                  },
                 },
               },
-              example: { secret: "whsec_n4w8s3cr3tR0t4t3dK3y" },
+              example: {
+                secret: "whsec_n4w8s3cr3tR0t4t3dK3y",
+                secretPrevious: "whsec_pr3v10us3cr3tT0R3t1r3",
+                rotationWindowEndsAt: "2026-05-04T12:00:00.000Z",
+              },
             },
           },
         },
