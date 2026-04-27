@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the CLI's `wrapHttpSinkWithFinalizeTracker` helper — the
- * safety net that lets the run command detect whether `PiRunner`
- * already finalized the sink, so the `finally` block on Ctrl-C /
- * SIGTERM doesn't double-post a `cancelled` finalize on top of a real
- * terminal status.
+ * Tests for the CLI's `attachFinalizeTracker` helper — the safety net
+ * that lets the run command detect whether `PiRunner` already
+ * finalized the sink, so the `finally` block on Ctrl-C / SIGTERM
+ * doesn't double-post a `cancelled` finalize on top of a real terminal
+ * status.
  *
- * The wrapper is the linchpin of the cooperative-shutdown fast path:
+ * The tracker is the linchpin of the cooperative-shutdown fast path:
  * without it the platform would have to wait the full
  * `RUN_STALL_THRESHOLD_SECONDS` (60s) for the watchdog to notice a
  * dead CLI. With it, the CLI sends an explicit finalize the moment
@@ -16,9 +16,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import {
-  _wrapHttpSinkWithFinalizeTrackerForTesting as wrap,
+  _attachFinalizeTrackerForTesting as attach,
   _raceFinalizeAgainstTimeoutForTesting as raceTimeout,
 } from "../src/commands/run.ts";
 
@@ -55,11 +55,7 @@ function startTestServer(): TestServer {
 
 const RUN_SECRET = "test-secret-finalize-tracker";
 
-function emptyResult(): RunResult {
-  return { memories: [], output: null, report: null, logs: [] };
-}
-
-describe("wrapHttpSinkWithFinalizeTracker", () => {
+describe("attachFinalizeTracker", () => {
   let server: TestServer;
 
   beforeEach(() => {
@@ -70,46 +66,43 @@ describe("wrapHttpSinkWithFinalizeTracker", () => {
     server.shutdown();
   });
 
-  it("reports wasFinalized() === false before any finalize call", () => {
-    const inner = new HttpSink({
+  it("reports false before any finalize call", () => {
+    const sink = new HttpSink({
       url: server.url,
       finalizeUrl: server.finalizeUrl,
       runSecret: RUN_SECRET,
     });
-    const tracked = wrap(inner);
-    expect(tracked.wasFinalized()).toBe(false);
+    const wasFinalized = attach(sink);
+    expect(wasFinalized()).toBe(false);
   });
 
-  it("flips wasFinalized() to true after the wrapped sink finalises", async () => {
-    const inner = new HttpSink({
+  it("flips to true after the patched sink finalises", async () => {
+    const sink = new HttpSink({
       url: server.url,
       finalizeUrl: server.finalizeUrl,
       runSecret: RUN_SECRET,
     });
-    const tracked = wrap(inner);
+    const wasFinalized = attach(sink);
 
-    expect(tracked.wasFinalized()).toBe(false);
-    await tracked.sink.finalize(emptyResult());
-    expect(tracked.wasFinalized()).toBe(true);
+    expect(wasFinalized()).toBe(false);
+    await sink.finalize(emptyRunResult());
+    expect(wasFinalized()).toBe(true);
   });
 
   it("forwards the finalize POST to the underlying sink (HTTP request reaches finalizeUrl)", async () => {
-    const inner = new HttpSink({
+    const sink = new HttpSink({
       url: server.url,
       finalizeUrl: server.finalizeUrl,
       runSecret: RUN_SECRET,
     });
-    const tracked = wrap(inner);
+    attach(sink);
 
     const result: RunResult = {
-      memories: [],
-      output: null,
-      report: null,
-      logs: [],
+      ...emptyRunResult(),
       status: "cancelled",
       error: { message: "Runner cancelled by user (CLI received signal)." },
     };
-    await tracked.sink.finalize(result);
+    await sink.finalize(result);
 
     const finalizePosts = server.received.filter((r) => r.url === "/events/finalize");
     expect(finalizePosts).toHaveLength(1);
@@ -119,22 +112,22 @@ describe("wrapHttpSinkWithFinalizeTracker", () => {
     expect(body.error?.message).toContain("cancelled by user");
   });
 
-  it("counts a single finalize even when called twice (each call still posts, but the flag stays true)", async () => {
-    // Belt-and-suspenders behaviour: the wrapper does not enforce
+  it("stays true on repeated finalize calls (each call still posts, flag stays true)", async () => {
+    // Belt-and-suspenders behaviour: the tracker does not enforce
     // single-call semantics — that's the platform's job (server CAS on
-    // `sink_closed_at IS NULL`). The wrapper only tracks "has finalize
+    // `sink_closed_at IS NULL`). The tracker only records "has finalize
     // been observed at least once". Double-finalize from the runner
-    // would be a runner bug, not something the wrapper needs to mask.
-    const inner = new HttpSink({
+    // would be a runner bug, not something the tracker needs to mask.
+    const sink = new HttpSink({
       url: server.url,
       finalizeUrl: server.finalizeUrl,
       runSecret: RUN_SECRET,
     });
-    const tracked = wrap(inner);
-    await tracked.sink.finalize(emptyResult());
-    expect(tracked.wasFinalized()).toBe(true);
-    await tracked.sink.finalize(emptyResult());
-    expect(tracked.wasFinalized()).toBe(true);
+    const wasFinalized = attach(sink);
+    await sink.finalize(emptyRunResult());
+    expect(wasFinalized()).toBe(true);
+    await sink.finalize(emptyRunResult());
+    expect(wasFinalized()).toBe(true);
     expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(2);
   });
 
@@ -164,20 +157,20 @@ describe("wrapHttpSinkWithFinalizeTracker", () => {
   });
 
   it("does not interfere with regular event POSTs (handle still works)", async () => {
-    const inner = new HttpSink({
+    const sink = new HttpSink({
       url: server.url,
       finalizeUrl: server.finalizeUrl,
       runSecret: RUN_SECRET,
     });
-    const tracked = wrap(inner);
+    const wasFinalized = attach(sink);
 
-    await tracked.sink.handle({
+    await sink.handle({
       type: "appstrate.progress",
       timestamp: Date.now(),
       runId: "run_track_test",
       message: "still running",
     });
-    expect(tracked.wasFinalized()).toBe(false);
+    expect(wasFinalized()).toBe(false);
     const eventPosts = server.received.filter((r) => r.url === "/events");
     expect(eventPosts).toHaveLength(1);
   });

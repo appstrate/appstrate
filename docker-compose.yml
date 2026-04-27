@@ -222,9 +222,11 @@ services:
       - REMOTE_RUN_BUFFER_FLUSH_MS=${REMOTE_RUN_BUFFER_FLUSH_MS:-5000}
       - REMOTE_RUN_EVENT_LIMITS=${REMOTE_RUN_EVENT_LIMITS:-{}}
       # ── Run liveness watchdog (optional, ratio: stall ≥ 3 × heartbeat) ──
-      - RUN_HEARTBEAT_INTERVAL_SECONDS=${RUN_HEARTBEAT_INTERVAL_SECONDS:-15}
-      - RUN_STALL_THRESHOLD_SECONDS=${RUN_STALL_THRESHOLD_SECONDS:-60}
-      - RUN_WATCHDOG_INTERVAL_SECONDS=${RUN_WATCHDOG_INTERVAL_SECONDS:-15}
+      # Defaults live in `packages/env` — passthrough means an unset host
+      # env falls back to the Zod schema's single source of truth.
+      - RUN_HEARTBEAT_INTERVAL_SECONDS
+      - RUN_STALL_THRESHOLD_SECONDS
+      - RUN_WATCHDOG_INTERVAL_SECONDS
       # ── Run limits (optional, see docs/specs/INLINE_RUNS.md) ──
       - PLATFORM_RUN_LIMITS=${PLATFORM_RUN_LIMITS:-{}}
       - INLINE_RUN_LIMITS=${INLINE_RUN_LIMITS:-{}}
