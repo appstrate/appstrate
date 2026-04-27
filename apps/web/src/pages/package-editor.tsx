@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { usePackageDetail, usePackageList, PACKAGE_CONFIG } from "../hooks/use-packages";
-import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
+import { usePackageDetail, usePackageList } from "../hooks/use-packages";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
-import { api } from "../api";
-import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
+import { useEditorState } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
 // Agent editor components
@@ -88,14 +85,36 @@ function AgentEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const createAgent = useCreatePackage("agent");
-  const updateAgent = useUpdatePackage("agent", packageId || "");
-
-  const [state, setState] = useState<AgentEditorState>(initialState);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
-  const [jsonEditorKey, setJsonEditorKey] = useState(0);
+
+  const {
+    state,
+    setState,
+    updateManifest,
+    blocker,
+    error,
+    jsonEditorKey,
+    bumpJsonKey,
+    saveDraft,
+    handleSubmit,
+    isPending,
+  } = useEditorState<AgentEditorState>({
+    initialState,
+    packageType: "agent",
+    packageId,
+    isEdit,
+    toWireBody: (s) => ({ manifest: s.manifest, content: s.prompt }),
+    validate: (s) => {
+      const { id } = getManifestName(s.manifest);
+      if (!id || !s.manifest.displayName) {
+        return { error: t("editor.errorRequired"), tab: "general" };
+      }
+      if (!s.prompt.trim()) {
+        return { error: t("editor.errorPrompt"), tab: "prompt" };
+      }
+      return null;
+    },
+  });
 
   // Pre-populate the platform's "stdlib" tools (log/output/pin/note)
   // once on first mount in create mode, after the registry's package list
@@ -132,10 +151,7 @@ function AgentEditorInner({
       m.dependencies = deps;
       return { ...s, manifest: m };
     });
-  }, [isEdit, toolsList]);
-
-  const updateManifest = (patch: Record<string, unknown>) =>
-    setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
+  }, [isEdit, toolsList, setState]);
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
@@ -160,28 +176,6 @@ function AgentEditorInner({
       });
     }
   };
-
-  // --- Unsaved changes detection ---
-  const isDirty = useMemo(
-    () => JSON.stringify(initialState) !== JSON.stringify(state),
-    [initialState, state],
-  );
-  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
-
-  const saveDraft = useCallback(async () => {
-    if (!isEdit || !packageId) return;
-    const cfg = PACKAGE_CONFIG.agent;
-    await api(`/packages/${cfg.path}/${packageId}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        manifest: state.manifest,
-        content: state.prompt,
-        lockVersion: state.lockVersion!,
-      }),
-    });
-    qc.invalidateQueries({ queryKey: ["packages"] });
-    qc.invalidateQueries({ queryKey: ["agents"] });
-  }, [state, isEdit, packageId, qc]);
 
   // Sync resolved skill/tool metadata from server (names, descriptions)
   useEffect(() => {
@@ -208,34 +202,10 @@ function AgentEditorInner({
       setResourceEntries(m, "tools", tools);
       return { ...prev, manifest: m };
     });
-  }, [resolvedDeps]);
+  }, [resolvedDeps, setState]);
 
-  const handleSubmit = () => {
-    setError(null);
-    const { id } = getManifestName(state.manifest);
-    if (!id || !state.manifest.displayName) {
-      setError(t("editor.errorRequired"));
-      setActiveTab("general");
-      return;
-    }
-    if (!state.prompt.trim()) {
-      setError(t("editor.errorPrompt"));
-      setActiveTab("prompt");
-      return;
-    }
-    allowNavigation();
-    const body = { manifest: state.manifest, content: state.prompt };
-    if (isEdit) {
-      updateAgent.mutate(
-        { ...body, lockVersion: state.lockVersion! },
-        { onError: (err) => setError(err.message) },
-      );
-    } else {
-      createAgent.mutate(body, { onError: (err) => setError(err.message) });
-    }
-  };
-
-  const isPending = createAgent.isPending || updateAgent.isPending;
+  const onSubmit = () =>
+    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
@@ -256,12 +226,12 @@ function AgentEditorInner({
       tabs={agentTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
-        if (v === "json") setJsonEditorKey((k) => k + 1);
+        if (v === "json") bumpJsonKey();
         setActiveTab(v as GenericEditorTab);
       }}
       error={error}
       isPending={isPending}
-      onSubmit={handleSubmit}
+      onSubmit={onSubmit}
       onCancel={() => navigate(isEdit ? `/agents/${packageId}` : "/")}
       hideSubmitBar={activeTab === "json"}
     >
@@ -395,79 +365,55 @@ function PackageEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const createPkg = useCreatePackage(type);
-  const updatePkg = useUpdatePackage(type, packageId || "");
-
-  const [state, setState] = useState(initialState);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
-  const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
-  const updateManifest = (patch: Record<string, unknown>) =>
-    setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
+  const {
+    state,
+    setState,
+    updateManifest,
+    blocker,
+    error,
+    jsonEditorKey,
+    bumpJsonKey,
+    saveDraft,
+    handleSubmit,
+    isPending,
+  } = useEditorState<PackageEditorState>({
+    initialState,
+    packageType: type,
+    packageId,
+    isEdit,
+    toWireBody: (s) => ({
+      manifest: s.manifest,
+      content: s.content,
+      ...(s.sourceCode !== undefined ? { sourceCode: s.sourceCode } : {}),
+    }),
+    validate: (s) => {
+      const { id } = getManifestName(s.manifest);
+      if (!id || !s.manifest.displayName) {
+        return { error: t("editor.errorRequired"), tab: "general" };
+      }
+      if (type === "skill" && !s.content.trim()) {
+        return {
+          error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
+          tab: "content",
+        };
+      }
+      if (type === "tool" && !s.sourceCode?.trim()) {
+        return {
+          error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
+          tab: "source",
+        };
+      }
+      return null;
+    },
+  });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
 
-  // --- Unsaved changes detection ---
-  const isDirty = useMemo(
-    () => JSON.stringify(initialState) !== JSON.stringify(state),
-    [initialState, state],
-  );
-  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
-
-  const saveDraft = useCallback(async () => {
-    if (!isEdit || !packageId) return;
-    const cfg = PACKAGE_CONFIG[type];
-    await api(`/packages/${cfg.path}/${packageId}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        manifest: state.manifest,
-        content: state.content,
-        ...(state.sourceCode !== undefined ? { sourceCode: state.sourceCode } : {}),
-        lockVersion: state.lockVersion!,
-      }),
-    });
-    qc.invalidateQueries({ queryKey: ["packages"] });
-  }, [state, isEdit, type, packageId, qc]);
-
-  const handleSubmit = () => {
-    setError(null);
-    const { id } = getManifestName(state.manifest);
-    if (!id || !state.manifest.displayName) {
-      setError(t("editor.errorRequired"));
-      setActiveTab("general");
-      return;
-    }
-    if (type === "skill" && !state.content.trim()) {
-      setError(t("editor.errorContent", { defaultValue: "Le contenu est requis." }));
-      setActiveTab("content");
-      return;
-    }
-    if (type === "tool" && !state.sourceCode?.trim()) {
-      setError(t("editor.errorContent", { defaultValue: "Le contenu est requis." }));
-      setActiveTab("source");
-      return;
-    }
-
-    allowNavigation();
-    const body = {
-      manifest: state.manifest,
-      content: state.content,
-      ...(state.sourceCode !== undefined ? { sourceCode: state.sourceCode } : {}),
-    };
-    if (isEdit) {
-      updatePkg.mutate(
-        { ...body, lockVersion: state.lockVersion! },
-        { onError: (err) => setError(err.message) },
-      );
-    } else {
-      createPkg.mutate(body, { onError: (err) => setError(err.message) });
-    }
-  };
-
-  const isPending = createPkg.isPending || updatePkg.isPending;
+  const onSubmit = () =>
+    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
@@ -487,12 +433,12 @@ function PackageEditorInner({
       tabs={pkgTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
-        if (v === "json") setJsonEditorKey((k) => k + 1);
+        if (v === "json") bumpJsonKey();
         setActiveTab(v as GenericEditorTab);
       }}
       error={error}
       isPending={isPending}
-      onSubmit={handleSubmit}
+      onSubmit={onSubmit}
       onCancel={() =>
         navigate(isEdit ? packageDetailPath(type, packageId!) : packageListPath(type))
       }
