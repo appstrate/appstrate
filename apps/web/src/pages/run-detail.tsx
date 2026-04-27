@@ -103,8 +103,8 @@ export function RunDetailPage() {
   } | null;
   const finalOutput = structuredOutput || execResult?.output || null;
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
-  const hasResult = !!hasOutput;
   const hasReport = !!structuredReport;
+  const hasResult = !!hasOutput || hasReport;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -113,14 +113,20 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
-  // Default tab: "report" first if a markdown report exists (it's the
-  // user-facing summary the agent built), then "result" for structured
-  // data, then logs. Hash override wins.
-  const defaultTab = hasReport ? "report" : hasResult ? "result" : "logs";
+  // Default tab: "result" if results exist (report and/or output), otherwise "logs".
+  // useTabWithHash respects the URL hash if present.
+  const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["report", "result", "logs", "memory", "info"] as const,
+    ["result", "logs", "memory", "info"] as const,
     defaultTab,
   );
+
+  // Result sub-tab: report first if available, otherwise data. User
+  // override is tracked separately so the auto-default can react to late
+  // events without clobbering an explicit click.
+  const autoSubTab: "report" | "data" = hasReport ? "report" : "data";
+  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
+  const resultSubTab = userSubTab ?? autoSubTab;
 
   // Subscribe to SSE for instant local status feedback
   useRunRealtime(
@@ -208,10 +214,9 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "report" | "logs" | "result" | "memory" | "info")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
         >
           <TabsList>
-            {hasReport && <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>}
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
@@ -254,14 +259,25 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {activeTab === "report" && hasReport && (
-        <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-          <Markdown>{structuredReport!}</Markdown>
-        </div>
-      )}
-
       {activeTab === "result" && hasResult && (
-        <div className="space-y-4">{hasOutput && <JsonView data={finalOutput!} />}</div>
+        <div className="space-y-4">
+          {hasReport && hasOutput && (
+            <Tabs value={resultSubTab} onValueChange={(v) => setUserSubTab(v as "report" | "data")}>
+              <TabsList>
+                <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>
+                <TabsTrigger value="data">{t("exec.tabResult")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+
+          {resultSubTab === "report" && hasReport && (
+            <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
+              <Markdown>{structuredReport!}</Markdown>
+            </div>
+          )}
+
+          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput!} />}
+        </div>
       )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
