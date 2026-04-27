@@ -47,6 +47,7 @@ import {
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { resolveAgentReadiness } from "../services/agent-readiness.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
@@ -139,6 +140,12 @@ export function createAgentsRouter() {
       const scope = getAppScope(c);
       await updateInstalledPackage(scope, agent.id, { config });
 
+      await recordAuditFromContext(c, {
+        action: "agent.config_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+      });
+
       return c.json({
         config,
         validation: { valid: true },
@@ -176,6 +183,12 @@ export function createAgentsRouter() {
       }
 
       await setUserAgentProviderOverride(actor, agent.id, data.providerId, data.profileId);
+      await recordAuditFromContext(c, {
+        action: "agent.provider_profile_set",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { providerId: data.providerId, profileId: data.profileId },
+      });
       return c.json({ success: true });
     },
   );
@@ -192,6 +205,12 @@ export function createAgentsRouter() {
       const body = await c.req.json();
       const data = parseBody(removeProviderProfileSchema, body);
       await removeUserAgentProviderOverride(actor, agent.id, data.providerId);
+      await recordAuditFromContext(c, {
+        action: "agent.provider_profile_removed",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { providerId: data.providerId },
+      });
       return c.json({ success: true });
     },
   );
@@ -217,6 +236,13 @@ export function createAgentsRouter() {
       const data = parseBody(proxyIdSchema, body);
 
       await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
+
+      await recordAuditFromContext(c, {
+        action: "agent.proxy_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { proxyId: data.proxyId },
+      });
 
       return c.json({ success: true });
     },
@@ -244,6 +270,13 @@ export function createAgentsRouter() {
 
       await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 
+      await recordAuditFromContext(c, {
+        action: "agent.model_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { modelId: data.modelId },
+      });
+
       return c.json({ success: true });
     },
   );
@@ -260,6 +293,13 @@ export function createAgentsRouter() {
       const data = parseBody(appProfileIdSchema, body);
 
       await updateInstalledPackage(scope, agent.id, { appProfileId: data.appProfileId });
+
+      await recordAuditFromContext(c, {
+        action: "agent.app_profile_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { appProfileId: data.appProfileId },
+      });
 
       return c.json({ success: true });
     },
@@ -360,6 +400,12 @@ export function createAgentsRouter() {
       if (!deleted) {
         throw notFound("Memory not found");
       }
+      await recordAuditFromContext(c, {
+        action: "agent.memory_deleted",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { memoryId: result.data },
+      });
       return c.json({ deleted: true });
     },
   );
@@ -380,6 +426,12 @@ export function createAgentsRouter() {
       if (!deleted) {
         throw notFound("Pinned slot not found");
       }
+      await recordAuditFromContext(c, {
+        action: "agent.pinned_slot_deleted",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { pinnedSlotId: result.data },
+      });
       return c.json({ deleted: true });
     },
   );
@@ -412,6 +464,19 @@ export function createAgentsRouter() {
         // each named slot must be deleted individually via DELETE /pinned/:id.)
         checkpointDeleted = await deleteCheckpoint(agent.id, applicationId, scope);
       }
+
+      await recordAuditFromContext(c, {
+        action: "agent.persistence_bulk_deleted",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: {
+          kind: kindParam ?? "all",
+          actorType: actorTypeParam ?? null,
+          actorId: actorIdParam ?? null,
+          memoriesDeleted,
+          checkpointDeleted,
+        },
+      });
 
       return c.json({ memoriesDeleted, checkpointDeleted });
     },

@@ -37,6 +37,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
 import { profileNameSchema } from "../lib/common-schemas.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export { profileNameSchema };
 export const bindAppProfileSchema = z.object({
@@ -65,6 +66,11 @@ export function createAppProfilesRouter() {
     const actor = getActor(c);
     const scope = getAppScope(c);
     await deleteAllActorConnections(scope, actor);
+    await recordAuditFromContext(c, {
+      action: "app_profile.connections_deleted_all",
+      resourceType: "app_profile",
+      resourceId: null,
+    });
     return c.json({ ok: true });
   });
 
@@ -89,6 +95,12 @@ export function createAppProfilesRouter() {
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     const profile = await createAppProfile(scope, data.name.trim());
+    await recordAuditFromContext(c, {
+      action: "app_profile.created",
+      resourceType: "app_profile",
+      resourceId: profile.id,
+      after: { name: profile.name },
+    });
     return c.json({ profile }, 201);
   });
 
@@ -100,6 +112,12 @@ export function createAppProfilesRouter() {
     const data = parseBody(profileNameSchema, body, "name");
     try {
       await renameAppProfile(scope, profileId, data.name.trim());
+      await recordAuditFromContext(c, {
+        action: "app_profile.renamed",
+        resourceType: "app_profile",
+        resourceId: profileId,
+        after: { name: data.name.trim() },
+      });
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
@@ -118,6 +136,11 @@ export function createAppProfilesRouter() {
     const profileId = c.req.param("id")!;
     try {
       await deleteAppProfile(scope, profileId);
+      await recordAuditFromContext(c, {
+        action: "app_profile.deleted",
+        resourceType: "app_profile",
+        resourceId: profileId,
+      });
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
@@ -192,6 +215,12 @@ export function createAppProfilesRouter() {
     }
 
     await bindAppProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
+    await recordAuditFromContext(c, {
+      action: "app_profile.bound",
+      resourceType: "app_profile",
+      resourceId: profileId,
+      after: { providerId: data.providerId, sourceProfileId: data.sourceProfileId },
+    });
     return c.json({ bound: true });
   });
 
@@ -216,6 +245,12 @@ export function createAppProfilesRouter() {
       }
 
       await unbindAppProfileProvider(profileId, providerId);
+      await recordAuditFromContext(c, {
+        action: "app_profile.unbound",
+        resourceType: "app_profile",
+        resourceId: profileId,
+        after: { providerId },
+      });
       return c.json({ unbound: true });
     },
   );
