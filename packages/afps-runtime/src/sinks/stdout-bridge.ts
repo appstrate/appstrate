@@ -215,10 +215,17 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
   // `Uint8Array`, plain `string`). We type the chunk as the widest
   // accepted shape and decode bytes via `TextDecoder` — which handles
   // both `Uint8Array` and Node's `Buffer` (a subclass of `Uint8Array`).
-  const decoder = new TextDecoder();
+  //
+  // `{ stream: true }` is load-bearing: a multi-byte UTF-8 character
+  // split across two chunk boundaries (e.g. `é` = 0xC3 0xA9 split into
+  // chunk-A=[…0xC3] and chunk-B=[0xA9…]) would otherwise be replaced
+  // with U+FFFD on each call. With streaming, partial sequences are
+  // stashed across calls and join correctly. The line-level partial
+  // buffer below handles split JSON envelopes; this handles split UTF-8.
+  const decoder = new TextDecoder("utf-8", { fatal: false });
 
   stdout.write = ((chunk: string | Uint8Array, ..._rest: unknown[]): boolean => {
-    const text = typeof chunk === "string" ? chunk : decoder.decode(chunk);
+    const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
     partial += text;
     const lines = partial.split("\n");
     partial = lines.pop() ?? "";

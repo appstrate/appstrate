@@ -313,6 +313,31 @@ describe("attachStdoutBridge — stdout interception", () => {
     bridge.restore();
   });
 
+  it("decodes multi-byte UTF-8 split across chunks (streaming decoder)", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
+
+    // `é` = UTF-8 [0xC3, 0xA9]. Split the byte sequence so the decoder
+    // sees an incomplete multi-byte char on the first call. Without
+    // `{ stream: true }` the bridge would emit U+FFFD and corrupt the
+    // event payload.
+    const fullJson = '{"type":"output.emitted","data":{"name":"café"}}\n';
+    const fullBytes = new TextEncoder().encode(fullJson);
+    // Locate the `é` (0xC3 0xA9) and split between its two bytes.
+    const eIndex = fullBytes.indexOf(0xc3);
+    expect(eIndex).toBeGreaterThan(0);
+    const writeChunk = stdout.write as unknown as (chunk: string | Uint8Array) => boolean;
+    writeChunk(fullBytes.slice(0, eIndex + 1)); // …0xC3
+    writeChunk(fullBytes.slice(eIndex + 1)); //   0xA9…\n
+    await flushMicrotasks();
+
+    expect(underlying.handled).toHaveLength(1);
+    const ev = underlying.handled[0]! as unknown as { data: { name: string } };
+    expect(ev.data.name).toBe("café");
+    bridge.restore();
+  });
+
   it("handles Uint8Array (and Buffer, by inheritance) chunks", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
