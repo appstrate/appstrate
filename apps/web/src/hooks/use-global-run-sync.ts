@@ -5,9 +5,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateRunAndNotificationQueries } from "./use-notifications";
-import type { Run } from "@appstrate/shared-types";
-
-const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
+import { type Run, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
 
 function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: string) {
   try {
@@ -43,7 +41,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
       qc.invalidateQueries({ queryKey: ["schedules", orgId, appId] });
     }
 
-    if (TERMINAL_STATUSES.has(status)) {
+    if (TERMINAL_RUN_STATUSES.has(status as RunStatus)) {
       invalidateRunAndNotificationQueries(qc);
       qc.invalidateQueries({ queryKey: ["billing", orgId] });
     }

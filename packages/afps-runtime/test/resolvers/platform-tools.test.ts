@@ -6,7 +6,6 @@ import {
   noteTool,
   pinTool,
   outputTool,
-  reportTool,
   logTool,
   PLATFORM_TOOLS,
   type RunEvent,
@@ -83,13 +82,6 @@ describe("platform tools — open envelope emission", () => {
     expect(events[0]!.data).toEqual({ ok: true });
   });
 
-  it("reportTool emits report.appended", async () => {
-    const { ctx, events } = makeCtx();
-    await reportTool.execute({ content: "done" }, ctx);
-    expect(events[0]!.type).toBe("report.appended");
-    expect(events[0]!.content).toBe("done");
-  });
-
   it("logTool emits log.written with level + message", async () => {
     const { ctx, events } = makeCtx();
     await logTool.execute({ level: "warn", message: "slow" }, ctx);
@@ -99,9 +91,7 @@ describe("platform tools — open envelope emission", () => {
   });
 
   it("PLATFORM_TOOLS maps all canonical tool names", () => {
-    expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(
-      ["log", "note", "output", "pin", "report"].sort(),
-    );
+    expect(Object.keys(PLATFORM_TOOLS).sort()).toEqual(["log", "note", "output", "pin"].sort());
     expect(PLATFORM_TOOLS.note).toBe(noteTool);
     expect(PLATFORM_TOOLS.pin).toBe(pinTool);
     expect(PLATFORM_TOOLS.log).toBe(logTool);
@@ -195,15 +185,12 @@ describe("reduceEvents", () => {
       { ...base, type: "pinned.set", timestamp: 3, key: "checkpoint", content: { x: 1 } },
       { ...base, type: "output.emitted", timestamp: 4, data: { a: 1 } },
       { ...base, type: "output.emitted", timestamp: 5, data: { b: 2 } },
-      { ...base, type: "report.appended", timestamp: 6, content: "line 1" },
-      { ...base, type: "report.appended", timestamp: 7, content: "line 2" },
       { ...base, type: "log.written", timestamp: 8, level: "info", message: "hello" },
     ];
     const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "a" }, { content: "b" }]);
     expect(result.pinned!.checkpoint).toEqual({ content: { x: 1 } });
     expect(result.output).toEqual({ b: 2 });
-    expect(result.report).toBe("line 1\nline 2");
     expect(result.logs).toHaveLength(1);
     expect(result.logs[0]!.timestamp).toBe(8);
   });

@@ -7,7 +7,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import type { Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
-import { asRecord } from "../../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { extractDepsFromManifest, parseDraftManifest } from "../../lib/manifest-utils.ts";
 
 // ─────────────────────────────────────────────

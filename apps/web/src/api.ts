@@ -116,6 +116,17 @@ export async function apiList<T = unknown>(path: string, options: RequestInit = 
   return envelope.data;
 }
 
+/**
+ * Build a query string from a record of optional values. Skips undefined entries
+ * and url-encodes values. Returns "" when all values are undefined.
+ */
+export function buildQs(params: Record<string, string | number | undefined>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return parts.length > 0 ? `?${parts.join("&")}` : "";
+}
+
 export async function uploadFormData<T = unknown>(
   path: string,
   formData: FormData,

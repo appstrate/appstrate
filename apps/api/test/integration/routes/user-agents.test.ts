@@ -7,7 +7,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
-import { asRecord } from "../../../src/lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 const app = getTestApp();
 

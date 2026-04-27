@@ -29,11 +29,5 @@
       "summary": "AFPS ships a portable runtime.",
       "partial": false
     }
-  },
-  {
-    "type": "report.appended",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "content": "All checks executed."
   }
 ]

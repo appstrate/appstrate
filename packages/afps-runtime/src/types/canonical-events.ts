@@ -9,11 +9,11 @@
  * envelope (`type: string` + open index signature) so third-party tools
  * can emit any payload without amending the spec. That openness is
  * correct at the spec layer but defeats TypeScript exhaustiveness in
- * the runtime, where five reserved namespaces (`memory.*`, `pinned.*`,
- * `output.*`, `report.*`, `log.*`) carry stable, runtime-meaningful
+ * the runtime, where four reserved namespaces (`memory.*`, `pinned.*`,
+ * `output.*`, `log.*`) carry stable, runtime-meaningful
  * shapes.
  *
- * {@link CanonicalRunEvent} narrows those five — and the `appstrate.*`
+ * {@link CanonicalRunEvent} narrows those four — and the `appstrate.*`
  * platform-internal events the runner emits — into a real discriminated
  * union. Switches over `event.type` get exhaustiveness via the standard
  * `_exhaustive: never` pattern. Unknown event types fall into the open
@@ -90,12 +90,6 @@ export interface PinnedSetEvent extends BaseEnvelope {
 export interface OutputEmittedEvent extends BaseEnvelope {
   type: "output.emitted";
   data: unknown;
-}
-
-/** `@afps/report` — `report()` tool. Append-by-newline semantics. */
-export interface ReportAppendedEvent extends BaseEnvelope {
-  type: "report.appended";
-  content: string;
 }
 
 /** `@afps/log` — `log()` tool. */
@@ -199,7 +193,6 @@ export type CanonicalRunEvent =
   | MemoryAddedEvent
   | PinnedSetEvent
   | OutputEmittedEvent
-  | ReportAppendedEvent
   | LogWrittenEvent
   | AppstrateProgressEvent
   | AppstrateErrorEvent
@@ -215,7 +208,6 @@ export const CANONICAL_EVENT_TYPES = [
   "memory.added",
   "pinned.set",
   "output.emitted",
-  "report.appended",
   "log.written",
   "appstrate.progress",
   "appstrate.error",
@@ -257,8 +249,6 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     }
     case "output.emitted":
       return "data" in event;
-    case "report.appended":
-      return typeof (event as Record<string, unknown>).content === "string";
     case "log.written": {
       const e = event as Record<string, unknown>;
       return (

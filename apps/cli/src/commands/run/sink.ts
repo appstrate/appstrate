@@ -104,8 +104,8 @@ function createHumanSink(opts: SinkOptions): EventSink {
           return;
         }
         default: {
-          // Be quiet about low-signal events (log.written, report.appended,
-          // pinned.set) by default — JSONL mode exposes them fully.
+          // Be quiet about low-signal events (log.written, pinned.set)
+          // by default — JSONL mode exposes them fully.
           return;
         }
       }

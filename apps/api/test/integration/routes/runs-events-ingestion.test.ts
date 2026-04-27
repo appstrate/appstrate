@@ -19,10 +19,10 @@
  *      the complete row) which would fail in either infra mode if the
  *      abstractions were bypassed.
  *
- *   2. `result.report` / `result.output` / `result.checkpoint` sent with
+ *   2. `result.output` / `result.checkpoint` sent with
  *      finalize land on `runs.result`. Before the tee sink merged
  *      aggregator fields into the finalize POST, tools that emitted
- *      `report.appended` via stdout produced an empty report column.
+ *      events via stdout produced an empty result column.
  *      This test is the server-side half of the contract: when the
  *      container POSTs a complete `result`, the row is complete too.
  */
@@ -281,14 +281,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     await seedPackage({ orgId: ctx.orgId, id: "@test/final-agent", type: "agent" });
   });
 
-  it("writes output + report + checkpoint from the finalize body onto runs.result", async () => {
+  it("writes output + checkpoint from the finalize body onto runs.result", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const result = {
       memories: [{ content: "m1" }],
       checkpoint: { step: 3 },
       output: { answer: 42 },
-      report: "# Report\nparagraph",
       logs: [],
       status: "success",
       durationMs: 1234,
@@ -301,10 +300,9 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.duration).toBe(1234);
     expect(row?.sinkClosedAt).not.toBeNull();
 
-    const persisted = row?.result as { output?: unknown; report?: unknown } | null;
+    const persisted = row?.result as { output?: unknown } | null;
     expect(persisted).not.toBeNull();
     expect(persisted?.output).toEqual({ answer: 42 });
-    expect(persisted?.report).toBe("# Report\nparagraph");
   });
 
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {
@@ -339,7 +337,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   it("CAS-guards all side effects — only the winning finalize writes log rows", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const body = { status: "success", output: { v: 1 }, report: "ok", durationMs: 10 };
+    const body = { status: "success", output: { v: 1 }, durationMs: 10 };
 
     const [a, b] = await Promise.all([postFinalize(runId, body), postFinalize(runId, body)]);
 

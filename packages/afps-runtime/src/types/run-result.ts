@@ -17,7 +17,6 @@ export type LogLevel = "info" | "warn" | "error";
  * - `memory.added` events append to `memories`
  * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
  * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
- * - `report.appended` events concatenate into `report` with `\n` separators
  * - `log.written` events append to `logs`
  *
  * Passed to {@link EventSink.finalize} when the run ends.
@@ -33,7 +32,6 @@ export interface RunResult {
    */
   pinned?: Record<string, PinnedSlot>;
   output: unknown | null;
-  report: string | null;
   logs: LogEntry[];
   error?: RunError;
   /**

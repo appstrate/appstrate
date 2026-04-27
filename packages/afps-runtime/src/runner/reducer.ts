@@ -6,7 +6,7 @@
  *
  * Consumes {@link RunEvent}s whose `type` is one of the reserved core
  * domains (`memory.added` / `pinned.set` / `output.emitted` /
- * `report.appended` / `log.written`). Events with any other `type` are
+ * `log.written`). Events with any other `type` are
  * passed through silently — the sink still sees them, but they do not
  * contribute to the aggregated result.
  *
@@ -28,7 +28,6 @@ export function emptyRunResult(): RunResult {
   return {
     memories: [],
     output: null,
-    report: null,
     logs: [],
   };
 }
@@ -38,7 +37,7 @@ export function emptyRunResult(): RunResult {
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
  * Open-envelope `RunEvent`s flow in; the canonical narrower projects
- * the five reserved namespaces (memory / pinned / output / report / log)
+ * the four reserved namespaces (memory / pinned / output / log)
  * + the runner-internal `appstrate.*` namespace into a discriminated
  * union, so the switch is exhaustively typed. Third-party / unknown
  * events are silently passed through — the sink still sees them, they
@@ -66,10 +65,6 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
     }
     case "output.emitted":
       result.output = canonical.data ?? null;
-      return;
-    case "report.appended":
-      result.report =
-        result.report === null ? canonical.content : `${result.report}\n${canonical.content}`;
       return;
     case "log.written":
       result.logs.push({

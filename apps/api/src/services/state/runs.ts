@@ -76,7 +76,7 @@ function safeRunLogData(value: Record<string, unknown> | null) {
   return result.data;
 }
 
-import { asRecordOrNull } from "../../lib/safe-json.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { toISO } from "../../lib/date-helpers.ts";
 
 /**

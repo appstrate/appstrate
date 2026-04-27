@@ -46,11 +46,5 @@
     "data": {
       "recommendation": "Schedule a joint session with Compliance before the August 2 deadline."
     }
-  },
-  {
-    "type": "report.appended",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "content": "Briefing complete. 2 findings surfaced; 1 recommendation issued. Confidence is medium pending confirmation from Compliance."
   }
 ]

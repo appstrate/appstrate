@@ -87,6 +87,12 @@ export interface ResourceEntry {
 
 import { runStatusEnum } from "@appstrate/db/schema";
 export type RunStatus = (typeof runStatusEnum.enumValues)[number];
+export {
+  TERMINAL_RUN_STATUSES,
+  TERMINAL_RUN_EVENT_TYPES,
+  terminalRunStatusValues,
+} from "@appstrate/db/schema";
+export type { TerminalRunStatus } from "@appstrate/db/schema";
 
 // --- Schedule Types ---
 
@@ -229,10 +235,22 @@ export interface ProviderStatus {
 
 export type { RunProviderSnapshot } from "@appstrate/db/schema";
 
-export interface AgentListItem {
+/**
+ * Fields shared by every package row when listed (agent or skill/tool/provider).
+ * Concrete list shapes (`AgentListItem`, `OrgPackageItem`) extend this with
+ * what their respective list endpoints additionally return.
+ */
+export interface BasePackageListItem {
   id: string;
+  description: string | null;
+  source: "system" | "local";
+  scope: string | null;
+  version: string | null;
+  forkedFrom: string | null;
+}
+
+export interface AgentListItem extends BasePackageListItem {
   displayName: string;
-  description: string;
   schemaVersion: string;
   author: string;
   keywords: string[];
@@ -242,11 +260,9 @@ export interface AgentListItem {
     tools: Record<string, string>;
   };
   runningRuns: number;
-  source: "system" | "local";
-  scope: string | null;
-  version: string | null;
   type: PackageType;
-  forkedFrom: string | null;
+  /** Always non-null on agents — narrowed for ergonomics. */
+  description: string;
 }
 
 export interface AgentDetail {
@@ -285,19 +301,15 @@ export interface AgentDetail {
 
 // --- Organization Package Types ---
 
-export interface OrgPackageItem {
-  id: string;
+export interface OrgPackageItem extends BasePackageListItem {
+  /** Display name from the manifest, may be missing on legacy rows. */
   name: string | null;
-  description: string | null;
-  source: "system" | "local";
   createdBy: string | null;
   createdByName: string | null;
   createdAt: string;
   updatedAt: string;
   usedByAgents: number;
-  version: string | null;
   autoInstalled: boolean;
-  forkedFrom: string | null;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { Run } from "@appstrate/shared-types";
@@ -43,17 +43,18 @@ export function usePaginatedRuns({
       ? `/agents/${packageId}/runs`
       : `/runs`;
 
-  const params = new URLSearchParams();
-  params.set("limit", String(limit));
-  params.set("offset", String(offset));
-  if (user) params.set("user", user);
-  if (kind && kind !== "all") params.set("kind", kind);
-  if (status) params.set("status", status);
+  const qs = buildQs({
+    limit,
+    offset,
+    user,
+    kind: kind && kind !== "all" ? kind : undefined,
+    status,
+  });
 
   return useQuery({
     queryKey: ["paginated-runs", orgId, appId, endpoint, user, kind, status, limit, offset],
     queryFn: async () => {
-      return api<PaginatedResult>(`${endpoint}?${params.toString()}`);
+      return api<PaginatedResult>(`${endpoint}${qs}`);
     },
     placeholderData: (prev) => prev,
     enabled: !!appId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),

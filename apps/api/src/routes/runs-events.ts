@@ -73,7 +73,6 @@ const RunResultSchema = z
       )
       .optional(),
     output: z.unknown().nullable().optional(),
-    report: z.string().nullable().optional(),
     logs: z
       .array(
         z.object({
@@ -177,7 +176,6 @@ export function createRunsEventsRouter() {
       memories: d.memories,
       ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
-      report: d.report ?? null,
       logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
       ...(d.status ? { status: d.status } : {}),

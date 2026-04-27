@@ -18,7 +18,7 @@ import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { asRecord } from "../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 export interface ForkResult {
   packageId: string;

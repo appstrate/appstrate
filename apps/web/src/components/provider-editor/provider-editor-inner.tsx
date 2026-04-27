@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCreatePackage, useUpdatePackage } from "../../hooks/use-mutations";
-import { PACKAGE_CONFIG } from "../../hooks/use-packages";
-import { api } from "../../api";
-import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
+import { useEditorState } from "../../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -131,23 +127,56 @@ export interface ProviderEditorInnerProps {
 export function ProviderEditorInner({ initialState, isEdit, packageId }: ProviderEditorInnerProps) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const createPkg = useCreatePackage("provider");
-  const updatePkg = useUpdatePackage("provider", packageId || "");
 
-  // Snapshot the initial state once so `isDirty` compares against the
-  // exact bytes the editor mounted with.
-  const [initialSnapshot] = useState(initialState);
-  const [state, setState] = useState(initialState);
   const [credentialFields, setCredentialFields] = useState<SchemaField[]>(() =>
     extractCredentialFields(initialState.manifest),
   );
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProviderEditorTab>("general");
-  const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
-  const updateManifest = (patch: Record<string, unknown>) =>
-    setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
+  // We need authMode for validation but the hook needs validate up-front.
+  // Read it lazily inside validate from the latest state.
+  const {
+    state,
+    setState,
+    updateManifest,
+    blocker,
+    error,
+    jsonEditorKey,
+    bumpJsonKey,
+    saveDraft,
+    handleSubmit,
+    isPending,
+  } = useEditorState<ProviderEditorState>({
+    initialState,
+    packageType: "provider",
+    packageId,
+    isEdit,
+    toWireBody: (s) => ({ manifest: s.manifest, content: s.content }),
+    validate: (s) => {
+      const { id } = getManifestName(s.manifest);
+      if (!id || !s.manifest.displayName) {
+        return { error: t("editor.errorRequired", { ns: "agents" }), tab: "general" };
+      }
+      const sDef = getDef(s.manifest);
+      const sAuthMode = (sDef.authMode as string) || "oauth2";
+      const sOauth2 = getAuthSub(s.manifest, "oauth2");
+      const sOauth1 = getAuthSub(s.manifest, "oauth1");
+      if (sAuthMode === "oauth2") {
+        if (!sOauth2.authorizationUrl || !sOauth2.tokenUrl) {
+          return { error: t("providers.form.errorOAuth2Required"), tab: "auth" };
+        }
+      } else if (sAuthMode === "oauth1") {
+        if (!sOauth1.requestTokenUrl || !sOauth1.accessTokenUrl) {
+          return { error: t("providers.form.errorOAuth1Required"), tab: "auth" };
+        }
+      } else if (sAuthMode === "api_key" || sAuthMode === "basic" || sAuthMode === "custom") {
+        if (credentialFields.length === 0) {
+          return { error: t("providers.form.errorCredentialsRequired"), tab: "auth" };
+        }
+      }
+      return null;
+    },
+  });
 
   const patchDef = (patch: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest: updateDef(s.manifest, patch) }));
@@ -163,70 +192,8 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
   const oauth2 = getAuthSub(state.manifest, "oauth2");
   const oauth1 = getAuthSub(state.manifest, "oauth1");
 
-  // --- Unsaved changes detection ---
-  const isDirty = useMemo(
-    () => JSON.stringify(initialSnapshot) !== JSON.stringify(state),
-    [initialSnapshot, state],
-  );
-  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
-
-  const saveDraft = useCallback(async () => {
-    if (!isEdit || !packageId) return;
-    const cfg = PACKAGE_CONFIG.provider;
-    await api(`/packages/${cfg.path}/${packageId}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        manifest: state.manifest,
-        content: state.content,
-        lockVersion: state.lockVersion!,
-      }),
-    });
-    qc.invalidateQueries({ queryKey: ["packages"] });
-    qc.invalidateQueries({ queryKey: ["providers"] });
-  }, [state, isEdit, packageId, qc]);
-
-  const handleSubmit = () => {
-    setError(null);
-    const { id } = getManifestName(state.manifest);
-    if (!id || !state.manifest.displayName) {
-      setError(t("editor.errorRequired", { ns: "agents" }));
-      setActiveTab("general");
-      return;
-    }
-
-    if (authMode === "oauth2") {
-      if (!oauth2.authorizationUrl || !oauth2.tokenUrl) {
-        setError(t("providers.form.errorOAuth2Required"));
-        setActiveTab("auth");
-        return;
-      }
-    } else if (authMode === "oauth1") {
-      if (!oauth1.requestTokenUrl || !oauth1.accessTokenUrl) {
-        setError(t("providers.form.errorOAuth1Required"));
-        setActiveTab("auth");
-        return;
-      }
-    } else if (authMode === "api_key" || authMode === "basic" || authMode === "custom") {
-      if (credentialFields.length === 0) {
-        setError(t("providers.form.errorCredentialsRequired"));
-        setActiveTab("auth");
-        return;
-      }
-    }
-
-    allowNavigation();
-    const body = { manifest: state.manifest, content: state.content };
-    if (isEdit) {
-      updatePkg.mutate(
-        { ...body, lockVersion: state.lockVersion! },
-        { onError: (err) => setError(err.message) },
-      );
-    } else {
-      createPkg.mutate(body, { onError: (err) => setError(err.message) });
-    }
-  };
-
-  const isPending = createPkg.isPending || updatePkg.isPending;
+  const onSubmit = () =>
+    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as ProviderEditorTab));
 
   const tabs: Array<{ id: ProviderEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral", { ns: "agents" }) },
@@ -299,12 +266,12 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={(v) => {
-        if (v === "json") setJsonEditorKey((k) => k + 1);
+        if (v === "json") bumpJsonKey();
         setActiveTab(v as ProviderEditorTab);
       }}
       error={error}
       isPending={isPending}
-      onSubmit={handleSubmit}
+      onSubmit={onSubmit}
       onCancel={() => navigate(isEdit ? `/providers/${packageId}` : "/providers")}
       hideSubmitBar={activeTab === "json"}
     >

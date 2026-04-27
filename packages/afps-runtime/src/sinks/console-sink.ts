@@ -44,7 +44,6 @@ export class ConsoleSink implements EventSink {
     const summary =
       `▶ run complete — memories=${result.memories.length} logs=${result.logs.length}` +
       (result.output !== null ? " output=set" : "") +
-      (result.report !== null ? " report=set" : "") +
       (result.pinned?.checkpoint !== undefined ? " checkpoint=set" : "") +
       (result.error ? ` ERROR=${result.error.message}` : "");
     this.out.write(summary + "\n");
@@ -65,8 +64,6 @@ export class ConsoleSink implements EventSink {
         }
         case "output.emitted":
           return `${seq} ◆ output: ${truncate(safeStringify(canonical.data), 200)}`;
-        case "report.appended":
-          return `${seq} 📝 report: ${truncate(canonical.content, 200)}`;
         case "log.written":
           return `${seq} ${logMarker(canonical.level)} ${canonical.message}`;
         case "appstrate.progress":

@@ -24,7 +24,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -90,14 +90,6 @@ export interface FinalizeRunInput {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Terminal RunEvent types — flush ordering buffer unconditionally. */
-const TERMINAL_EVENT_TYPES = new Set([
-  "run.completed",
-  "run.failed",
-  "run.timeout",
-  "run.cancelled",
-]);
 
 /** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
@@ -188,7 +180,7 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
   await bufferEvent(run.id, sequence, event);
 
   // Terminal events flush unconditionally (accept gaps).
-  if (TERMINAL_EVENT_TYPES.has(event.type)) {
+  if (TERMINAL_RUN_EVENT_TYPES.has(event.type)) {
     await drainBufferedEvents(run, { allowGaps: true });
     return { status: "persisted", sequence };
   }
@@ -210,7 +202,7 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
  *           schema (if declared) — failure overrides to "failed".
  *        d. If status is still "success": apply the "zero tokens" heuristic
  *           (no LLM roundtrip ever happened) — overrides to "failed".
- *   4. Build the result payload (`{ output, report }`) mirroring the legacy
+ *   4. Build the result payload (`{ output }`) mirroring the legacy
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
  *   5. Fire the `afterRun` hook to collect module-provided metadata (billing,
@@ -263,14 +255,10 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   }
 
   // 4. Build the persisted result payload — matches the legacy platform shape
-  //    so existing consumers of `runs.result.output` / `runs.result.report`
-  //    keep working.
+  //    so existing consumers of `runs.result.output` keep working.
   const resultPayload: Record<string, unknown> = {};
   if (result.output !== null && result.output !== undefined) {
     resultPayload.output = result.output;
-  }
-  if (typeof result.report === "string" && result.report.length > 0) {
-    resultPayload.report = result.report;
   }
   const resultToPersist =
     Object.keys(resultPayload).length > 0 ? (resultPayload as Record<string, unknown>) : null;

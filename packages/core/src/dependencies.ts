@@ -71,6 +71,66 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   return deps;
 }
 
+// ─────────────────────────────────────────────
+// Provider entries (manifest.dependencies.providers + providersConfiguration)
+// ─────────────────────────────────────────────
+
+/**
+ * A single provider entry as it appears in a manifest: the dependency
+ * identifier (`@scope/name`), the declared version range, and optional
+ * OAuth scopes from `providersConfiguration`.
+ */
+export interface ManifestProviderEntry {
+  id: string;
+  version: string;
+  scopes: string[];
+}
+
+/** Read providers + providersConfiguration into a flat ManifestProviderEntry[]. */
+export function parseManifestProviders(manifest: Record<string, unknown>): ManifestProviderEntry[] {
+  const deps = (manifest.dependencies ?? {}) as { providers?: Record<string, string> };
+  const providers = deps.providers ?? {};
+  const config = (manifest.providersConfiguration ?? {}) as Record<string, { scopes?: unknown }>;
+  return Object.entries(providers).map(([id, version]) => {
+    const scopes = config[id]?.scopes;
+    return {
+      id,
+      version: version || "*",
+      scopes: Array.isArray(scopes)
+        ? (scopes as string[]).filter((s) => typeof s === "string")
+        : [],
+    };
+  });
+}
+
+/**
+ * Write a list of ManifestProviderEntry back into a manifest, mutating
+ * `manifest.dependencies.providers` and `manifest.providersConfiguration`
+ * in place. Used by the agent editor when the user updates the providers
+ * panel — pairs with `parseManifestProviders` for round-tripping.
+ */
+export function writeManifestProviders(
+  manifest: Record<string, unknown>,
+  entries: ManifestProviderEntry[],
+): void {
+  if (!manifest.dependencies) manifest.dependencies = { providers: {} };
+  const deps = manifest.dependencies as Record<string, unknown>;
+  const providers: Record<string, string> = {};
+  const config: Record<string, Record<string, unknown>> = {};
+  for (const e of entries) {
+    if (!e.id) continue;
+    providers[e.id] = e.version;
+    const scopes = (e.scopes ?? []).filter(Boolean);
+    if (scopes.length > 0) config[e.id] = { scopes };
+  }
+  deps.providers = providers;
+  if (Object.keys(config).length > 0) {
+    manifest.providersConfiguration = config;
+  } else {
+    delete manifest.providersConfiguration;
+  }
+}
+
 /** Result of circular dependency detection. */
 export interface CycleCheckResult {
   /** Whether a circular dependency was detected. */

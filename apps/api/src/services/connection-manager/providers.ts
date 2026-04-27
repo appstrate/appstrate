@@ -22,7 +22,7 @@ import {
 } from "@appstrate/connect";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
-import { asRecord } from "../../lib/safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getPackageDisplayName } from "../../lib/package-helpers.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";

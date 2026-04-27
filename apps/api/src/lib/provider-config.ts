@@ -8,7 +8,7 @@ import {
   buildProviderDefinitionFromManifest,
 } from "@appstrate/core/validation";
 import { decryptCredentials } from "@appstrate/connect";
-import { asRecord } from "./safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 /** Check if encrypted credentials contain actual data (not just an empty object). */
 export function hasActualCredentials(encrypted: string | undefined): boolean {

@@ -47,14 +47,12 @@ describe("ConsoleSink", () => {
   it("formats each canonical event kind distinctly", async () => {
     await sink.handle(event("pinned.set", { key: "checkpoint", content: { a: 1 } }));
     await sink.handle(event("output.emitted", { data: "x" }));
-    await sink.handle(event("report.appended", { content: "# R" }));
     await sink.handle(event("log.written", { level: "warn", message: "careful" }));
     const lines = buf.output.trim().split("\n");
-    expect(lines).toHaveLength(4);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("pinned[checkpoint]");
     expect(lines[1]).toContain("output");
-    expect(lines[2]).toContain("report");
-    expect(lines[3]).toContain("careful");
+    expect(lines[2]).toContain("careful");
   });
 
   it("formats unknown / third-party event types with a fallback marker", async () => {
@@ -75,13 +73,11 @@ describe("ConsoleSink", () => {
       memories: [{ content: "a" }, { content: "b" }],
       pinned: { checkpoint: { content: { foo: 1 } } },
       output: { done: true },
-      report: "# Done",
       logs: [{ level: "info", message: "ok", timestamp: 0 }],
     });
     expect(buf.output).toContain("memories=2");
     expect(buf.output).toContain("logs=1");
     expect(buf.output).toContain("output=set");
-    expect(buf.output).toContain("report=set");
     expect(buf.output).toContain("checkpoint=set");
   });
 
@@ -89,7 +85,6 @@ describe("ConsoleSink", () => {
     await sink.finalize({
       memories: [],
       output: null,
-      report: null,
       logs: [],
       error: { message: "boom" },
     });

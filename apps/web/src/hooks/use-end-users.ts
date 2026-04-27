@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
@@ -17,13 +17,13 @@ export function useEndUsers(params?: EndUserListParams) {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["end-users", orgId, appId, params?.limit, params?.startingAfter],
-    queryFn: () => {
-      const searchParams = new URLSearchParams();
-      if (params?.limit) searchParams.set("limit", String(params.limit));
-      if (params?.startingAfter) searchParams.set("startingAfter", params.startingAfter);
-      const qs = searchParams.toString();
-      return api<EndUserListResponse>(`/end-users${qs ? `?${qs}` : ""}`);
-    },
+    queryFn: () =>
+      api<EndUserListResponse>(
+        `/end-users${buildQs({
+          limit: params?.limit,
+          startingAfter: params?.startingAfter,
+        })}`,
+      ),
     enabled: !!orgId && !!appId,
   });
 }

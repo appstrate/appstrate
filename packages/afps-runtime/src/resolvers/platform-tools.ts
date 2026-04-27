@@ -3,7 +3,7 @@
 
 /**
  * AFPS 1.3 platform tools — spec-compliant Tool implementations for
- * the five reserved core domains (memory, state, output, report, log).
+ * the four reserved core domains (memory, state, output, log).
  *
  * In AFPS 1.3 these tools MOVE from hardcoded runtime extensions to
  * packages shipped in the bundle (`@afps/memory`, `@afps/state`, …).
@@ -19,7 +19,7 @@
  *
  * Each tool simply emits a RunEvent — the EventSink decides what to do
  * (persist, broadcast, ignore). The runtime no longer hardcodes memory
- * / state / output / report / log semantics internally.
+ * / state / output / log semantics internally.
  */
 
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
@@ -150,29 +150,6 @@ export const outputTool: Tool = {
 };
 
 // ─────────────────────────────────────────────
-// @afps/report — report → report.appended
-// ─────────────────────────────────────────────
-
-export const reportTool: Tool = {
-  name: "report",
-  description:
-    "Append a line to the human-readable run report. Lines are concatenated with newline separators in the final RunResult.",
-  parameters: {
-    type: "object",
-    required: ["content"],
-    additionalProperties: false,
-    properties: {
-      content: { type: "string", description: "One line of the human-readable report." },
-    },
-  } satisfies JSONSchema,
-  async execute(args, ctx) {
-    const { content } = args as { content: string };
-    emit(ctx, "report.appended", { content });
-    return successResult("Report line appended");
-  },
-};
-
-// ─────────────────────────────────────────────
 // @afps/log — log → log.written
 // ─────────────────────────────────────────────
 
@@ -201,14 +178,13 @@ export const logTool: Tool = {
 // ─────────────────────────────────────────────
 
 /**
- * The five platform tools keyed by tool name, suitable for
+ * The four platform tools keyed by tool name, suitable for
  * `RunOptions.toolOverrides`. Spread directly into the overrides map
- * when a runner needs to inject all five at once.
+ * when a runner needs to inject all four at once.
  */
 export const PLATFORM_TOOLS = {
   note: noteTool,
   pin: pinTool,
   output: outputTool,
-  report: reportTool,
   log: logTool,
 } as const satisfies Record<string, Tool>;

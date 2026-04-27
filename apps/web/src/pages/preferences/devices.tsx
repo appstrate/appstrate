@@ -25,7 +25,10 @@ export function PreferencesDevicesPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: SESSIONS_QUERY_KEY,
-    queryFn: () => apiFetch<CliSessionsResponse>("/api/auth/cli/sessions"),
+    queryFn: async () => {
+      const env = await apiFetch<CliSessionsResponse>("/api/auth/cli/sessions");
+      return env.data;
+    },
   });
 
   const revokeOne = useMutation({
@@ -55,7 +58,7 @@ export function PreferencesDevicesPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const sessions = data?.data ?? [];
+  const sessions = data ?? [];
 
   return (
     <>

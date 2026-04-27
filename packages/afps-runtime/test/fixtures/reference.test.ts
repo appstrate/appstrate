@@ -119,7 +119,6 @@ describe("fixtures/reference — end-to-end round trip", () => {
     expect(result.memories).toHaveLength(1);
     expect(result.pinned!.checkpoint).toEqual({ content: { iteration: 1 } });
     expect(result.output).toEqual({ summary: "AFPS ships a portable runtime.", partial: false });
-    expect(result.report).toBe("All checks executed.");
     expect(finalized).toBeDefined();
   });
 

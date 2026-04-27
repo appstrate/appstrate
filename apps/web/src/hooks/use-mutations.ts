@@ -4,19 +4,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch, uploadFormData } from "../api";
+import { api, apiFetch, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
 import { invalidateConnectionRelated } from "./invalidation";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
-
-function buildQs(params: Record<string, string | undefined>): string {
-  const parts = Object.entries(params)
-    .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => `${k}=${encodeURIComponent(v!)}`);
-  return parts.length > 0 ? `?${parts.join("&")}` : "";
-}
 
 export function onMutationError(err: Error) {
   toast.error(i18n.t("error.prefix", { message: err.message }));

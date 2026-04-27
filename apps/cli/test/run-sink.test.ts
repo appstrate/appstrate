@@ -57,7 +57,6 @@ function emptyResult(): RunResult {
   return {
     memories: [],
     output: null,
-    report: "",
     logs: [],
   };
 }
@@ -99,9 +98,9 @@ describe("createConsoleSink — JSONL mode", () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sink-test-"));
     const out = path.join(dir, "result.json");
     const sink = createConsoleSink({ json: true, outputPath: out });
-    await sink.finalize({ ...emptyResult(), report: "hello" });
+    await sink.finalize({ ...emptyResult(), output: { hello: true } });
     const read = await fs.readFile(out, "utf8");
-    expect(read).toContain('"report": "hello"');
+    expect(read).toContain('"hello": true');
     await fs.rm(dir, { recursive: true, force: true });
   });
 });

@@ -829,12 +829,11 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `report`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
+                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs`.",
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
                 output: {},
-                report: { type: ["string", "null"] },
                 logs: { type: "array" },
                 error: {
                   type: "object",

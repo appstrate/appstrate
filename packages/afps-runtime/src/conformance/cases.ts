@@ -380,8 +380,6 @@ const SAMPLE_SCRIPT: RunEvent[] = [
   scriptEvent("pinned.set", { key: "checkpoint", content: { counter: 2 } }),
   scriptEvent("output.emitted", { data: { answer: 0, partial: true } }),
   scriptEvent("output.emitted", { data: { answer: 42, partial: false, extra: "done" } }),
-  scriptEvent("report.appended", { content: "line 1" }),
-  scriptEvent("report.appended", { content: "line 2" }),
 ];
 
 async function withScript(
@@ -416,8 +414,6 @@ const L4_ORDERED_EMISSION: ConformanceCase = {
       "pinned.set",
       "output.emitted",
       "output.emitted",
-      "report.appended",
-      "report.appended",
     ];
     for (let i = 0; i < emitted.length; i++) {
       if (emitted[i]!.type !== EXPECTED_TYPES[i]) {
@@ -465,9 +461,6 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
       return fail(`output replace-on-emit failed: ${JSON.stringify(out)}`);
     }
-    if (r.report !== "line 1\nline 2") {
-      return fail(`report should concat with \\n, got ${JSON.stringify(r.report)}`);
-    }
     if (r.logs.length !== 1 || r.logs[0]!.message !== "starting") {
       return fail(`log entries malformed: ${JSON.stringify(r.logs)}`);
     }
@@ -493,8 +486,7 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
       r.memories.length !== 0 ||
       r.logs.length !== 0 ||
       r.pinned !== undefined ||
-      r.output !== null ||
-      r.report !== null
+      r.output !== null
     ) {
       return fail(`RunResult should be empty baseline, got ${JSON.stringify(r)}`);
     }

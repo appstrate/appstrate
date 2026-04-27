@@ -2,7 +2,7 @@
 
 import { eq, or, isNull, ne } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
-import { asRecord } from "./safe-json.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 /** Drizzle filter: packages owned by org OR system packages (orgId: null). */
 export function orgOrSystemFilter(orgId: string) {
