@@ -35,7 +35,10 @@ export function OrgSettingsCliSessionsPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["org-cli-sessions", orgId],
-    queryFn: () => api<AdminCliSessionsResponse>(`/orgs/${orgId}/cli-sessions`),
+    queryFn: async () => {
+      const env = await api<AdminCliSessionsResponse>(`/orgs/${orgId}/cli-sessions`);
+      return env.data;
+    },
     enabled: !!orgId,
   });
 
@@ -53,7 +56,7 @@ export function OrgSettingsCliSessionsPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const sessions = data?.data ?? [];
+  const sessions = data ?? [];
 
   return (
     <>

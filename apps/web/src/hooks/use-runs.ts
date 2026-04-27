@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { Run, RunLog } from "@appstrate/shared-types";
@@ -11,12 +11,7 @@ export function useRuns(packageId: string | undefined) {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["runs", orgId, appId, packageId],
-    queryFn: async () => {
-      const result = await api<{ object: "list"; data: Run[]; total: number; hasMore: boolean }>(
-        `/agents/${packageId}/runs`,
-      );
-      return result.data;
-    },
+    queryFn: () => apiList<Run>(`/agents/${packageId}/runs`),
     enabled: !!packageId && !!appId,
   });
 }

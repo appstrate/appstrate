@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { api, uploadFormData, apiBlob } from "../api";
+import { api, apiList, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 // Profile resolution is now per-provider (server-side), no global profileId needed
@@ -41,12 +41,7 @@ function usePackageList(type: PackageType) {
   const cfg = PACKAGE_CONFIG[type];
   return useQuery({
     queryKey: ["packages", cfg.path, orgId, appId],
-    queryFn: async () => {
-      const result = await api<{ object: "list"; data: OrgPackageItem[]; hasMore: boolean }>(
-        `/packages/${cfg.path}`,
-      );
-      return result.data;
-    },
+    queryFn: () => apiList<OrgPackageItem>(`/packages/${cfg.path}`),
     enabled: !!orgId && !!appId,
   });
 }
@@ -121,12 +116,7 @@ export function useAgents() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["agents", orgId, appId],
-    queryFn: async () => {
-      const result = await api<{ object: "list"; data: AgentListItem[]; hasMore: boolean }>(
-        "/agents",
-      );
-      return result.data;
-    },
+    queryFn: () => apiList<AgentListItem>("/agents"),
     enabled: !!orgId && !!appId,
   });
 }

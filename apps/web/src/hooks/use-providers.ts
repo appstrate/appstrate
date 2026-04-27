@@ -24,6 +24,8 @@ export function useProviders() {
   return useQuery<ProvidersResponse>({
     queryKey: ["providers", orgId, appId],
     queryFn: async () => {
+      // /providers extends the list envelope with `callbackUrl`, so we still
+      // call api() here instead of apiList() to preserve that extra field.
       const env = await api<ProvidersWireResponse>("/providers");
       return { providers: env.data, callbackUrl: env.callbackUrl };
     },

@@ -19,7 +19,7 @@ import type {
   AgentPinnedSlotItem,
   PersistenceActorType,
 } from "@appstrate/shared-types";
-import { api } from "../api";
+import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
@@ -52,11 +52,8 @@ function usePersistenceQuery<T>(
   return useQuery({
     queryKey: ["agent-persistence", scopeTag, orgId, appId, packageId, params],
     queryFn: async () => {
-      const search = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) if (v !== undefined) search.set(k, v);
-      const qs = search.toString();
       const res = await api<PersistenceResponse>(
-        `/agents/${packageId}/persistence${qs ? `?${qs}` : ""}`,
+        `/agents/${packageId}/persistence${buildQs(params)}`,
       );
       return pick(res);
     },

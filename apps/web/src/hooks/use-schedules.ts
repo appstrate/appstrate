@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
@@ -12,12 +12,7 @@ export function useScheduleRuns(scheduleId: string | undefined) {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedule-runs", orgId, appId, scheduleId],
-    queryFn: async () => {
-      const result = await api<{ object: "list"; data: Run[]; total: number; hasMore: boolean }>(
-        `/schedules/${scheduleId}/runs`,
-      );
-      return result.data;
-    },
+    queryFn: () => apiList<Run>(`/schedules/${scheduleId}/runs`),
     enabled: !!scheduleId && !!appId,
   });
 }
