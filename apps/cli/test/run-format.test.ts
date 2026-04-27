@@ -16,7 +16,9 @@ import {
   formatToolArgsCompact,
   formatToolArgsVerbose,
   formatToolResult,
+  isTruncationMarker,
   resolveVerbosity,
+  unwrapMcpContent,
 } from "../src/commands/run/format.ts";
 
 describe("formatToolArgsCompact", () => {
@@ -125,11 +127,184 @@ describe("formatToolResult", () => {
     expect(out).toContain('"ok": true');
   });
 
-  it("renders the bridge's truncation marker as JSON in normal mode", () => {
+  it("renders the bridge's truncation marker as a human-readable size in normal mode", () => {
     const marker = { __truncated: true, reason: "size", bytes: 99999, limit: 2048 };
     const out = formatToolResult(marker, "normal");
-    expect(out).toContain("__truncated");
-    expect(out).toContain("size");
+    expect(out).toContain("truncated");
+    expect(out).toContain("KB");
+    expect(out).not.toContain("__truncated");
+  });
+});
+
+describe("unwrapMcpContent", () => {
+  it("returns null for non-MCP shapes", () => {
+    expect(unwrapMcpContent(null)).toBe(null);
+    expect(unwrapMcpContent(undefined)).toBe(null);
+    expect(unwrapMcpContent("string")).toBe(null);
+    expect(unwrapMcpContent(42)).toBe(null);
+    expect(unwrapMcpContent({})).toBe(null);
+    expect(unwrapMcpContent({ content: "not an array" })).toBe(null);
+    expect(unwrapMcpContent({ content: [] })).toBe(null);
+    expect(unwrapMcpContent({ content: [{ type: "image" }] })).toBe(null);
+  });
+
+  it("extracts a single text block", () => {
+    expect(unwrapMcpContent({ content: [{ type: "text", text: "hello" }] })).toBe("hello");
+  });
+
+  it("joins multiple text blocks with newlines", () => {
+    const out = unwrapMcpContent({
+      content: [
+        { type: "text", text: "first" },
+        { type: "text", text: "second" },
+      ],
+    });
+    expect(out).toBe("first\nsecond");
+  });
+
+  it("skips non-text blocks (image, resource)", () => {
+    const out = unwrapMcpContent({
+      content: [
+        { type: "text", text: "real" },
+        { type: "image", data: "..." },
+        { type: "resource", uri: "..." },
+        { type: "text", text: "more" },
+      ],
+    });
+    expect(out).toBe("real\nmore");
+  });
+
+  it("returns null when text array contains no text blocks", () => {
+    expect(unwrapMcpContent({ content: [{ type: "image" }, { type: "resource" }] })).toBe(null);
+  });
+
+  it("ignores blocks with non-string text fields", () => {
+    expect(unwrapMcpContent({ content: [{ type: "text", text: 42 }] })).toBe(null);
+  });
+});
+
+describe("isTruncationMarker", () => {
+  it("recognises the bridge's truncation marker", () => {
+    expect(isTruncationMarker({ __truncated: true, bytes: 9999, limit: 2048 })).toBe(true);
+    expect(
+      isTruncationMarker({
+        __truncated: true,
+        bytes: 9999,
+        limit: 2048,
+        reason: "size",
+        preview: "...",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects non-marker values", () => {
+    expect(isTruncationMarker(null)).toBe(false);
+    expect(isTruncationMarker(undefined)).toBe(false);
+    expect(isTruncationMarker("string")).toBe(false);
+    expect(isTruncationMarker({ __truncated: true })).toBe(false); // missing bytes/limit
+    expect(isTruncationMarker({ __truncated: false, bytes: 1, limit: 1 })).toBe(false);
+    expect(isTruncationMarker({ bytes: 1, limit: 1 })).toBe(false);
+  });
+});
+
+describe("formatToolResult — MCP unwrapping", () => {
+  it("renders just the text from an MCP envelope (single block)", () => {
+    const out = formatToolResult(
+      { content: [{ type: "text", text: "Logged [info]: hello world" }] },
+      "normal",
+    );
+    expect(out).toBe("Logged [info]: hello world");
+    expect(out).not.toContain('"content"');
+    expect(out).not.toContain('"type"');
+  });
+
+  it("joins multi-block MCP envelopes with collapsed newlines in normal mode", () => {
+    const out = formatToolResult(
+      {
+        content: [
+          { type: "text", text: "line one" },
+          { type: "text", text: "line two" },
+        ],
+      },
+      "normal",
+    );
+    expect(out).not.toContain("\n");
+    expect(out).toContain("↵");
+    expect(out).toContain("line one");
+    expect(out).toContain("line two");
+  });
+
+  it("preserves real newlines in verbose mode", () => {
+    const out = formatToolResult(
+      {
+        content: [
+          { type: "text", text: "line one" },
+          { type: "text", text: "line two" },
+        ],
+      },
+      "verbose",
+    );
+    expect(out).toBe("line one\nline two");
+  });
+
+  it("falls back to JSON for non-MCP objects", () => {
+    const out = formatToolResult({ ok: true, n: 1 }, "normal");
+    expect(out).toBe('{"ok":true,"n":1}');
+  });
+});
+
+describe("formatToolResult — truncation marker", () => {
+  it("renders bytes/limit in human units", () => {
+    const out = formatToolResult(
+      { __truncated: true, bytes: 12244, limit: 2048, reason: "size" },
+      "normal",
+    );
+    expect(out).toContain("truncated");
+    // 12244 B = 11.96 KB → rendered as "12 KB" (≥10 → integer)
+    expect(out).toContain("12 KB");
+    // 2048 B = 2.0 KB → rendered as "2.0 KB" (<10 → 1 decimal)
+    expect(out).toContain("2.0 KB");
+    expect(out).not.toContain("__truncated");
+    expect(out).not.toContain('"reason"');
+  });
+
+  it("unwraps MCP envelope inside JSON-encoded preview", () => {
+    const innerEnvelope = JSON.stringify({
+      content: [{ type: "text", text: "Logged [info]: J'ai récupéré..." }],
+    });
+    const out = formatToolResult(
+      { __truncated: true, bytes: 6895, limit: 2048, preview: innerEnvelope },
+      "normal",
+    );
+    expect(out).toContain("truncated");
+    expect(out).toContain("6.7 KB");
+    expect(out).toContain("Logged [info]: J'ai récupéré...");
+    expect(out).not.toContain('"content"');
+    expect(out).not.toContain('\\"');
+  });
+
+  it("falls back to raw preview when it isn't JSON", () => {
+    const out = formatToolResult(
+      { __truncated: true, bytes: 5000, limit: 2048, preview: "just a plain string" },
+      "normal",
+    );
+    expect(out).toContain("just a plain string");
+  });
+
+  it("omits preview blurb when preview is empty", () => {
+    const out = formatToolResult({ __truncated: true, bytes: 9999, limit: 2048 }, "normal");
+    expect(out).toBe("(truncated 9.8 KB > 2.0 KB)");
+  });
+
+  it("formats sub-KB sizes in bytes", () => {
+    const out = formatToolResult({ __truncated: true, bytes: 600, limit: 100 }, "normal");
+    expect(out).toContain("600 B");
+    expect(out).toContain("100 B");
+  });
+
+  it("formats MB-sized payloads", () => {
+    const out = formatToolResult({ __truncated: true, bytes: 5_500_000, limit: 2048 }, "normal");
+    expect(out).toContain("5.2 MB");
   });
 });
 

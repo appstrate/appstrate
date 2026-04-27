@@ -348,11 +348,13 @@ interface PiAssistantMessage {
 interface PiToolExecutionStartEvent {
   type: "tool_execution_start";
   toolName?: string;
+  toolCallId?: string;
   args?: unknown;
 }
 interface PiToolExecutionEndEvent {
   type: "tool_execution_end";
   toolName?: string;
+  toolCallId?: string;
   result?: unknown;
   isError?: boolean;
 }
@@ -508,7 +510,16 @@ export function installSessionBridge(
           timestamp: Date.now(),
           runId,
           message: `Tool: ${e.toolName ?? "unknown"}`,
-          data: { tool: e.toolName, args: e.args },
+          // `toolCallId` is the Pi SDK's per-call identifier; forwarding
+          // it lets sinks correlate start/end events when multiple
+          // tools run concurrently (the LLM can dispatch a parallel
+          // batch and the results land out-of-order). Optional —
+          // omitted from `data` when the SDK didn't provide one.
+          data: {
+            tool: e.toolName,
+            args: e.args,
+            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+          },
         });
         break;
       }
@@ -535,6 +546,7 @@ export function installSessionBridge(
             tool: e.toolName,
             result: truncatedResult,
             isError,
+            ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
           },
         });
         break;

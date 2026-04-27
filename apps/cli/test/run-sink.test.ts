@@ -257,7 +257,7 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout.split("\n").filter(Boolean)).toHaveLength(1);
   });
 
-  it("renders the bridge's truncation marker on oversized results", async () => {
+  it("renders the bridge's truncation marker as a human-readable size", async () => {
     const sink = createConsoleSink({});
     await sink.handle(
       progressEvent("Tool result: read_file", {
@@ -266,11 +266,16 @@ describe("createConsoleSink — human mode", () => {
         isError: false,
       }),
     );
-    expect(streams.stdout).toContain("__truncated");
-    expect(streams.stdout).toContain("size");
+    expect(streams.stdout).toContain("truncated");
+    expect(streams.stdout).toContain("9.8 KB");
+    expect(streams.stdout).not.toContain("__truncated");
   });
 
-  it("routes appstrate.error to stderr", async () => {
+  it("routes appstrate.error to stderr with ⚠ (warning) glyph, not ✗", async () => {
+    // appstrate.error is mid-run advisory (Pi can recover); the
+    // terminal `[run failed]` is the only fatal indicator. Using ✗
+    // here would visually contradict a successful finalize that
+    // follows.
     const sink = createConsoleSink({});
     await sink.handle({
       type: "appstrate.error",
@@ -279,7 +284,106 @@ describe("createConsoleSink — human mode", () => {
       message: "boom",
     } as RunEvent);
     expect(streams.stderr).toContain("boom");
+    expect(streams.stderr).toContain("⚠");
+    expect(streams.stderr).not.toContain("✗");
     expect(streams.stdout).not.toContain("boom");
+  });
+
+  it("renders MCP envelope results without leaking the JSON framing", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool result: log", {
+        tool: "log",
+        result: { content: [{ type: "text", text: "Logged [info]: hello" }] },
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toContain("Logged [info]: hello");
+    expect(streams.stdout).not.toContain('"content"');
+    expect(streams.stdout).not.toContain('"type":"text"');
+  });
+
+  it("renders the bridge's truncation marker in human units", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool result: read_file", {
+        tool: "read_file",
+        result: {
+          __truncated: true,
+          reason: "size",
+          bytes: 12244,
+          limit: 2048,
+          preview: JSON.stringify({
+            content: [{ type: "text", text: "Logged [info]: deep content" }],
+          }),
+        },
+        isError: false,
+      }),
+    );
+    expect(streams.stdout).toContain("truncated");
+    // 12244 B = 11.96 KB → "12 KB" in our formatter (≥10 → integer).
+    expect(streams.stdout).toContain("12 KB");
+    expect(streams.stdout).toContain("Logged [info]: deep content");
+    expect(streams.stdout).not.toContain('"__truncated"');
+    expect(streams.stdout).not.toContain('\\"content\\"');
+  });
+
+  it("hides toolCallId suffix in normal mode", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle(
+      progressEvent("Tool: bash", {
+        tool: "bash",
+        args: { command: "ls" },
+        toolCallId: "call_abcd1234efgh5678",
+      }),
+    );
+    expect(streams.stdout).toContain("→ tool: bash");
+    expect(streams.stdout).not.toContain("#");
+    expect(streams.stdout).not.toContain("abcd1234");
+  });
+
+  it("appends short toolCallId suffix (last 8 chars) in verbose mode", async () => {
+    const sink = createConsoleSink({ verbosity: "verbose" });
+    await sink.handle(
+      progressEvent("Tool: bash", {
+        tool: "bash",
+        args: { command: "ls" },
+        toolCallId: "call_abcd1234efgh5678",
+      }),
+    );
+    expect(streams.stdout).toContain("→ tool: bash");
+    expect(streams.stdout).toContain("#efgh5678");
+    // Long-form id should NOT leak.
+    expect(streams.stdout).not.toContain("call_abcd");
+  });
+
+  it("matches start and end events via toolCallId in verbose mode", async () => {
+    const sink = createConsoleSink({ verbosity: "verbose" });
+    await sink.handle(
+      progressEvent("Tool: provider_call", {
+        tool: "provider_call",
+        args: { url: "/foo" },
+        toolCallId: "call_aaaaaaaaaaaaaaaa",
+      }),
+    );
+    await sink.handle(
+      progressEvent("Tool: provider_call", {
+        tool: "provider_call",
+        args: { url: "/bar" },
+        toolCallId: "call_bbbbbbbbbbbbbbbb",
+      }),
+    );
+    await sink.handle(
+      progressEvent("Tool result: provider_call", {
+        tool: "provider_call",
+        result: "ok",
+        isError: false,
+        toolCallId: "call_aaaaaaaaaaaaaaaa",
+      }),
+    );
+    // The 'aaaa...' result line must carry the same suffix as its start line.
+    const lines = streams.stdout.split("\n").filter((l) => l.includes("aaaaaaaa"));
+    expect(lines.length).toBe(2);
   });
 
   it("prints run complete on successful finalize", async () => {

@@ -105,24 +105,34 @@ function renderToolEvent(
     args?: unknown;
     result?: unknown;
     isError?: boolean;
+    toolCallId?: string;
   },
   verbosity: Verbosity,
   writeStdout: (chunk: string) => void,
 ): void {
   if (verbosity === "quiet") return;
   const tool = data.tool ?? "unknown";
+  // Short call-id tag appended only in verbose mode. The Pi SDK
+  // dispatches parallel tool calls — the suffix lets users match a
+  // start event with its (possibly out-of-order) result. Hidden in
+  // normal mode to keep the default output uncluttered for the common
+  // sequential case.
+  const callTag =
+    verbosity === "verbose" && typeof data.toolCallId === "string" && data.toolCallId.length > 0
+      ? ` ${dim(`#${data.toolCallId.slice(-8)}`)}`
+      : "";
 
   // Start-of-call: print the tool name + args. The `result` field
   // discriminates start vs end — the bridge guarantees one or the
   // other, never both.
   if (data.result === undefined && data.args === undefined) {
     // Defensive: no args, no result — emit just the name.
-    writeStdout(cyan(`→ tool: ${tool}\n`));
+    writeStdout(cyan(`→ tool: ${tool}`) + callTag + "\n");
     return;
   }
 
   if (data.result === undefined) {
-    writeStdout(cyan(`→ tool: ${tool}\n`));
+    writeStdout(cyan(`→ tool: ${tool}`) + callTag + "\n");
     if (data.args !== undefined && data.args !== null) {
       const argsText =
         verbosity === "verbose"
@@ -151,17 +161,17 @@ function renderToolEvent(
   const label = isError ? "error " : "result";
   const resultText = formatToolResult(data.result, verbosity);
   if (!resultText) {
-    writeStdout(`${glyph} ${label} ${dim(`(${tool})`)}\n`);
+    writeStdout(`${glyph} ${label}${callTag} ${dim(`(${tool})`)}\n`);
     return;
   }
   if (verbosity === "verbose" && resultText.includes("\n")) {
     const indented = resultText
       .split("\n")
-      .map((line, idx) => (idx === 0 ? `${glyph} ${label} ${line}` : `         ${line}`))
+      .map((line, idx) => (idx === 0 ? `${glyph} ${label}${callTag} ${line}` : `         ${line}`))
       .join("\n");
     writeStdout(indented + "\n");
   } else {
-    writeStdout(`${glyph} ${label} ${dim(resultText)}\n`);
+    writeStdout(`${glyph} ${label}${callTag} ${dim(resultText)}\n`);
   }
 }
 
@@ -192,6 +202,7 @@ function createHumanSink(opts: SinkOptions, writeStdout: (chunk: string) => void
                 args?: unknown;
                 result?: unknown;
                 isError?: boolean;
+                toolCallId?: string;
               }
             | undefined;
           if (data?.tool) {
@@ -207,9 +218,22 @@ function createHumanSink(opts: SinkOptions, writeStdout: (chunk: string) => void
           return;
         }
         case "appstrate.error": {
+          // Mid-run error: Pi SDK fires this on `message_end` with
+          // `stopReason: "error"` (rate limits, context overflow,
+          // transient API failures). The runner usually recovers — the
+          // run finalises with `status: "success"` and the platform
+          // records success. Rendering this with `✗` red conflates a
+          // recoverable hiccup with a terminal failure: users see the
+          // glyph and conclude the run died, even though `[run complete]`
+          // prints right after.
+          //
+          // Use `⚠` yellow to mark it as advisory. Terminal failures are
+          // surfaced separately via `[run failed]` at finalize, which
+          // keeps the red treatment.
+          //
           // stderr bypasses the stdout bridge entirely — no need to
           // route through `writeStdout`.
-          process.stderr.write(red(`✗ ${event.message ?? "error"}\n`));
+          process.stderr.write(yellow(`⚠ ${event.message ?? "error"}\n`));
           return;
         }
         case "appstrate.metric": {
