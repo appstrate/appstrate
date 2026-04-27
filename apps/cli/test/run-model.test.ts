@@ -248,7 +248,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(apiKey.length).toBeGreaterThan(0);
   });
 
-  it("routes mistral-conversations through /api/llm-proxy/mistral-conversations/v1", async () => {
+  it("routes mistral-conversations through /api/llm-proxy/mistral-conversations", async () => {
     const { model, apiKey } = await resolvePresetModel({
       profileName: "default",
       modelId: "preset_mistral",
@@ -257,11 +257,9 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       orgId: "org_1",
       presetsLoader: async () => [PRESET_MISTRAL],
     });
-    // Mistral SDK appends `/chat/completions` → baseUrl carries `/v1`,
-    // same convention as OpenAI.
-    expect(model.baseUrl).toBe(
-      "https://app.example.com/api/llm-proxy/mistral-conversations/v1",
-    );
+    // Mistral SDK appends `/v1/chat/completions` → baseUrl is the bare
+    // route prefix (no `/v1`), same convention as Anthropic.
+    expect(model.baseUrl).toBe("https://app.example.com/api/llm-proxy/mistral-conversations");
     // Mistral's SDK natively sends `Authorization: Bearer <apiKey>` —
     // no header side-channel needed (unlike Anthropic).
     expect(apiKey).toBe("ask_test_mistral");

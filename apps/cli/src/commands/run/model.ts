@@ -231,9 +231,11 @@ function buildProxyBaseUrl(instance: string, api: string): string {
   //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`.
   //   - Anthropic SDK appends `/v1/messages`   → baseUrl is the bare
   //     route prefix (no `/v1`).
-  //   - Mistral SDK appends `/chat/completions` → baseUrl carries `/v1`,
-  //     same convention as OpenAI (Mistral's `chat.stream` targets
-  //     `/v1/chat/completions`, not the Beta `/v1/conversations` API).
+  //   - Mistral SDK appends `/v1/chat/completions` → baseUrl is the bare
+  //     route prefix (no `/v1`). Despite the protocol family name
+  //     `mistral-conversations`, pi-ai uses Mistral's `chat.stream` which
+  //     hits `/v1/chat/completions`, not the Beta `/v1/conversations`
+  //     agentic API.
   if (api === "openai-completions") {
     return `${trimmed}/api/llm-proxy/openai-completions/v1`;
   }
@@ -241,7 +243,7 @@ function buildProxyBaseUrl(instance: string, api: string): string {
     return `${trimmed}/api/llm-proxy/anthropic-messages`;
   }
   if (api === "mistral-conversations") {
-    return `${trimmed}/api/llm-proxy/mistral-conversations/v1`;
+    return `${trimmed}/api/llm-proxy/mistral-conversations`;
   }
   throw new ModelResolutionError(
     `CLI preset mode does not yet route protocol "${api}"`,
