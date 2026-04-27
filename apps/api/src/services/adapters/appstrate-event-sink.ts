@@ -137,6 +137,22 @@ export class PersistingEventSink implements EventSink {
         break;
       }
 
+      case "report.appended": {
+        // `@appstrate/report` system tool — appends one Markdown chunk
+        // to the run's user-facing report. Stored as `type='result'
+        // event='report'` so the UI can find it in O(rows-with-event-report)
+        // instead of scanning every log payload. Each emit is its own
+        // row; concatenation is the renderer's job (the UI joins them
+        // in id order). Without this case the content was silently
+        // dropped (default branch) and the agent's report never
+        // surfaced anywhere.
+        const content = typeof event.content === "string" ? event.content : null;
+        if (content !== null) {
+          await appendRunLog(this.scope, this.runId, "result", "report", null, { content }, "info");
+        }
+        break;
+      }
+
       case "appstrate.progress": {
         const message = typeof event.message === "string" ? event.message : null;
         const data = isPlainObject(event.data) ? event.data : null;

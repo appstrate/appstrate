@@ -64,6 +64,16 @@ export interface RunResult {
    * include those, only the runner's view.
    */
   cost?: number;
+  /**
+   * Concatenated markdown body of the run's user-facing report — built by
+   * appending each `report.appended` event's `content`, joined by `\n`.
+   * Distinct from {@link RunResult.output} which carries structured JSON
+   * for the next step in a pipeline. The platform persists each
+   * `report.appended` event individually as a `run_logs` row so the UI
+   * can stream the report incrementally; this field is the runner's
+   * eager aggregate, used by sinks that want a single string at finalize.
+   */
+  report?: string;
 }
 
 /**

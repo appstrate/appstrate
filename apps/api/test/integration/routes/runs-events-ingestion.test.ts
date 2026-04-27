@@ -270,6 +270,66 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("running");
   });
+
+  // End-to-end coverage for the `@appstrate/report` system tool.
+  //
+  // Why this lives at the route layer and not just in the sink unit test:
+  // the production bug shipped because the chain Tool → tee-sink → HttpSink
+  // → POST /events → ingestion → run_logs → UI was only exercised in
+  // isolation, leg by leg. The sink-level test catches the dispatch logic;
+  // this test catches the contract — that an HMAC-signed CloudEvent of
+  // type `report.appended` reaching the public ingestion endpoint actually
+  // produces the `run_logs` row the UI consumes. Same shape as the
+  // production POST a runtime-pi container makes.
+  it("report.appended events persist as run_logs(type='result', event='report')", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+    const markdown = "# ✅ Export OK\n\n- 6 rows\n- TTC 16 224,96 €";
+
+    const envelope = buildEnvelope(
+      runId,
+      "report.appended",
+      { content: markdown, timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { outcome: string };
+    expect(body.outcome).toBe("persisted");
+
+    const reportLogs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")));
+    expect(reportLogs).toHaveLength(1);
+    expect(reportLogs[0]!.type).toBe("result");
+    expect(reportLogs[0]!.data).toEqual({ content: markdown });
+  });
+
+  // Multiple report.appended POSTs must all land — the tool docstring
+  // says "Appends markdown content"; concatenation is the UI's job, not
+  // the persistence layer's. Each event becomes its own log row.
+  it("preserves multiple report.appended events as separate ordered rows", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const chunks = ["## Step 1", "## Step 2", "## Step 3"];
+    for (let i = 0; i < chunks.length; i++) {
+      const env = buildEnvelope(
+        runId,
+        "report.appended",
+        { content: chunks[i], timestamp: Date.now() },
+        i + 1,
+      );
+      const res = await postEvent(runId, env);
+      expect(res.status).toBe(200);
+    }
+
+    const reportLogs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")))
+      .orderBy(runLogs.id);
+    expect(reportLogs.map((l) => (l.data as { content: string }).content)).toEqual(chunks);
+  });
 });
 
 describe("POST /api/runs/:runId/events/finalize — complete result persistence", () => {

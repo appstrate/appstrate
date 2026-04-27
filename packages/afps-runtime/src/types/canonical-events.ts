@@ -99,6 +99,22 @@ export interface LogWrittenEvent extends BaseEnvelope {
   message: string;
 }
 
+/**
+ * `@appstrate/report` — `report(content)` tool.
+ *
+ * Append-only markdown channel for the user-facing run report. Each call
+ * appends `content` to the run's accumulated report — the platform stores
+ * one `run_logs` row per emit and the UI concatenates them when rendering.
+ *
+ * Distinct from `output.emitted`: `output` carries structured JSON
+ * consumed programmatically (next step in a pipeline, schema-validated);
+ * `report` carries human-readable markdown summarising what the run did.
+ */
+export interface ReportAppendedEvent extends BaseEnvelope {
+  type: "report.appended";
+  content: string;
+}
+
 /** `appstrate.progress` — runner-emitted lifecycle breadcrumb (container started, runtime ready, …). */
 export interface AppstrateProgressEvent extends BaseEnvelope {
   type: "appstrate.progress";
@@ -194,6 +210,7 @@ export type CanonicalRunEvent =
   | PinnedSetEvent
   | OutputEmittedEvent
   | LogWrittenEvent
+  | ReportAppendedEvent
   | AppstrateProgressEvent
   | AppstrateErrorEvent
   | AppstrateMetricEvent
@@ -209,6 +226,7 @@ export const CANONICAL_EVENT_TYPES = [
   "pinned.set",
   "output.emitted",
   "log.written",
+  "report.appended",
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
@@ -256,6 +274,8 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
         typeof e.message === "string"
       );
     }
+    case "report.appended":
+      return typeof (event as Record<string, unknown>).content === "string";
     case "appstrate.progress":
     case "appstrate.error":
       return typeof (event as Record<string, unknown>).message === "string";

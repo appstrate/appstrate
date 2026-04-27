@@ -368,4 +368,69 @@ describe("PersistingEventSink", () => {
     await sink.handle(event("appstrate.error", { message: "boom" }));
     expect(sink.lastError).toBe("boom");
   });
+
+  // The `@appstrate/report` system tool emits one `report.appended` event per
+  // call. The platform-side contract is that every event becomes a typed
+  // `run_logs` row the UI can pick up — `type='result' event='report'` so a
+  // dedicated Markdown viewer can find it without scanning every log payload.
+  // Without this case the report content was silently dropped (default branch
+  // in the persist switch), reaching the UI only as the args of the generic
+  // "Tool: report" log entry — truncated to 200 chars and never rendered as
+  // markdown. The bug in #XXX shipped because nothing covered this leg.
+  it("report.appended → run_logs row (type='result', event='report', data.content)", async () => {
+    const sink = new PersistingEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
+    const markdown = "# Export OK\n\n- 6 rows\n- TTC 16224.96 €";
+    await sink.handle(event("report.appended", { content: markdown }));
+
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")))
+      .orderBy(asc(runLogs.id));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.type).toBe("result");
+    expect(logs[0]!.level).toBe("info");
+    expect(logs[0]!.data).toEqual({ content: markdown });
+  });
+
+  it("multiple report.appended events produce one row each, in order", async () => {
+    const sink = new PersistingEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
+    await sink.handle(event("report.appended", { content: "## Step 1" }));
+    await sink.handle(event("report.appended", { content: "## Step 2" }));
+    await sink.handle(event("report.appended", { content: "## Step 3" }));
+
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")))
+      .orderBy(asc(runLogs.id));
+    expect(logs).toHaveLength(3);
+    expect(logs.map((l) => (l.data as { content: string }).content)).toEqual([
+      "## Step 1",
+      "## Step 2",
+      "## Step 3",
+    ]);
+  });
+
+  it("report.appended with non-string content is dropped (no row, no throw)", async () => {
+    const sink = new PersistingEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+    });
+    // Tampered payload — the runtime narrower rejects, the persister
+    // silently drops to keep the ingestion path total.
+    await sink.handle(event("report.appended", { content: 42 }));
+
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")));
+    expect(logs).toHaveLength(0);
+  });
 });

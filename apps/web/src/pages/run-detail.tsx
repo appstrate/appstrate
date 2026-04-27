@@ -25,6 +25,7 @@ import { useMarkRead } from "../hooks/use-notifications";
 import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
+import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
@@ -91,10 +92,10 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId!);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], structuredOutput: null };
-    const { entries, output } = buildLogEntries(logs as RawLog[]);
-    return { historicalLogs: entries, structuredOutput: output };
+  const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredOutput: null, structuredReport: null };
+    const { entries, output, report } = buildLogEntries(logs as RawLog[]);
+    return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
   }, [logs]);
 
   const execResult = run?.result as {
@@ -103,6 +104,7 @@ export function RunDetailPage() {
   const finalOutput = structuredOutput || execResult?.output || null;
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
   const hasResult = !!hasOutput;
+  const hasReport = !!structuredReport;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -111,11 +113,12 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
-  // Default tab: "result" if results exist, otherwise "logs".
-  // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
-  const defaultTab = hasResult ? "result" : "logs";
+  // Default tab: "report" first if a markdown report exists (it's the
+  // user-facing summary the agent built), then "result" for structured
+  // data, then logs. Hash override wins.
+  const defaultTab = hasReport ? "report" : hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "memory", "info"] as const,
+    ["report", "result", "logs", "memory", "info"] as const,
     defaultTab,
   );
 
@@ -205,9 +208,10 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
+          onValueChange={(v) => setActiveTab(v as "report" | "logs" | "result" | "memory" | "info")}
         >
           <TabsList>
+            {hasReport && <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>}
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
@@ -249,6 +253,12 @@ export function RunDetailPage() {
           )}
         </div>
       </div>
+
+      {activeTab === "report" && hasReport && (
+        <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
+          <Markdown>{structuredReport!}</Markdown>
+        </div>
+      )}
 
       {activeTab === "result" && hasResult && (
         <div className="space-y-4">{hasOutput && <JsonView data={finalOutput!} />}</div>
