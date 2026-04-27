@@ -36,7 +36,16 @@ import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRemoteAgentIdentity } from "../services/remote-run-identity.ts";
 import { getPackage } from "../services/agent-service.ts";
-import type { LoadedPackage } from "../types/index.ts";
+import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
+import { validateConfig, validateInput } from "../services/schema.ts";
+import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import {
+  resolveActorProfileContext,
+  resolveProviderProfiles,
+} from "../services/connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
+import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,15 +61,43 @@ const CONTEXT_SNAPSHOT_MAX_BYTES = 16 * 1024;
 
 const CreateRemoteRunBodySchema = z
   .object({
-    // v1 supports the inline source only — ad-hoc manifest + prompt shipped
-    // in the request body. Registry-lookup (`{ kind: "registry", packageId,
-    // version }`) is reserved for a follow-up; leaving the discriminated
-    // union in place keeps the wire contract forward-compatible.
+    // Two source shapes:
+    //   - `inline`   — ad-hoc manifest + prompt shipped in the request
+    //                  body. Used by GitHub Action and any runner that
+    //                  builds the agent dynamically. Always lands on a
+    //                  shadow ephemeral package ("Inline" badge in UI).
+    //   - `registry` — the runner declares which package it's running
+    //                  by id; the server reads the manifest from its own
+    //                  catalog. Deterministic attribution, no fingerprint
+    //                  reconciliation, no spoof surface.
     source: z.discriminatedUnion("kind", [
       z.object({
         kind: z.literal("inline"),
         manifest: z.record(z.string(), z.unknown()),
         prompt: z.string().min(1),
+        providerProfiles: z.record(z.string(), z.string()).optional(),
+        config: z.record(z.string(), z.unknown()).optional(),
+        modelId: z.string().nullable().optional(),
+        proxyId: z.string().nullable().optional(),
+      }),
+      z.object({
+        kind: z.literal("registry"),
+        packageId: z.string().min(1),
+        // `stage` discriminates draft vs published — kept distinct from
+        // the parent `source` discriminator (which selects inline vs
+        // registry) to avoid the `source.source` collision.
+        stage: z.enum(["draft", "published"]).default("published"),
+        spec: z.string().optional(),
+        /**
+         * SRI digest the runner received with the bundle download
+         * (`X-Bundle-Integrity`). Optional: when present, the server
+         * logs a warning if the version it just resolved produces a
+         * different artifact (drift between bundle download and run
+         * creation). The bundle is already on the runner's host, so
+         * we don't reject — refusing the run wastes the runner's work
+         * for no security gain (no untrusted bytes are loaded server-side).
+         */
+        integrity: z.string().optional(),
         providerProfiles: z.record(z.string(), z.string()).optional(),
         config: z.record(z.string(), z.unknown()).optional(),
         modelId: z.string().nullable().optional(),
@@ -113,52 +150,157 @@ export function createRunsRemoteRouter() {
       // downstream against app membership by the ownership guard.
       const applicationId = body.applicationId;
 
-      // Only the inline source is supported in v1 (enforced by the Zod
-      // discriminated union above).
       const src = body.source;
-
-      const preflight = await runInlinePreflight({
-        orgId,
-        applicationId,
-        actor,
-        body: {
-          manifest: src.manifest,
-          prompt: src.prompt,
-          input: body.input,
-          config: src.config,
-          providerProfiles: src.providerProfiles,
-          modelId: src.modelId,
-          proxyId: src.proxyId,
-        },
-      });
-
-      // Attempt to resolve the posted bundle against the org's package
-      // registry. Matches land the run on the real `@scope/name@version`
-      // (no shadow, no "Inline" UI badge, version label populated); any
-      // mismatch — manifest divergence, unpublished version, cross-org —
-      // falls back cleanly to the shadow path below.
-      const resolved = await resolveRemoteAgentIdentity({
-        orgId,
-        manifest: preflight.manifest,
-        prompt: preflight.prompt,
-      });
 
       let agentForRun: LoadedPackage;
       let overrideVersionLabel: string | undefined;
+      let providerProfiles: ProviderProfileMap;
+      let effectiveInput: Record<string, unknown> | null;
+      let effectiveConfig: Record<string, unknown>;
+      let modelIdOverride: string | null;
+      let proxyIdOverride: string | null;
+      // Attribution path counter — emitted once per request so we can
+      // track inline/registry/fallback share over time. The deprecated
+      // identity-resolver path is only safe to delete once the inline
+      // share trends to zero, so this metric is the tombstone gate.
+      let attributionPath: "registry" | "inline_attributed" | "inline_shadow";
 
-      if (resolved) {
-        const real = await getPackage(resolved.packageId, orgId);
-        if (real) {
-          agentForRun = real;
-          overrideVersionLabel = resolved.versionLabel;
-        } else {
-          agentForRun = await createShadowAgent();
+      if (src.kind === "registry") {
+        // Server-resolved attribution. The runner names the package; we
+        // load manifest+prompt from our own catalog. No fingerprint
+        // reconciliation, no shadow row, no "Inline" badge.
+        const resolved = await resolveRegistryAgent({
+          orgId,
+          applicationId,
+          packageId: src.packageId,
+          stage: src.stage,
+          spec: src.spec,
+          ...(src.integrity ? { integrityHint: src.integrity } : {}),
+        });
+        agentForRun = resolved.agent;
+        overrideVersionLabel = resolved.versionLabel;
+        attributionPath = "registry";
+
+        // Body-supplied providerProfiles already validated as
+        // Record<string,string> by the discriminated-union schema above.
+        const providerProfilesOverride = src.providerProfiles;
+        modelIdOverride = src.modelId ?? null;
+        proxyIdOverride = src.proxyId ?? null;
+
+        effectiveConfig =
+          src.config && typeof src.config === "object" && !Array.isArray(src.config)
+            ? (src.config as Record<string, unknown>)
+            : {};
+        effectiveInput =
+          body.input && typeof body.input === "object" && !Array.isArray(body.input)
+            ? (body.input as Record<string, unknown>)
+            : null;
+
+        // Validate config + input against the resolved manifest's schemas.
+        // The manifest is server-authored (came from our own catalog), so
+        // structural validation is unnecessary — only AJV schema checks.
+        const configSchema = agentForRun.manifest.config?.schema;
+        if (configSchema) {
+          const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
+          if (!cv.valid) {
+            const first = cv.errors[0]!;
+            throw new ApiError({
+              status: 400,
+              code: "invalid_config",
+              title: "Invalid Config",
+              detail: first.field ? `${first.field}: ${first.message}` : first.message,
+            });
+          }
         }
+        const inputSchema = agentForRun.manifest.input?.schema;
+        if (inputSchema) {
+          const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
+          if (!iv.valid) {
+            const first = iv.errors[0]!;
+            throw new ApiError({
+              status: 400,
+              code: "invalid_input",
+              title: "Invalid Input",
+              detail: first.field ? `${first.field}: ${first.message}` : first.message,
+            });
+          }
+        }
+
+        // Provider profile resolution — same cascade as the inline path.
+        const { defaultUserProfileId } = await resolveActorProfileContext(
+          actor,
+          agentForRun.id,
+          null,
+          applicationId,
+        );
+        providerProfiles = await resolveProviderProfiles(
+          resolveManifestProviders(agentForRun.manifest),
+          defaultUserProfileId,
+          providerProfilesOverride,
+          null,
+          applicationId,
+        );
+
+        // Readiness gate — same checks the inline preflight ends with.
+        await validateAgentReadiness({
+          agent: agentForRun,
+          providerProfiles,
+          orgId,
+          config: effectiveConfig,
+          applicationId,
+        });
       } else {
-        agentForRun = await createShadowAgent();
+        // Inline path — the runner ships a manifest+prompt blob. Validate
+        // structurally, run readiness against a shadow LoadedPackage, then
+        // attempt fingerprint reconciliation against published versions
+        // for backwards-compatible attribution (older CLIs and any caller
+        // that still posts inline for a published agent).
+        const preflight = await runInlinePreflight({
+          orgId,
+          applicationId,
+          actor,
+          body: {
+            manifest: src.manifest,
+            prompt: src.prompt,
+            input: body.input,
+            config: src.config,
+            providerProfiles: src.providerProfiles,
+            modelId: src.modelId,
+            proxyId: src.proxyId,
+          },
+        });
+
+        const resolved = await resolveRemoteAgentIdentity({
+          orgId,
+          manifest: preflight.manifest,
+          prompt: preflight.prompt,
+        });
+
+        if (resolved) {
+          const real = await getPackage(resolved.packageId, orgId);
+          if (real) {
+            agentForRun = real;
+            overrideVersionLabel = resolved.versionLabel;
+            attributionPath = "inline_attributed";
+          } else {
+            agentForRun = await createShadowAgent(preflight);
+            attributionPath = "inline_shadow";
+          }
+        } else {
+          agentForRun = await createShadowAgent(preflight);
+          attributionPath = "inline_shadow";
+        }
+
+        providerProfiles = preflight.providerProfiles;
+        effectiveInput = preflight.effectiveInput;
+        effectiveConfig = preflight.effectiveConfig;
+        modelIdOverride = preflight.modelIdOverride;
+        proxyIdOverride = preflight.proxyIdOverride;
       }
 
-      async function createShadowAgent(): Promise<LoadedPackage> {
+      async function createShadowAgent(
+        preflight: Awaited<ReturnType<typeof runInlinePreflight>>,
+      ): Promise<LoadedPackage> {
         const createdBy = actor?.type === "member" ? actor.id : null;
         const shadowId = await insertShadowPackage({
           orgId,
@@ -184,11 +326,11 @@ export function createRunsRemoteRouter() {
         actor,
         agent: agentForRun,
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
-        providerProfiles: preflight.providerProfiles,
-        input: preflight.effectiveInput,
-        config: preflight.effectiveConfig,
-        modelId: preflight.modelIdOverride,
-        proxyId: preflight.proxyIdOverride,
+        providerProfiles,
+        input: effectiveInput,
+        config: effectiveConfig,
+        modelId: modelIdOverride,
+        proxyId: proxyIdOverride,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink,
         contextSnapshot: body.contextSnapshot,
@@ -215,6 +357,15 @@ export function createRunsRemoteRouter() {
           detail: "Remote run created without sink credentials — please retry",
         });
       }
+
+      logger.info("runs.remote.attribution", {
+        runId: result.runId,
+        orgId,
+        applicationId,
+        path: attributionPath,
+        packageId: agentForRun.id,
+        versionLabel: overrideVersionLabel ?? null,
+      });
 
       c.status(201);
       return c.json({

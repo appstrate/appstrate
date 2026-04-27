@@ -1681,12 +1681,115 @@
         }
       }
     },
+    "/api/agents/{scope}/{name}/readiness": {
+      "get": {
+        "operationId": "getAgentReadiness",
+        "tags": ["Agents"],
+        "summary": "Preflight provider readiness for an agent",
+        "description": "Returns `{ ready, missing[] }` describing which provider connections are unsatisfied for this agent under the given profile context. The CLI uses this before triggering a run to decide whether to prompt the user to open the browser and connect missing providers; the dashboard can use it to surface live readiness status. Reuses the same resolution logic the run pipeline applies, so the preflight answer is in lockstep with what the run would actually do.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "in": "query",
+            "name": "connectionProfileId",
+            "required": false,
+            "description": "Override the default profile lookup with an explicit profile UUID. When unset, the route falls back to the caller's actor default (mirrors the run pipeline).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Readiness report",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ready", "missing"],
+                  "properties": {
+                    "ready": {
+                      "type": "boolean"
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["providerId", "profileId", "reason", "message"],
+                        "properties": {
+                          "providerId": {
+                            "type": "string"
+                          },
+                          "profileId": {
+                            "type": ["string", "null"],
+                            "format": "uuid"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "no_connection",
+                              "needs_reconnection",
+                              "scope_insufficient",
+                              "provider_not_enabled"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "ready": false,
+                  "missing": [
+                    {
+                      "providerId": "@afps/gmail",
+                      "profileId": "550e8400-e29b-41d4-a716-446655440010",
+                      "reason": "no_connection",
+                      "message": "Provider '@afps/gmail' is not connected"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/agents/{scope}/{name}/bundle": {
       "get": {
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies at pinned versions. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). By default exports the version installed for this application; pass `?version=` to pin to a different release or dist-tag.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1704,9 +1807,19 @@
             "in": "query",
             "name": "version",
             "required": false,
-            "description": "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag).",
+            "description": "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "description": "Bundle source. `published` (default) exports a published version archive — reproducible and signable. `draft` bundles the agent's live draft state and resolves dependencies via the draft catalog — mirrors the dashboard Run button so the CLI can run never-published agents.",
+            "schema": {
+              "type": "string",
+              "enum": ["draft", "published"]
             }
           }
         ],
@@ -1728,6 +1841,12 @@
               },
               "X-Bundle-Integrity": {
                 "description": "Bundle-level SRI digest (`sha256-<base64>`) over the canonical packages map — clients may compare this against a client-side recompute to validate the transfer without unzipping.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Bundle-Version": {
+                "description": "Resolved version label of the served bundle: a concrete semver for `source=published`, or `\"draft\"` for `source=draft`. Lets a CLI/runner attribute its run via `POST /api/runs/remote` `kind: \"registry\"` without parsing the manifest.",
                 "schema": {
                   "type": "string"
                 }
@@ -1809,12 +1928,19 @@
                   "proxyId": {
                     "type": "string",
                     "description": "Proxy ID override for this run, or \"none\" to disable proxying. Takes priority over agent and org defaults."
+                  },
+                  "config": {
+                    "type": "object",
+                    "description": "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair."
                   }
                 }
               },
               "example": {
                 "input": {
                   "message": "Summarize my latest emails"
+                },
+                "config": {
+                  "dryRun": true
                 }
               }
             },
@@ -2698,36 +2824,84 @@
                 "required": ["source", "applicationId"],
                 "properties": {
                   "source": {
-                    "type": "object",
-                    "required": ["kind", "manifest", "prompt"],
-                    "properties": {
-                      "kind": {
-                        "const": "inline"
-                      },
-                      "manifest": {
+                    "description": "Two attribution shapes: `inline` ships the manifest+prompt in the body (ad-hoc agents — always lands on a shadow ephemeral package); `registry` declares the package by id and the server reads the manifest from its own catalog (deterministic attribution, no fingerprint reconciliation).",
+                    "oneOf": [
+                      {
                         "type": "object",
-                        "description": "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog."
-                      },
-                      "prompt": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "providerProfiles": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "string"
+                        "required": ["kind", "manifest", "prompt"],
+                        "properties": {
+                          "kind": {
+                            "const": "inline"
+                          },
+                          "manifest": {
+                            "type": "object",
+                            "description": "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog."
+                          },
+                          "prompt": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "providerProfiles": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "config": {
+                            "type": "object"
+                          },
+                          "modelId": {
+                            "type": ["string", "null"]
+                          },
+                          "proxyId": {
+                            "type": ["string", "null"]
+                          }
                         }
                       },
-                      "config": {
-                        "type": "object"
-                      },
-                      "modelId": {
-                        "type": ["string", "null"]
-                      },
-                      "proxyId": {
-                        "type": ["string", "null"]
+                      {
+                        "type": "object",
+                        "required": ["kind", "packageId"],
+                        "properties": {
+                          "kind": {
+                            "const": "registry"
+                          },
+                          "packageId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Scoped package id (`@scope/name`)."
+                          },
+                          "stage": {
+                            "type": "string",
+                            "enum": ["draft", "published"],
+                            "default": "published",
+                            "description": "`draft` reads `draftManifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row."
+                          },
+                          "spec": {
+                            "type": "string",
+                            "description": "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the application, then to the `latest` dist-tag."
+                          },
+                          "integrity": {
+                            "type": "string",
+                            "description": "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal."
+                          },
+                          "providerProfiles": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "config": {
+                            "type": "object"
+                          },
+                          "modelId": {
+                            "type": ["string", "null"]
+                          },
+                          "proxyId": {
+                            "type": ["string", "null"]
+                          }
+                        }
                       }
-                    }
+                    ]
                   },
                   "applicationId": {
                     "type": "string",
@@ -3500,6 +3674,22 @@
                   },
                   "input": {
                     "type": "object"
+                  },
+                  "configOverride": {
+                    "type": "object",
+                    "description": "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires."
+                  },
+                  "modelIdOverride": {
+                    "type": "string",
+                    "description": "Override the persisted model on every run triggered by this schedule."
+                  },
+                  "proxyIdOverride": {
+                    "type": "string",
+                    "description": "Override the persisted proxy on every run triggered by this schedule."
+                  },
+                  "versionOverride": {
+                    "type": "string",
+                    "description": "Pin the agent version every run triggered by this schedule. Literal label or dist-tag."
                   }
                 }
               }
@@ -3688,6 +3878,19 @@
                   },
                   "input": {
                     "type": "object"
+                  },
+                  "configOverride": {
+                    "type": ["object", "null"],
+                    "description": "Per-schedule config delta. Pass `null` to clear the override."
+                  },
+                  "modelIdOverride": {
+                    "type": ["string", "null"]
+                  },
+                  "proxyIdOverride": {
+                    "type": ["string", "null"]
+                  },
+                  "versionOverride": {
+                    "type": ["string", "null"]
                   }
                 }
               }
@@ -8738,6 +8941,140 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/me/application-profile": {
+      "get": {
+        "operationId": "getMyApplicationProfile",
+        "tags": ["Profile"],
+        "summary": "Get the caller's pinned default profile for the active app",
+        "description": "Returns the connection profile id the caller has pinned as their personal default for the active application, or `null` if no sticky is set. The credential proxy's `resolveProfileId` cascade consults this between the explicit per-run override (`X-Connection-Profile-Id`) and the application default. Member-only — end-user callers always receive `{ profileId: null }`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sticky profile id (or null)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profileId"],
+                  "properties": {
+                    "profileId": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setMyApplicationProfile",
+        "tags": ["Profile"],
+        "summary": "Pin a default connection profile for the active app",
+        "description": "Sets the caller's per-(member, application) sticky default. The profile must be either a profile the caller owns or an app profile of the active application; anything else is rejected. Idempotent — repeated calls update the same row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["profileId"],
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sticky profile pinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profileId"],
+                  "properties": {
+                    "profileId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Profile is not owned by the caller and not an app profile of this app"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearMyApplicationProfile",
+        "tags": ["Profile"],
+        "summary": "Clear the caller's pinned default profile for the active app",
+        "description": "Removes the per-(member, application) sticky default; the cascade falls back to the application default. Idempotent — succeeds even when no row exists.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Sticky cleared"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14831,6 +15168,86 @@
         }
       }
     },
+    "/api/applications/{appId}/packages/{scope}/{name}/run-config": {
+      "get": {
+        "operationId": "getApplicationPackageRunConfig",
+        "tags": ["Application Packages"],
+        "summary": "Get the resolved per-app run configuration",
+        "description": "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, pinned version label, and the list of providers required by the package's manifest. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved run configuration",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["config", "modelId", "proxyId", "versionPin", "requiredProviders"],
+                  "properties": {
+                    "config": {
+                      "type": "object"
+                    },
+                    "modelId": {
+                      "type": ["string", "null"]
+                    },
+                    "proxyId": {
+                      "type": ["string", "null"]
+                    },
+                    "versionPin": {
+                      "type": ["string", "null"]
+                    },
+                    "requiredProviders": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "config": {
+                    "dryRun": true
+                  },
+                  "modelId": "claude-sonnet-4-6",
+                  "proxyId": null,
+                  "versionPin": "1.2.3",
+                  "requiredProviders": ["@afps/gmail", "@afps/clickup"]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/applications/{appId}/providers": {
       "get": {
         "operationId": "listAppProviderOverrides",
@@ -15761,6 +16178,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Connection-Profile-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional explicit connection profile UUID. When set, the proxy narrows to that profile after validating it belongs to the caller (own user / end-user profile, or an app profile in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -15890,6 +16317,16 @@
             "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "X-Connection-Profile-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional explicit connection profile UUID. When set, the proxy narrows to that profile after validating it belongs to the caller (own user / end-user profile, or an app profile in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -16028,6 +16465,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Connection-Profile-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional explicit connection profile UUID. When set, the proxy narrows to that profile after validating it belongs to the caller (own user / end-user profile, or an app profile in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -16165,6 +16612,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Connection-Profile-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional explicit connection profile UUID. When set, the proxy narrows to that profile after validating it belongs to the caller (own user / end-user profile, or an app profile in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -16301,6 +16758,16 @@
             "description": "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "X-Connection-Profile-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional explicit connection profile UUID. When set, the proxy narrows to that profile after validating it belongs to the caller (own user / end-user profile, or an app profile in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -16520,6 +16987,98 @@
                   },
                   "max_tokens": {
                     "type": "integer"
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "content": {
+              "application/json": {},
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, or preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — principal lacks `llm-proxy:call`, or cookie session used (bearer only)."
+          },
+          "413": {
+            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB)."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "Upstream provider returned a non-2xx response; body and status forwarded as-is. No usage recorded."
+          }
+        }
+      }
+    },
+    "/api/llm-proxy/mistral-conversations/v1/chat/completions": {
+      "post": {
+        "operationId": "llmProxyMistralChatCompletions",
+        "tags": ["LLM Proxy"],
+        "summary": "Mistral Chat Completions — with server-side model injection",
+        "description": "Wire-compatible with the Mistral `/v1/chat/completions` endpoint. Despite the protocol family name (`mistral-conversations`, inherited from pi-ai's registry), this endpoint targets Mistral's standard OpenAI-compatible chat-completions API — NOT the Beta Conversations agentic API at `/v1/conversations`. The caller supplies `body.model` as an Appstrate **model preset id**; the platform resolves the preset, substitutes the real upstream model id, injects the upstream API key as `Authorization: Bearer`, and forwards the request. All other fields (`messages`, `tools`, `tool_choice`, `temperature`, `stream`, …) pass through untouched.\n\nStreaming responses pass through unchanged; usage is tapped in parallel for accounting when the caller opts in (terminal SSE frame with `usage`, same convention as OpenAI).\n\nAuthentication: bearer only — API key with the `llm-proxy:call` scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, dashboard access token). Cookie sessions are rejected.",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {
+            "bearerJwt": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Run-Id",
+            "in": "header",
+            "required": false,
+            "description": "Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec).",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Mistral Chat Completions payload, with `model` replaced by an Appstrate model preset id. All other fields pass through untouched.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["model", "messages"],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Appstrate model preset id (NOT an upstream model id)."
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
                   },
                   "stream": {
                     "type": "boolean"
@@ -17646,6 +18205,21 @@
             "description": "Snapshot of the effective agent config (merged overrides) at run creation",
             "additionalProperties": true
           },
+          "configOverride": {
+            "type": ["object", "null"],
+            "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
+            "additionalProperties": true
+          },
+          "modelOverridden": {
+            "type": "boolean",
+            "description": "True when the caller's modelId differed from the persisted default."
+          },
+          "proxyOverridden": {
+            "type": "boolean"
+          },
+          "versionOverridden": {
+            "type": "boolean"
+          },
           "dashboardUserName": {
             "type": ["string", "null"],
             "description": "Display name of the dashboard user who triggered the run (from profiles table)"
@@ -17771,6 +18345,18 @@
           },
           "input": {
             "type": "object"
+          },
+          "configOverride": {
+            "type": ["object", "null"]
+          },
+          "modelIdOverride": {
+            "type": ["string", "null"]
+          },
+          "proxyIdOverride": {
+            "type": ["string", "null"]
+          },
+          "versionOverride": {
+            "type": ["string", "null"]
           },
           "lastRunAt": {
             "type": ["string", "null"],
@@ -18576,6 +19162,11 @@
           "providerKeyLabel": {
             "type": ["string", "null"],
             "description": "Provider key label for display"
+          },
+          "keyKind": {
+            "type": ["string", "null"],
+            "enum": ["oauth", "api-key", null],
+            "description": "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols."
           },
           "cost": {
             "type": ["object", "null"],

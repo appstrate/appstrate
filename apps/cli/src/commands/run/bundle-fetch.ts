@@ -56,8 +56,18 @@ export interface BundleFetchResult {
   bytes: Uint8Array;
   /** Bundle SRI digest (`sha256-<base64>`) reported by the server. */
   integrity: string;
-  /** Resolved version label (best-effort — parsed from `Content-Disposition`). */
+  /**
+   * Resolved version label. Read from `X-Bundle-Version` (concrete semver
+   * for published, literal `"draft"` for draft). Falls back to a
+   * Content-Disposition parse on older servers, then to `"unspecified"`.
+   */
   version: string;
+  /**
+   * Whether the served bundle came from the package's draft state or a
+   * published version. Drives the `stage` field on `POST /api/runs/remote`
+   * `kind: "registry"`.
+   */
+  stage: "draft" | "published";
 }
 
 /**
@@ -127,8 +137,21 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     );
   }
 
+  // Prefer the explicit `X-Bundle-Version` header (added when registry-
+  // attribution landed); fall back to the Content-Disposition parse for
+  // older servers, and finally to `"unspecified"`. The header value is
+  // either a concrete semver (`1.2.3`, `1.2.3-rc.1`) or the literal
+  // `"draft"` — propagate verbatim so the run-creation call can decide
+  // between `source: "published" + spec` and `source: "draft"`.
+  const versionHeader = res.headers.get("X-Bundle-Version") ?? res.headers.get("x-bundle-version");
   const version =
-    parseVersionFromContentDisposition(res.headers.get("Content-Disposition")) ?? "unspecified";
+    versionHeader ??
+    parseVersionFromContentDisposition(res.headers.get("Content-Disposition")) ??
+    "unspecified";
+  // `?source=draft` was sent ⇔ the server returned the draft. We don't
+  // trust `versionHeader === "draft"` alone for this — the request shape
+  // is the authoritative signal, and the response is a sanity check.
+  const stage: "draft" | "published" = input.spec === undefined ? "draft" : "published";
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.
@@ -143,7 +166,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     );
   }
 
-  return { bytes, integrity, version };
+  return { bytes, integrity, version, stage };
 }
 
 // ---------------------------------------------------------------------------

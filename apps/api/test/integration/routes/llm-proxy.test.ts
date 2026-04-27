@@ -163,8 +163,8 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(forwardedBody.model).toBe("gpt-4o-2024-08-06");
     expect(forwardedBody.messages).toEqual([{ role: "user", content: "hi" }]);
 
-    // Metering row — allow the async insert to flush.
-    await new Promise((r) => setTimeout(r, 50));
+    // Metering row — `recordUsage` is awaited on the non-streaming path,
+    // so the row is committed before the response returns. No sleep needed.
     const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(row).toBeDefined();
     expect(row!.model).toBe(h.presetId);
@@ -242,7 +242,8 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     });
     expect(res.status).toBe(429);
 
-    await new Promise((r) => setTimeout(r, 50));
+    // Upstream-error path never reaches `recordUsage` (see core.ts:114),
+    // so there's no async write to wait for — assert directly.
     const rows = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
     expect(rows).toHaveLength(0);
   });
@@ -346,19 +347,45 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
     expect(forwardedBody.model).toBe("claude-sonnet-4-5-20250929");
 
-    // SSE tap is async — allow the insert to flush after the stream
-    // drains. The promise chain is started at `tee()` time but only
-    // resolves once the caller consumed the stream, so we wait a beat.
-    await new Promise((r) => setTimeout(r, 100));
-    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
-    expect(row).toBeDefined();
-    expect(row!.inputTokens).toBe(150);
-    expect(row!.outputTokens).toBe(77);
-    expect(row!.cacheReadTokens).toBe(100);
-    expect(row!.cacheWriteTokens).toBe(20);
-    expect(row!.api).toBe("anthropic-messages");
+    // SSE tap is genuinely async: the response stream is tee'd, and the
+    // metering insert only runs once the tap copy has been fully drained
+    // and parsed. There's no observable signal we can synchronously
+    // await from the test (the route discards the metering promise on
+    // purpose so a slow DB doesn't block the response). Poll until the
+    // row materialises instead of guessing a sleep length.
+    const row = await waitForRow(() =>
+      db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId)).limit(1),
+    );
+    expect(row.inputTokens).toBe(150);
+    expect(row.outputTokens).toBe(77);
+    expect(row.cacheReadTokens).toBe(100);
+    expect(row.cacheWriteTokens).toBe(20);
+    expect(row.api).toBe("anthropic-messages");
   });
 });
+
+/**
+ * Poll a query until it returns a row, or the deadline elapses. Used
+ * exclusively by the SSE-streaming metering test where the insert is
+ * tee'd off the response stream and cannot be awaited synchronously.
+ *
+ * Polling beats a fixed `setTimeout`: the test passes as soon as the
+ * insert lands (no padding), and stops cleanly with a clear error if
+ * the contract regresses (no quiet timeout, no "tests pass on fast
+ * machines / fail on CI" flakes).
+ */
+async function waitForRow<T>(
+  query: () => Promise<T[]>,
+  { timeoutMs = 1000, intervalMs = 10 }: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rows = await query();
+    if (rows.length > 0) return rows[0]!;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`waitForRow: row never materialised within ${timeoutMs}ms`);
+}
 
 describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => {
   beforeEach(async () => {
@@ -394,18 +421,15 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
       );
     });
 
-    const res = await app.request(
-      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
-      {
-        method: "POST",
-        headers: authHeaders(h),
-        body: JSON.stringify({
-          model: h.presetId,
-          messages: [{ role: "user", content: "salut" }],
-          temperature: 0.5,
-        }),
-      },
-    );
+    const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "salut" }],
+        temperature: 0.5,
+      }),
+    });
 
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
@@ -424,17 +448,14 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
   it("returns 400 when the preset uses a different protocol family", async () => {
     const h = await buildHarness({ api: "openai-completions" });
-    const res = await app.request(
-      "/api/llm-proxy/mistral-conversations/v1/chat/completions",
-      {
-        method: "POST",
-        headers: authHeaders(h),
-        body: JSON.stringify({
-          model: h.presetId,
-          messages: [{ role: "user", content: "hi" }],
-        }),
-      },
-    );
+    const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
     expect(res.status).toBe(400);
   });
 });

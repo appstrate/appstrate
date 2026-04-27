@@ -61,6 +61,7 @@ import {
   type ReportFallback,
   type ReportContext,
   type ReportSession,
+  type ReportSource,
 } from "./run/report.ts";
 import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
@@ -278,7 +279,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 3a. Optional: register run + build reporting session ─────────
-  const reportSession = await resolveReportSession(opts, bundle, resolverInputs);
+  const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
   // ─── 3b. Build the ProviderResolver ────────────────────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
@@ -839,6 +840,7 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 async function resolveReportSession(
   opts: RunCommandOptions,
   bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
+  bundleSource: BundleSource,
   resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
 ): Promise<ReportSession | null> {
   const mode: ReportMode = opts.report ?? "auto";
@@ -869,10 +871,28 @@ async function resolveReportSession(
   }
   if (!enabled || !reportCtx) return null;
 
+  // The bundle is sourced one of two ways:
+  //   - From a local file (path mode) → we have no registry handle, so
+  //     the run is genuinely ad-hoc and `kind: "inline"` is correct.
+  //   - Fetched by id from the registry → the server already owns the
+  //     manifest+prompt; declare the package directly via
+  //     `kind: "registry"` for deterministic attribution.
+  const reportSource: ReportSource =
+    bundleSource.kind === "bytes"
+      ? {
+          kind: "registry",
+          bundle,
+          packageId: bundleSource.packageId,
+          stage: bundleSource.registryStage,
+          ...(bundleSource.spec ? { spec: bundleSource.spec } : {}),
+          ...(bundleSource.integrity ? { integrity: bundleSource.integrity } : {}),
+        }
+      : { kind: "inline", bundle };
+
   const identity = bundleIdentity(bundle);
   try {
     return await startReportSession(
-      bundle,
+      reportSource,
       reportCtx,
       { mode, fallback, ttlSeconds: opts.sinkTtl },
       {
@@ -1002,7 +1022,21 @@ async function maybeFetchRunConfig(
 
 type BundleSource =
   | { kind: "path"; path: string; label: string }
-  | { kind: "bytes"; bytes: Uint8Array; label: string };
+  | {
+      kind: "bytes";
+      bytes: Uint8Array;
+      label: string;
+      /** Originating package id when fetched by id from the registry. */
+      packageId: string;
+      /** Resolved version (from `X-Bundle-Version`) — concrete semver or `"draft"`. */
+      version: string;
+      /** Whether the fetched bundle came from draft state or a published release. */
+      registryStage: "draft" | "published";
+      /** Spec the user/inheritance asked for (only set for published). */
+      spec: string | undefined;
+      /** SRI digest (`sha256-…`) the server reported for the artifact. */
+      integrity: string;
+    };
 
 async function resolveBundleSource(
   target: ReturnType<typeof parseRunTarget>,
@@ -1040,7 +1074,16 @@ async function resolveBundleSource(
   if (!opts.json) {
     process.stderr.write(`→ fetched bundle ${label}\n`);
   }
-  return { kind: "bytes", bytes: fetched.bytes, label };
+  return {
+    kind: "bytes",
+    bytes: fetched.bytes,
+    label,
+    packageId: target.packageId,
+    version: fetched.version,
+    registryStage: fetched.stage,
+    spec: target.spec,
+    integrity: fetched.integrity,
+  };
 }
 
 // Re-export error types for the CLI's formatError pipeline.

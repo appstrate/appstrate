@@ -106,32 +106,44 @@ export function shouldReport(mode: ReportMode, ctx: ReportContext | null): boole
 }
 
 /**
+ * Discriminator for how to register a remote run:
+ *   - `inline`   — ship the manifest+prompt verbatim (true ad-hoc agent,
+ *                  or a runner whose package isn't in the catalog).
+ *   - `registry` — declare the package by id and let the server load
+ *                  its own copy. Deterministic attribution, no shadow
+ *                  row, no "Inline" badge in the UI.
+ */
+export type ReportSource =
+  | { kind: "inline"; bundle: Bundle }
+  | {
+      kind: "registry";
+      bundle: Bundle;
+      packageId: string;
+      /** Lifecycle stage of the package the runner downloaded — wire field is `stage`. */
+      stage: "draft" | "published";
+      spec?: string | undefined;
+      integrity?: string | undefined;
+    };
+
+/**
  * Register a remote run against the instance and return a configured
  * HttpSink. The caller composes it with its local ConsoleSink. On
  * registration failure, the caller's fallback policy decides whether
  * to abort the run or continue console-only (see {@link ReportOptions}).
+ *
+ * For `kind: "registry"`, the server returning a 400 with code
+ * `invalid_request` (or any 4xx surfaced as a Zod validation error)
+ * triggers an automatic fallback to the inline path with a stderr
+ * warning. This covers the new-CLI / old-server combination — the
+ * runner already has the bundle in memory, so re-posting it as inline
+ * keeps the run moving instead of dying on a wire-format mismatch.
  */
 export async function startReportSession(
-  bundle: Bundle,
+  reportSource: ReportSource,
   ctx: ReportContext,
   opts: ReportOptions,
   contextSnapshot: ReportContextSnapshot,
 ): Promise<ReportSession> {
-  const manifest = extractBundleManifest(bundle);
-  const prompt = extractBundlePrompt(bundle);
-
-  const body = {
-    source: {
-      kind: "inline" as const,
-      manifest,
-      prompt,
-    },
-    applicationId: ctx.appId,
-    input: {},
-    contextSnapshot: truncateSnapshot(contextSnapshot),
-    ...(opts.ttlSeconds ? { sink: { ttlSeconds: opts.ttlSeconds } } : {}),
-  };
-
   const url = `${ctx.instance.replace(/\/$/, "")}/api/runs/remote`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -143,11 +155,69 @@ export async function startReportSession(
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 
-  const res = await fetch(url, {
+  const sink = opts.ttlSeconds ? { sink: { ttlSeconds: opts.ttlSeconds } } : {};
+  const baseBody = {
+    applicationId: ctx.appId,
+    input: {},
+    contextSnapshot: truncateSnapshot(contextSnapshot),
+    ...sink,
+  };
+
+  let body: Record<string, unknown>;
+  if (reportSource.kind === "registry") {
+    body = {
+      ...baseBody,
+      source: {
+        kind: "registry" as const,
+        packageId: reportSource.packageId,
+        stage: reportSource.stage,
+        ...(reportSource.spec ? { spec: reportSource.spec } : {}),
+        ...(reportSource.integrity ? { integrity: reportSource.integrity } : {}),
+      },
+    };
+  } else {
+    body = {
+      ...baseBody,
+      source: {
+        kind: "inline" as const,
+        manifest: extractBundleManifest(reportSource.bundle),
+        prompt: extractBundlePrompt(reportSource.bundle),
+      },
+    };
+  }
+
+  let res = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
   });
+
+  // New-CLI / old-server: the registry branch lands as a 400 on the Zod
+  // discriminated-union check. Fall back to inline once, with a stderr
+  // breadcrumb so the upgrade incentive is visible. Skip the retry for
+  // any other 4xx (auth, rate limit, real validation error) — those
+  // would loop or mask the real failure.
+  if (!res.ok && res.status === 400 && reportSource.kind === "registry") {
+    const peek = await peekProblemBody(res);
+    if (looksLikeUnknownRegistryKind(peek)) {
+      process.stderr.write(
+        "warn: server doesn't support kind: 'registry' source — falling back to inline (run will show as Inline in the dashboard)\n",
+      );
+      const inlineBody = {
+        ...baseBody,
+        source: {
+          kind: "inline" as const,
+          manifest: extractBundleManifest(reportSource.bundle),
+          prompt: extractBundlePrompt(reportSource.bundle),
+        },
+      };
+      res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(inlineBody),
+      });
+    }
+  }
 
   if (!res.ok) {
     const snippet = await readSnippet(res);
@@ -261,6 +331,72 @@ async function readSnippet(res: Response): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+interface PeekedProblem {
+  raw: string;
+  code: string | null;
+  detail: string | null;
+}
+
+/**
+ * Peek a response body once for fallback heuristics, leaving the
+ * original Response cloned so a downstream {@link readSnippet} can
+ * still read the body when we surface the error. Parses RFC 9457
+ * problem+json fields when present so the heuristic doesn't have to
+ * guess at the shape.
+ */
+async function peekProblemBody(res: Response): Promise<PeekedProblem> {
+  try {
+    const text = await res.clone().text();
+    const raw = text.length > 512 ? `${text.slice(0, 512)}…` : text;
+    let code: string | null = null;
+    let detail: string | null = null;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const obj = parsed as Record<string, unknown>;
+        if (typeof obj["code"] === "string") code = obj["code"] as string;
+        if (typeof obj["detail"] === "string") detail = obj["detail"] as string;
+      }
+    } catch {
+      // Non-JSON body — code/detail stay null, raw still serves the heuristic.
+    }
+    return { raw, code, detail };
+  } catch {
+    return { raw: "", code: null, detail: null };
+  }
+}
+
+/**
+ * Heuristic: does this 400 look like the server rejected the
+ * `kind: "registry"` discriminator (i.e. an old build before the
+ * registry source landed)? Two signals, both required:
+ *   1. RFC 9457 `code` is `invalid_request` (Hono's `parseBody`
+ *      validation surface — anything else like rate-limit, auth, app
+ *      context errors carry distinct codes).
+ *   2. The detail/raw mentions the source field path or the registry
+ *      kind explicitly.
+ *
+ * Without (1) we'd false-positive on rate-limit JSON bodies that
+ * happen to mention `source`. Without (2) we'd false-positive on any
+ * unrelated invalid_request (e.g. a malformed `applicationId`).
+ */
+function looksLikeUnknownRegistryKind(peek: PeekedProblem): boolean {
+  if (!peek.raw) return false;
+  if (peek.code !== "invalid_request") return false;
+  // Use the structured `detail` when present, otherwise fall back to the
+  // raw body. The substring set is intentionally narrow — we only match
+  // path/value tokens that a Zod error from the `source` discriminator
+  // would emit ("source.kind", "Invalid discriminator value").
+  const haystack = (peek.detail ?? peek.raw).toLowerCase();
+  return (
+    haystack.includes("source.kind") ||
+    haystack.includes("'source'") ||
+    haystack.includes('"source"') ||
+    haystack.includes("discriminator") ||
+    haystack.includes("registry")
+  );
 }
 
 /**

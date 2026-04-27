@@ -620,24 +620,66 @@ export const runsPaths = {
               required: ["source", "applicationId"],
               properties: {
                 source: {
-                  type: "object",
-                  required: ["kind", "manifest", "prompt"],
-                  properties: {
-                    kind: { const: "inline" },
-                    manifest: {
+                  description:
+                    "Two attribution shapes: `inline` ships the manifest+prompt in the body (ad-hoc agents — always lands on a shadow ephemeral package); `registry` declares the package by id and the server reads the manifest from its own catalog (deterministic attribution, no fingerprint reconciliation).",
+                  oneOf: [
+                    {
                       type: "object",
-                      description:
-                        "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog.",
+                      required: ["kind", "manifest", "prompt"],
+                      properties: {
+                        kind: { const: "inline" },
+                        manifest: {
+                          type: "object",
+                          description:
+                            "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog.",
+                        },
+                        prompt: { type: "string", minLength: 1 },
+                        providerProfiles: {
+                          type: "object",
+                          additionalProperties: { type: "string" },
+                        },
+                        config: { type: "object" },
+                        modelId: { type: ["string", "null"] },
+                        proxyId: { type: ["string", "null"] },
+                      },
                     },
-                    prompt: { type: "string", minLength: 1 },
-                    providerProfiles: {
+                    {
                       type: "object",
-                      additionalProperties: { type: "string" },
+                      required: ["kind", "packageId"],
+                      properties: {
+                        kind: { const: "registry" },
+                        packageId: {
+                          type: "string",
+                          minLength: 1,
+                          description: "Scoped package id (`@scope/name`).",
+                        },
+                        stage: {
+                          type: "string",
+                          enum: ["draft", "published"],
+                          default: "published",
+                          description:
+                            "`draft` reads `draftManifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
+                        },
+                        spec: {
+                          type: "string",
+                          description:
+                            "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the application, then to the `latest` dist-tag.",
+                        },
+                        integrity: {
+                          type: "string",
+                          description:
+                            "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
+                        },
+                        providerProfiles: {
+                          type: "object",
+                          additionalProperties: { type: "string" },
+                        },
+                        config: { type: "object" },
+                        modelId: { type: ["string", "null"] },
+                        proxyId: { type: ["string", "null"] },
+                      },
                     },
-                    config: { type: "object" },
-                    modelId: { type: ["string", "null"] },
-                    proxyId: { type: ["string", "null"] },
-                  },
+                  ],
                 },
                 applicationId: { type: "string", minLength: 1 },
                 input: { type: "object" },
