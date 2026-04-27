@@ -36,6 +36,18 @@ export interface ModelPreset {
     cacheRead: number;
     cacheWrite: number;
   } | null;
+  /**
+   * Anthropic-only: shape of the upstream credential. When `oauth`, the
+   * CLI hands pi-ai an `sk-ant-oat-…`-shaped placeholder so pi-ai's
+   * prefix-based OAuth detection fires locally and the body is reshaped
+   * (Claude-Code system prompt + tool renaming) BEFORE it reaches the
+   * proxy. Anthropic gates OAuth tokens to that body shape upstream, so
+   * the reshape has to happen client-side; the proxy only swaps the
+   * placeholder secret for the real OAuth bearer. null for non-Anthropic
+   * protocols and for Anthropic models whose creds aren't loadable
+   * (treat as api-key).
+   */
+  keyKind?: "oauth" | "api-key" | null;
 }
 
 interface ListResponse {

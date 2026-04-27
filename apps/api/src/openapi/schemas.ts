@@ -931,6 +931,12 @@ export const schemas = {
         description: "Provider key ID for API key credentials",
       },
       providerKeyLabel: { type: ["string", "null"], description: "Provider key label for display" },
+      keyKind: {
+        type: ["string", "null"],
+        enum: ["oauth", "api-key", null],
+        description:
+          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
+      },
       cost: {
         type: ["object", "null"],
         description: "Cost per million tokens",

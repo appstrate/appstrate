@@ -165,7 +165,21 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // real upstream key from server-side storage. Net effect: the
   // placeholder never leaves the platform's network. See
   // `apps/api/src/services/llm-proxy/anthropic.ts:HEADERS_TO_FORWARD`.
+  //
+  // OAuth-keyed Anthropic presets need an extra trick: the upstream
+  // (`sk-ant-oat-*`) is gated to Claude-Code identity at the BODY level
+  // — system prompt + tool-name renaming — which pi-ai injects locally
+  // only when its `apiKey.includes("sk-ant-oat")` detection fires. So we
+  // mirror the prefix in the placeholder. pi-ai then takes its OAuth
+  // path: it tries to set `Authorization: Bearer <oauth-placeholder>` AND
+  // reshapes the body. The Anthropic SDK's `defaultHeaders` (= our
+  // `model.headers`) is applied AFTER the auth header in `buildHeaders`
+  // (later wins), so our `Authorization: Bearer <appstrate-token>`
+  // overrides pi-ai's OAuth bearer before the request leaves the
+  // process — the proxy still authenticates with the Appstrate token,
+  // and the reshaped body flows through to the real OAuth upstream.
   const isAnthropic = preset.api === "anthropic-messages";
+  const isAnthropicOAuth = isAnthropic && preset.keyKind === "oauth";
   const headers: Record<string, string> = { "X-Org-Id": inputs.orgId };
   if (isAnthropic) {
     headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
@@ -184,8 +198,18 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     headers,
   };
   // Placeholder for anthropic — never reaches upstream (see comment above).
-  // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
-  const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;
+  // For OAuth-keyed presets the placeholder must mirror the `sk-ant-oat-`
+  // prefix so pi-ai's local detection picks it up; for plain API-key
+  // presets any non-OAuth string is fine. For other APIs, pi-ai's SDK
+  // sends `Authorization: Bearer <apiKey>` natively.
+  let apiKey: string;
+  if (isAnthropicOAuth) {
+    apiKey = "sk-ant-oat-placeholder";
+  } else if (isAnthropic) {
+    apiKey = "x-platform-bearer-injected-via-headers";
+  } else {
+    apiKey = inputs.bearerToken;
+  }
   return { model, apiKey };
 }
 

@@ -422,6 +422,19 @@ export interface OrgModelInfo {
   source: "built-in" | "custom";
   providerKeyId: string;
   providerKeyLabel: string | null;
+  /**
+   * Anthropic-only: shape of the upstream credential, exposed so the CLI
+   * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`
+   * tokens (Anthropic gates these to Claude-Code identity at the body
+   * level — system prompt + tool-name renaming — which pi-ai injects
+   * locally only when its prefix-based detection fires); `api-key` for
+   * regular `sk-ant-…` keys; null for non-Anthropic protocols and for
+   * Anthropic models whose credentials cannot be loaded (treat as
+   * api-key). The CLI mirrors the kind by passing `sk-ant-oat-placeholder`
+   * as the `apiKey` to pi-ai when `keyKind === "oauth"`, so pi-ai
+   * reshapes the body before the proxy ever sees it.
+   */
+  keyKind?: "oauth" | "api-key" | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

@@ -14,11 +14,40 @@ import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers
 
 // --- List (system + DB) ---
 
+/**
+ * Anthropic gates `sk-ant-oat-*` tokens to Claude-Code identity at the
+ * body level (system prompt + tool-name renaming) — pi-ai injects that
+ * locally only when its prefix-based detection fires (see
+ * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
+ * the LLM proxy path the upstream key never leaves the platform, so we
+ * surface its kind to the CLI; the CLI then mirrors the prefix in the
+ * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
+ * protocols and for Anthropic models whose creds are unavailable.
+ */
+function detectKeyKind(api: string, apiKey: string): "oauth" | "api-key" | null {
+  if (api !== "anthropic-messages") return null;
+  return apiKey.includes("sk-ant-oat") ? "oauth" : "api-key";
+}
+
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   const orgHasDefault = rows.some((r) => r.isDefault);
   const now = toISORequired(new Date());
+
+  // Resolve keyKind for Anthropic DB models — needs a credentials lookup
+  // per distinct providerKeyId. System models carry `apiKey` inline, so
+  // detection there is free. Other protocols don't expose keyKind at all.
+  const anthropicProviderKeyIds = new Set(
+    rows.filter((r) => r.api === "anthropic-messages").map((r) => r.providerKeyId),
+  );
+  const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
+  await Promise.all(
+    Array.from(anthropicProviderKeyIds).map(async (id) => {
+      const creds = await loadProviderKeyCredentials(orgId, id);
+      dbKeyKinds.set(id, creds ? detectKeyKind("anthropic-messages", creds.apiKey) : null);
+    }),
+  );
 
   return mergeSystemAndDb({
     system,
@@ -39,6 +68,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       source: "built-in" as const,
       providerKeyId: def.providerKeyId,
       providerKeyLabel: null,
+      keyKind: detectKeyKind(def.api, def.apiKey),
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -59,6 +89,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       source: row.source as "custom" | "built-in",
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
+      keyKind:
+        row.api === "anthropic-messages" ? (dbKeyKinds.get(row.providerKeyId) ?? null) : null,
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),

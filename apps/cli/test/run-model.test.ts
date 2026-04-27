@@ -267,6 +267,57 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(model.provider).toBe("mistral");
   });
 
+  it("uses an OAuth-shaped placeholder for keyKind=oauth Anthropic presets", async () => {
+    // pi-ai detects OAuth via `apiKey.includes("sk-ant-oat")` and reshapes
+    // the body locally (Claude-Code system prompt + tool renaming) — that
+    // reshape only happens when the placeholder mirrors the prefix. The
+    // SDK then tries to set `Authorization: Bearer <oauth-placeholder>`,
+    // but `defaultHeaders` (= our `model.headers`) is applied AFTER the
+    // auth header in `buildHeaders`, so our `Authorization: Bearer
+    // ask_test_oauth` overrides it before the request leaves the process.
+    const { model, apiKey } = await resolvePresetModel({
+      profileName: "default",
+      modelId: "preset_anthropic_oauth",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test_oauth",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_anthropic_oauth",
+          api: "anthropic-messages",
+          isDefault: false,
+          keyKind: "oauth",
+        }),
+      ],
+    });
+    expect(apiKey).toBe("sk-ant-oat-placeholder");
+    expect(model.headers?.["Authorization"]).toBe("Bearer ask_test_oauth");
+    expect(model.headers?.["X-Org-Id"]).toBe("org_1");
+  });
+
+  it("uses the non-OAuth placeholder for keyKind=api-key Anthropic presets", async () => {
+    const { apiKey } = await resolvePresetModel({
+      profileName: "default",
+      modelId: "preset_anthropic_apikey",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test_apikey",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_anthropic_apikey",
+          api: "anthropic-messages",
+          isDefault: false,
+          keyKind: "api-key",
+        }),
+      ],
+    });
+    // `keyKind: "api-key"` MUST NOT trigger pi-ai's OAuth branch —
+    // body reshaping with a non-OAuth upstream would be sent to the wrong
+    // shape (renamed tools, injected Claude-Code system prompt) and the
+    // upstream would reject it.
+    expect(apiKey).not.toContain("sk-ant-oat");
+  });
+
   it("rejects unsupported protocols with an actionable hint", async () => {
     await expect(
       resolvePresetModel({
