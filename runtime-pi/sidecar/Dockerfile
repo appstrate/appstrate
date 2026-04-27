@@ -72,6 +72,7 @@ COPY runtime-pi/sidecar/server.ts           \
      runtime-pi/sidecar/blob-store.ts       \
      runtime-pi/sidecar/credential-proxy.ts \
      runtime-pi/sidecar/roots.ts            \
+     runtime-pi/sidecar/logger.ts           \
      runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
