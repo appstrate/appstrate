@@ -222,6 +222,88 @@ describe("HttpSink", () => {
     expect(server.received).toHaveLength(1);
   });
 
+  it("surfaces problem+json code/detail in non-retryable error message", async () => {
+    // Spin up a one-off server that returns a 410 RFC 9457 envelope —
+    // the platform's actual error shape on a closed sink. The test
+    // confirms the CLI gets a self-explanatory error message instead
+    // of a bare "410 Gone".
+    const probeServer = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(
+          JSON.stringify({
+            type: "about:blank",
+            title: "Gone",
+            status: 410,
+            code: "run_sink_closed",
+            detail: "run run_xyz sink was closed at 2026-04-27T17:30:00.000Z",
+          }),
+          { status: 410, headers: { "content-type": "application/problem+json" } },
+        ),
+    });
+
+    try {
+      const sink = new HttpSink({
+        url: `http://localhost:${probeServer.port}/events`,
+        runSecret: RUN_SECRET,
+        initialBackoffMs: 5,
+        maxAttempts: 2,
+      });
+
+      await expect(sink.handle(SAMPLE_EVENT)).rejects.toThrow(/run_sink_closed.*sink was closed/);
+    } finally {
+      probeServer.stop(true);
+    }
+  });
+
+  it("falls back to raw body preview when error response is not JSON", async () => {
+    const probeServer = Bun.serve({
+      port: 0,
+      fetch: () => new Response("upstream timeout — try again later", { status: 410 }),
+    });
+
+    try {
+      const sink = new HttpSink({
+        url: `http://localhost:${probeServer.port}/events`,
+        runSecret: RUN_SECRET,
+        initialBackoffMs: 5,
+        maxAttempts: 2,
+      });
+
+      await expect(sink.handle(SAMPLE_EVENT)).rejects.toThrow(/upstream timeout/);
+    } finally {
+      probeServer.stop(true);
+    }
+  });
+
+  it("truncates oversized error bodies to keep log lines scannable", async () => {
+    const huge = "x".repeat(10_000);
+    const probeServer = Bun.serve({
+      port: 0,
+      fetch: () => new Response(huge, { status: 400 }),
+    });
+
+    try {
+      const sink = new HttpSink({
+        url: `http://localhost:${probeServer.port}/events`,
+        runSecret: RUN_SECRET,
+        initialBackoffMs: 5,
+        maxAttempts: 2,
+      });
+
+      const err = await sink.handle(SAMPLE_EVENT).then(
+        () => null,
+        (e: Error) => e,
+      );
+      expect(err).not.toBeNull();
+      // Bounded: should NOT contain the full 10k-char body — cap is ~512.
+      expect(err!.message.length).toBeLessThan(1500);
+      expect(err!.message).toContain("…");
+    } finally {
+      probeServer.stop(true);
+    }
+  });
+
   it("throws after exhausting all attempts", async () => {
     server.setTransientFailures(10, 500);
 

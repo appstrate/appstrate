@@ -164,7 +164,14 @@ export class HttpSink implements EventSink {
         if (res.ok) return;
 
         if (res.status < 500 && res.status !== 429) {
-          throw new NonRetryableHttpError(res.status, res.statusText);
+          // Capture a peek of the response body. Platform errors are
+          // RFC 9457 `application/problem+json` envelopes whose `code` /
+          // `detail` fields are the only machine-readable explanation
+          // for the failure (e.g. `run_sink_closed`, `run_sink_expired`,
+          // `invalid_signature`). Discarding them turns a one-line
+          // diagnosis into a debug session.
+          const detail = await peekErrorDetail(res);
+          throw new NonRetryableHttpError(res.status, res.statusText, detail);
         }
 
         lastError = new Error(`HttpSink: retryable ${res.status} ${res.statusText}`);
@@ -196,8 +203,43 @@ class NonRetryableHttpError extends Error {
   constructor(
     readonly status: number,
     readonly statusText: string,
+    readonly detail?: string,
   ) {
-    super(`HttpSink: non-retryable ${status} ${statusText}`);
+    const suffix = detail ? ` — ${detail}` : "";
+    super(`HttpSink: non-retryable ${status} ${statusText}${suffix}`);
     this.name = "NonRetryableHttpError";
+  }
+}
+
+/**
+ * Best-effort body extraction from a non-OK response. Returns a short
+ * `code: <code>, detail: <detail>` string for RFC 9457 problem+json
+ * envelopes (the platform's standard error shape), a plain truncated
+ * preview otherwise, or `undefined` if the body can't be read.
+ *
+ * Bounded to ~512 bytes to keep error messages scannable in CI logs and
+ * to avoid copying multi-MB error pages from misconfigured proxies.
+ */
+async function peekErrorDetail(res: Response): Promise<string | undefined> {
+  try {
+    const text = await res.text();
+    if (!text) return undefined;
+    const trimmed = text.length > 512 ? text.slice(0, 512) + "…" : text;
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("json")) {
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        const code = typeof parsed.code === "string" ? parsed.code : undefined;
+        const detail = typeof parsed.detail === "string" ? parsed.detail : undefined;
+        if (code && detail) return `code: ${code}, detail: ${detail}`;
+        if (code) return `code: ${code}`;
+        if (detail) return detail;
+      } catch {
+        /* fall through to raw preview */
+      }
+    }
+    return trimmed;
+  } catch {
+    return undefined;
   }
 }
