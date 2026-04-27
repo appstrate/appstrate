@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",

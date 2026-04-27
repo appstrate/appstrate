@@ -5,6 +5,24 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0] — 2026-04-27
+
+### Changed
+
+- `@appstrate/core/env::createEnvGetter` now coalesces empty-string env
+  values to `undefined` before Zod validation runs. Aligns the helper
+  with Docker Compose's `${VAR:-}` pattern (an unset host variable is
+  forwarded to the container as a literal `VAR=`, not as a missing
+  key) so Zod's `.default(...)` fires uniformly across every refined
+  field. Previously, `MY_VAR=` would fail boot for any field with a
+  refine guard or enum, with a cryptic `must be …` error.
+
+  Subtle observable change for `.optional()` fields: `MY_VAR=` now
+  parses to `undefined` instead of `""`. Safe for env vars in
+  practice (the host shell never assigns a meaningful empty string),
+  but downstream code that distinguished `""` from `undefined` would
+  need to be updated.
+
 ## [2.12.0] — 2026-04-19
 
 ### Added
