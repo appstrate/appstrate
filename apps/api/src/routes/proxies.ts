@@ -23,6 +23,7 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createProxySchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -58,6 +59,12 @@ export function createProxiesRouter() {
 
     try {
       const id = await createOrgProxy(orgId, data.label, data.url, user.id);
+      await recordAuditFromContext(c, {
+        action: "proxy.created",
+        resourceType: "proxy",
+        resourceId: id,
+        after: { label: data.label, url: data.url },
+      });
       return c.json({ id }, 201);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -78,6 +85,11 @@ export function createProxiesRouter() {
 
     try {
       await setDefaultProxy(orgId, data.proxyId);
+      await recordAuditFromContext(c, {
+        action: "proxy.default_set",
+        resourceType: "proxy",
+        resourceId: data.proxyId,
+      });
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default proxy failed", {
@@ -119,6 +131,12 @@ export function createProxiesRouter() {
 
     try {
       await updateOrgProxy(orgId, proxyId, data);
+      await recordAuditFromContext(c, {
+        action: "proxy.updated",
+        resourceType: "proxy",
+        resourceId: proxyId,
+        after: data as unknown as Record<string, unknown>,
+      });
       return c.json({ id: proxyId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -141,6 +159,11 @@ export function createProxiesRouter() {
 
     try {
       await deleteOrgProxy(orgId, proxyId);
+      await recordAuditFromContext(c, {
+        action: "proxy.deleted",
+        resourceType: "proxy",
+        resourceId: proxyId,
+      });
       return c.body(null, 204);
     } catch (err) {
       logger.error("Proxy delete failed", {

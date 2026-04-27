@@ -27,6 +27,7 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -104,6 +105,12 @@ export function createModelsRouter() {
         reasoning,
         cost,
       });
+      await recordAuditFromContext(c, {
+        action: "model.created",
+        resourceType: "model",
+        resourceId: id,
+        after: { label, api, baseUrl, modelId, providerKeyId },
+      });
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Model create failed", {
@@ -122,6 +129,11 @@ export function createModelsRouter() {
 
     try {
       await setDefaultModel(orgId, data.modelId);
+      await recordAuditFromContext(c, {
+        action: "model.default_set",
+        resourceType: "model",
+        resourceId: data.modelId,
+      });
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default model failed", {
@@ -290,6 +302,12 @@ export function createModelsRouter() {
 
     try {
       await updateOrgModel(orgId, modelId, data);
+      await recordAuditFromContext(c, {
+        action: "model.updated",
+        resourceType: "model",
+        resourceId: modelId,
+        after: data as unknown as Record<string, unknown>,
+      });
       return c.json({ id: modelId });
     } catch (err) {
       logger.error("Model update failed", {
@@ -311,6 +329,11 @@ export function createModelsRouter() {
 
     try {
       await deleteOrgModel(orgId, modelId);
+      await recordAuditFromContext(c, {
+        action: "model.deleted",
+        resourceType: "model",
+        resourceId: modelId,
+      });
       return c.body(null, 204);
     } catch (err) {
       logger.error("Model delete failed", {

@@ -24,6 +24,7 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -64,6 +65,12 @@ export function createProviderKeysRouter() {
     try {
       const { label, api, baseUrl, apiKey } = data;
       const id = await createOrgProviderKey(orgId, label, api, baseUrl, apiKey, user.id);
+      await recordAuditFromContext(c, {
+        action: "provider_key.created",
+        resourceType: "provider_key",
+        resourceId: id,
+        after: { label, api, baseUrl },
+      });
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Provider key create failed", {
@@ -132,6 +139,13 @@ export function createProviderKeysRouter() {
     const data = parseBody(updateSchema, body);
     try {
       await updateOrgProviderKey(orgId, id, data);
+      const { apiKey: _apiKey, ...auditData } = data;
+      await recordAuditFromContext(c, {
+        action: "provider_key.updated",
+        resourceType: "provider_key",
+        resourceId: id,
+        after: auditData as Record<string, unknown>,
+      });
       return c.json({ id });
     } catch (err) {
       logger.error("Provider key update failed", {
@@ -151,6 +165,11 @@ export function createProviderKeysRouter() {
     }
     try {
       await deleteOrgProviderKey(orgId, id);
+      await recordAuditFromContext(c, {
+        action: "provider_key.deleted",
+        resourceType: "provider_key",
+        resourceId: id,
+      });
       return c.body(null, 204);
     } catch (err) {
       logger.error("Provider key delete failed", {

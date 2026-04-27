@@ -31,7 +31,12 @@ import { logger } from "../../lib/logger.ts";
 import { listResponse, type ListResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import { runMetadataSchema, runConfigSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
+import {
+  runMetadataSchema,
+  runConfigSchema,
+  runConfigOverrideSchema,
+  runLogDataSchema,
+} from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
@@ -44,6 +49,17 @@ function parseRunConfig(value: Record<string, unknown> | null | undefined) {
   if (!result.success) {
     throw invalidRequest(
       `Invalid run config: ${result.error.issues[0]?.message ?? "validation failed"}`,
+    );
+  }
+  return result.data;
+}
+
+function parseRunConfigOverride(value: Record<string, unknown> | null | undefined) {
+  if (value == null) return null;
+  const result = runConfigOverrideSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidRequest(
+      `Invalid run config override: ${result.error.issues[0]?.message ?? "validation failed"}`,
     );
   }
   return result.data;
@@ -225,7 +241,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
     config: parseRunConfig(params.config),
-    configOverride: parseRunConfig(params.configOverride),
+    configOverride: parseRunConfigOverride(params.configOverride),
     modelOverridden: params.modelOverridden ?? false,
     proxyOverridden: params.proxyOverridden ?? false,
     versionOverridden: params.versionOverridden ?? false,
