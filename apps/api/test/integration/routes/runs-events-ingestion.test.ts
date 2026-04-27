@@ -274,9 +274,9 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   // End-to-end coverage for the `@appstrate/report` system tool.
   //
   // Why this lives at the route layer and not just in the sink unit test:
-  // the production bug shipped because the chain Tool → tee-sink → HttpSink
-  // → POST /events → ingestion → run_logs → UI was only exercised in
-  // isolation, leg by leg. The sink-level test catches the dispatch logic;
+  // the production bug shipped because the chain Tool → stdout bridge →
+  // HttpSink → POST /events → ingestion → run_logs → UI was only exercised
+  // in isolation, leg by leg. The sink-level test catches the dispatch logic;
   // this test catches the contract — that an HMAC-signed CloudEvent of
   // type `report.appended` reaching the public ingestion endpoint actually
   // produces the `run_logs` row the UI consumes. Same shape as the
