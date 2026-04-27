@@ -44,11 +44,7 @@ export interface RunOverridesPanelProps {
   persistedModelId: string | null;
   /** Persisted proxy id (or null = inherit org default). */
   persistedProxyId: string | null;
-  /**
-   * Persisted version pin (or null = follow latest dist-tag). Currently
-   * surfaced read-only — UI may pin per-run (always wins) but does not
-   * mutate the per-app pin from the run modal.
-   */
+  /** Persisted version pin (or null = follow latest dist-tag). */
   persistedVersion: string | null;
   /** Current value (controlled). */
   value: RunOverridesValue;
@@ -56,15 +52,14 @@ export interface RunOverridesPanelProps {
 }
 
 /**
- * Per-run override editor — rendered both inside the Run modal and the
- * Schedule form. Emits a delta payload (`onChange`): each field is
- * present only when it differs from the persisted default, so the
- * resulting payload is what the server expects on `POST /run` and the
- * caller never has to re-implement diff detection.
+ * Per-run override editor — rendered inside the Schedule form. Emits a
+ * delta payload (`onChange`): each field is present only when it differs
+ * from the persisted default, so the caller never has to re-implement
+ * diff detection.
  *
- * Mirrors the CLI's `--config / --model / --proxy / @spec` flags. Source
- * of truth for the merge semantics: `@appstrate/core/schema-validation`
- * (`deepMergeConfig`), shared with the run pipeline.
+ * Source of truth for the merge semantics:
+ * `@appstrate/core/schema-validation` (`deepMergeConfig`), shared with
+ * the run pipeline.
  */
 export function RunOverridesPanel({
   packageId,
@@ -159,11 +154,11 @@ export function RunOverridesPanel({
             <SelectContent>
               <SelectItem value={INHERIT}>
                 {orgDefaultModel
-                  ? t("run.modal.modelInheritWithDefault", {
+                  ? t("run.overrides.modelInheritWithDefault", {
                       ns: "agents",
                       name: orgDefaultModel.label,
                     })
-                  : t("run.modal.modelInherit", { ns: "agents" })}
+                  : t("run.overrides.modelInherit", { ns: "agents" })}
               </SelectItem>
               {orgModels.map((m) => {
                 const mp = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
@@ -192,13 +187,13 @@ export function RunOverridesPanel({
             <SelectContent>
               <SelectItem value={INHERIT}>
                 {orgDefaultProxy
-                  ? t("run.modal.proxyInheritWithDefault", {
+                  ? t("run.overrides.proxyInheritWithDefault", {
                       ns: "agents",
                       name: orgDefaultProxy.label,
                     })
-                  : t("run.modal.proxyInherit", { ns: "agents" })}
+                  : t("run.overrides.proxyInherit", { ns: "agents" })}
               </SelectItem>
-              <SelectItem value={NONE}>{t("run.modal.proxyNone", { ns: "agents" })}</SelectItem>
+              <SelectItem value={NONE}>{t("run.overrides.proxyNone", { ns: "agents" })}</SelectItem>
               {orgProxies.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.label}
@@ -211,7 +206,7 @@ export function RunOverridesPanel({
 
       {versions && versions.length > 0 && (
         <div className="space-y-2">
-          <Label>{t("run.modal.versionLabel", { ns: "agents" })}</Label>
+          <Label>{t("run.overrides.versionLabel", { ns: "agents" })}</Label>
           <Select value={versionSelectValue} onValueChange={setVersion}>
             <SelectTrigger>
               <SelectValue />
@@ -219,11 +214,11 @@ export function RunOverridesPanel({
             <SelectContent>
               <SelectItem value={INHERIT}>
                 {persistedVersion
-                  ? t("run.modal.versionInheritPinned", {
+                  ? t("run.overrides.versionInheritPinned", {
                       ns: "agents",
                       version: persistedVersion,
                     })
-                  : t("run.modal.versionInheritLatest", { ns: "agents" })}
+                  : t("run.overrides.versionInheritLatest", { ns: "agents" })}
               </SelectItem>
               {versions
                 .filter((v) => !v.yanked)
@@ -239,9 +234,9 @@ export function RunOverridesPanel({
 
       {hasConfigFields && wrapper && (
         <div className="space-y-2">
-          <Label>{t("run.modal.configLabel", { ns: "agents" })}</Label>
+          <Label>{t("run.overrides.configLabel", { ns: "agents" })}</Label>
           <p className="text-muted-foreground text-xs">
-            {t("run.modal.configHint", { ns: "agents" })}
+            {t("run.overrides.configHint", { ns: "agents" })}
           </p>
           <div className="border-border bg-card rounded-md border p-3">
             <SchemaForm
