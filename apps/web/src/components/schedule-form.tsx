@@ -157,9 +157,9 @@ export function ScheduleForm({
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
     const v: RunOverridesValue = {};
     if (defaultValues?.configOverride) v.configOverride = defaultValues.configOverride;
-    if (defaultValues?.modelIdOverride) v.modelId = defaultValues.modelIdOverride;
-    if (defaultValues?.proxyIdOverride) v.proxyId = defaultValues.proxyIdOverride;
-    if (defaultValues?.versionOverride) v.version = defaultValues.versionOverride;
+    if (defaultValues?.modelIdOverride) v.modelIdOverride = defaultValues.modelIdOverride;
+    if (defaultValues?.proxyIdOverride) v.proxyIdOverride = defaultValues.proxyIdOverride;
+    if (defaultValues?.versionOverride) v.versionOverride = defaultValues.versionOverride;
     return v;
   });
   const initialOverridesNonEmpty =
@@ -209,15 +209,15 @@ export function ScheduleForm({
     const overridePayload = isEdit
       ? {
           configOverride: overrides.configOverride ?? null,
-          modelIdOverride: overrides.modelId ?? null,
-          proxyIdOverride: overrides.proxyId ?? null,
-          versionOverride: overrides.version ?? null,
+          modelIdOverride: overrides.modelIdOverride ?? null,
+          proxyIdOverride: overrides.proxyIdOverride ?? null,
+          versionOverride: overrides.versionOverride ?? null,
         }
       : {
           ...(overrides.configOverride ? { configOverride: overrides.configOverride } : {}),
-          ...(overrides.modelId ? { modelIdOverride: overrides.modelId } : {}),
-          ...(overrides.proxyId ? { proxyIdOverride: overrides.proxyId } : {}),
-          ...(overrides.version ? { versionOverride: overrides.version } : {}),
+          ...(overrides.modelIdOverride ? { modelIdOverride: overrides.modelIdOverride } : {}),
+          ...(overrides.proxyIdOverride ? { proxyIdOverride: overrides.proxyIdOverride } : {}),
+          ...(overrides.versionOverride ? { versionOverride: overrides.versionOverride } : {}),
         };
 
     onSubmit({

@@ -10,6 +10,7 @@ import { collectDependencyErrors } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
+import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import type {
@@ -155,6 +156,27 @@ export function validateMergedConfigOrThrow(
     title: "Invalid Config",
     detail: first.field ? `config.${first.field}: ${first.message}` : first.message,
   });
+}
+
+/**
+ * Apply a per-run config override on top of the persisted config and re-validate
+ * against the manifest schema. No-op when `override` is null/undefined — returns
+ * `persisted` verbatim. Throws `ApiError(400, "invalid_config")` if the merged
+ * result violates the manifest schema (mirrors `validateMergedConfigOrThrow`).
+ *
+ * Single source of truth for the merge+validate sequence shared by `POST /run`
+ * and the scheduler — every per-run invocation reaches an identical resolved
+ * config for the same `(persisted, override)` pair.
+ */
+export function mergeAndValidateConfigOverride(
+  agent: LoadedPackage,
+  persisted: Record<string, unknown>,
+  override: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!override) return persisted;
+  const merged = deepMergeConfig(persisted, override);
+  validateMergedConfigOrThrow(agent, merged);
+  return merged;
 }
 
 // ---------------------------------------------------------------------------

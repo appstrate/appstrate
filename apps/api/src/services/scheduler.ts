@@ -30,12 +30,11 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
-import { validateMergedConfigOrThrow } from "./agent-readiness.ts";
+import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { deepMergeConfig } from "@appstrate/core/schema-validation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -344,35 +343,26 @@ async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    // Apply per-schedule overrides on top of the resolved preflight values.
-    // Same shape as POST /run body — deep-merge for `config`, first-non-null
-    // for model/proxy/version. Stamped on the run record (not just used at
-    // execute time) so the dashboard can badge "default vs override".
-    const mergedConfig = overrides.configOverride
-      ? deepMergeConfig(config, overrides.configOverride)
-      : config;
-
-    // Re-validate against the manifest schema when an override is in play —
-    // the persisted side was vetted by `resolveRunPreflight`, but a frozen
-    // schedule override can push the merged config out of schema (especially
-    // after a manifest update tightened the schema). Mirrors the gate the
-    // run route runs on `POST /run`.
-    if (overrides.configOverride) {
-      try {
-        validateMergedConfigOrThrow(agent, mergedConfig);
-      } catch (err) {
-        if (err instanceof ApiError) {
-          logger.warn("Schedule config override no longer satisfies manifest schema", {
-            scheduleId,
-            packageId,
-            code: err.code,
-            detail: err.message,
-          });
-          await failSchedule(err.message, actor);
-          return;
-        }
-        throw err;
+    // Apply per-schedule overrides (deep-merge + re-validate) via the same
+    // helper used by `POST /run` so both paths converge to an identical
+    // resolved config. Wrapped in try/catch because a frozen schedule
+    // override can fall out of schema after a manifest update tightens it
+    // — the scheduler must `failSchedule` instead of throwing.
+    let mergedConfig: Record<string, unknown>;
+    try {
+      mergedConfig = mergeAndValidateConfigOverride(agent, config, overrides.configOverride);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        logger.warn("Schedule config override no longer satisfies manifest schema", {
+          scheduleId,
+          packageId,
+          code: err.code,
+          detail: err.message,
+        });
+        await failSchedule(err.message, actor);
+        return;
       }
+      throw err;
     }
 
     const finalModelId = overrides.modelIdOverride ?? preflightModelId;

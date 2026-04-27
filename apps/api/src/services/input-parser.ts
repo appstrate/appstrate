@@ -19,16 +19,22 @@ import { consumeUpload, isUploadUri, parseUploadUri } from "./uploads.ts";
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: UploadedFile[];
-  modelId?: string;
-  proxyId?: string;
+  /** Per-run model override (wire field `modelId` on the request body). */
+  modelIdOverride?: string;
+  /** Per-run proxy override (wire field `proxyId` on the request body). */
+  proxyIdOverride?: string;
   /**
-   * Per-run config override. Deep-merged with `application_packages.config`
-   * before the run is executed (see `deepMergeConfig` in
-   * `@appstrate/core/schema-validation`). Mirrors the OpenAI Assistants
-   * `runs.create { instructions, model, tools }` and Argo Workflows
-   * `submitOptions.parameters` SOTA: the merge happens server-side so
-   * UI / CLI / SDK clients all reach the same resolved config for the
-   * same `(persisted, override)` pair.
+   * Per-run config override (wire field `config` on the request body).
+   * Deep-merged with `application_packages.config` before the run is
+   * executed (see `deepMergeConfig` in `@appstrate/core/schema-validation`).
+   * Mirrors the OpenAI Assistants `runs.create { instructions, model, tools }`
+   * and Argo Workflows `submitOptions.parameters` SOTA: the merge happens
+   * server-side so UI / CLI / SDK clients all reach the same resolved config
+   * for the same `(persisted, override)` pair.
+   *
+   * Internal output names use the `*Override` suffix to match the schedule
+   * wire (`configOverride / modelIdOverride / proxyIdOverride / versionOverride`)
+   * and the run-record columns (`runs.config_override`, `model_overridden`, …).
    */
   configOverride?: Record<string, unknown>;
 }
@@ -162,8 +168,8 @@ export async function parseRequestInput(
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-    modelId: body.modelId,
-    proxyId: body.proxyId,
+    modelIdOverride: body.modelId,
+    proxyIdOverride: body.proxyId,
     configOverride: body.config,
   };
 }
