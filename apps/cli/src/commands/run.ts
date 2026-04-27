@@ -407,11 +407,9 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // (provider extension build, runtime-ready emit, …) bypasses
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
-  const trackedHttpSink = reportSession
-    ? wrapHttpSinkWithFinalizeTracker(reportSession.httpSink)
-    : null;
-  const sink = trackedHttpSink
-    ? new CompositeSink([consoleSink, trackedHttpSink.sink])
+  const wasHttpSinkFinalized = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
+  const sink = reportSession
+    ? new CompositeSink([consoleSink, reportSession.httpSink])
     : consoleSink;
   if (!opts.json) {
     const reportNote = reportSession
@@ -501,7 +499,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
     // this whole change is trying to eliminate. Industry guidance for
     // graceful-shutdown cleanup is 5–10s; we sit at 5s and rely on the
     // watchdog (60s by default) for the abandoned cases.
-    if (trackedHttpSink && !trackedHttpSink.wasFinalized()) {
+    if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
       const aborted = controller.signal.aborted;
       const result: RunResult = emptyRunResult();
       result.status = aborted ? "cancelled" : "failed";
@@ -511,7 +509,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
           : "Runner exited before completion (CLI bootstrap or teardown error).",
       };
       await raceFinalizeAgainstTimeout(
-        trackedHttpSink.sink.finalize(result),
+        reportSession.httpSink.finalize(result),
         SAFETY_NET_FINALIZE_TIMEOUT_MS,
       ).catch((err) => {
         if (!opts.json) {
@@ -532,30 +530,20 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 }
 
 /**
- * Wrap a finalize-capable EventSink so the caller can tell whether
- * `finalize` has been invoked (by the runner, mid-run). The CLI uses
- * this to avoid double-finalizing from its `finally` safety net.
+ * Patch an HttpSink's `finalize` in place so the caller can tell
+ * whether it has already been invoked (by the runner, mid-run). The
+ * CLI uses this to avoid double-finalizing from its `finally` safety
+ * net. Returns a getter for the flag — callers keep using the original
+ * sink reference.
  */
-interface TrackedHttpSink {
-  sink: HttpSink;
-  wasFinalized(): boolean;
-}
-
-function wrapHttpSinkWithFinalizeTracker(inner: HttpSink): TrackedHttpSink {
+function attachFinalizeTracker(sink: HttpSink): () => boolean {
   let finalized = false;
-  // Replace the original `finalize` in place rather than building a
-  // wrapper class — HttpSink is concrete and CompositeSink expects a
-  // structural EventSink. Patching the bound method preserves identity
-  // so any other code holding the reference still observes the flag.
-  const originalFinalize = inner.finalize.bind(inner);
-  inner.finalize = async (result) => {
+  const original = sink.finalize.bind(sink);
+  sink.finalize = async (result) => {
     finalized = true;
-    await originalFinalize(result);
+    await original(result);
   };
-  return {
-    sink: inner,
-    wasFinalized: () => finalized,
-  };
+  return () => finalized;
 }
 
 /**
@@ -1048,6 +1036,7 @@ export async function _buildResolverInputsForTesting(
 }
 
 /**
+/**
  * Pull the AFPS 1.x `config.schema` JSON Schema out of the bundle's
  * root package manifest. Returns `undefined` when the agent declares
  * no config schema (so validation is a no-op). Mirrors the unexported
@@ -1066,20 +1055,15 @@ export function readBundleConfigSchema(
 }
 
 /**
- * Test-only access to the finalize-tracker wrapper. Exercised by
- * `apps/cli/test/run-finalize-tracker.test.ts` to assert the
- * cancel-path safety net (detect runner cancellation immediately
+ * Test-only access to the finalize tracker and safety-net timeout race.
+ * Exercised by `apps/cli/test/run-finalize-tracker.test.ts` to assert
+ * the cancel-path safety net (detect runner cancellation immediately
  * rather than waiting for the heartbeat watchdog).
  */
-export function _wrapHttpSinkWithFinalizeTrackerForTesting(inner: HttpSink): TrackedHttpSink {
-  return wrapHttpSinkWithFinalizeTracker(inner);
+export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => boolean {
+  return attachFinalizeTracker(sink);
 }
 
-/**
- * Test-only access to the safety-net timeout race so we can assert
- * the cap is enforced (a partitioned platform must not hang the CLI
- * for tens of seconds on Ctrl-C — see SAFETY_NET_FINALIZE_TIMEOUT_MS).
- */
 export function _raceFinalizeAgainstTimeoutForTesting(
   p: Promise<void>,
   timeoutMs: number,
