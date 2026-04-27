@@ -151,7 +151,13 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const usage = inputs.adapter.parseJsonUsage(parsed);
   if (usage) {
-    void recordUsage({
+    // Non-streaming path: the upstream body is already fully buffered,
+    // so awaiting the metering insert costs ~1ms and removes the
+    // observable race. `recordUsage` swallows its own DB errors (a
+    // failed insert never breaks the call), so awaiting is safe.
+    // Streaming uses `void tapSseStream(...)` deliberately — the
+    // response is already on the wire before the SSE tap drains.
+    await recordUsage({
       principal: inputs.principal,
       runId: inputs.runId,
       resolved,
