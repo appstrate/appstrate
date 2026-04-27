@@ -430,34 +430,13 @@ const envSchema = z
 
 // ─── Getter ──────────────────────────────────────────────────
 
-/**
- * Universal "empty string → unset" preprocessing.
- *
- * Docker Compose's `${VAR:-}` pattern forwards an unset host variable to
- * the container as an empty string (`VAR=`), not as a missing key. Zod's
- * `.default(...)` only fires on `undefined`, so without this preprocess
- * any refined-string field (booleans, regex-validated kid IDs, enums)
- * would crash boot on a literal `VAR=` with a cryptic "must be …" error.
- *
- * Coalescing `""` to `undefined` once, at the schema root, makes
- * `.default(...)` the single source of truth for fallback behavior on
- * EVERY field — no per-field opt-in helper, no behavioral drift between
- * fields. For env vars, "explicitly empty" and "unset" are conceptually
- * identical anyway (the host never sets a variable to a meaningful empty
- * string).
- */
-const sanitizedEnvSchema = z.preprocess((raw) => {
-  if (typeof raw !== "object" || raw === null) return raw;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    out[k] = v === "" ? undefined : v;
-  }
-  return out;
-}, envSchema);
-
 export type Env = z.infer<typeof envSchema>;
 
-const { getEnv, resetCache } = createEnvGetter(sanitizedEnvSchema);
+// `createEnvGetter` coalesces `""` → `undefined` across the entire
+// process.env snapshot before validating, so `.default(...)` fires
+// uniformly for compose's `${VAR:-}` pattern. No per-field opt-in
+// needed; see `@appstrate/core/env::sanitizeEnv` for the rationale.
+const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
