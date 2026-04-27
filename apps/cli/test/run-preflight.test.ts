@@ -175,7 +175,7 @@ describe("preflightCheck", () => {
     expect(thrown).toBeInstanceOf(PreflightAbortError);
     const err = thrown as PreflightAbortError;
     expect(err.code).toBe("connections_missing");
-    expect(err.connectUrl).toContain("/preferences/connectors");
+    expect(err.connectUrl).toContain("/agents/@scope/agent#connectors");
     expect(prompted).toBe(false);
     expect(opened).toBe(false);
   });
@@ -333,12 +333,15 @@ describe("preflightCheck", () => {
 
   it("assertSameOrigin refuses to open a connect URL on a different origin", () => {
     expect(() =>
-      assertSameOrigin("https://evil.com/preferences/connectors", "https://app.example.com"),
+      assertSameOrigin(
+        "https://evil.com/agents/@scope/agent#connectors",
+        "https://app.example.com",
+      ),
     ).toThrow(PreflightAbortError);
     // Same origin is fine — different path is permitted.
     expect(() =>
       assertSameOrigin(
-        "https://app.example.com/preferences/connectors?profile=p",
+        "https://app.example.com/agents/@scope/agent#connectors",
         "https://app.example.com",
       ),
     ).not.toThrow();

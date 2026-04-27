@@ -9,8 +9,10 @@
  *   2. If `ready` → continue silently.
  *   3. Else, in a TTY without `--json` / `--no-preflight`:
  *      - Print missing providers + reasons.
- *      - Prompt to open the browser at
- *        `${instance}/preferences/connectors?profile=<id>`.
+ *      - Prompt to open the browser at the agent-detail page with the
+ *        `#connectors` anchor (`${instance}/agents/{scope}/{name}#connectors`)
+ *        — same surface the dashboard's "Lancer" button uses, so the user
+ *        lands on the agent's connectors panel scoped to this run.
  *      - Poll readiness every `pollMs` until ready or timeout. Ctrl-C
  *        aborts.
  *   4. Else (CI / non-TTY / `--json`) — emit a structured error on
@@ -114,7 +116,7 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
   const initial = await fetchReadiness();
   if (initial.ready) return initial;
 
-  const connectUrl = buildConnectUrl(instance, inputs.connectionProfileId);
+  const connectUrl = buildConnectUrl(instance, inputs.scope, inputs.name);
 
   // Non-interactive paths exit immediately so CI runs fail fast with a
   // structured error the caller can parse.
@@ -230,18 +232,20 @@ function buildReadinessUrl(instance: string, inputs: PreflightInputs): string {
 
 /**
  * Build the same-origin connect URL the user is invited to open in
- * their browser. We construct it via `URL` against the normalized
- * instance origin so a malformed `instance` (or a future caller that
- * forgets to normalise) cannot produce a cross-origin redirect that
- * `defaultOpenBrowser` would faithfully launch.
+ * their browser — the agent-detail page with the `#connectors` anchor,
+ * same surface the dashboard's "Lancer" button hands off to. We
+ * construct it via `URL` against the normalized instance origin so a
+ * malformed `instance` (or a future caller that forgets to normalise)
+ * cannot produce a cross-origin redirect that `defaultOpenBrowser`
+ * would faithfully launch.
  *
  * `assertSameOrigin` is a belt-and-suspenders guard: if the URL
  * constructor ever yielded a different origin (e.g. a proto-relative
  * `//evil.com` slipping through), we refuse rather than open it.
  */
-function buildConnectUrl(instance: string, profileId: string | undefined): string {
-  const base = new URL("/preferences/connectors", instance);
-  if (profileId) base.searchParams.set("profile", profileId);
+function buildConnectUrl(instance: string, scope: string, name: string): string {
+  const base = new URL(`/agents/${scope}/${name}`, instance);
+  base.hash = "connectors";
   assertSameOrigin(base.toString(), instance);
   return base.toString();
 }
