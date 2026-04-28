@@ -71,24 +71,17 @@ export function OnboardingCreateStep() {
   const slugValue = useWatch({ control, name: "slug" });
 
   // Pre-fill form for first org once user data is available.
-  // reset() sets both fields atomically without triggering the name→slug watcher.
-  // setSlugEdited is intentional here: one-shot init, not a cascading pattern.
+  // The suggested slug intentionally differs from toSlug(name) (e.g. "pierre" vs
+  // "pierres-organization"), so name→slug sync is driven by the name field's
+  // onChange — not a useEffect watcher that would clobber the suggestion.
   const defaultAppliedRef = useRef(false);
   useEffect(() => {
     if (defaultAppliedRef.current) return;
     const isFirstOrg = !fromSwitcher && orgs.length === 0;
     if (!isFirstOrg || !user) return;
     defaultAppliedRef.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot pre-fill, not cascading
-    setSlugEdited(true);
     reset(suggestOrgDefaults(user, i18n.language));
   }, [fromSwitcher, orgs, user, i18n.language, reset]);
-
-  useEffect(() => {
-    if (!slugEdited && !defaultAppliedRef.current) {
-      setValue("slug", toSlug(nameValue));
-    }
-  }, [nameValue, slugEdited, setValue]);
 
   const createMutation = useMutation({
     mutationFn: async (body: { name: string; slug: string }) => {
@@ -137,6 +130,9 @@ export function OnboardingCreateStep() {
                 validate: (v) => {
                   if (!v.trim()) return t("validation.required", { ns: "common" });
                   return true;
+                },
+                onChange: (e) => {
+                  if (!slugEdited) setValue("slug", toSlug(e.target.value));
                 },
               })}
               placeholder={t("createOrg.namePlaceholder")}
