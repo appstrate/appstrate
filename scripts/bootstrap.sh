@@ -509,19 +509,23 @@ _appstrate_bootstrap() {
   # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
   # subprocesses (`bun run dev`, `docker compose up`).
   #
-  # Auto-install (legacy all-in-one behaviour) fires when the caller has
-  # opted in explicitly. Three signals trigger it:
-  #   1. user passed `--yes` (CI / scripted automation)
-  #   2. APPSTRATE_AUTO_INSTALL=1 env override (Ansible, cloud-init —
-  #      explicit escape hatch for the previous default)
-  #   3. genuinely non-interactive shell — no TTY on stdout AND no
-  #      readable `/dev/tty`. The CLI's own `install` would fail-fast on
-  #      missing TTY anyway; running `--yes` is friendlier than crashing.
+  # Auto-install (legacy all-in-one behaviour) fires on four signals,
+  # ordered cheapest → broadest:
+  #   1. user passed `--yes` (CI / scripted automation, explicit intent)
+  #   2. APPSTRATE_AUTO_INSTALL=1 (Ansible / cloud-init escape hatch —
+  #      preserves the previous default for existing IaC)
+  #   3. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
+  #      sets the canonical CI flag is by definition non-interactive)
+  #   4. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
+  #      `bash /tmp/inst.sh > out.log`). The user wouldn't see the
+  #      next-step instruction anyway; running `--yes` is friendlier
+  #      than dropping the binary and silently exiting.
   #
-  # On the `--yes` path, the CLI's `resolveBootstrapEmail` now ships a
-  # bootstrap token (closed-by-default) when no `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`
-  # is set — no more silently-public VPS (#344 Layer 2b). The operator
-  # claims ownership at `<URL>/claim` with the printed token.
+  # On the auto path, the CLI's `resolveBootstrapEmail` ships a
+  # bootstrap token (closed-by-default) when no
+  # `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is set — no more silently-public
+  # VPS (#344 Layer 2b). The operator claims ownership at `<URL>/claim`
+  # with the printed token.
   #
   # Pre-existing escape hatch preserved:
   #   - APPSTRATE_NO_LAUNCH=1 → drop binary, no install at all (scripted
@@ -529,7 +533,8 @@ _appstrate_bootstrap() {
   _wants_auto=0
   case " $* " in *" --yes "*) _wants_auto=1 ;; esac
   if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _wants_auto=1; fi
-  if [ ! -t 1 ] && [ ! -r /dev/tty ]; then _wants_auto=1; fi
+  case "${CI:-}" in true | 1 | yes) _wants_auto=1 ;; esac
+  if [ ! -t 1 ]; then _wants_auto=1; fi
 
   if [ "${APPSTRATE_NO_LAUNCH:-0}" = "1" ]; then
     log "APPSTRATE_NO_LAUNCH=1: skipping install entirely. Binary at $DEST."
