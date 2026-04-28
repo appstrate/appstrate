@@ -4,16 +4,20 @@ import { useEffect, useRef } from "react";
 import { getCurrentOrgId } from "./use-org";
 import { getCurrentApplicationId } from "./use-current-application";
 
+interface RunRealtimeHandlers {
+  onStatusChange?: (payload: Record<string, unknown>) => void;
+  onNewLog?: (log: Record<string, unknown>) => void;
+}
+
 /**
- * Subscribe to run status changes + log inserts for a single run via SSE.
+ * Subscribe to run status changes and/or log inserts for a single run via
+ * a single SSE connection. Pass any subset of handlers — the connection
+ * dispatches by event type and skips channels with no listener attached.
  */
-export function useRunRealtime(
-  runId: string | null | undefined,
-  onStatusChange?: (payload: Record<string, unknown>) => void,
-) {
-  const onStatusRef = useRef(onStatusChange);
+export function useRunRealtime(runId: string | null | undefined, handlers: RunRealtimeHandlers) {
+  const handlersRef = useRef(handlers);
   useEffect(() => {
-    onStatusRef.current = onStatusChange;
+    handlersRef.current = handlers;
   });
 
   useEffect(() => {
@@ -30,45 +34,16 @@ export function useRunRealtime(
     es.addEventListener("run_update", (e) => {
       try {
         const data = JSON.parse(e.data);
-        onStatusRef.current?.(data);
+        handlersRef.current.onStatusChange?.(data);
       } catch {
         // Ignore malformed SSE payloads
       }
     });
 
-    return () => {
-      es.close();
-    };
-  }, [runId]);
-}
-
-/**
- * Subscribe to run_logs INSERTs via SSE.
- */
-export function useRunLogsRealtime(
-  runId: string | null | undefined,
-  onNewLog: (log: Record<string, unknown>) => void,
-) {
-  const onNewLogRef = useRef(onNewLog);
-  useEffect(() => {
-    onNewLogRef.current = onNewLog;
-  });
-
-  useEffect(() => {
-    if (!runId) return;
-    const orgId = getCurrentOrgId();
-    const appId = getCurrentApplicationId();
-    if (!orgId || !appId) return;
-
-    const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
-      { withCredentials: true },
-    );
-
     es.addEventListener("run_log", (e) => {
       try {
         const data = JSON.parse(e.data);
-        onNewLogRef.current(data);
+        handlersRef.current.onNewLog?.(data);
       } catch {
         // Ignore malformed SSE payloads
       }

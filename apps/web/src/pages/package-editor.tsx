@@ -11,7 +11,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
-import { useEditorState } from "../hooks/use-editor-state";
+import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
 // Agent editor components
@@ -345,11 +345,9 @@ function AgentEditorInner({
 
 // ─── Package (Skill/Tool) Editor Inner Form ─────────────────────────
 
-interface PackageEditorState {
-  manifest: Record<string, unknown>;
+interface PackageEditorState extends EditorStateBase {
   content: string;
   sourceCode?: string;
-  lockVersion?: number;
 }
 
 function PackageEditorInner({

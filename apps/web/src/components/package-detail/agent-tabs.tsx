@@ -9,7 +9,12 @@ import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
 import { useAgentReadiness } from "../../hooks/use-agent-readiness";
-import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
+import {
+  isFileField,
+  schemaHasFileFields,
+  type JSONSchemaObject,
+  type JSONSchema7,
+} from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { AgentProvidersSection } from "./agent-providers-section";
 import { RunList } from "../run-list";
@@ -64,11 +69,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
 
   if (!detail) return null;
 
-  const hasFileInput =
-    detail.input?.schema?.properties &&
-    Object.values(detail.input.schema.properties).some(isFileField);
-
-  if (hasFileInput) {
+  if (schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
 

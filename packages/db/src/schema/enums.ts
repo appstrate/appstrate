@@ -41,6 +41,13 @@ export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(terminalRun
 export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
 
 /**
+ * Active (non-terminal) run statuses — the run is still progressing.
+ * Mirror of {@link TERMINAL_RUN_STATUSES} for callers that need to gate
+ * UI on "in flight" rather than "done".
+ */
+export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(["pending", "running"]);
+
+/**
  * RunEvent types that mark a run as terminal — `run.completed`, `run.failed`,
  * `run.timeout`, `run.cancelled`. Mirrors `terminalRunStatusValues` but for
  * the event-stream side of the boundary.

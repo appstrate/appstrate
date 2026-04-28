@@ -25,14 +25,9 @@ import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 
-type ServerMemory = Omit<AgentMemoryItem, "actorType" | "actorId"> & {
-  actorType: PersistenceActorType;
-  actorId: string | null;
-};
-
 interface PersistenceResponse {
   pinned?: AgentPinnedSlotItem[];
-  memories?: ServerMemory[];
+  memories?: AgentMemoryItem[];
 }
 
 /**

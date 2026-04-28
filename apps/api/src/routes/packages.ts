@@ -1430,7 +1430,8 @@ export function createPackagesRouter() {
     }
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
-    return c.json({ packageId, type: packageType }, 201);
+    const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
+    return c.json({ packageId, type: packageType, version: importedVersion }, 201);
   }
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle

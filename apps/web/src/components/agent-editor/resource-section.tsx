@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, useMemo, useEffect, useRef } from "react";
+import { type ChangeEvent, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -32,9 +32,6 @@ interface ResourceSectionProps {
   title: string;
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
-  // Accepts a functional updater so concurrent version migrations from
-  // multiple `VersionSelect` instances compose instead of clobbering each
-  // other in the same React batch.
   onChange: (updater: ResourceEntriesUpdater) => void;
 }
 
@@ -51,17 +48,6 @@ export function VersionSelect({
 }) {
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
-  const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
-  const latestRange = ranges[0];
-
-  // Migrate the stored value to a caret range whenever it doesn't
-  // match one of the offered choices — covers legacy `*`, exact pins
-  // typed by hand, and yanked versions that disappeared since save.
-  useEffect(() => {
-    if (!latestRange) return;
-    if (ranges.includes(value)) return;
-    onChange(latestRange);
-  }, [latestRange, ranges, value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {
@@ -102,38 +88,14 @@ export function ResourceSection({
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
-  // Defense-in-depth for legacy manifests that still carry `*` (or for
-  // a freshly uploaded package whose entry is added with `*` while we
-  // wait for the package list to refetch). Resolve in one setState so
-  // multiple stale entries can't race the per-`VersionSelect` migration
-  // and clobber each other in the same React batch. New agents go
-  // through `package-editor.tsx`'s create-mode prefill, which emits
-  // caret ranges from the start — no `*` to migrate.
-  useEffect(() => {
-    if (!items || items.length === 0 || selectedEntries.length === 0) return;
-    let mutated = false;
-    const next = selectedEntries.map((e) => {
-      if (e.version && e.version !== "*") return e;
-      const item = items.find((i) => i.id === e.id);
-      if (!item?.version) return e;
-      mutated = true;
-      return { ...e, version: caretRange(item.version) };
-    });
-    if (mutated) onChange(next);
-  }, [items, selectedEntries, onChange]);
-
   const toggle = (id: string) => {
     onChange((prev) => {
       if (prev.some((e) => e.id === id)) {
         return prev.filter((e) => e.id !== id);
       }
       const item = items?.find((i) => i.id === id);
-      // `*` only as a last-resort placeholder — `VersionSelect` migrates
-      // it to caret-of-latest as soon as the package's version list
-      // arrives. Hitting this branch means the package list lacks a
-      // `version` field, which would already be a registry data issue.
-      const version = item?.version ? caretRange(item.version) : "*";
-      return [...prev, { id, version }];
+      if (!item?.version) return prev;
+      return [...prev, { id, version: caretRange(item.version) }];
     });
   };
 
@@ -148,13 +110,12 @@ export function ResourceSection({
     try {
       const result = await upload.mutateAsync(file);
       const newId = result.packageId;
+      const newVersion = result.version;
+      if (!newVersion) return;
 
       onChange((prev) => {
         if (prev.some((e) => e.id === newId)) return prev;
-        // Placeholder — `VersionSelect` migrates `*` to caret-of-latest
-        // on mount, which after this upload resolves to the version we
-        // just published.
-        return [...prev, { id: newId, version: "*" }];
+        return [...prev, { id: newId, version: caretRange(newVersion) }];
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("error.unknown"));

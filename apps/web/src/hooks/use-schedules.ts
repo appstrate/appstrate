@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { schemaHasFileFields, type JSONSchemaObject } from "@appstrate/core/form";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { usePackageDetail } from "./use-packages";
+import { useAgentModel } from "./use-models";
+import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
 
@@ -120,4 +124,38 @@ export function useDeleteSchedule() {
     onSuccess: () => invalidateSchedules(qc),
     onError: onMutationError,
   });
+}
+
+export interface ScheduleFormDeps {
+  inputSchema: JSONSchemaObject | undefined;
+  configSchema: JSONSchemaObject | undefined;
+  persistedConfig: Record<string, unknown>;
+  persistedModelId: string | null;
+  persistedProxyId: string | null;
+  persistedVersion: string | null;
+  hasFileInputs: boolean;
+}
+
+/**
+ * Aggregates the agent-detail / model / proxy lookups that both
+ * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
+ * Returns `null` while inputs aren't ready or no agent is selected.
+ */
+export function useScheduleFormDeps(packageId: string | undefined): ScheduleFormDeps | null {
+  const { data: agentDetail } = usePackageDetail("agent", packageId);
+  const { data: agentModel } = useAgentModel(packageId);
+  const { data: agentProxy } = useAgentProxy(packageId);
+
+  if (!packageId) return null;
+
+  const inputSchema = agentDetail?.input?.schema ?? undefined;
+  return {
+    inputSchema,
+    configSchema: agentDetail?.config?.schema ?? undefined,
+    persistedConfig: (agentDetail?.config?.current ?? {}) as Record<string, unknown>,
+    persistedModelId: agentModel?.modelId ?? null,
+    persistedProxyId: agentProxy?.proxyId ?? null,
+    persistedVersion: agentDetail?.version ?? null,
+    hasFileInputs: schemaHasFileFields(inputSchema),
+  };
 }

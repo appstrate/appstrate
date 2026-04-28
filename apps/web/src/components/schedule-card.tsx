@@ -7,7 +7,7 @@ import { NextRunPreview } from "./next-run-preview";
 import { ProfileLabel } from "./profile-label";
 import { useScheduleRuns } from "../hooks/use-schedules";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
-import type { EnrichedSchedule } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedSchedule } from "@appstrate/shared-types";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
@@ -20,8 +20,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
   const hasProviders = totalProviders > 0;
 
   // Running + unread counts scoped to this schedule's runs
-  const runningRuns =
-    runs?.filter((e) => e.status === "running" || e.status === "pending").length ?? 0;
+  const runningRuns = runs?.filter((e) => ACTIVE_RUN_STATUSES.has(e.status)).length ?? 0;
   const unreadCount = runs?.filter((e) => e.notifiedAt != null && e.readAt == null).length ?? 0;
 
   // While client-side readiness is loading, use the server-side readiness from EnrichedSchedule

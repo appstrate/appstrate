@@ -69,7 +69,7 @@ function useUploadPackage(type: PackageType) {
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
-      return uploadFormData<{ packageId: string }>(`/packages/${cfg.path}`, fd);
+      return uploadFormData<{ packageId: string; version?: string }>(`/packages/${cfg.path}`, fd);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });

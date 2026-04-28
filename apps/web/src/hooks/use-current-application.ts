@@ -29,7 +29,6 @@ const CORE_APP_SCOPED_KEYS = [
   "run",
   "run-logs",
   "paginated-runs",
-  "all-runs",
   "schedules",
   "schedule",
   "schedule-runs",

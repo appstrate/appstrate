@@ -101,7 +101,7 @@ export async function runPlatformContainer(
     };
 
     const hasOutputSchema =
-      plan.schemas.output?.properties && Object.keys(plan.schemas.output.properties).length > 0;
+      plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
     const containerEnv = buildRuntimePiEnv({
       model: {
         api: llmConfig.api,
@@ -119,7 +119,7 @@ export async function runPlatformContainer(
       runId,
       sidecarProxyLlmUrl: llmApiKey ? "http://sidecar:8080/llm" : undefined,
       connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
-      outputSchema: hasOutputSchema ? plan.schemas.output : undefined,
+      outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: "http://sidecar:8081",
       sink: {
         url: sinkCredentials.url,

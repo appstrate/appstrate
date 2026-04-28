@@ -8,7 +8,7 @@ import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { cn } from "@/lib/utils";
 import { formatDateField } from "../lib/markdown";
-import type { EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 
 export function RunRow({
   run,
@@ -21,7 +21,7 @@ export function RunRow({
   disableLink?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
-  const isRunning = run.status === "running" || run.status === "pending";
+  const isRunning = ACTIVE_RUN_STATUSES.has(run.status);
   const isUnread = run.notifiedAt != null && run.readAt == null;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
   const isInline = run.packageEphemeral === true;
