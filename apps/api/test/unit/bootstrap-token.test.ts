@@ -43,18 +43,18 @@ describe("bootstrap-token state machine", () => {
   });
 
   it("isPending mirrors isConfigured before any consume", () => {
-    setToken("abcDEF123_-");
+    setToken("abcDEF123_-abcDEF123_-X");
     expect(isBootstrapTokenPending()).toBe(true);
   });
 
   it("isPending flips false after markConsumed (in-memory)", () => {
-    setToken("abcDEF123_-");
+    setToken("abcDEF123_-abcDEF123_-X");
     markBootstrapTokenConsumed();
     expect(isBootstrapTokenPending()).toBe(false);
   });
 
   it("markConsumed is idempotent (no exceptions on second call)", () => {
-    setToken("abcDEF123_-");
+    setToken("abcDEF123_-abcDEF123_-X");
     markBootstrapTokenConsumed();
     expect(() => markBootstrapTokenConsumed()).not.toThrow();
     expect(isBootstrapTokenPending()).toBe(false);
@@ -66,7 +66,7 @@ describe("bootstrap-token state machine", () => {
   });
 
   it("_resetForTesting unflips the consumed flag (test seam only)", () => {
-    setToken("abc");
+    setToken("abcDEF123_-abcDEF123_-X");
     markBootstrapTokenConsumed();
     expect(isBootstrapTokenPending()).toBe(false);
     _resetBootstrapTokenForTesting();
@@ -108,9 +108,9 @@ describe("verifyBootstrapToken", () => {
     // `isBootstrapTokenRedeemable` is the gate that combines both. This
     // test is here to lock down the invariant — verify() is a pure
     // string compare, nothing more.
-    setToken("matching");
+    setToken("matchingMatchingMatching");
     markBootstrapTokenConsumed();
-    expect(verifyBootstrapToken("matching")).toBe(true);
+    expect(verifyBootstrapToken("matchingMatchingMatching")).toBe(true);
   });
 });
 

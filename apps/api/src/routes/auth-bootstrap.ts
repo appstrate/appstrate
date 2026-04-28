@@ -157,9 +157,11 @@ export function createAuthBootstrapRouter(): Hono {
         // WARN-level so SIEMs alert on brute-force. The IP comes from
         // `getClientIp(c)` which respects `TRUST_PROXY` for accurate
         // attribution behind a reverse proxy.
+        // Intentionally NO email field: the submitter's email is
+        // attacker-supplied PII on this branch — keep logs free of it
+        // so a public scan can't accumulate probe-emails in our SIEM.
         logger.warn("bootstrap-redeem: invalid token", {
           ip: getClientIp(c),
-          email: data.email,
         });
         throw new ApiError({
           status: 401,
@@ -182,7 +184,8 @@ export function createAuthBootstrapRouter(): Hono {
         )) as Response;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error("bootstrap-redeem: signUpEmail threw", { error: msg, email: data.email });
+        // Email omitted — see WARN-log comment above on the bad-token branch.
+        logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
         if (msg.includes("already exists") || msg.includes("duplicate")) {
           throw new ApiError({
             status: 409,
@@ -217,10 +220,10 @@ export function createAuthBootstrapRouter(): Hono {
 
       if (!authResponse.ok) {
         const bodyText = await authResponse.text().catch(() => "");
+        // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.warn("bootstrap-redeem: signUpEmail !ok", {
           status: authResponse.status,
           body: bodyText.slice(0, 400),
-          email: data.email,
         });
         // Domain-allowlist rejection — surfaced from the auth.ts gate
         // when the bootstrap-token bypass hits an active

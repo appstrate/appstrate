@@ -433,16 +433,18 @@ const envSchema = z
     //
     // Empty (default) = no pending token = normal signup flow. Format
     // matches the CLI's `generateBootstrapToken()` output: base64url,
-    // 1-128 chars, alphanumerics + `_-`. We accept the loose range
-    // (instead of exact 43) so future entropy bumps in the CLI don't
-    // require a coordinated env-schema PR — the auth path validates the
-    // exact bytes via timing-safe compare anyway.
+    // 22-128 chars, alphanumerics + `_-`. The 22-char floor enforces
+    // ~128 bits of entropy so a hand-edited `.env` (e.g. `=foo`) cannot
+    // bring the brute-force window into reach of the per-IP rate limit;
+    // the auth path then validates the exact bytes via timing-safe
+    // compare. The CLI's `generateBootstrapToken()` emits 43 chars / 256
+    // bits, well above the floor.
     AUTH_BOOTSTRAP_TOKEN: z
       .string()
       .default("")
-      .refine((v) => v === "" || /^[A-Za-z0-9_-]{1,128}$/.test(v), {
+      .refine((v) => v === "" || /^[A-Za-z0-9_-]{22,128}$/.test(v), {
         message:
-          "AUTH_BOOTSTRAP_TOKEN must be empty or a base64url string (1-128 chars, [A-Za-z0-9_-])",
+          "AUTH_BOOTSTRAP_TOKEN must be empty or a base64url string (22-128 chars, [A-Za-z0-9_-]) — the 22-char floor enforces ~128 bits of entropy",
       }),
   })
   .refine((env) => !env.S3_BUCKET || env.S3_REGION, {
