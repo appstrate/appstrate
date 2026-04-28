@@ -58,6 +58,7 @@ import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
+import { ClaimPage } from "./pages/claim";
 import { VerifyEmailPage } from "./pages/verify-email";
 import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
@@ -229,6 +230,23 @@ export function App() {
       <div className="flex min-h-screen items-center justify-center">
         <Spinner />
       </div>
+    );
+  }
+
+  // Bootstrap-token redemption (#344 Layer 2b) — when the platform has a
+  // pending unattended-install token AND the visitor isn't authenticated,
+  // every route funnels into `/claim`. The redeem route owns its own gate
+  // (timing-safe compare + DB-org-count); the SPA's job is just to render
+  // the form and prevent users from wandering into login/register on a
+  // closed-by-default fresh instance.
+  if (!user && features.bootstrapTokenPending) {
+    return (
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/claim" element={<ClaimPage />} />
+          <Route path="*" element={<Navigate to="/claim" replace />} />
+        </Routes>
+      </ErrorBoundary>
     );
   }
 

@@ -221,8 +221,21 @@ await boot();
 // Initialize app config (async — modules may contribute structured data like OIDC client ID)
 await initAppConfig();
 
-// Pre-compute config script (config is static after boot — cloud module is loaded or not)
-const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(getAppConfig())};</script>`;
+// Build the per-request `<script>` that injects `window.__APP_CONFIG__`.
+// Most fields are stable after boot (modules don't load/unload at runtime),
+// but `bootstrapTokenPending` flips false the moment the operator claims
+// an unattended install via `/api/auth/bootstrap/redeem` (#344). Re-
+// stringifying on every SPA request is ~1µs and means the post-claim
+// page reload doesn't loop the user back into `/claim`.
+import { isBootstrapTokenPending } from "./lib/bootstrap-token.ts";
+function buildAppConfigScript(): string {
+  const base = getAppConfig();
+  const liveConfig = {
+    ...base,
+    features: { ...base.features, bootstrapTokenPending: isBootstrapTokenPending() },
+  };
+  return `<script>window.__APP_CONFIG__=${JSON.stringify(liveConfig)};</script>`;
+}
 
 // Graceful shutdown
 const shutdown = createShutdownHandler(() => {
@@ -316,7 +329,7 @@ app.use(
 // Read fresh each time: Vite build --watch rewrites index.html with new asset hashes.
 app.get("/*", async (c) => {
   const raw = await Bun.file("./apps/web/dist/index.html").text();
-  return c.html(raw.replace("</head>", `${appConfigScript}\n</head>`));
+  return c.html(raw.replace("</head>", `${buildAppConfigScript()}\n</head>`));
 });
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
