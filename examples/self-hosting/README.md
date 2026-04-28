@@ -11,11 +11,24 @@ Docker Compose. This directory holds the production `docker-compose.yml`
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-This downloads the `appstrate` CLI binary for your OS/arch and hands
-control to `appstrate install`. Just press Enter at the tier prompt to
-land on the recommended Tier 3 production stack:
+This downloads + cryptographically verifies the `appstrate` CLI binary
+for your OS/arch, drops it on PATH, and prints a copy-pasteable next
+step. **The install itself is a separate command:**
 
-- **Tier 3** — Postgres + Redis + MinIO (full production, **default — what this README covers**)
+```bash
+appstrate install
+```
+
+Why two steps? Running `install` from your real interactive shell gives
+you the full clack-style prompts (tier picker, install dir, port, owner
+email) and sidesteps a Bun macOS regression (#199, oven-sh/bun #6862,
+#7033, #24615) that hangs interactive prompts when launched under
+`curl|bash`. The two-step pattern is the same one Supabase, Vercel,
+Railway, gh CLI, and fly.io use.
+
+Press Enter at the tier prompt to land on the recommended Tier 3 stack:
+
+- **Tier 3** — Postgres + Redis + MinIO (full production, **default**)
 - **Tier 2** — Postgres + Redis (no object storage)
 - **Tier 1** — Postgres only (dev / testing)
 - **Tier 0** — Bun + PGlite + filesystem (no Docker, hobby / evaluation)
@@ -23,12 +36,41 @@ land on the recommended Tier 3 production stack:
 If Docker is not detected on your machine the CLI automatically falls
 back to Tier 0 as the highlighted default.
 
-The CLI generates cryptographic secrets, writes `.env` +
+`appstrate install` generates cryptographic secrets, writes `.env` +
 `docker-compose.yml`, runs `docker compose up -d`, waits for the
 healthcheck, and opens http://localhost:3000 in your browser.
 
+### Unattended install (CI / cloud-init / Ansible)
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash -s -- --yes
+```
+
+The `--yes` flag fires the legacy all-in-one path: download + verify +
+exec `appstrate install --yes` in a single command. **Closed-by-default
+semantics apply (#344):** when no `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is
+provided, the installer generates a single-use `AUTH_BOOTSTRAP_TOKEN`,
+ships the instance with `AUTH_DISABLE_SIGNUP=true`, and prints a banner
+with the redemption URL. Open `<APP_URL>/claim`, paste the token plus
+your owner email/password — the instance is yours.
+
+Want to skip the redemption step entirely? Pre-set the bootstrap email:
+
+```bash
+APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com \
+  curl -fsSL https://get.appstrate.dev | bash -s -- --yes
+```
+
+Now the bootstrap owner signs up at `/register` (form pre-fills + locks
+the email field) — see [AUTH_MODES.md](./AUTH_MODES.md) for the full
+matrix of closed-mode options.
+
+Legacy `APPSTRATE_AUTO_INSTALL=1` is preserved as an escape hatch for
+existing scripted provisioning that depended on the previous "always
+auto-install" default.
+
 Overrides: `APPSTRATE_VERSION=v1.2.3` (env var pins a specific release
-binary). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
+binary). Per-field flags: `bash -s -- --tier 3 --dir ~/appstrate`.
 
 To upgrade, re-run the same command with the new tag — `APPSTRATE_VERSION`
 controls which CLI binary is downloaded.
