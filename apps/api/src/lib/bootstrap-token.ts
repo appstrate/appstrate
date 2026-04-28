@@ -18,9 +18,18 @@
  *                          once any org has been created, the token cannot be
  *                          replayed even if the operator forgets to remove it
  *                          from `.env`.
+ *   - **InFlight**       — atomic CAS flag protecting against in-process
+ *                          parallel redeem races. JS is single-threaded so
+ *                          `tryAcquireRedemption()` is race-free; the flag
+ *                          forces the second concurrent POST to return 409
+ *                          before it can re-enter the BA signUp path.
  *   - **Consumed**       — flipped in-memory after a successful redemption.
  *                          Idempotent — a second concurrent attempt sees
  *                          either the in-memory flag or the now-existing org.
+ *
+ * Cross-process serialization (multiple API replicas booting from the
+ * same `.env`) is enforced by a Postgres advisory lock taken at the top
+ * of the redeem handler — see `apps/api/src/routes/auth-bootstrap.ts`.
  *
  * The token VALUE is never exposed to clients. Only the boolean state
  * (`bootstrapTokenPending` on AppConfig) is surfaced; redemption requires
@@ -38,6 +47,7 @@ import { createLogger } from "@appstrate/core/logger";
 const logger = createLogger("info");
 
 let _consumed = false;
+let _inFlight = false;
 
 /** True when an `AUTH_BOOTSTRAP_TOKEN` value is set in env (regardless of pending state). */
 export function isBootstrapTokenConfigured(): boolean {
@@ -72,6 +82,33 @@ export async function isBootstrapTokenRedeemable(): Promise<boolean> {
 }
 
 /**
+ * Atomic in-process CAS to claim the redemption slot. Returns
+ * `"acquired"` if the caller now holds the slot, `"in_flight"` if
+ * another caller is already mid-redeem (409), or `"consumed"` if the
+ * token has already been redeemed in this process (the route maps
+ * this to 410 — same as the durable DB-org-count guard).
+ *
+ * Bun/Node JS is single-threaded; the check-and-set runs without await
+ * boundaries between observation and write, so two parallel requests
+ * cannot both observe `_inFlight=false` and both flip it to true.
+ *
+ * The caller MUST invoke `releaseRedemption()` in a `finally` clause —
+ * `markBootstrapTokenConsumed()` does that implicitly on the success
+ * path so callers don't need to double-release.
+ */
+export function tryAcquireRedemption(): "acquired" | "in_flight" | "consumed" {
+  if (_consumed) return "consumed";
+  if (_inFlight) return "in_flight";
+  _inFlight = true;
+  return "acquired";
+}
+
+/** Release the in-flight slot without consuming the token (rollback). */
+export function releaseRedemption(): void {
+  _inFlight = false;
+}
+
+/**
  * Constant-time compare of `submitted` against `env.AUTH_BOOTSTRAP_TOKEN`.
  * Returns false on length mismatch (after running a dummy compare to
  * keep the timing profile uniform across the bad-shape and bad-bytes
@@ -95,6 +132,7 @@ export function verifyBootstrapToken(submitted: string): boolean {
 
 /** Mark the token consumed for the rest of this process lifetime. Idempotent. */
 export function markBootstrapTokenConsumed(): void {
+  _inFlight = false;
   if (_consumed) return;
   _consumed = true;
   logger.info("bootstrap-token: consumed");
@@ -103,4 +141,5 @@ export function markBootstrapTokenConsumed(): void {
 /** Test-only: reset the in-memory consume flag. Production callers must NOT use this. */
 export function _resetBootstrapTokenForTesting(): void {
   _consumed = false;
+  _inFlight = false;
 }

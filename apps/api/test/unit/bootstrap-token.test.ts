@@ -10,6 +10,8 @@ import {
   isBootstrapTokenConfigured,
   isBootstrapTokenPending,
   markBootstrapTokenConsumed,
+  releaseRedemption,
+  tryAcquireRedemption,
   verifyBootstrapToken,
 } from "../../src/lib/bootstrap-token.ts";
 
@@ -109,5 +111,43 @@ describe("verifyBootstrapToken", () => {
     setToken("matching");
     markBootstrapTokenConsumed();
     expect(verifyBootstrapToken("matching")).toBe(true);
+  });
+});
+
+// Audit fix: in-process compare-and-swap to serialize parallel redeem
+// calls within the same Bun process. JS is single-threaded, so a CAS
+// expressed as `if (!_inFlight) { _inFlight = true; }` is race-free
+// at the language level — these tests pin the contract.
+describe("tryAcquireRedemption / releaseRedemption", () => {
+  beforeEach(() => {
+    _resetBootstrapTokenForTesting();
+    setToken("kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk");
+  });
+
+  it("first acquire wins, second observes the in-flight flag", () => {
+    expect(tryAcquireRedemption()).toBe("acquired");
+    expect(tryAcquireRedemption()).toBe("in_flight");
+    releaseRedemption();
+  });
+
+  it("release re-opens the slot for a retry", () => {
+    expect(tryAcquireRedemption()).toBe("acquired");
+    releaseRedemption();
+    expect(tryAcquireRedemption()).toBe("acquired");
+    releaseRedemption();
+  });
+
+  it("markConsumed locks the slot permanently — subsequent acquires return 'consumed'", () => {
+    expect(tryAcquireRedemption()).toBe("acquired");
+    markBootstrapTokenConsumed();
+    expect(tryAcquireRedemption()).toBe("consumed");
+    // Even an explicit release does not re-open after consume.
+    releaseRedemption();
+    expect(tryAcquireRedemption()).toBe("consumed");
+  });
+
+  it("rejects acquire when the token has already been consumed", () => {
+    markBootstrapTokenConsumed();
+    expect(tryAcquireRedemption()).toBe("consumed");
   });
 });

@@ -16,7 +16,12 @@ import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
-import { evaluateSignupPolicy, isBootstrapOwner, normalizeEmail } from "./auth-policy.ts";
+import {
+  evaluateSignupPolicy,
+  isAllowedSignupDomain,
+  isBootstrapOwner,
+  normalizeEmail,
+} from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
 
 /**
@@ -748,28 +753,50 @@ function buildAuth(
             // for the only path where a restriction applies.
             const envForGate = getEnv();
             // Bootstrap-token redemption (#344 Layer 2b) — explicitly
-            // bypasses the gate. The redeem route has already verified
-            // a single-use 256-bit token against
+            // bypasses the `AUTH_DISABLE_SIGNUP` gate. The redeem route
+            // has already verified a single-use 256-bit token against
             // `env.AUTH_BOOTSTRAP_TOKEN` via timing-safe compare; trying
             // to also satisfy `evaluateSignupPolicy` would force the
             // operator to also ship `AUTH_PLATFORM_ADMIN_EMAILS`, which
             // defeats the point of "no email needed at install time".
+            //
+            // The bypass is SCOPED — it covers only the closed-mode
+            // gate (`AUTH_DISABLE_SIGNUP`). An active domain allowlist
+            // (`AUTH_ALLOWED_SIGNUP_DOMAINS`) remains load-bearing
+            // because the operator explicitly chose to lock down which
+            // emails can register; the bootstrap owner must satisfy
+            // that policy too. A pending invitation also overrides
+            // both gates (Infisical-style breakage avoidance), matching
+            // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
-            if (
-              !bootstrapTokenBypass &&
-              (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length)
-            ) {
+            const gateActive =
+              envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
+            if (gateActive) {
               const hasInvite = await hasPendingInvitationByEmail(user.email);
-              const decision = evaluateSignupPolicy(user.email, hasInvite);
-              if (!decision.allowed) {
-                logger.info("auth: platform signup gate blocked signup", {
-                  email: user.email,
-                  reason: decision.reason,
-                });
-                throw new APIError("FORBIDDEN", {
-                  message: decision.reason,
-                  code: decision.reason,
-                });
+              if (bootstrapTokenBypass) {
+                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !hasInvite) {
+                  if (!isAllowedSignupDomain(user.email)) {
+                    logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
+                      email: user.email,
+                    });
+                    throw new APIError("FORBIDDEN", {
+                      message: "signup_domain_not_allowed",
+                      code: "signup_domain_not_allowed",
+                    });
+                  }
+                }
+              } else {
+                const decision = evaluateSignupPolicy(user.email, hasInvite);
+                if (!decision.allowed) {
+                  logger.info("auth: platform signup gate blocked signup", {
+                    email: user.email,
+                    reason: decision.reason,
+                  });
+                  throw new APIError("FORBIDDEN", {
+                    message: decision.reason,
+                    code: decision.reason,
+                  });
+                }
               }
             }
             if (_beforeSignupHook) {

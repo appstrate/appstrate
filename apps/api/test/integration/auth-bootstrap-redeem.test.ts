@@ -21,6 +21,8 @@ import { getTestApp } from "../helpers/app.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { organizations, organizationMembers, user } from "@appstrate/db/schema";
 import { _resetBootstrapTokenForTesting } from "../../src/lib/bootstrap-token.ts";
+import { resetRateLimiters } from "../../src/middleware/rate-limit.ts";
+import { flushRedis } from "../helpers/redis.ts";
 
 const app = getTestApp();
 
@@ -31,6 +33,7 @@ const SNAPSHOT = {
   AUTH_BOOTSTRAP_ORG_NAME: process.env.AUTH_BOOTSTRAP_ORG_NAME,
   AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP,
   AUTH_DISABLE_ORG_CREATION: process.env.AUTH_DISABLE_ORG_CREATION,
+  AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
 };
 
 function setEnv(vars: Record<string, string | undefined>) {
@@ -64,6 +67,12 @@ describe("POST /api/auth/bootstrap/redeem", () => {
   beforeEach(async () => {
     await truncateAll();
     _resetBootstrapTokenForTesting();
+    // Fresh rate-limit budget per test — clear both the in-process
+    // limiter cache AND the Redis-backed counters so tests using >5
+    // calls (parallel-redeem, second-redeem, domain-allowlist) don't
+    // accumulate consumption across cases.
+    resetRateLimiters();
+    await flushRedis();
     // Wire the post-hook so the redeem route has a destination for its
     // best-effort default-app provisioning. We don't assert on it here
     // (covered in auth-bootstrap-org.test.ts) — we just need it not to
@@ -75,6 +84,9 @@ describe("POST /api/auth/bootstrap/redeem", () => {
       AUTH_DISABLE_SIGNUP: "true",
       AUTH_DISABLE_ORG_CREATION: "true",
       AUTH_BOOTSTRAP_ORG_NAME: "Acme HQ",
+      // Explicit reset so the domain-allowlist test doesn't leak its
+      // setting into subsequent test cases.
+      AUTH_ALLOWED_SIGNUP_DOMAINS: undefined,
     });
   });
 
@@ -220,5 +232,77 @@ describe("POST /api/auth/bootstrap/redeem", () => {
     // valid 4xx — assert "client error" not the exact code.
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
+  });
+
+  // Audit fix: parallel redeems must not both create owners. The CAS
+  // (`tryAcquireRedemption`) + advisory lock (`pg_try_advisory_lock`)
+  // together guarantee that only one of two simultaneous POSTs reaches
+  // the signUpEmail path — the loser sees 409 (in-flight) or 410
+  // (token already consumed by the winner).
+  it("serializes parallel redeems — only one creates an org", async () => {
+    const [resA, resB] = await Promise.all([
+      redeem({
+        token: VALID_TOKEN,
+        email: "winner@acme.com",
+        name: "Winner",
+        password: "TestPassword123!",
+      }),
+      redeem({
+        token: VALID_TOKEN,
+        email: "loser@acme.com",
+        name: "Loser",
+        password: "TestPassword123!",
+      }),
+    ]);
+
+    const sorted = [resA.status, resB.status].sort((a, b) => a - b);
+    // Exactly one should succeed (200); the other must be 409 (in
+    // flight) or 410 (consumed) depending on which check intercepted.
+    expect(sorted[0]).toBe(200);
+    expect([409, 410]).toContain(sorted[1]!);
+
+    const orgs = await db.select().from(organizations);
+    expect(orgs).toHaveLength(1);
+
+    const users = await db.select().from(user);
+    expect(users).toHaveLength(1);
+  });
+
+  // Audit fix: bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP
+  // ONLY. An active domain allowlist remains load-bearing — the operator
+  // chose to lock down which emails can register, and the bypass must
+  // not silently skip that policy.
+  it("respects AUTH_ALLOWED_SIGNUP_DOMAINS during redemption", async () => {
+    setEnv({
+      AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN,
+      AUTH_DISABLE_SIGNUP: "true",
+      AUTH_DISABLE_ORG_CREATION: "true",
+      AUTH_BOOTSTRAP_ORG_NAME: "Acme HQ",
+      AUTH_ALLOWED_SIGNUP_DOMAINS: "acme.com",
+    });
+
+    // Off-domain email must be rejected (403 surface from the redeem
+    // route remap, or 4xx from BA — either way, NOT 200).
+    const denied = await redeem({
+      token: VALID_TOKEN,
+      email: "owner@evil.com",
+      name: "Evil Owner",
+      password: "TestPassword123!",
+    });
+    expect(denied.status).toBeGreaterThanOrEqual(400);
+    expect(denied.status).toBeLessThan(500);
+
+    // No user/org should have been created.
+    expect(await db.select().from(user)).toHaveLength(0);
+    expect(await db.select().from(organizations)).toHaveLength(0);
+
+    // Allowed-domain email succeeds.
+    const allowed = await redeem({
+      token: VALID_TOKEN,
+      email: "owner@acme.com",
+      name: "Acme Owner",
+      password: "TestPassword123!",
+    });
+    expect(allowed.status).toBe(200);
   });
 });

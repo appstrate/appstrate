@@ -11,6 +11,7 @@
  * module and returns.
  */
 
+import { closeSync, openSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
@@ -101,6 +102,32 @@ function appUrlForPort(port: number): string {
 }
 
 /**
+ * Write a single line directly to the controlling terminal, bypassing
+ * stdout. Used to print the bootstrap token banner so a piped install
+ * (`appstrate install --yes 2>&1 | tee install.log`) doesn't capture
+ * the secret into a tee'd log file with default umask.
+ *
+ * The pattern matches rustup's "[CONFIDENTIAL]" output. Falls back to
+ * stderr if `/dev/tty` isn't writable (Windows, detached daemons, CI
+ * runners with no TTY) — in those environments the operator has
+ * already opted into a non-interactive-output context, and stderr is
+ * the safest remaining sink.
+ */
+function writeToTty(line: string): void {
+  const out = line.endsWith("\n") ? line : `${line}\n`;
+  try {
+    const fd = openSync("/dev/tty", "w");
+    try {
+      writeSync(fd, out);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    process.stderr.write(out);
+  }
+}
+
+/**
  * Print the closed-mode follow-up note. Two flavors:
  *   - **Named owner** (#228, `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`) — the
  *     dashboard pre-fills + locks the email field, the operator just
@@ -112,6 +139,12 @@ function appUrlForPort(port: number): string {
  *
  * Renders nothing in true open mode (Tier 0 interactive). Called by
  * both Tier 0 and Docker-tier installers right before `outro()`.
+ *
+ * Token-leak hardening: when stdout is NOT a TTY (the install output
+ * is being piped/tee'd to a file), the token line is written directly
+ * to `/dev/tty` instead of through clack.note. The clack-rendered
+ * note still appears with the URL + .env hint, but the secret itself
+ * goes only to the operator's terminal — not to disk.
  */
 export function printBootstrapFollowup(
   appUrl: string,
@@ -128,10 +161,25 @@ export function printBootstrapFollowup(
   }
   const token = bootstrap.bootstrapToken;
   if (token) {
+    const stdoutIsTty = process.stdout.isTTY === true;
+    if (stdoutIsTty) {
+      // Interactive install: stdout IS the operator's terminal, so
+      // printing the token inline is fine — and clack.note frames it
+      // nicely. No risk of capture into a log file.
+      note(
+        `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
+        "Closed-by-default install — claim ownership",
+      );
+      return;
+    }
+    // Piped/tee'd install: render the framing note via clack (which
+    // hits stdout — fine, doesn't contain the secret) and write the
+    // token itself directly to the TTY.
     note(
-      `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
+      `Open  ${appUrl}/claim\nThe bootstrap token is printed below directly to your\nterminal (and stored in <dir>/.env, mode 0600). It does\nNOT appear in the install log if you tee'd this output.\nPublic signup is disabled until you claim the instance.`,
       "Closed-by-default install — claim ownership",
     );
+    writeToTty(`\n[appstrate bootstrap token — keep secret]\n  ${token}\n`);
   }
 }
 
