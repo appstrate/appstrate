@@ -52,11 +52,7 @@ const originalStderrWrite = process.stderr.write.bind(process.stderr);
 let stdoutChunks: string[];
 let stderrChunks: string[];
 
-class ExitError extends Error {
-  constructor(public readonly code: number) {
-    super(`process.exit(${code}) called`);
-  }
-}
+import { ExitError } from "./helpers/process-exit.ts";
 
 function captureIo(): void {
   stdoutChunks = [];

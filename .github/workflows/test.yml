@@ -35,8 +35,27 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
+      # Path list covers every package whose tests are pure unit (no service deps
+      # beyond the Docker stack the preload boots). Integration tests for
+      # apps/api/test/integration/ and apps/api/src/modules/oidc/test/integration/
+      # remain in the heavier `integration` job below — they need DB seeding and
+      # are slower to run, so they stay opt-in via the `integration` label or
+      # post-merge on main. Anything pure-unit must run on every PR.
       - name: Run unit tests
-        run: bun test apps/api/test/unit/ runtime-pi/ packages/connect/ packages/ui/
+        run: |
+          bun test \
+            apps/api/test/unit/ \
+            apps/api/src/modules/oidc/test/unit/ \
+            apps/web/src/ \
+            runtime-pi/ \
+            packages/connect/ \
+            packages/core/ \
+            packages/afps-runtime/ \
+            packages/mcp-transport/ \
+            packages/runner-pi/ \
+            packages/emails/ \
+            packages/env/ \
+            packages/ui/
 
       # CLI tests live in a separate workspace with its own bunfig.toml
       # (no Docker preload needed), so we run them from that directory to
