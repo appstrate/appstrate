@@ -84,11 +84,7 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
  * uses `process.exit(1)` on error branches; the happy path returns
  * normally.
  */
-class ExitError extends Error {
-  constructor(public readonly code: number) {
-    super(`process.exit(${code}) called`);
-  }
-}
+import { ExitError } from "./helpers/process-exit.ts";
 
 function captureIo(): void {
   stdoutChunks = [];
