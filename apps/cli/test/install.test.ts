@@ -1133,10 +1133,31 @@ describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
     ).rejects.toThrow(/not a valid email/);
   });
 
-  it("returns empty (open mode) on non-interactive without env var", async () => {
+  it("returns a bootstrap token on non-interactive Tier ≥ 1 fresh install without env var (#344)", async () => {
     delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
     const result = await resolveBootstrapEmail({
       tier: 3,
+      mode: "fresh",
+      nonInteractive: true,
+    });
+    expect(result.bootstrapOwnerEmail).toBeUndefined();
+    expect(result.bootstrapToken).toMatch(/^[A-Za-z0-9_-]+$/);
+    // 32 random bytes → base64url is ~43 chars (32*4/3 with padding stripped).
+    expect(result.bootstrapToken!.length).toBeGreaterThanOrEqual(40);
+    expect(result.bootstrapToken!.length).toBeLessThanOrEqual(64);
+  });
+
+  it("generates a fresh token on each call (entropy not memoized)", async () => {
+    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
+    const a = await resolveBootstrapEmail({ tier: 3, mode: "fresh", nonInteractive: true });
+    const b = await resolveBootstrapEmail({ tier: 3, mode: "fresh", nonInteractive: true });
+    expect(a.bootstrapToken).not.toBe(b.bootstrapToken);
+  });
+
+  it("returns empty (open mode) on non-interactive Tier 0 fresh install (local dev)", async () => {
+    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
+    const result = await resolveBootstrapEmail({
+      tier: 0,
       mode: "fresh",
       nonInteractive: true,
     });

@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
 import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
 import {
+  generateBootstrapToken,
   generateEnvForTier,
   isValidBootstrapEmail,
   renderEnvFile,
@@ -100,16 +101,17 @@ function appUrlForPort(port: number): string {
 }
 
 /**
- * Print the closed-mode follow-up note (issue #228) so the user knows
- * exactly where to go next when bootstrap was configured. The dashboard
- * pre-fills + locks the email field via `AppConfig.bootstrapOwnerEmail`,
- * so the only remaining action is "open the URL and pick a password".
+ * Print the closed-mode follow-up note. Two flavors:
+ *   - **Named owner** (#228, `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`) — the
+ *     dashboard pre-fills + locks the email field, the operator just
+ *     picks a password.
+ *   - **Bootstrap token** (#344 Layer 2b, unattended installs) — the
+ *     operator claims ownership at `<appUrl>/claim` by pasting the
+ *     printed token. Single-use, dies on first redemption or as soon
+ *     as any organization exists.
  *
- * Renders nothing in open mode (no env var written, no friction added).
- * Called by both Tier 0 and Docker-tier installers right before `outro()`
- * — the placement matters: clack groups note + outro together, and the
- * outro dominates the bottom of the terminal so the action stays
- * immediately visible.
+ * Renders nothing in true open mode (Tier 0 interactive). Called by
+ * both Tier 0 and Docker-tier installers right before `outro()`.
  */
 export function printBootstrapFollowup(
   appUrl: string,
@@ -117,11 +119,20 @@ export function printBootstrapFollowup(
   note: (message: string, title?: string) => void = clack.note,
 ): void {
   const email = bootstrap.bootstrapOwnerEmail;
-  if (!email) return;
-  note(
-    `Open  ${appUrl}/register\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
-    "Next: create your owner account",
-  );
+  if (email) {
+    note(
+      `Open  ${appUrl}/register\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
+      "Next: create your owner account",
+    );
+    return;
+  }
+  const token = bootstrap.bootstrapToken;
+  if (token) {
+    note(
+      `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
+      "Closed-by-default install — claim ownership",
+    );
+  }
 }
 
 export async function installCommand(opts: InstallOptions): Promise<void> {
@@ -240,8 +251,18 @@ export async function resolveBootstrapEmail(opts: {
     return { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
   }
   if (opts.mode === "upgrade") return {};
-  if (opts.nonInteractive) return {};
+  // Tier 0 (local dev) stays open — invitation-only is meaningless when
+  // the platform binds to localhost and survives only as long as the
+  // dev shell.
   if (opts.tier === 0) return {};
+  // Non-interactive Docker tier on a fresh install: no named owner and
+  // no env override means the historical default was a silently-public
+  // VPS (#344). Generate a single-use bootstrap token instead — the
+  // operator claims ownership at `<appUrl>/claim` after the install
+  // banner. Dominant `curl|bash -s -- --yes` path.
+  if (opts.nonInteractive) {
+    return { bootstrapToken: generateBootstrapToken() };
+  }
 
   // Interactive Docker tier, fresh install, no env override → ask once.
   // Empty input is the documented "skip" path; clack returns "" on Enter
