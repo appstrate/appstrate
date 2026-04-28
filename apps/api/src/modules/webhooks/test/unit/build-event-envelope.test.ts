@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEventEnvelope } from "../service.ts";
+import { buildEventEnvelope } from "../../service.ts";
 
 describe("buildEventEnvelope", () => {
   it("builds a valid event envelope in full mode", () => {

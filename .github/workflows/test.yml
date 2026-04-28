@@ -46,6 +46,7 @@ jobs:
           bun test \
             apps/api/test/unit/ \
             apps/api/src/modules/oidc/test/unit/ \
+            apps/api/src/modules/webhooks/test/unit/ \
             apps/web/src/ \
             runtime-pi/ \
             packages/connect/ \
