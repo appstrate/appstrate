@@ -9,9 +9,14 @@
  * bounced between `/login` and `/auth/callback` forever with no surfaceable
  * error.
  *
- * The auth pipeline now answers 401 with `Set-Cookie: …; Max-Age=0` for every
- * BA cookie name, so the browser actually drops the bad cookie on the next
- * tick and the next login attempt starts from a clean slate.
+ * The auth pipeline now answers 401 with two complementary mechanisms:
+ *   1. `Set-Cookie: …; Max-Age=0` for every BA cookie name (works when the
+ *      Domain/Path of the original cookie still match the current config).
+ *   2. `Clear-Site-Data: "cookies"` as a backstop for when a previous
+ *      deployment issued the cookie under a different `COOKIE_DOMAIN` —
+ *      RFC 6265 silently rejects the targeted delete in that case, but
+ *      `Clear-Site-Data` purges the origin's cookie jar without needing
+ *      Domain/Path to match. See `lib/auth-cookies.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -70,6 +75,21 @@ describe("auth pipeline — stale cookie cleanup", () => {
     expect(sessionTokenClear).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/i);
   });
 
+  it('emits Clear-Site-Data: "cookies" as backstop when the session is stale', async () => {
+    // Backstop for the case where the cookie was issued under a previous
+    // `COOKIE_DOMAIN` and the targeted Set-Cookie delete cannot match.
+    const res = await app.request("/api/agents", {
+      headers: {
+        Cookie:
+          "better-auth.session_token=stale-value-no-session-row; better-auth.session_data=stale-cache",
+        "X-Org-Id": "00000000-0000-0000-0000-000000000000",
+      },
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("clear-site-data")).toBe('"cookies"');
+  });
+
   it("does not emit a session_token clearing cookie on routes that succeed without auth", async () => {
     // `/health` is a public route mounted before the auth middleware.
     // The pipeline must not gratuitously clear cookies on every request —
@@ -83,5 +103,7 @@ describe("auth pipeline — stale cookie cleanup", () => {
         /Max-Age=0|Expires=Thu, 01 Jan 1970/i.test(c),
     );
     expect(sessionTokenClear).toBeUndefined();
+    // And no Clear-Site-Data on a healthy public response.
+    expect(res.headers.get("clear-site-data")).toBeNull();
   });
 });
