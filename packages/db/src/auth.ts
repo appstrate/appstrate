@@ -201,6 +201,28 @@ export interface SmtpOverride {
 
 const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 
+// ─── Bootstrap-token redemption (per-request bypass) ─────────────────────────
+//
+// `AUTH_BOOTSTRAP_TOKEN` (issue #344 Layer 2b) ships an instance with
+// `AUTH_DISABLE_SIGNUP=true` so a fresh `curl|bash -s -- --yes` install
+// is closed by default. The redemption route (`POST
+// /api/auth/bootstrap/redeem`) needs to bypass that gate exactly once,
+// for exactly the request that submitted a valid token. AsyncLocalStorage
+// scoped to the redeem route's call to `auth.api.signUpEmail()` is the
+// minimum-blast-radius primitive — same shape as `withSmtpOverride`.
+
+const bootstrapTokenRedemptionStore = new AsyncLocalStorage<boolean>();
+
+/** Run `fn` with the bootstrap-token bypass active for any signup-gate eval downstream. */
+export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T> {
+  return bootstrapTokenRedemptionStore.run(true, fn);
+}
+
+/** True when the current async context is inside `withBootstrapTokenRedemption`. */
+export function isBootstrapTokenRedemptionActive(): boolean {
+  return bootstrapTokenRedemptionStore.getStore() === true;
+}
+
 /** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
 export function withSmtpOverride<T>(
   override: SmtpOverride | null,
@@ -725,7 +747,18 @@ function buildAuth(
             // index-covered (`idx_org_invitations_email`) — negligible cost
             // for the only path where a restriction applies.
             const envForGate = getEnv();
-            if (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length) {
+            // Bootstrap-token redemption (#344 Layer 2b) — explicitly
+            // bypasses the gate. The redeem route has already verified
+            // a single-use 256-bit token against
+            // `env.AUTH_BOOTSTRAP_TOKEN` via timing-safe compare; trying
+            // to also satisfy `evaluateSignupPolicy` would force the
+            // operator to also ship `AUTH_PLATFORM_ADMIN_EMAILS`, which
+            // defeats the point of "no email needed at install time".
+            const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            if (
+              !bootstrapTokenBypass &&
+              (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length)
+            ) {
               const hasInvite = await hasPendingInvitationByEmail(user.email);
               const decision = evaluateSignupPolicy(user.email, hasInvite);
               if (!decision.allowed) {

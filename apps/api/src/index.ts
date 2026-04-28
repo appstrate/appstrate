@@ -37,6 +37,7 @@ import { createConnectionsRouter } from "./routes/connections.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
+import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
@@ -151,6 +152,12 @@ app.use("*", async (c, next) => {
   }
   return next();
 });
+
+// Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
+// Better Auth catch-all so the more-specific path wins. This route owns
+// its own gate (timing-safe token compare + DB-org-count check) and
+// must NOT pass through Better Auth's normal `/api/auth/*` handler.
+app.route("/api/auth/bootstrap", createAuthBootstrapRouter());
 
 // Shared auth pipeline — mounts Better Auth handler, installs module
 // auth strategies → Bearer API key → cookie session middleware, org

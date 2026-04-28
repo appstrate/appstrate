@@ -423,6 +423,27 @@ const envSchema = z
     // AUTH_BOOTSTRAP_ORG_NAME — display name of the bootstrap org. Defaults
     // to "Default" when unset. Slug is derived from the name.
     AUTH_BOOTSTRAP_ORG_NAME: z.string().default("Default"),
+    // AUTH_BOOTSTRAP_TOKEN — one-shot redemption token for unattended
+    // installs that didn't supply a named owner email (#344 Layer 2b).
+    // The CLI generates a 256-bit token at install time, writes it into
+    // .env, and prints a banner with the redemption URL. The platform
+    // reads it at boot, holds it in memory, and lets the first POST to
+    // /api/auth/bootstrap/redeem with a matching token claim ownership
+    // of the instance — clearing the token in-memory after a single use.
+    //
+    // Empty (default) = no pending token = normal signup flow. Format
+    // matches the CLI's `generateBootstrapToken()` output: base64url,
+    // 1-128 chars, alphanumerics + `_-`. We accept the loose range
+    // (instead of exact 43) so future entropy bumps in the CLI don't
+    // require a coordinated env-schema PR — the auth path validates the
+    // exact bytes via timing-safe compare anyway.
+    AUTH_BOOTSTRAP_TOKEN: z
+      .string()
+      .default("")
+      .refine((v) => v === "" || /^[A-Za-z0-9_-]{1,128}$/.test(v), {
+        message:
+          "AUTH_BOOTSTRAP_TOKEN must be empty or a base64url string (1-128 chars, [A-Za-z0-9_-])",
+      }),
   })
   .refine((env) => !env.S3_BUCKET || env.S3_REGION, {
     message: "S3_REGION is required when S3_BUCKET is set",

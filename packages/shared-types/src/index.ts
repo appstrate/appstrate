@@ -52,6 +52,15 @@ export interface AppConfigFeatures {
   signupDisabled: boolean;
   /** AUTH_DISABLE_ORG_CREATION — webapp routes org-less users to "waiting for invitation". */
   orgCreationDisabled: boolean;
+  /**
+   * AUTH_BOOTSTRAP_TOKEN is set and unredeemed (#344 Layer 2b). The webapp
+   * routes the user to `/claim` instead of `/login`, where they paste the
+   * token + their owner credentials to seize ownership of a freshly-
+   * installed unattended instance. Flips back to false once the token is
+   * consumed. The token VALUE is never exposed in AppConfig — only the
+   * pending-state boolean.
+   */
+  bootstrapTokenPending: boolean;
   [key: string]: boolean;
 }
 

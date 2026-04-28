@@ -8,12 +8,7 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import {
-  loadModules,
-  getModules,
-  getModuleContributions,
-  emitEvent,
-} from "./modules/module-loader.ts";
+import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
@@ -23,8 +18,7 @@ import {
   createAuth,
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
-import { createDefaultApplication } from "../services/applications.ts";
-import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
+import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -118,24 +112,7 @@ export async function boot(): Promise<void> {
   // module listeners on `onOrgCreate` (cloud free-tier, audit, analytics)
   // observe the org creation. Each side effect catches its own errors —
   // signup must never fail on a non-fatal provisioning hiccup.
-  setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
-    await emitEvent("onOrgCreate", orgId, userEmail);
-    const defaultApp = await createDefaultApplication(orgId, userId).catch((err) => {
-      logger.warn("Failed to create default application for bootstrap org", {
-        orgId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    });
-    if (defaultApp) {
-      await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch((err) => {
-        logger.warn("Failed to provision default agent for bootstrap org", {
-          orgId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
-  });
+  setPostBootstrapOrgHook(triggerPostBootstrapOrg);
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {

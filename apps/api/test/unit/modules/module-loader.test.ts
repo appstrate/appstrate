@@ -50,6 +50,7 @@ const baseConfig: AppConfig = {
     smtp: false,
     signupDisabled: false,
     orgCreationDisabled: false,
+    bootstrapTokenPending: false,
   },
   trustedOrigins: [],
 };

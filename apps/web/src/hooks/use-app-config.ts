@@ -15,6 +15,7 @@ const DEFAULT_CONFIG: AppConfig = {
     smtp: false,
     signupDisabled: false,
     orgCreationDisabled: false,
+    bootstrapTokenPending: false,
   },
   trustedOrigins: [],
 };

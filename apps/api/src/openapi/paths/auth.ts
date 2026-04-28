@@ -124,6 +124,69 @@ export const authPaths = {
       },
     },
   },
+  "/api/auth/bootstrap/redeem": {
+    post: {
+      operationId: "redeemBootstrapToken",
+      tags: ["Auth"],
+      summary: "Claim ownership of an unattended install",
+      description:
+        "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default application, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+      security: [],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["token", "email", "password", "name"],
+              properties: {
+                token: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 128,
+                  description: "Bootstrap token from the install banner / .env.",
+                },
+                email: { type: "string", format: "email" },
+                password: { type: "string", minLength: 8 },
+                name: { type: "string", minLength: 1, maxLength: 120 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Ownership claimed, session cookie set",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  user: { $ref: "#/components/schemas/User" },
+                  session: { type: "object" },
+                  bootstrap: {
+                    type: "object",
+                    properties: {
+                      orgId: { type: "string" },
+                      orgSlug: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { description: "Validation error" },
+        "401": { description: "Invalid bootstrap token" },
+        "409": { description: "Account with that email already exists" },
+        "410": {
+          description:
+            "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
+        },
+        "422": { description: "Signup rejected (weak password, duplicate email)" },
+      },
+    },
+  },
   "/api/auth/get-session": {
     get: {
       operationId: "getSession",
