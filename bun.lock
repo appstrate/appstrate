@@ -82,10 +82,6 @@
       },
       "dependencies": {
         "@apidevtools/swagger-parser": "^12.1.0",
-        "@appstrate/afps-runtime": "workspace:*",
-        "@appstrate/core": "workspace:*",
-        "@appstrate/runner-pi": "workspace:*",
-        "@appstrate/shared-types": "workspace:*",
         "@clack/prompts": "^1.2.0",
         "@mariozechner/pi-ai": "^0.67.2",
         "@mariozechner/pi-coding-agent": "^0.67.2",
@@ -97,6 +93,10 @@
         "write-file-atomic": "^7",
       },
       "devDependencies": {
+        "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/core": "workspace:*",
+        "@appstrate/runner-pi": "workspace:*",
+        "@appstrate/shared-types": "workspace:*",
         "@types/bun": "latest",
         "@types/write-file-atomic": "^4.0.3",
       },
@@ -219,7 +219,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.17.0",
+      "version": "2.18.0",
       "dependencies": {
         "@afps-spec/schema": "^1.4.0",
         "ajv": "^8.18.0",
