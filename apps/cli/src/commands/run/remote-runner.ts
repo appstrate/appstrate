@@ -37,6 +37,12 @@
  * submission across CLI retries.
  */
 
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { RunResult } from "@appstrate/afps-runtime/runner";
+import { createConsoleSink } from "./sink.ts";
+import type { Verbosity } from "./format.ts";
+
 const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -57,6 +63,13 @@ export interface RemoteRunRecord {
   error?: string | null;
   checkpoint?: unknown;
   cost?: number | null;
+  /** snake-case to mirror the platform's `runs.tokenUsage` JSONB shape. */
+  tokenUsage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  } | null;
   startedAt?: string | null;
   completedAt?: string | null;
   duration?: number | null;
@@ -136,6 +149,12 @@ export interface RunRemoteOptions {
   /** When true, emit each event as JSONL on stdout. Otherwise human-format. */
   json: boolean;
   /**
+   * Tool-call rendering verbosity for the human sink. Mirrors the local
+   * `--verbose` / `--quiet` flag wiring so output is byte-identical
+   * across local and remote paths. Default `"normal"`.
+   */
+  verbosity?: Verbosity;
+  /**
    * Optional path — final RunResult JSON written here. Shape parity
    * with the local path's `--output`: top-level keys match the AFPS
    * `RunResult` (`memories`, `pinned`, `output`, `logs`, `error`,
@@ -198,13 +217,36 @@ export async function runRemote(
   // ─── 1. Trigger the run ────────────────────────────────────────────
   const runId = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
 
+  // Match the local path's preamble verbatim so the user sees the same
+  // "→ running ... (reporting to ... as run_xxx)" line in both modes.
+  // The local path emits this on stderr from runCommandLocal:534 — see
+  // also `runCommand.ts` for the source of the format string.
   if (!opts.json) {
-    writeStderr(`→ remote run ${runId} on ${opts.instance}\n`);
+    writeStderr(`→ running ${opts.bundleLabel} (reporting to ${opts.instance} as ${runId})\n`);
   } else {
     writeStdout(
       JSON.stringify({ type: "appstrate.remote.triggered", runId, instance: opts.instance }) + "\n",
     );
   }
+
+  // ─── 1b. Set up the local console sink ─────────────────────────────
+  //
+  // Output parity with the local path is achieved by feeding the *same*
+  // sink (createConsoleSink) the canonical RunEvents the platform
+  // recorded server-side. Each `run_logs` row is the persisted form of
+  // exactly one RunEvent (see `apps/api/src/services/adapters/
+  // appstrate-event-sink.ts`); we invert that mapping in
+  // `runLogToRunEvent()` and re-dispatch through the sink.
+  //
+  // JSONL mode delegates entirely to the sink — the runner emits no
+  // bespoke `appstrate.remote.*` envelopes anymore (they were a
+  // pre-parity artefact). That keeps `--json` output identical to local
+  // and unblocks `jq` pipelines that expect canonical events.
+  const consoleSink: EventSink = createConsoleSink({
+    json: opts.json,
+    verbosity: opts.verbosity ?? "normal",
+    writeStdout,
+  });
 
   // ─── 2. Cancellation wiring ────────────────────────────────────────
   // Single-shot cancel POST on the first `abort` event. Polling continues
@@ -254,7 +296,8 @@ export async function runRemote(
       seenLogIds.add(log.id);
       allLogs.push(log);
       if (log.id > lastLogId) lastLogId = log.id;
-      renderLog(log, opts, { writeStdout, writeStderr });
+      const event = runLogToRunEvent(log);
+      if (event) await consoleSink.handle(event);
     }
 
     // Record poll runs on a fixed cadence (tick 0, then every N ticks).
@@ -289,7 +332,8 @@ export async function runRemote(
     seenLogIds.add(log.id);
     allLogs.push(log);
     if (log.id > lastLogId) lastLogId = log.id;
-    renderLog(log, opts, { writeStdout, writeStderr });
+    const event = runLogToRunEvent(log);
+    if (event) await consoleSink.handle(event);
   }
 
   const status = (
@@ -297,25 +341,30 @@ export async function runRemote(
   ) as TerminalRunStatus;
   const exitCode = status === "success" ? 0 : 1;
 
-  // ─── 5. Render summary + write --output ────────────────────────────
-  renderSummary(finalRecord, status, opts, { writeStdout, writeStderr });
+  // ─── 5. Synthesize the trailing metric + finalize ──────────────────
+  //
+  // The platform absorbs `appstrate.metric` events at ingestion time
+  // (they update `runs.tokenUsage` + the LLM-usage ledger) without
+  // persisting a `run_logs` row, so the inverse mapping cannot recover
+  // them. Without this synthesis the user would lose the `∑ tokens
+  // in=… out=…  $cost` line at the end of every remote run — a visible
+  // local↔remote divergence. We rebuild the equivalent event from the
+  // run record's `tokenUsage` + `cost` columns (snake_case JSONB) and
+  // dispatch it through the same sink.
+  const metricEvent = buildMetricEvent(finalRecord);
+  if (metricEvent) await consoleSink.handle(metricEvent);
+
+  // Finalize delegates the `[run complete]` / `[run failed]` line to
+  // the local sink, matching local mode byte-for-byte. JSONL mode's
+  // `appstrate.finalize` envelope is emitted at the same point in the
+  // event stream as local. The `--output` file write is handled below
+  // (not via the sink's `outputPath` option) so the runner's `writeFile`
+  // DI works for tests without monkeypatching `node:fs/promises`.
+  const reconstructedResult = buildRunResultPayload(finalRecord, status);
+  await consoleSink.finalize(reconstructedResult);
 
   if (opts.outputPath !== undefined) {
-    // Shape parity with the local path's `--output`: the local
-    // EventSink writes a full `RunResult` (memories, pinned, output,
-    // logs, error, status, durationMs, usage, cost, report). The remote
-    // path doesn't have an event-stream reducer of its own — the
-    // platform aggregated the events server-side — so we reconstruct as
-    // much of the same surface as the run record exposes. Fields that
-    // would require additional endpoints (memories, pinned named slots,
-    // report, runner-source token usage) are emitted as empty defaults
-    // so consumers can rely on the top-level keys being present.
-    //
-    // Two remote-only extras (`runId`, `instance`) are added on top —
-    // they are useful for debugging and do not collide with any
-    // RunResult field.
-    const payload = buildRunResultPayload(runId, opts.instance, finalRecord, status);
-    await writeFile(opts.outputPath, JSON.stringify(payload, null, 2) + "\n");
+    await writeFile(opts.outputPath, JSON.stringify(reconstructedResult, null, 2) + "\n");
   }
 
   return { runId, status, record: finalRecord, logs: allLogs, exitCode };
@@ -476,102 +525,177 @@ async function safeReadBody(res: Response): Promise<unknown> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// run_logs row → canonical RunEvent (inverse of appstrate-event-sink.ts)
+// ---------------------------------------------------------------------------
+
 /**
- * Build the `--output` JSON payload for a remote run, shaped to match
- * the local path's `RunResult` surface (see
- * `packages/afps-runtime/src/types/run-result.ts`). Fields the run
- * record does not expose — `memories`, `pinned`, `logs`, `report`,
- * `usage` — are emitted as empty defaults so downstream consumers can
- * rely on the top-level key set being identical between local and
- * remote `--output` files. `runId` and `instance` are remote-only
- * extras for debuggability.
+ * Reverse the platform's persistence mapping: for each `run_logs` row the
+ * platform recorded during a run, return the canonical {@link RunEvent}
+ * the runner originally emitted (or `null` for rows that have no event
+ * counterpart, like the synthetic `system/run_completed` finalizer or
+ * the persisted `result/result` snapshot).
+ *
+ * The forward mapping lives in
+ * `apps/api/src/services/adapters/appstrate-event-sink.ts` —
+ * any change there must update this function in lockstep, otherwise
+ * `appstrate run` (remote) and `appstrate run --local` will drift
+ * apart on rendering.
+ *
+ * Lossy cases worth knowing:
+ *   - `progress/progress` rows can come from either `appstrate.progress`
+ *     or `log.written` events; both render the same way through the
+ *     console sink (progress branch with optional tool data, log.written
+ *     hits the silent default), so we always map to `appstrate.progress`.
+ *   - `appstrate.metric` events leave no row — they're synthesized
+ *     separately at end-of-run from `runs.tokenUsage` + `runs.cost`.
+ *   - `memory.added` / `pinned.set` events are not persisted to
+ *     `run_logs` either (they update `package_persistence`); the local
+ *     human sink only renders memories with a leading `+ memory:` line,
+ *     so the remote-mode user simply doesn't see those breadcrumbs.
+ *     Acceptable for v1 — the dashboard surfaces both.
  */
-function buildRunResultPayload(
-  runId: string,
-  instance: string,
-  record: RemoteRunRecord,
-  status: TerminalRunStatus,
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    runId,
-    instance,
-    status,
-    output: record.result ?? null,
+function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
+  // RunEvent envelope requires `timestamp` (Unix ms) + `runId`. We pull
+  // them from the row so downstream sinks that index by either field
+  // (e.g. CloudEvents adapters) get a stable value rather than a
+  // fabricated `Date.now()` snapshot at conversion time.
+  const ts = log.createdAt ? Date.parse(log.createdAt) : Date.now();
+  const timestamp = Number.isFinite(ts) ? ts : Date.now();
+  const envelope = { timestamp, runId: log.runId };
+
+  // `progress/progress` — runner lifecycle breadcrumb or tool call.
+  // The console sink's `appstrate.progress` branch handles both cases:
+  // when `data.tool` is present it renders the cyan tool-call line +
+  // args/result; otherwise it prints the message with a `→` glyph.
+  if (log.type === "progress" && log.event === "progress") {
+    const data = isPlainObject(log.data) ? (log.data as Record<string, unknown>) : undefined;
+    return {
+      ...envelope,
+      type: "appstrate.progress",
+      message: log.message ?? "",
+      ...(data ? { data } : {}),
+    };
+  }
+
+  // `result/output` — `output()` system tool emit. Data is the structured
+  // payload (replace-on-emit semantics).
+  if (log.type === "result" && log.event === "output") {
+    return {
+      ...envelope,
+      type: "output.emitted",
+      data: log.data ?? null,
+    };
+  }
+
+  // `result/report` — `report(content)` system tool emit. Platform
+  // wraps the markdown in `{ content }` to keep the JSONB column
+  // structured; we unwrap it here so the canonical event matches the
+  // shape the local runner emits.
+  if (log.type === "result" && log.event === "report") {
+    const content =
+      isPlainObject(log.data) && typeof (log.data as { content?: unknown }).content === "string"
+        ? (log.data as { content: string }).content
+        : null;
+    if (content === null) return null;
+    return { ...envelope, type: "report.appended", content };
+  }
+
+  // `system/adapter_error` — fatal runtime error (e.g. ingestion-side
+  // adapter raised an unhandled exception). The local sink renders this
+  // with `⚠` yellow on stderr.
+  if (log.type === "system" && log.event === "adapter_error") {
+    const data = isPlainObject(log.data) ? (log.data as Record<string, unknown>) : undefined;
+    return {
+      ...envelope,
+      type: "appstrate.error",
+      message: log.message ?? "adapter error",
+      ...(data ? { data } : {}),
+    };
+  }
+
+  // `result/result` — full RunResult snapshot persisted at finalize. The
+  // local sink consumes this via `finalize()` not as an in-stream event,
+  // so we drop the row here. The value is still available via the
+  // run record's `result` JSONB column.
+  // `system/run_completed` — terminal marker used by the dashboard. The
+  // local sink's `finalize()` already prints `[run complete] / [run
+  // failed]`, so a parallel render here would double-print.
+  return null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Synthesize the trailing `appstrate.metric` event from the run record's
+ * `tokenUsage` + `cost` columns. The platform absorbs the live
+ * `appstrate.metric` events at ingestion time (they update `runs.*`
+ * directly without persisting a `run_logs` row), so the inverse mapping
+ * above cannot recover them — without this synthesis the user would
+ * lose the `∑ tokens in=… out=… $cost` line at the end of every remote
+ * run, breaking parity with the local path.
+ *
+ * Returns `null` when the record carries neither usage nor cost (e.g.
+ * a tool-only run with no LLM traffic) so we don't render a misleading
+ * `$0.0000` line.
+ */
+function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
+  const usage = record.tokenUsage ?? undefined;
+  const cost = record.cost ?? undefined;
+  const hasUsage =
+    usage !== undefined &&
+    usage !== null &&
+    ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0);
+  if (!hasUsage && (cost === undefined || cost === null)) return null;
+  const completedAt = record.completedAt ? Date.parse(record.completedAt) : NaN;
+  return {
+    type: "appstrate.metric",
+    timestamp: Number.isFinite(completedAt) ? completedAt : Date.now(),
+    runId: record.id,
+    ...(hasUsage ? { usage } : {}),
+    ...(cost !== undefined && cost !== null ? { cost } : {}),
+    ...(record.duration != null ? { durationMs: record.duration } : {}),
+  };
+}
+
+/**
+ * Reconstruct a {@link RunResult} from the run record + terminal status,
+ * matching the shape `EventSink.finalize` consumes locally. Fields the
+ * record cannot reconstruct (`memories`, `pinned` named slots,
+ * per-event `logs`, `report` aggregate, `usage`) are emitted as empty
+ * defaults — the dashboard remains the source of truth for those
+ * surfaces. `output` carries `runs.result` (the AFPS `output()` value),
+ * matching `RunResult.output`. The status is mapped one-to-one.
+ */
+function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatus): RunResult {
+  const result: RunResult = {
     memories: [],
     pinned: {},
+    output: record.result ?? null,
     logs: [],
+    status,
   };
   if (record.error) {
-    payload.error = { message: record.error };
+    result.error = { code: "remote_run_error", message: record.error };
   }
-  if (record.duration != null) payload.durationMs = record.duration;
-  if (record.cost != null) payload.cost = record.cost;
-  return payload;
-}
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-interface Writers {
-  writeStdout: (chunk: string) => void;
-  writeStderr: (chunk: string) => void;
-}
-
-function renderLog(log: RemoteRunLog, opts: RunRemoteOptions, writers: Writers): void {
-  if (opts.json) {
-    // Spread first so the literal `type` wins over `log.type`.
-    writers.writeStdout(
-      JSON.stringify({ ...log, type: "appstrate.remote.log", logType: log.type }) + "\n",
-    );
-    return;
+  if (record.duration != null) result.durationMs = record.duration;
+  if (record.cost != null) result.cost = record.cost;
+  if (record.tokenUsage) {
+    const u = record.tokenUsage;
+    result.usage = {
+      input_tokens: u.input_tokens ?? 0,
+      output_tokens: u.output_tokens ?? 0,
+      ...(u.cache_creation_input_tokens != null
+        ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
+        : {}),
+      ...(u.cache_read_input_tokens != null
+        ? { cache_read_input_tokens: u.cache_read_input_tokens }
+        : {}),
+    };
   }
-  // Human format — keep it terse, level-prefixed. The dashboard remains
-  // the primary surface for verbose introspection; the CLI's job here is
-  // to show enough that the user knows the run is alive.
-  const prefix =
-    log.level === "error" ? "✗" : log.level === "warn" ? "!" : log.level === "info" ? "·" : " ";
-  const tag = log.event ? `${log.type}/${log.event}` : log.type;
-  const message = log.message?.trim();
-  const line = message ? `${prefix} [${tag}] ${message}\n` : `${prefix} [${tag}]\n`;
-  writers.writeStderr(line);
-}
-
-function renderSummary(
-  record: RemoteRunRecord,
-  status: TerminalRunStatus,
-  opts: RunRemoteOptions,
-  writers: Writers,
-): void {
-  if (opts.json) {
-    writers.writeStdout(
-      JSON.stringify({
-        type: "appstrate.remote.finalize",
-        runId: record.id,
-        status,
-        result: record.result ?? null,
-        error: record.error ?? null,
-        cost: record.cost ?? null,
-        durationMs: record.duration ?? null,
-      }) + "\n",
-    );
-    return;
-  }
-  const icon = status === "success" ? "✓" : status === "cancelled" ? "·" : "✗";
-  const dur = record.duration ? ` in ${formatDurationMs(record.duration)}` : "";
-  const cost = record.cost != null ? ` ($${record.cost.toFixed(4)})` : "";
-  writers.writeStderr(`${icon} ${status}${dur}${cost}\n`);
-  if (status !== "success" && record.error) {
-    writers.writeStderr(`  ${record.error}\n`);
-  }
-}
-
-function formatDurationMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.floor((ms % 60_000) / 1000);
-  return `${m}m${s}s`;
+  return result;
 }
 
 // ---------------------------------------------------------------------------

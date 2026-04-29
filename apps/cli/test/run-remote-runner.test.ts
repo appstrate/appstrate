@@ -225,9 +225,9 @@ describe("runRemote — happy path", () => {
               {
                 id: 1,
                 runId: "run_test_1",
-                type: "system",
-                event: "started",
-                message: "boot",
+                type: "progress",
+                event: "progress",
+                message: "runtime ready in 39ms",
                 level: "info",
               },
             ] satisfies RemoteRunLog[],
@@ -236,18 +236,10 @@ describe("runRemote — happy path", () => {
             status: 200,
             body: [
               {
-                id: 1,
-                runId: "run_test_1",
-                type: "system",
-                event: "started",
-                message: "boot",
-                level: "info",
-              },
-              {
                 id: 2,
                 runId: "run_test_1",
-                type: "appstrate",
-                event: null,
+                type: "progress",
+                event: "progress",
                 message: "thinking",
                 level: "info",
               },
@@ -256,7 +248,13 @@ describe("runRemote — happy path", () => {
         ],
         "GET /api/runs/run_test_1": [
           { status: 200, body: recordSummary({ status: "running" }) },
-          { status: 200, body: recordSummary({ status: "success" }) },
+          {
+            status: 200,
+            body: recordSummary({
+              status: "success",
+              tokenUsage: { input_tokens: 100, output_tokens: 200 },
+            }),
+          },
         ],
       },
       calls,
@@ -279,10 +277,17 @@ describe("runRemote — happy path", () => {
     expect(trigger.headers["x-org-id"]).toBe("org_1");
     expect(JSON.parse(trigger.body!)).toEqual({ input: { greeting: "hi" }, config: {} });
 
-    // Stderr summary mentions success
-    const summary = writers.stderr.join("");
-    expect(summary).toMatch(/success/);
-    expect(summary).toMatch(/\$0\.0123/);
+    // Stderr carries the "→ running" preamble (parity with local mode).
+    expect(writers.stderr.join("")).toContain("→ running @system/hello-world (reporting to");
+
+    // Stdout carries the events: progress messages, the metric line,
+    // and the `[run complete]` finalize line — same surface the local
+    // human sink emits.
+    const stdout = writers.stdout.join("");
+    expect(stdout).toContain("→ runtime ready in 39ms");
+    expect(stdout).toContain("→ thinking");
+    expect(stdout).toContain("[run complete]");
+    expect(stdout).toMatch(/∑ tokens in=100 out=200 +\$0\.0123/);
   });
 
   it("forwards modelId, proxyId, and version override to the trigger", async () => {
@@ -359,12 +364,11 @@ describe("runRemote — happy path", () => {
 
     expect(writers.files["/tmp/out.json"]).toBeDefined();
     const parsed = JSON.parse(writers.files["/tmp/out.json"]!);
-    // Shape parity with the local `--output` (`RunResult`) — the local
-    // path emits `output`, not `result`. The remote payload mirrors
-    // that, with empty defaults for fields the run record cannot
-    // reconstruct (`memories`, `pinned`, `logs`).
-    expect(parsed.runId).toBe("run_4");
-    expect(parsed.instance).toBe("https://app.example.com");
+    // Shape parity with the local `--output` (canonical AFPS RunResult).
+    // No `runId`/`instance` on the wire payload — those are the runner's
+    // private debugging extras carried only on stderr/JSONL envelopes.
+    // The local `RunResult` has no such fields and we want byte-for-byte
+    // parity here.
     expect(parsed.status).toBe("success");
     expect(parsed.output).toEqual({ final: 42 });
     expect(parsed.memories).toEqual([]);
@@ -373,6 +377,8 @@ describe("runRemote — happy path", () => {
     expect(parsed.durationMs).toBe(42_000);
     expect(parsed.cost).toBe(0.0123);
     expect(parsed.error).toBeUndefined();
+    expect(parsed.runId).toBeUndefined();
+    expect(parsed.instance).toBeUndefined();
   });
 
   it("--output payload carries error envelope on non-success", async () => {
@@ -399,11 +405,17 @@ describe("runRemote — happy path", () => {
 
     const parsed = JSON.parse(writers.files["/tmp/out.err.json"]!);
     expect(parsed.status).toBe("failed");
-    expect(parsed.error).toEqual({ message: "Provider rejected request" });
+    // `RunError` shape — local writes `{ code, message }`. We supply a
+    // canonical `code` so consumers downstream can branch on it instead
+    // of having to parse the human message.
+    expect(parsed.error).toEqual({
+      code: "remote_run_error",
+      message: "Provider rejected request",
+    });
     expect(parsed.output).toBeNull();
   });
 
-  it("emits JSONL events on stdout in --json mode", async () => {
+  it("emits canonical RunEvents on stdout in --json mode (parity with local)", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
@@ -414,16 +426,29 @@ describe("runRemote — happy path", () => {
             {
               id: 1,
               runId: "run_5",
-              type: "system",
-              event: "started",
-              message: "boot",
+              type: "progress",
+              event: "progress",
+              message: "runtime ready in 12ms",
+              level: "info",
+            },
+            {
+              id: 2,
+              runId: "run_5",
+              type: "result",
+              event: "output",
+              message: null,
+              data: { greeting: "hi" },
               level: "info",
             },
           ] satisfies RemoteRunLog[],
         },
         "GET /api/runs/run_5": {
           status: 200,
-          body: recordSummary({ id: "run_5", status: "success" }),
+          body: recordSummary({
+            id: "run_5",
+            status: "success",
+            tokenUsage: { input_tokens: 10, output_tokens: 20 },
+          }),
         },
       },
       calls,
@@ -433,11 +458,23 @@ describe("runRemote — happy path", () => {
     await runRemote(opts, new AbortController().signal);
 
     const lines = writers.stdout.join("").split("\n").filter(Boolean);
-    expect(lines.length).toBeGreaterThanOrEqual(3); // triggered + log + finalize
     const types = lines.map((l) => JSON.parse(l).type);
-    expect(types).toContain("appstrate.remote.triggered");
-    expect(types).toContain("appstrate.remote.log");
-    expect(types).toContain("appstrate.remote.finalize");
+
+    // The remote runner emits the same canonical event vocabulary as
+    // the local path — `appstrate.progress`, `output.emitted`,
+    // `appstrate.metric`, `appstrate.finalize` — plus its own
+    // `appstrate.remote.triggered` envelope as the very first line so
+    // jq pipelines can pick the run id without parsing logs.
+    expect(types[0]).toBe("appstrate.remote.triggered");
+    expect(types).toContain("appstrate.progress");
+    expect(types).toContain("output.emitted");
+    expect(types).toContain("appstrate.metric");
+    expect(types).toContain("appstrate.finalize");
+
+    // Sanity-check the metric shape — usage + cost flow through.
+    const metric = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.metric");
+    expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
+    expect(metric.cost).toBe(0.0123);
   });
 });
 
@@ -460,7 +497,9 @@ describe("runRemote — non-success terminals", () => {
     const outcome = await runRemote(opts, new AbortController().signal);
     expect(outcome.status).toBe("failed");
     expect(outcome.exitCode).toBe(1);
-    expect(writers.stderr.join("")).toMatch(/boom/);
+    // Local sink renders failures as `[run failed] <message>` on stdout
+    // (its writeStdout target). Same here for parity.
+    expect(writers.stdout.join("")).toMatch(/\[run failed\] boom/);
   });
 
   it("returns exit code 1 on `timeout` status", async () => {
@@ -655,8 +694,8 @@ describe("runRemote — log dedup", () => {
     const log = (id: number, msg: string): RemoteRunLog => ({
       id,
       runId: "run_dd",
-      type: "appstrate",
-      event: null,
+      type: "progress",
+      event: "progress",
       message: msg,
       level: "info",
     });
@@ -686,11 +725,12 @@ describe("runRemote — log dedup", () => {
     );
 
     expect(outcome.logs.map((l) => l.id)).toEqual([1, 2, 3]);
-    // Each log message should appear exactly once on stderr
-    const stderr = writers.stderr.join("");
-    expect((stderr.match(/\] a/g) ?? []).length).toBe(1);
-    expect((stderr.match(/\] b/g) ?? []).length).toBe(1);
-    expect((stderr.match(/\] c/g) ?? []).length).toBe(1);
+    // Each progress message should appear exactly once on stdout — the
+    // sink renders `appstrate.progress` events with a `→ ` prefix.
+    const stdout = writers.stdout.join("");
+    expect((stdout.match(/→ a$/gm) ?? []).length).toBe(1);
+    expect((stdout.match(/→ b$/gm) ?? []).length).toBe(1);
+    expect((stdout.match(/→ c$/gm) ?? []).length).toBe(1);
   });
 });
 
@@ -700,8 +740,8 @@ describe("runRemote — log cursor (?since=)", () => {
     const log = (id: number): RemoteRunLog => ({
       id,
       runId: "run_cursor",
-      type: "appstrate",
-      event: null,
+      type: "progress",
+      event: "progress",
       message: `m${id}`,
       level: "info",
     });
@@ -750,8 +790,8 @@ describe("runRemote — log cursor (?since=)", () => {
     const log = (id: number): RemoteRunLog => ({
       id,
       runId: "run_tail",
-      type: "appstrate",
-      event: null,
+      type: "progress",
+      event: "progress",
       message: `m${id}`,
       level: "info",
     });
