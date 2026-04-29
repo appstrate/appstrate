@@ -150,9 +150,14 @@ export const packagesPaths = {
                     type: "string",
                     description: "Package type (agent/skill/tool/provider)",
                   },
+                  version: {
+                    type: "string",
+                    description:
+                      "Imported manifest version (semver). Omitted when the manifest carries no version field.",
+                  },
                 },
               },
-              example: { packageId: "@acme/email-sorter", type: "agent" },
+              example: { packageId: "@acme/email-sorter", type: "agent", version: "1.0.0" },
             },
           },
         },
@@ -251,6 +256,11 @@ export const packagesPaths = {
                   type: {
                     type: "string",
                     description: "Package type (agent/skill/tool/provider)",
+                  },
+                  version: {
+                    type: "string",
+                    description:
+                      "Imported manifest version (semver). Omitted when the manifest carries no version field.",
                   },
                 },
               },

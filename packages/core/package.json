@@ -69,7 +69,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^1.4.0",
-    "ajv": "^8.18.0",
+    "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",
     "pino": "^10.3.1",

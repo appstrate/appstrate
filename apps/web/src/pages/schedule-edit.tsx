@@ -4,16 +4,17 @@ import { useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
-import { usePackageDetail } from "../hooks/use-packages";
-import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import {
+  useScheduleById,
+  useUpdateSchedule,
+  useDeleteSchedule,
+  useScheduleFormDeps,
+} from "../hooks/use-schedules";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
-import { useAgentModel } from "../hooks/use-models";
-import { useAgentProxy } from "../hooks/use-proxies";
 import { ScheduleForm } from "../components/schedule-form";
 import type { ForeignProfile } from "../components/combined-profile-select";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
-import { isFileField } from "@appstrate/core/form";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -22,9 +23,7 @@ export function ScheduleEditPage() {
   const { id } = useParams<{ id: string }>();
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
-  const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId || undefined);
-  const { data: agentModel } = useAgentModel(schedule?.packageId || undefined);
-  const { data: agentProxy } = useAgentProxy(schedule?.packageId || undefined);
+  const deps = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
@@ -49,10 +48,6 @@ export function ScheduleEditPage() {
   if (!isMember) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
-
-  const inputSchema = agentDetail?.input?.schema;
-  const hasFileInputs =
-    inputSchema?.properties && Object.values(inputSchema.properties).some(isFileField);
 
   const scheduleName = schedule.name || t("schedule.unnamed");
 
@@ -84,14 +79,14 @@ export function ScheduleEditPage() {
           proxyIdOverride: schedule.proxyIdOverride ?? null,
           versionOverride: schedule.versionOverride ?? null,
         }}
-        inputSchema={inputSchema}
-        configSchema={agentDetail?.config?.schema ?? undefined}
-        persistedConfig={(agentDetail?.config?.current ?? {}) as Record<string, unknown>}
-        persistedModelId={agentModel?.modelId ?? null}
-        persistedProxyId={agentProxy?.proxyId ?? null}
-        persistedVersion={agentDetail?.version ?? null}
+        inputSchema={deps?.inputSchema}
+        configSchema={deps?.configSchema}
+        persistedConfig={deps?.persistedConfig ?? {}}
+        persistedModelId={deps?.persistedModelId ?? null}
+        persistedProxyId={deps?.persistedProxyId ?? null}
+        persistedVersion={deps?.persistedVersion ?? null}
         packageId={schedule.packageId}
-        blockedMessage={hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
+        blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
         onSubmit={(data) => {
           updateSchedule.mutate(

@@ -92,17 +92,13 @@ describe("POST /api/runs/inline — validation", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects a prompt exceeding the configured byte cap with 400", async () => {
-    // Default cap is 200_000 bytes. ASCII: 200_001 bytes = 200_001 chars.
-    const huge = "a".repeat(200_001);
-    const res = await post({ manifest: validManifest(), prompt: huge });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/prompt|bytes/i);
-  });
-
-  it("rejects a manifest larger than manifest_bytes with 400", async () => {
-    // Default cap is 65536 bytes. Inflate `description` past the cap.
+  // Byte-cap arithmetic (prompt_bytes, manifest_bytes, utf-8 boundaries) is
+  // exhaustively tested at the unit level — see
+  // `apps/api/test/unit/inline-manifest-validation.test.ts`. Here we only
+  // verify the route surfaces the validator's verdict as a 400 with the
+  // expected error code, using the manifest path as the representative
+  // case (size-cap rejection on prompt has identical wiring).
+  it("returns 400 when the validator rejects an oversized manifest", async () => {
     const manifest = validManifest();
     manifest.description = "x".repeat(70_000);
     const res = await post({ manifest, prompt: "hi" });

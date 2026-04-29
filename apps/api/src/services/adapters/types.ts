@@ -7,7 +7,7 @@ import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 
-export type { ModelCost };
+export type { ModelCost, ToolMeta };
 export { modelCostSchema };
 
 export const tokenUsageSchema = z.object({
@@ -27,8 +27,6 @@ export interface UploadedFile {
 }
 
 export type FileReference = Omit<UploadedFile, "buffer">;
-
-export type { ToolMeta };
 
 /**
  * Provider definition projected for prompt enrichment + sidecar wiring.
@@ -69,22 +67,15 @@ export interface AppstrateRunPlan {
   // --- Bundle-derived (needed for prompt building + validation) ---
   /**
    * Parsed multi-package bundle. Single source of truth for the prompt
-   * builder — `availableTools` / `availableSkills` / `toolDocs` /
-   * bundle-side providers / input / config / output schemas are all
-   * derived from this by `buildPlatformPromptInputs` at prompt-build
-   * time. The DB-sourced fields below mirror this shape and are kept
-   * as platform-level overrides (e.g. `providers` filtered by
-   * credential availability).
+   * builder — tools, skills, providers, input/config/output schemas, and
+   * tool docs are all derived from this by `buildPlatformPromptInputs` at
+   * prompt-build time.
    */
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  /** Input / config / output JSON Schemas extracted from the manifest. */
-  schemas: {
-    input?: JSONSchemaObject;
-    config?: JSONSchemaObject;
-    output?: JSONSchemaObject;
-  };
+  /** Output JSON Schema (used for native LLM constrained decoding). */
+  outputSchema?: JSONSchemaObject;
 
   // --- LLM ---
   llmConfig: LlmConfig;
@@ -102,12 +93,6 @@ export interface AppstrateRunPlan {
   tokens: Record<string, string>;
   /** Connected providers resolved for this run — used by sidecar + prompt. */
   providers: ProviderSummary[];
-  /** Tool metadata from the bundle — used for prompt enrichment. */
-  availableTools: ToolMeta[];
-  /** Skill metadata from the bundle — used for prompt enrichment. */
-  availableSkills: ToolMeta[];
-  /** Additional tool documentation (e.g. from TOOL.md). */
-  toolDocs: Array<{ id: string; content: string }>;
 
   // --- Files ---
   /** File references surfaced in the prompt ("## Documents" section). */

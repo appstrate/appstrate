@@ -44,11 +44,7 @@ class FakeKeyring implements KeyringHandle {
   }
 }
 
-class ExitError extends Error {
-  constructor(public readonly code: number) {
-    super(`process.exit(${code}) called`);
-  }
-}
+import { ExitError } from "./helpers/process-exit.ts";
 
 let tmpConfig: string;
 let tmpCache: string;

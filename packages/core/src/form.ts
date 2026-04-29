@@ -99,6 +99,12 @@ export function isMultipleFileField(prop: JSONSchema7): boolean {
   return getType(prop) === "array" && items?.format === "uri" && !!items?.contentMediaType;
 }
 
+/** Whether a schema has any file fields (format: "uri" + contentMediaType). */
+export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
+  if (!schema?.properties) return false;
+  return Object.values(schema.properties).some(isFileField);
+}
+
 // ─── Ordered Keys ────────────────────────────────────────────────────────────
 
 /** Return schema property keys respecting propertyOrder, with unlisted keys appended. */

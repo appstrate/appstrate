@@ -31,7 +31,6 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
 
     qc.invalidateQueries({ queryKey: ["agents", orgId] });
     qc.invalidateQueries({ queryKey: ["packages", "agent", orgId, packageId] });
-    qc.invalidateQueries({ queryKey: ["all-runs"] });
     qc.invalidateQueries({ queryKey: ["paginated-runs"] });
 
     // Invalidate schedule-specific caches

@@ -38,7 +38,6 @@ export function useUnreadCountsByAgent() {
 export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["unread-count"] });
   qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
-  qc.invalidateQueries({ queryKey: ["all-runs"] });
   qc.invalidateQueries({ queryKey: ["paginated-runs"] });
   qc.invalidateQueries({ queryKey: ["runs"] });
   qc.invalidateQueries({ queryKey: ["run"] });

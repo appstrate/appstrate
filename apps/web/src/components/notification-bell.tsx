@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { useUnreadCount, useMarkRead, useMarkAllRead } from "../hooks/use-notifications";
-import { useAllRuns } from "../hooks/use-runs";
+import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
 import type { Run } from "@appstrate/shared-types";
@@ -111,7 +111,7 @@ export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { data: runsData } = useAllRuns(0, 50);
+  const { data: runsData } = usePaginatedRuns({ limit: 50, offset: 0 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);

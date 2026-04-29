@@ -61,18 +61,18 @@
   },
   "devDependencies": {
     "@appstrate/core": "workspace:*",
-    "@types/bun": "^1.3.9",
-    "@rjsf/core": "^6.4.2",
-    "@rjsf/utils": "^6.4.2",
-    "@rjsf/validator-ajv8": "^6.4.2",
+    "@types/bun": "^1.3.13",
+    "@rjsf/core": "^6.5.1",
+    "@rjsf/utils": "^6.5.1",
+    "@rjsf/validator-ajv8": "^6.5.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "lucide-react": "^1.8.0",
+    "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-select": "^5.10.2",
-    "typescript": "^5.7.0",
-    "vite": "^8.0.9"
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

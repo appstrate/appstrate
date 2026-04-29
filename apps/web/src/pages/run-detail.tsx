@@ -11,7 +11,7 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
-import { useRunRealtime, useRunLogsRealtime } from "../hooks/use-realtime";
+import { useRunRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
@@ -22,7 +22,12 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
-import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
+import {
+  ACTIVE_RUN_STATUSES,
+  type RunStatus,
+  type RunLog,
+  type EnrichedRun,
+} from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -57,28 +62,11 @@ export function RunDetailPage() {
   }
 
   const status = liveStatus || run?.status;
-  const isRunning = status === "running" || status === "pending";
+  const isRunning = !!status && ACTIVE_RUN_STATUSES.has(status);
 
   const { data: logs } = useRunLogs(runId);
 
   const qc = useQueryClient();
-
-  // Subscribe to new log INSERTs via SSE while run is running
-  useRunLogsRealtime(
-    isRunning ? runId : null,
-    useCallback(
-      (newLog: Record<string, unknown>) => {
-        const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, appId, runId], (prev) => {
-          if (!prev) return [log];
-          // Deduplicate: skip if already present (race between REST fetch and SSE)
-          if (prev.some((l) => l.id === log.id)) return prev;
-          return [...prev, log];
-        });
-      },
-      [qc, orgId, appId, runId],
-    ),
-  );
 
   const markRead = useMarkRead();
 
@@ -128,14 +116,14 @@ export function RunDetailPage() {
   const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
   const resultSubTab = userSubTab ?? autoSubTab;
 
-  // Subscribe to SSE for instant local status feedback
-  useRunRealtime(
-    isRunning ? runId : null,
-    useCallback(
+  // Single SSE connection: status changes drive `liveStatus`, log inserts
+  // patch the React Query cache, terminal status forces a refetch as a
+  // safety net so the final state can't drift.
+  useRunRealtime(isRunning ? runId : null, {
+    onStatusChange: useCallback(
       (payload: Record<string, unknown>) => {
         const newStatus = payload.status as RunStatus;
         setLiveStatus(newStatus);
-        // Safety net: final refetch of logs on terminal status (ensures completeness)
         const terminal =
           newStatus === "success" ||
           newStatus === "failed" ||
@@ -148,7 +136,18 @@ export function RunDetailPage() {
       },
       [qc, orgId, appId, runId],
     ),
-  );
+    onNewLog: useCallback(
+      (newLog: Record<string, unknown>) => {
+        const log = newLog as unknown as RunLog;
+        qc.setQueryData<RunLog[]>(["run-logs", orgId, appId, runId], (prev) => {
+          if (!prev) return [log];
+          if (prev.some((l) => l.id === log.id)) return prev;
+          return [...prev, log];
+        });
+      },
+      [qc, orgId, appId, runId],
+    ),
+  });
 
   if (isLoading) return <LoadingState />;
 
