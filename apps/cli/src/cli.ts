@@ -728,15 +728,23 @@ program
 program
   .command("run")
   .description(
-    "Execute an agent locally via PiRunner — by package id (downloads + caches the bundle) or from a local file path",
+    "Execute an agent — by package id (default: remote, on the pinned Appstrate instance) or from a local file path (default: in-process via PiRunner). Pass --local / --remote to override the per-target default.",
   )
   .argument(
     "<bundle>",
-    "Either @scope/agent[@spec] (id, fetched from the pinned instance) or a path to a .afps / .afps-bundle file",
+    "Either @scope/agent[@spec] (id; default: remote execution) or a path to a .afps / .afps-bundle file (default: local execution)",
+  )
+  .option(
+    "--local",
+    "Force in-process execution via PiRunner (caller's shell + FS). Default for path-mode bundles. Use this on an @scope/agent id to opt into the historical dev-loop behaviour.",
+  )
+  .option(
+    "--remote",
+    'Force remote execution on the pinned instance (same path as the dashboard "Run" button). Default for @scope/agent ids. Path-mode bundles are not yet supported in remote mode.',
   )
   .option(
     "--providers <mode>",
-    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none",
+    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
   )
   .option("--creds-file <path>", "JSON credentials file for --providers=local")
   .option("--api-key <key>", "Appstrate API key (ask_...) for --providers=remote")
@@ -813,6 +821,8 @@ program
     await runCommand({
       profile: globalOpts.profile,
       bundle,
+      local: opts.local === true,
+      remote: opts.remote === true,
       providers: typeof opts.providers === "string" ? opts.providers : undefined,
       credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
       apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
