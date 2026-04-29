@@ -82,6 +82,28 @@ export async function isBootstrapTokenRedeemable(): Promise<boolean> {
 }
 
 /**
+ * Boot-time reconciliation. When the env still carries an
+ * `AUTH_BOOTSTRAP_TOKEN` AND at least one organization already exists,
+ * the token is functionally dead — `isBootstrapTokenRedeemable()` would
+ * already say so via the DB count. Flip the in-memory consumed flag so
+ * the SYNC `isBootstrapTokenPending()` (used by `buildAppConfigScript`
+ * to avoid a per-request async DB hit) also reports `false`. Without
+ * this, an operator who forgets to clear `.env` after a successful
+ * redemption sees the SPA funnel returning visitors to `/claim`, where
+ * any submission then dies with 410.
+ *
+ * Called once during boot, after core migrations are applied. Idempotent.
+ */
+export async function reconcileBootstrapTokenAtBoot(): Promise<void> {
+  if (!isBootstrapTokenConfigured()) return;
+  const [row] = await db.select({ n: count() }).from(organizations);
+  if ((row?.n ?? 0) > 0) {
+    markBootstrapTokenConsumed();
+    logger.info("bootstrap-token: marked consumed at boot — orgs already exist");
+  }
+}
+
+/**
  * Atomic in-process CAS to claim the redemption slot. Returns
  * `"acquired"` if the caller now holds the slot, `"in_flight"` if
  * another caller is already mid-redeem (409), or `"consumed"` if the

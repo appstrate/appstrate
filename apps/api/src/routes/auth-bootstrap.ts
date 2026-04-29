@@ -320,14 +320,12 @@ export function createAuthBootstrapRouter(): Hono {
       // but rewrite the body to surface our org info to the SPA. Use
       // `getSetCookie()` so multi-cookie batches (refresh + session) are
       // appended individually instead of concatenated with `, ` which
-      // browsers interpret as a malformed single cookie.
+      // browsers interpret as a malformed single cookie. Available on
+      // Bun, Node 18.14+, and modern Undici — the runtimes Appstrate
+      // supports — so no fallback is needed.
       const baBody = (await authResponse.json().catch(() => ({}))) as Record<string, unknown>;
       const passThroughHeaders = new Headers();
-      const cookies =
-        typeof authResponse.headers.getSetCookie === "function"
-          ? authResponse.headers.getSetCookie()
-          : (authResponse.headers.get("set-cookie")?.split(/,\s*(?=[A-Za-z]+=)/) ?? []);
-      for (const cookie of cookies) {
+      for (const cookie of authResponse.headers.getSetCookie()) {
         passThroughHeaders.append("set-cookie", cookie);
       }
       passThroughHeaders.set("content-type", "application/json");

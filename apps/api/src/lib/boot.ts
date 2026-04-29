@@ -19,6 +19,7 @@ import {
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
+import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -65,6 +66,18 @@ export async function boot(): Promise<void> {
     });
     await applyCoreMigrations();
   }
+
+  // Bootstrap-token reconciliation (#344). If the env still carries an
+  // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
+  // flip the in-memory consumed flag so the per-request `bootstrapTokenPending`
+  // boolean in AppConfig reports `false` immediately. Otherwise an operator
+  // who forgot to clear .env after a successful claim sends returning
+  // visitors back through `/claim`, where redemption then 410s.
+  await reconcileBootstrapTokenAtBoot().catch((err) => {
+    logger.warn("Could not reconcile bootstrap token at boot", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
