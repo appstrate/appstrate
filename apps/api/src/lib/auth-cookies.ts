@@ -36,6 +36,25 @@ import type { AppEnv } from "../types/index.ts";
  * realm guard: an end-user session that lands on a platform route is still
  * a legitimate session for the OIDC application it was minted for, and
  * killing the cookie would log the user out from that application too.
+ *
+ * Two complementary mechanisms run together — not a primary + legacy split,
+ * defense in depth with different trade-offs:
+ *
+ *   1. Targeted `Set-Cookie: Max-Age=0` (below): primary path for the 99%
+ *      case where the cookie was issued by the same instance config that
+ *      is now serving the request. Surgical (kills only the 4 BA cookies),
+ *      works on plain HTTP, works on legacy browsers.
+ *
+ *   2. `Clear-Site-Data: "cookies"`: backstop for config drift. When the
+ *      cookie was issued under a *previous* `COOKIE_DOMAIN` (e.g. set then
+ *      unset between deployments) or a different cookie-name prefix, RFC
+ *      6265 silently rejects the targeted delete because the `Domain`
+ *      attribute does not match. `Clear-Site-Data` purges every cookie
+ *      visible to the origin without needing `Domain` / `Path` to match —
+ *      precisely the property the targeted delete cannot offer when the
+ *      issuer config has drifted. Requires HTTPS or localhost (secure
+ *      context); ignored on plain HTTP, hence (1) remains as fallback.
+ *      Browser support: Chrome/Edge 61+, Firefox 63+, Safari 16.4+.
  */
 export function clearStaleAuthCookies(c: Context<AppEnv>): void {
   const cookies = getCookies(getAuth().options);
@@ -51,4 +70,8 @@ export function clearStaleAuthCookies(c: Context<AppEnv>): void {
     // which is what flips this from a refresh into a delete.
     deleteCookie(c, cookie.name, cookie.attributes);
   }
+  // Backstop for config drift (rotated `BETTER_AUTH_SECRET`, toggled
+  // `COOKIE_DOMAIN`, changed cookie-name prefix). Same-origin only,
+  // honored on HTTPS / localhost. See header docstring above.
+  c.header("Clear-Site-Data", '"cookies"');
 }
