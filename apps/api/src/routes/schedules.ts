@@ -12,7 +12,7 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
-import { validateInput, schemaHasFileFields } from "../services/schema.ts";
+import { validateInput } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { forbidden, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
@@ -20,7 +20,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
+import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/index.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";

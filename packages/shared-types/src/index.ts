@@ -91,6 +91,7 @@ export {
   TERMINAL_RUN_STATUSES,
   TERMINAL_RUN_EVENT_TYPES,
   terminalRunStatusValues,
+  ACTIVE_RUN_STATUSES,
 } from "@appstrate/db/schema";
 export type { TerminalRunStatus } from "@appstrate/db/schema";
 
@@ -372,9 +373,9 @@ export interface AgentMemoryItem {
   content: string;
   runId: string | null;
   /** Actor scope of this memory row. `shared` = visible to all actors. */
-  actorType?: PersistenceActorType;
+  actorType: PersistenceActorType;
   /** Actor identifier. NULL when `actorType === "shared"`. */
-  actorId?: string | null;
+  actorId: string | null;
   /**
    * When true, this memory is rendered into the system prompt on every
    * run (working set). When false, it lives in the archive and is only

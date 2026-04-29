@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useEditorState } from "../../hooks/use-editor-state";
+import { useEditorState, type EditorStateBase } from "../../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -66,10 +66,8 @@ function updateAuthSub(
 
 // ─── Types ─────────────────────────────────────────────────
 
-interface ProviderEditorState {
-  manifest: Record<string, unknown>;
+interface ProviderEditorState extends EditorStateBase {
   content: string;
-  lockVersion?: number;
 }
 
 // ─── Credential modes ──────────────────────────────────────

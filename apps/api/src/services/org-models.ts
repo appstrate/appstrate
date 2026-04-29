@@ -11,6 +11,7 @@ import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
+import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 
 // --- List (system + DB) ---
 
@@ -426,24 +427,7 @@ export async function testModelConfig(config: {
       message: `Provider returned ${res.status}`,
     };
   } catch (err) {
-    const latency = Math.round(performance.now() - start);
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      return { ok: false, latency, error: "TIMEOUT", message: "Request timed out (10s)" };
-    }
-    const msg = err instanceof Error ? err.message : "Network error";
-    if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
-      return { ok: false, latency, error: "DNS_ERROR", message: "DNS resolution failed" };
-    }
-    if (msg.includes("ECONNREFUSED")) {
-      return { ok: false, latency, error: "CONNECTION_REFUSED", message: "Connection refused" };
-    }
-    if (msg.includes("ECONNRESET") || msg.includes("EPIPE")) {
-      return { ok: false, latency, error: "CONNECTION_RESET", message: "Connection reset" };
-    }
-    if (msg.includes("UNABLE_TO_VERIFY_LEAF_SIGNATURE") || msg.includes("CERT_")) {
-      return { ok: false, latency, error: "TLS_ERROR", message: "TLS certificate error" };
-    }
-    return { ok: false, latency, error: "NETWORK_ERROR", message: msg };
+    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
   }
 }
 

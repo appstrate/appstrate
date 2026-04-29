@@ -13,8 +13,8 @@
  *     `prompt.md` at the root package
  *   - each declared dep is resolved and embedded under
  *     `packages/@scope/name/version/…`
- *   - `toolDocs` preserves the legacy contract: one entry per
- *     tool dep that ships a `TOOL.md`
+ *   - tool deps that ship a `TOOL.md` carry it through into the bundle
+ *     package's file map
  *   - when projected back through `bundleToLoadedBundle` (what the
  *     container does), the flat layout matches what the runtime
  *     resolvers expect: `tools/<scoped-id>/`, `skills/<scoped-id>/`,
@@ -147,9 +147,6 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     );
 
     expect(result.zip.byteLength).toBeGreaterThan(0);
-    expect(result.toolDocs).toEqual([
-      { id: "@bundlehost/calc-tool", content: "Calculator tool documentation" },
-    ]);
 
     // ─── 4. Read it back as a Bundle ─────────────────────────────────
     const bundle = readBundleFromBuffer(new Uint8Array(result.zip));

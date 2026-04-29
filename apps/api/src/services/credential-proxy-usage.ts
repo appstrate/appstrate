@@ -78,11 +78,6 @@ export async function insertCredentialProxyUsage(
   }
 }
 
-export interface RunCostBreakdown {
-  llmUsd: number;
-  total: number;
-}
-
 /**
  * Compute the total attributable spend for a run from the unified
  * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
@@ -92,7 +87,7 @@ export interface RunCostBreakdown {
  *
  * One scalar SUM over the `(run_id)` index — cheap even on long runs.
  */
-export async function computeRunCost(runId: string): Promise<RunCostBreakdown> {
+export async function computeRunCost(runId: string): Promise<number> {
   const [llm] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
@@ -100,9 +95,5 @@ export async function computeRunCost(runId: string): Promise<RunCostBreakdown> {
     .from(llmUsage)
     .where(eq(llmUsage.runId, runId));
 
-  const llmUsd = Number(llm?.total ?? 0);
-  return {
-    llmUsd,
-    total: llmUsd,
-  };
+  return Number(llm?.total ?? 0);
 }

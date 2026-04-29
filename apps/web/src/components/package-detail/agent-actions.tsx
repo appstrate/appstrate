@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { isFileField } from "@appstrate/core/form";
+import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
@@ -62,9 +62,7 @@ export function AgentActions({
 
   if (!detail) return null;
 
-  const hasFileInput =
-    detail.input?.schema?.properties &&
-    Object.values(detail.input.schema.properties).some(isFileField);
+  const hasFileInput = schemaHasFileFields(detail.input?.schema);
 
   const handleConfirm = () => {
     if (!confirmState) return;

@@ -306,7 +306,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     status,
     packageEphemeral,
     duration: resolvedDurationMs,
-    ...(cost.total > 0 ? { cost: cost.total } : {}),
+    ...(cost > 0 ? { cost } : {}),
     ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
   };
   let metadata: Record<string, unknown> | null = null;
@@ -336,7 +336,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       error: errorMessage,
       completedAt: now,
       duration: resolvedDurationMs,
-      cost: cost.total > 0 ? cost.total : null,
+      cost: cost > 0 ? cost : null,
       sinkClosedAt: now,
       notifiedAt: now,
       // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the

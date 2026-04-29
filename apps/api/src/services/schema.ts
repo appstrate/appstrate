@@ -142,12 +142,6 @@ export function validateInput(
   return runValidate("input", input, schema);
 }
 
-/** Check if a schema has any file fields (format: "uri" + contentMediaType). */
-export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
-  if (!schema?.properties) return false;
-  return Object.values(schema.properties).some(isFileField);
-}
-
 export function validateOutput(
   result: Record<string, unknown>,
   schema: JSONSchemaObject,

@@ -11,10 +11,16 @@ import type {
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
 
+interface TestSchemas {
+  input?: import("@appstrate/core/form").JSONSchemaObject;
+  config?: import("@appstrate/core/form").JSONSchemaObject;
+  output?: import("@appstrate/core/form").JSONSchemaObject;
+}
+
 function makeTestBundle(opts: {
   rawPrompt?: string;
   schemaVersion?: string;
-  schemas?: AppstrateRunPlan["schemas"];
+  schemas?: TestSchemas;
   timeout?: number;
   tools?: ToolMeta[];
   skills?: ToolMeta[];
@@ -83,7 +89,7 @@ interface PromptContext {
   runApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
-  schemas: AppstrateRunPlan["schemas"];
+  schemas: TestSchemas;
   providers: ProviderSummary[];
   memories?: Array<{ id: number; content: string; createdAt: string | null }>;
   llmModel: string;
@@ -121,16 +127,13 @@ function splitLegacy(ctx: PromptContext): {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: ctx.rawPrompt,
-    schemas: ctx.schemas,
+    ...(ctx.schemas.output ? { outputSchema: ctx.schemas.output } : {}),
     llmConfig: ctx.llmConfig,
     ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
     tokens: ctx.tokens,
     providers: ctx.providers,
-    availableTools: ctx.availableTools ?? [],
-    availableSkills: ctx.availableSkills ?? [],
-    toolDocs: ctx.toolDocs ?? [],
     files: ctx.files,
   };
   return { context, plan };

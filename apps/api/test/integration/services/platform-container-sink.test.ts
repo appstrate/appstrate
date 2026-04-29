@@ -179,7 +179,6 @@ function buildRunPlan(): AppstrateRunPlan {
   return {
     bundle: buildTestBundle(),
     rawPrompt: "Do the thing.",
-    schemas: {},
     llmConfig: {
       api: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
@@ -188,9 +187,6 @@ function buildRunPlan(): AppstrateRunPlan {
     },
     tokens: {},
     providers: [],
-    availableTools: [],
-    availableSkills: [],
-    toolDocs: [],
     timeout: 60,
   };
 }

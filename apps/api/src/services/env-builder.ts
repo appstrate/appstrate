@@ -110,7 +110,7 @@ export async function buildRunContext(params: {
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
-  const { bundle, toolDocs } = agentPackageResult;
+  const { bundle } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
   const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
@@ -176,24 +176,13 @@ export async function buildRunContext(params: {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
-    schemas: extractManifestSchemas(agent.manifest),
+    outputSchema: extractManifestSchemas(agent.manifest).output,
     llmConfig,
     runApi: { url: runApiUrl, token: signRunToken(runId) },
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,
     tokens,
     providers: providerDefs,
-    availableTools: agent.tools.map((e) => ({
-      id: e.id,
-      name: e.name,
-      description: e.description,
-    })),
-    availableSkills: agent.skills.map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-    })),
-    toolDocs,
     files,
   };
 
