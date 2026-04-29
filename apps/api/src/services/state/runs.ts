@@ -4,6 +4,7 @@ import {
   eq,
   and,
   ne,
+  gt,
   desc,
   isNotNull,
   inArray,
@@ -806,6 +807,14 @@ export async function getRunByOrg(args: { runId: string; orgId: string }) {
  * is always chronological — `desc` affects which rows are selected, not
  * the order callers receive.
  *
+ * `sinceId` (asc-only) returns rows with `id > sinceId`, the cursor used
+ * by the CLI's polling loop in `runRemote`. Append-only `id` (BIGSERIAL)
+ * makes this a stable monotonic cursor: callers track the last id they
+ * rendered and pass it back, so each poll's payload size is bounded by
+ * the rows produced since the previous poll instead of the run's full
+ * history. Not legal with `order: "desc"` — the call throws to surface
+ * the misuse rather than silently fall back to a full scan.
+ *
  * Org-scoped by design — `run_logs` has no `applicationId` column, and
  * the object-args shape is the module-facing public contract. App-scoped
  * callers must verify run ownership via `getRun(scope, runId)` first.
@@ -815,12 +824,18 @@ export async function listRunLogs(args: {
   orgId: string;
   limit?: number;
   order?: "asc" | "desc";
+  sinceId?: number;
 }) {
-  const { runId, orgId, limit, order = "asc" } = args;
+  const { runId, orgId, limit, order = "asc", sinceId } = args;
+  if (sinceId !== undefined && order === "desc") {
+    throw new Error("listRunLogs: sinceId is not supported with order=desc");
+  }
+  const filters = [eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)];
+  if (sinceId !== undefined) filters.push(gt(runLogs.id, sinceId));
   const q = db
     .select()
     .from(runLogs)
-    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
+    .where(and(...filters))
     .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
   const rows = limit ? await q.limit(limit) : await q;
   return order === "desc" ? rows.reverse() : rows;

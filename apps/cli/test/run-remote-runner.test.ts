@@ -318,9 +318,48 @@ describe("runRemote — happy path", () => {
 
     expect(writers.files["/tmp/out.json"]).toBeDefined();
     const parsed = JSON.parse(writers.files["/tmp/out.json"]!);
+    // Shape parity with the local `--output` (`RunResult`) — the local
+    // path emits `output`, not `result`. The remote payload mirrors
+    // that, with empty defaults for fields the run record cannot
+    // reconstruct (`memories`, `pinned`, `logs`).
     expect(parsed.runId).toBe("run_4");
+    expect(parsed.instance).toBe("https://app.example.com");
     expect(parsed.status).toBe("success");
-    expect(parsed.result).toEqual({ final: 42 });
+    expect(parsed.output).toEqual({ final: 42 });
+    expect(parsed.memories).toEqual([]);
+    expect(parsed.pinned).toEqual({});
+    expect(parsed.logs).toEqual([]);
+    expect(parsed.durationMs).toBe(42_000);
+    expect(parsed.cost).toBe(0.0123);
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it("--output payload carries error envelope on non-success", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": { status: 200, body: { runId: "run_4e" } },
+        "GET /api/runs/run_4e/logs": { status: 200, body: [] },
+        "GET /api/runs/run_4e": {
+          status: 200,
+          body: recordSummary({
+            id: "run_4e",
+            status: "failed",
+            error: "Provider rejected request",
+            result: null,
+          }),
+        },
+      },
+      calls,
+    );
+
+    const opts = withCapturedWriters(buildBaseOpts({ fetchImpl, outputPath: "/tmp/out.err.json" }));
+    await runRemote(opts, new AbortController().signal);
+
+    const parsed = JSON.parse(writers.files["/tmp/out.err.json"]!);
+    expect(parsed.status).toBe("failed");
+    expect(parsed.error).toEqual({ message: "Provider rejected request" });
+    expect(parsed.output).toBeNull();
   });
 
   it("emits JSONL events on stdout in --json mode", async () => {
@@ -580,6 +619,9 @@ describe("runRemote — log dedup", () => {
       message: msg,
       level: "info",
     });
+    // Fixture returns full lists every poll — even with the `?since=`
+    // cursor wired in, `seenLogIds` defense-in-depth dedup must still
+    // catch a server that fails to honor the cursor.
     const fetchImpl = makeFetchImpl(
       {
         "POST /api/agents/%40system/hello-world/run": { status: 200, body: { runId: "run_dd" } },
@@ -598,7 +640,7 @@ describe("runRemote — log dedup", () => {
     );
 
     const outcome = await runRemote(
-      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
       new AbortController().signal,
     );
 
@@ -608,5 +650,220 @@ describe("runRemote — log dedup", () => {
     expect((stderr.match(/\] a/g) ?? []).length).toBe(1);
     expect((stderr.match(/\] b/g) ?? []).length).toBe(1);
     expect((stderr.match(/\] c/g) ?? []).length).toBe(1);
+  });
+});
+
+describe("runRemote — log cursor (?since=)", () => {
+  it("first poll omits ?since=, subsequent polls send the highest seen id", async () => {
+    const calls: FetchCall[] = [];
+    const log = (id: number): RemoteRunLog => ({
+      id,
+      runId: "run_cursor",
+      type: "appstrate",
+      event: null,
+      message: `m${id}`,
+      level: "info",
+    });
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": {
+          status: 200,
+          body: { runId: "run_cursor" },
+        },
+        "GET /api/runs/run_cursor/logs": [
+          { status: 200, body: [log(1), log(2)] },
+          { status: 200, body: [log(3)] },
+          { status: 200, body: [] },
+        ],
+        "GET /api/runs/run_cursor": [
+          { status: 200, body: recordSummary({ id: "run_cursor", status: "running" }) },
+          { status: 200, body: recordSummary({ id: "run_cursor", status: "running" }) },
+          { status: 200, body: recordSummary({ id: "run_cursor", status: "success" }) },
+        ],
+      },
+      calls,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
+      new AbortController().signal,
+    );
+
+    expect(outcome.logs.map((l) => l.id)).toEqual([1, 2, 3]);
+
+    // Inspect the sequence of /logs requests: first must be cursor-less,
+    // subsequent ones must carry `?since=<lastSeenId>`.
+    const logCalls = calls.filter(
+      (c) => c.method === "GET" && c.url.includes("/api/runs/run_cursor/logs"),
+    );
+    expect(logCalls.length).toBeGreaterThanOrEqual(2);
+    expect(logCalls[0]!.url).not.toContain("since=");
+    expect(logCalls[1]!.url).toContain("since=2");
+    if (logCalls.length >= 3) {
+      expect(logCalls[2]!.url).toContain("since=3");
+    }
+  });
+
+  it("cursor advances across the final tail fetch (post-terminal)", async () => {
+    const calls: FetchCall[] = [];
+    const log = (id: number): RemoteRunLog => ({
+      id,
+      runId: "run_tail",
+      type: "appstrate",
+      event: null,
+      message: `m${id}`,
+      level: "info",
+    });
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": { status: 200, body: { runId: "run_tail" } },
+        "GET /api/runs/run_tail/logs": [
+          { status: 200, body: [log(1)] },
+          // After terminal, the post-terminal "tail" fetch picks up a
+          // straggler log id=2 committed in the same transaction as the
+          // status flip.
+          { status: 200, body: [log(2)] },
+        ],
+        "GET /api/runs/run_tail": {
+          status: 200,
+          body: recordSummary({ id: "run_tail", status: "success" }),
+        },
+      },
+      calls,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
+      new AbortController().signal,
+    );
+
+    expect(outcome.logs.map((l) => l.id)).toEqual([1, 2]);
+    // Two log calls: the loop poll (no since) and the post-terminal tail
+    // (since=1, the highest id rendered before the terminal record).
+    const logCalls = calls.filter(
+      (c) => c.method === "GET" && c.url.includes("/api/runs/run_tail/logs"),
+    );
+    expect(logCalls).toHaveLength(2);
+    expect(logCalls[0]!.url).not.toContain("since=");
+    expect(logCalls[1]!.url).toContain("since=1");
+  });
+});
+
+describe("runRemote — record-poll cadence", () => {
+  it("does not refetch the run record every tick on a quiet run", async () => {
+    const calls: FetchCall[] = [];
+    // Long-idle run: no logs ever. With recordPollEveryNTicks=3, the
+    // loop fetches the record on tick 0 (running) and tick 3 (success →
+    // break). The post-loop final fetch in step 4 is the third call.
+    // Without the cadence throttle, an every-tick fetch would land 4+
+    // record polls here; the assertion guards against regressing back
+    // to log-activity-driven refresh.
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": { status: 200, body: { runId: "run_quiet" } },
+        "GET /api/runs/run_quiet/logs": { status: 200, body: [] },
+        "GET /api/runs/run_quiet": [
+          { status: 200, body: recordSummary({ id: "run_quiet", status: "running" }) },
+          { status: 200, body: recordSummary({ id: "run_quiet", status: "success" }) },
+        ],
+      },
+      calls,
+    );
+
+    await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 3 })),
+      new AbortController().signal,
+    );
+
+    const recordCalls = calls.filter(
+      (c) => c.method === "GET" && c.url.endsWith("/api/runs/run_quiet"),
+    );
+    // Loop: tick 0 (running) + tick 3 (success → break) = 2.
+    // Plus the post-loop final fetch = 3 total.
+    expect(recordCalls.length).toBe(3);
+
+    // Logs are polled every tick — over 4 ticks (0..3) we expect 4 log
+    // calls in the loop + 1 final fetch = 5. This proves the record
+    // fetches stayed throttled while the log poll ran each tick.
+    const logCalls = calls.filter(
+      (c) => c.method === "GET" && c.url.includes("/api/runs/run_quiet/logs"),
+    );
+    expect(logCalls.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("runRemote — trigger response shape", () => {
+  it("rejects a 200 response that is not a JSON object", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": {
+          status: 200,
+          contentType: "text/plain",
+          body: "ok",
+        },
+      },
+      calls,
+    );
+
+    try {
+      await runRemote(
+        withCapturedWriters(buildBaseOpts({ fetchImpl })),
+        new AbortController().signal,
+      );
+      throw new Error("expected throw");
+    } catch (err) {
+      if (!(err instanceof RemoteRunError)) throw err;
+      expect(err.message).toMatch(/non-JSON|missing/i);
+    }
+  });
+
+  it("rejects a 200 response where runId is not a string", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": {
+          status: 200,
+          body: { runId: 12345 },
+        },
+      },
+      calls,
+    );
+
+    try {
+      await runRemote(
+        withCapturedWriters(buildBaseOpts({ fetchImpl })),
+        new AbortController().signal,
+      );
+      throw new Error("expected throw");
+    } catch (err) {
+      if (!(err instanceof RemoteRunError)) throw err;
+      expect(err.message).toMatch(/runId/);
+      expect(err.hint).toBeDefined();
+    }
+  });
+
+  it("rejects a 200 response with empty-string runId", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/%40system/hello-world/run": {
+          status: 200,
+          body: { runId: "" },
+        },
+      },
+      calls,
+    );
+
+    try {
+      await runRemote(
+        withCapturedWriters(buildBaseOpts({ fetchImpl })),
+        new AbortController().signal,
+      );
+      throw new Error("expected throw");
+    } catch (err) {
+      if (!(err instanceof RemoteRunError)) throw err;
+      expect(err.message).toMatch(/runId/);
+    }
   });
 });

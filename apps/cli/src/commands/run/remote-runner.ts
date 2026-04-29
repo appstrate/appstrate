@@ -7,10 +7,14 @@
  * the platform spawns a Pi container (same path as the dashboard "Run"
  * button). The CLI then tails the run by polling two endpoints:
  *
- *   - `GET /api/runs/:runId/logs` — append-only run-log entries for
- *     incremental rendering.
- *   - `GET /api/runs/:runId`      — terminal-status detection + the
- *     final RunResult/error/cost reconciliation.
+ *   - `GET /api/runs/:runId/logs?since=<lastId>` — append-only run-log
+ *     entries with `id > since`. The cursor is required for bounded
+ *     per-poll cost: without it the server returns the run's full
+ *     history every tick and per-poll wire size grows linearly with run
+ *     length. We track the highest log id we've rendered and pass it as
+ *     `?since=` on the next request.
+ *   - `GET /api/runs/:runId` — terminal-status detection + the final
+ *     RunResult/error/cost reconciliation.
  *
  * Polling (rather than SSE) is the v1 transport because the realtime
  * endpoint's `validateSSEAuth` (apps/api/src/routes/realtime.ts) only
@@ -19,6 +23,13 @@
  * `/api/runs/...` but not on the SSE handler. Polling sidesteps this
  * cleanly without any server change. Migrating to SSE later is a pure
  * client-side swap behind the same `runRemote()` entry point.
+ *
+ * Record-poll cadence is throttle-driven, not log-activity-driven: a
+ * fixed `recordPollEveryNTicks` (default every 4 ticks ≈ 6s) refreshes
+ * the run record so terminal-status detection happens in bounded time
+ * regardless of whether the run is streaming logs or sitting idle. The
+ * loop also forces a record fetch on the first iteration so very short
+ * runs (success in <1 tick) finalize without a wasted log-poll.
  *
  * Cancellation: on `signal` abort the runner POSTs `/api/runs/:id/cancel`
  * once and continues polling until the run reaches a terminal status.
@@ -29,6 +40,7 @@
 const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_RECORD_POLL_EVERY_N_TICKS = 4;
 
 export type TerminalRunStatus = "success" | "failed" | "timeout" | "cancelled";
 export type RunStatus = "pending" | "running" | TerminalRunStatus;
@@ -123,7 +135,16 @@ export interface RunRemoteOptions {
 
   /** When true, emit each event as JSONL on stdout. Otherwise human-format. */
   json: boolean;
-  /** Optional path — final RunResult JSON written here. */
+  /**
+   * Optional path — final RunResult JSON written here. Shape parity
+   * with the local path's `--output`: top-level keys match the AFPS
+   * `RunResult` (`memories`, `pinned`, `output`, `logs`, `error`,
+   * `status`, `durationMs`, `cost`). `memories`, `pinned`, `logs`, and
+   * `report` are emitted as empty defaults — the remote path does not
+   * have a server-side endpoint surfacing the runner's reduced AFPS
+   * state, only `runs.result`. Two remote-only extras (`runId`,
+   * `instance`) are added for debuggability.
+   */
   outputPath?: string | undefined;
   /** Label printed on the "→ running …" stderr line. */
   bundleLabel: string;
@@ -133,6 +154,13 @@ export interface RunRemoteOptions {
   fetchImpl?: typeof fetch;
   /** Polling cadence between log fetches (ms). Default 1500. */
   pollIntervalMs?: number;
+  /**
+   * How often (in poll ticks) to refetch the run record for terminal-
+   * status detection. Decoupled from log activity — an idle run that
+   * emits no logs still terminates within `recordPollEveryNTicks *
+   * pollIntervalMs` of the server flipping status. Default 4 ticks.
+   */
+  recordPollEveryNTicks?: number;
   /** Per-request timeout (ms). Default 30000. */
   requestTimeoutMs?: number;
   /** Output writer for stdout (`--json` / final result). Defaults to `process.stdout.write`. */
@@ -158,6 +186,7 @@ export async function runRemote(
 ): Promise<RemoteRunOutcome> {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const recordPollEveryNTicks = opts.recordPollEveryNTicks ?? DEFAULT_RECORD_POLL_EVERY_N_TICKS;
   const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const writeStderr = opts.writeStderr ?? ((chunk) => process.stderr.write(chunk));
   const writeStdout = opts.writeStdout ?? ((chunk) => process.stdout.write(chunk));
@@ -197,36 +226,45 @@ export async function runRemote(
   else signal.addEventListener("abort", onAbort, { once: true });
 
   // ─── 3. Poll loop ──────────────────────────────────────────────────
+  //
+  // Two cadences run in lockstep:
+  //
+  // - Logs polled every tick with `?since=<lastLogId>` so the wire payload
+  //   is bounded by what's new since the last poll, not by total run length.
+  // - Run record refreshed every `recordPollEveryNTicks` ticks regardless
+  //   of log activity, plus once on tick 0 so very short runs (<1 tick)
+  //   finalize without an extra wait. Decoupling the record fetch from log
+  //   activity prevents the previous behaviour where idle runs (waiting
+  //   on an LLM) refetched the record every tick.
+  //
+  // `seenLogIds` is retained as a defense-in-depth dedup against race
+  //  conditions on the cursor (e.g. server clock skew, retry duplicating a
+  //  row) — under normal conditions `?since=` already returns each row
+  //  exactly once.
   const seenLogIds = new Set<number>();
   const allLogs: RemoteRunLog[] = [];
-  // Run-record polling is cheaper than logs polling — we only refetch
-  // it when the last logs poll surfaced no new entries (stalled state).
-  // This bounds the call rate at one record fetch per poll tick when
-  // idle, plus one per ~10 ticks during active log streaming. The record
-  // itself is re-fetched in step 4 to capture the freshest result, so we
-  // only use the loop poll for terminal-status detection.
-  let recordPollCounter = 0;
+  let lastLogId = 0;
+  let tick = 0;
 
   while (true) {
-    // Poll logs first — they're the high-frequency stream.
-    const logs = await fetchLogs(opts, runId, { fetchImpl, requestTimeoutMs });
-    let appended = 0;
+    // Logs first — high-frequency, bounded by the cursor.
+    const logs = await fetchLogs(opts, runId, lastLogId, { fetchImpl, requestTimeoutMs });
     for (const log of logs) {
       if (seenLogIds.has(log.id)) continue;
       seenLogIds.add(log.id);
       allLogs.push(log);
-      appended++;
+      if (log.id > lastLogId) lastLogId = log.id;
       renderLog(log, opts, { writeStdout, writeStderr });
     }
 
-    // Periodically (or after a quiet tick) refresh the run record so we
-    // observe the terminal transition in bounded time.
-    const refreshRecord = appended === 0 || recordPollCounter % 10 === 0;
-    recordPollCounter++;
-    if (refreshRecord) {
+    // Record poll runs on a fixed cadence (tick 0, then every N ticks).
+    // Independent of `appended` so an idle agent terminates in bounded
+    // time without an unrelated stream of polls.
+    if (tick % recordPollEveryNTicks === 0) {
       const record = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
       if (TERMINAL_STATUSES.has(record.status)) break;
     }
+    tick++;
 
     // Wait for the next tick — abortable so cancellation kicks in fast.
     await sleepAbortable(pollIntervalMs, signal).catch(() => {
@@ -236,12 +274,21 @@ export async function runRemote(
   }
 
   // ─── 4. Final fetch — make sure we have the freshest record + tail logs ──
+  //
+  // The server flips status + closes the sink atomically (any in-flight
+  // event POST 410's after that point), so by the time the loop observes
+  // a terminal status all log rows for this run are already persisted.
+  // We still re-fetch logs once with `?since=lastLogId` to pick up any
+  // rows committed in the same transaction as the status flip, in case
+  // they landed after our last loop poll but before the loop's record
+  // fetch saw the terminal state.
   const finalRecord = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
-  const finalLogs = await fetchLogs(opts, runId, { fetchImpl, requestTimeoutMs });
+  const finalLogs = await fetchLogs(opts, runId, lastLogId, { fetchImpl, requestTimeoutMs });
   for (const log of finalLogs) {
     if (seenLogIds.has(log.id)) continue;
     seenLogIds.add(log.id);
     allLogs.push(log);
+    if (log.id > lastLogId) lastLogId = log.id;
     renderLog(log, opts, { writeStdout, writeStderr });
   }
 
@@ -254,16 +301,21 @@ export async function runRemote(
   renderSummary(finalRecord, status, opts, { writeStdout, writeStderr });
 
   if (opts.outputPath !== undefined) {
-    const payload = {
-      runId,
-      status,
-      result: finalRecord.result ?? null,
-      error: finalRecord.error ?? null,
-      cost: finalRecord.cost ?? null,
-      startedAt: finalRecord.startedAt ?? null,
-      completedAt: finalRecord.completedAt ?? null,
-    };
-    await writeFile(opts.outputPath, JSON.stringify(payload, null, 2));
+    // Shape parity with the local path's `--output`: the local
+    // EventSink writes a full `RunResult` (memories, pinned, output,
+    // logs, error, status, durationMs, usage, cost, report). The remote
+    // path doesn't have an event-stream reducer of its own — the
+    // platform aggregated the events server-side — so we reconstruct as
+    // much of the same surface as the run record exposes. Fields that
+    // would require additional endpoints (memories, pinned named slots,
+    // report, runner-source token usage) are emitted as empty defaults
+    // so consumers can rely on the top-level keys being present.
+    //
+    // Two remote-only extras (`runId`, `instance`) are added on top —
+    // they are useful for debugging and do not collide with any
+    // RunResult field.
+    const payload = buildRunResultPayload(runId, opts.instance, finalRecord, status);
+    await writeFile(opts.outputPath, JSON.stringify(payload, null, 2) + "\n");
   }
 
   return { runId, status, record: finalRecord, logs: allLogs, exitCode };
@@ -326,12 +378,26 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
     });
   }
 
+  // The server's contract is `{ runId: string }` (apps/api/src/routes/runs.ts
+  // → `c.json({ runId })`). We accept *only* that shape — falling back to
+  // alternate keys (`{ id }`, `{ run.id }`, …) would silently mask a
+  // contract drift instead of failing fast at the boundary. The error
+  // body carries the unexpected payload so the user can debug a server
+  // mismatch without re-running with extra logging.
   const payload = (await res.json().catch(() => null)) as { runId?: unknown } | null;
-  const runId = payload && typeof payload.runId === "string" ? payload.runId : null;
-  if (!runId) {
-    throw new RemoteRunError("Trigger returned no runId", { body: payload });
+  if (!payload || typeof payload !== "object") {
+    throw new RemoteRunError("Trigger returned a non-JSON response", {
+      body: payload,
+      hint: "The server should return `{ runId: string }`. Check the platform version on the pinned instance.",
+    });
   }
-  return runId;
+  if (typeof payload.runId !== "string" || payload.runId.length === 0) {
+    throw new RemoteRunError("Trigger response missing `runId` string", {
+      body: payload,
+      hint: "Expected `{ runId: string }`. The platform may be incompatible with this CLI version.",
+    });
+  }
+  return payload.runId;
 }
 
 async function fetchRunRecord(
@@ -354,9 +420,14 @@ async function fetchRunRecord(
 async function fetchLogs(
   opts: RunRemoteOptions,
   runId: string,
+  sinceId: number,
   deps: HttpDeps,
 ): Promise<RemoteRunLog[]> {
   const url = new URL(`/api/runs/${encodeURIComponent(runId)}/logs`, opts.instance);
+  // `since=0` is treated as "no cursor" by the server (rows have id ≥ 1),
+  // so we send it unconditionally — keeps the URL shape uniform across
+  // the first poll and the subsequent ones for easier debugging.
+  if (sinceId > 0) url.searchParams.set("since", String(sinceId));
   const res = await timeoutFetch(deps, url.toString(), { headers: platformHeaders(opts) });
   if (!res.ok) {
     // Logs endpoint failures are non-fatal — we keep polling. The next
@@ -401,6 +472,39 @@ async function safeReadBody(res: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Build the `--output` JSON payload for a remote run, shaped to match
+ * the local path's `RunResult` surface (see
+ * `packages/afps-runtime/src/types/run-result.ts`). Fields the run
+ * record does not expose — `memories`, `pinned`, `logs`, `report`,
+ * `usage` — are emitted as empty defaults so downstream consumers can
+ * rely on the top-level key set being identical between local and
+ * remote `--output` files. `runId` and `instance` are remote-only
+ * extras for debuggability.
+ */
+function buildRunResultPayload(
+  runId: string,
+  instance: string,
+  record: RemoteRunRecord,
+  status: TerminalRunStatus,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    runId,
+    instance,
+    status,
+    output: record.result ?? null,
+    memories: [],
+    pinned: {},
+    logs: [],
+  };
+  if (record.error) {
+    payload.error = { message: record.error };
+  }
+  if (record.duration != null) payload.durationMs = record.duration;
+  if (record.cost != null) payload.cost = record.cost;
+  return payload;
 }
 
 // ---------------------------------------------------------------------------

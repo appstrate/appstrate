@@ -428,6 +428,15 @@ export function createRunsRouter() {
   });
 
   // GET /api/runs/:id/logs — get run logs
+  //
+  // Optional `?since=<bigint>` cursor returns rows with `id > since`. The
+  // CLI's `runRemote` polling loop tracks the last id it rendered and
+  // passes it back so each poll's payload is bounded by what's new since
+  // the previous tick — without the cursor, the server returns the full
+  // history on every poll and per-tick wire cost grows linearly with run
+  // length. Invalid values (non-numeric, negative) are silently ignored
+  // rather than 400'd: a stale or malformed cursor on a re-fetch must
+  // never break the tail.
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const scope = getAppScope(c);
@@ -439,9 +448,21 @@ export function createRunsRouter() {
     if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
+
+    const sinceParam = c.req.query("since");
+    let sinceId: number | undefined;
+    if (sinceParam !== undefined && sinceParam !== "") {
+      const parsed = Number(sinceParam);
+      if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
+    }
+
     // Ownership was just verified via getRun(scope) above — we can hand
     // off to the org-scoped log reader safely.
-    const logs = await listRunLogs({ runId, orgId: scope.orgId });
+    const logs = await listRunLogs({
+      runId,
+      orgId: scope.orgId,
+      ...(sinceId !== undefined ? { sinceId } : {}),
+    });
 
     return c.json(logs);
   });

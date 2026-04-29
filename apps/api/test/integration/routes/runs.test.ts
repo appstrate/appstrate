@@ -397,6 +397,105 @@ describe("Runs API", () => {
       const res = await app.request("/api/runs/exec_anything/logs");
       expect(res.status).toBe(401);
     });
+
+    it("filters by ?since= cursor (returns only id > since)", async () => {
+      await seedAgent({
+        id: "@runorg/cursor-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const run = await seedRun({
+        packageId: "@runorg/cursor-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+      });
+      const log1 = await seedRunLog({
+        runId: run.id,
+        orgId: ctx.orgId,
+        message: "first",
+        level: "info",
+      });
+      const log2 = await seedRunLog({
+        runId: run.id,
+        orgId: ctx.orgId,
+        message: "second",
+        level: "info",
+      });
+      const log3 = await seedRunLog({
+        runId: run.id,
+        orgId: ctx.orgId,
+        message: "third",
+        level: "info",
+      });
+
+      // since=log1.id → returns log2 and log3
+      const res = await app.request(`/api/runs/${run.id}/logs?since=${log1.id}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{ id: number; message: string }>;
+      expect(body.map((l) => l.id)).toEqual([log2.id, log3.id]);
+    });
+
+    it("ignores a malformed ?since= cursor (returns full list)", async () => {
+      await seedAgent({
+        id: "@runorg/badcursor-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const run = await seedRun({
+        packageId: "@runorg/badcursor-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+      });
+      await seedRunLog({
+        runId: run.id,
+        orgId: ctx.orgId,
+        message: "only",
+        level: "info",
+      });
+
+      // Stale or garbled cursors must not 400 — the polling tail must
+      // keep working through transient client-side malformation.
+      const res = await app.request(`/api/runs/${run.id}/logs?since=not-a-number`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as unknown[];
+      expect(body).toHaveLength(1);
+    });
+
+    it("?since=<highest_id> returns an empty array", async () => {
+      await seedAgent({
+        id: "@runorg/sinceall-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const run = await seedRun({
+        packageId: "@runorg/sinceall-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        dashboardUserId: ctx.user.id,
+        status: "running",
+      });
+      const log = await seedRunLog({
+        runId: run.id,
+        orgId: ctx.orgId,
+        message: "only",
+        level: "info",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}/logs?since=${log.id}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as unknown[];
+      expect(body).toHaveLength(0);
+    });
   });
 
   // ─── POST /api/runs/:id/cancel ─────────────────────────────
