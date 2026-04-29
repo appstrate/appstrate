@@ -87,6 +87,13 @@ import {
   ConnectionProfileResolutionError,
 } from "./run/connection-profiles.ts";
 import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
+import {
+  resolveExecutionMode,
+  validateOptsForMode,
+  ExecutionModeError,
+  type ExecutionMode,
+} from "./run/mode.ts";
+import { runRemote, RemoteRunError } from "./run/remote-runner.ts";
 import { validateConfig } from "@appstrate/core/schema-validation";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { onShutdown, shutdownSignal } from "../lib/shutdown.ts";
@@ -165,17 +172,47 @@ export interface RunCommandOptions {
    * silent. Mutually exclusive with `--verbose`.
    */
   quiet?: boolean;
+  /**
+   * Force local in-process execution (PiRunner). Default rule: when a
+   * package id is given (`@scope/agent`), the CLI runs the agent on the
+   * pinned instance — pass `--local` to keep the historical dev-loop
+   * behaviour where the bundle executes in the caller's shell. Mutually
+   * exclusive with `--remote`. Path-mode bundles default to local
+   * already, so `--local` is a no-op there.
+   */
+  local?: boolean;
+  /**
+   * Force remote execution on the pinned instance (same path as the
+   * dashboard "Run" button). Default rule: id-mode is already remote,
+   * so this flag mostly exists for symmetry. Path-mode bundles cannot
+   * run remotely in v1 (they would need to be uploaded as inline runs);
+   * passing `--remote` with a path target is rejected with a clear
+   * error. Mutually exclusive with `--local`.
+   */
+  remote?: boolean;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
   try {
-    await runCommandInner(opts);
+    // Mode resolution happens BEFORE any I/O so flag-conflict errors
+    // surface instantly without spinning up keyring / network. Target
+    // parsing also has to live here — it is what `resolveExecutionMode`
+    // keys off (id → remote default, path → local default).
+    const target = parseRunTarget(opts.bundle);
+    const executionMode: ExecutionMode = resolveExecutionMode(target, opts);
+    validateOptsForMode(executionMode, opts);
+
+    if (executionMode === "remote") {
+      await runCommandRemote(opts, target);
+    } else {
+      await runCommandLocal(opts);
+    }
   } catch (err) {
     exitWithError(err);
   }
 }
 
-async function runCommandInner(opts: RunCommandOptions): Promise<void> {
+async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // Captured at command entry so the "runtime ready in {N}ms" signal
   // reflects the user-perceived warm-up cost (profile resolution, model
   // download, bundle prep, sink setup) — not just PiRunner construction.
@@ -645,6 +682,90 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
   // change inside `coordinator.trigger` that adds an extra `await` could
   // flip the race. This guard is a no-op if the coordinator already
   // exited, and a backstop if it hasn't.
+  if (shutdownSignal.aborted) process.exit(130);
+}
+
+// ---------------------------------------------------------------------------
+// Remote execution path
+// ---------------------------------------------------------------------------
+
+/**
+ * Trigger a run on the pinned Appstrate instance and tail it to terminal
+ * status. This is the dashboard-parity path: the platform spawns the Pi
+ * container, isolates the agent's tools, and reports the run record
+ * natively. The CLI's role is reduced to (a) translating flags into a
+ * trigger payload, (b) printing logs as they arrive via the local
+ * console sink, and (c) reporting the final status with the right exit
+ * code.
+ *
+ * Caller invariants enforced upstream by `resolveExecutionMode`:
+ *   - `target.kind === "id"` (path targets rejected with
+ *     `ExecutionModeError` before reaching here)
+ *   - local-only flags rejected by `validateOptsForMode`
+ */
+async function runCommandRemote(
+  opts: RunCommandOptions,
+  target: ReturnType<typeof parseRunTarget>,
+): Promise<void> {
+  if (target.kind !== "id") {
+    // The dispatcher in runCommand() routes path targets to local mode,
+    // so this is unreachable from the CLI. Keeping a typed early-exit
+    // (rather than a non-null assertion) lets the type narrowing flow
+    // through the rest of the function without `as` casts.
+    throw new ExecutionModeError("remote mode requires an `@scope/agent` package id");
+  }
+
+  // `buildResolverInputs("remote", …)` always returns a `RemoteResolverInputs`
+  // (with `bearerToken`) or throws — the `null` / `LocalResolverInputs`
+  // branches are reserved for `mode === "local"` / `"none"`.
+  const resolverInputs = (await buildResolverInputs("remote", opts)) as RemoteResolverInputs;
+
+  // Parse `--input` / `--input-file` and `--config` flag overrides. The
+  // platform performs the same validation server-side, so we send the
+  // flag values verbatim — no client-side schema check. (Local mode
+  // validates client-side because PiRunner runs in-process; here, the
+  // server has the authoritative manifest.)
+  const input = await resolveInput(opts);
+  const config = opts.config ? safeParseJson(opts.config, "--config") : {};
+
+  // Idempotency: a stable per-invocation key so trigger retries don't
+  // create duplicate runs. `--run-id` is honoured so the user can safely
+  // re-run with the same id (server replays the stored response).
+  const idempotencyKey =
+    opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  const bundleLabel = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
+
+  const outcome = await runRemote(
+    {
+      instance: resolverInputs.instance,
+      bearerToken: resolverInputs.bearerToken,
+      appId: resolverInputs.appId,
+      orgId: resolverInputs.orgId,
+      scope: target.scope,
+      name: target.name,
+      spec: target.spec,
+      input,
+      config,
+      ...(opts.model != null ? { modelId: opts.model } : {}),
+      ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
+      idempotencyKey,
+      json: opts.json ?? false,
+      ...(opts.output != null ? { outputPath: opts.output } : {}),
+      bundleLabel,
+    },
+    shutdownSignal,
+  );
+
+  // Match the local path: a non-success terminal status sets
+  // `process.exitCode` so shell `&& chain` works. The shutdown
+  // coordinator owns SIGINT exit (130); we only mark for the
+  // natural-completion path.
+  if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
+
+  // Defense-in-depth backstop matching the local path: if the abort
+  // fired between `runRemote` returning and us getting here, exit 130
+  // explicitly so the CLI doesn't claim natural completion.
   if (shutdownSignal.aborted) process.exit(130);
 }
 
@@ -1181,6 +1302,8 @@ export {
   RunConfigFetchError,
   ConnectionProfileResolutionError,
   PreflightAbortError,
+  ExecutionModeError,
+  RemoteRunError,
 };
 
 /**
