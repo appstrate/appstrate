@@ -256,16 +256,23 @@ jobs:
           trap 'kill $SERVER 2>/dev/null || true; rm -f /tmp/dry.key' EXIT
           sleep 1
 
-          # ── Scenario 1: happy path ────────────────────────────────────
-          echo "::group::happy path"
+          # ── Scenario 1: happy path (new default — drop & instruct) ───
+          # Per #344 + #199 sidestep, bootstrap.sh no longer auto-execs
+          # `appstrate install --yes` under `curl|bash`. It drops the
+          # verified binary, prints a copy-pasteable next step, exits 0.
+          # The user runs `appstrate install` from their real interactive
+          # shell where clack works (Bun setRawMode/kqueue regressions
+          # don't fire on a non-shell-piped child).
+          echo "::group::happy path (drop & instruct)"
           export APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin"
           export PATH="$APPSTRATE_BIN_DIR:$PATH"
 
-          # Run with `set +e` around the capture so a failing bootstrap
-          # still surfaces its stdout/stderr in the log instead of being
-          # killed silently by `set -e` at the `OUT=$(...)` assignment.
+          # GHA sets CI=true and pipes stdout, both of which trigger the
+          # legacy auto-install path. To test the interactive default
+          # ("drop & instruct"), strip CI and allocate a pseudo-tty via
+          # `script` so `[ -t 1 ]` returns true inside bootstrap.sh.
           set +e
-          OUT=$(bash /tmp/bootstrap.sh 2>&1)
+          OUT=$(env -u CI script -qfec "bash /tmp/bootstrap.sh" /dev/null 2>&1)
           rc=$?
           set -e
           echo "$OUT"
@@ -273,28 +280,67 @@ jobs:
             || { echo "::error::bootstrap exited $rc on the happy path"; exit 1; }
           echo "$OUT" | grep -q "Integrity + provenance verified" \
             || { echo "::error::bootstrap did not emit the verified banner"; exit 1; }
-          echo "$OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
-            || { echo "::error::bootstrap did not exec the installed binary"; exit 1; }
-          # #199: bootstrap MUST pass --yes so the Bun compile + macOS
-          # setRawMode regression can't hang the install. A future refactor
-          # that drops `--yes` from the exec line regresses the whole
-          # curl|bash flow on macOS — fail the CI before it ships.
-          echo "$OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
-            || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
-          # #199 (second bug): bootstrap MUST NOT redirect stdin from
+          echo "$OUT" | grep -q "Appstrate CLI installed" \
+            || { echo "::error::bootstrap did not emit the drop-banner (two-step default)"; exit 1; }
+          echo "$OUT" | grep -q "appstrate install" \
+            || { echo "::error::bootstrap did not print the next-step command"; exit 1; }
+          # New default: drop & instruct, do NOT exec.
+          echo "$OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap auto-launched the CLI (two-step default broken)"; exit 1; }
+          # #199 (kqueue bug): bootstrap MUST NOT redirect stdin from
           # /dev/tty when exec'ing the CLI. The combo `exec </dev/tty
           # "$DEST"` triggers an orthogonal Bun macOS bug — `EINVAL:
           # invalid argument, kqueue` — when the CLI later spawns
-          # subprocesses (bun run dev, docker compose up). With --yes no
-          # prompt fires, so the redirect is unnecessary AND harmful.
-          # Any reintroduction of `</dev/tty` regresses the curl|bash
-          # flow on macOS — fail the CI before it ships.
+          # subprocesses (bun run dev, docker compose up). Any
+          # reintroduction of `</dev/tty` regresses the curl|bash flow
+          # on macOS — fail the CI before it ships.
           grep -q "exec </dev/tty" scripts/bootstrap.sh \
             && { echo "::error::bootstrap reintroduced </dev/tty redirect (regression for #199 kqueue bug)"; exit 1; }
-          # grep -q exit 1 means no match — guard asserted.
           test -x "$APPSTRATE_BIN_DIR/appstrate"
           echo "::endgroup::"
           echo "✓ happy path OK"
+
+          # ── Scenario 1c: --yes (legacy auto-install + #199 sidestep) ──
+          # `curl|bash -s -- --yes` triggers the legacy all-in-one path.
+          # The CLI MUST receive --yes so the Bun setRawMode regression
+          # (#199) is sidestepped by construction (no clack prompt fires).
+          echo "::group::--yes (legacy auto-install)"
+          set +e
+          YES_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-yes" \
+            APPSTRATE_FORCE_DUAL=1 \
+            bash /tmp/bootstrap.sh --yes 2>&1)
+          rc=$?
+          set -e
+          echo "$YES_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on --yes"; exit 1; }
+          echo "$YES_OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
+            || { echo "::error::bootstrap did not exec the CLI under --yes"; exit 1; }
+          echo "$YES_OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
+            || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
+          test -x "$GITHUB_WORKSPACE/bin-yes/appstrate"
+          echo "::endgroup::"
+          echo "✓ --yes path OK"
+
+          # ── Scenario 1d: APPSTRATE_AUTO_INSTALL=1 (legacy escape hatch) ─
+          # Existing scripted provisioning (Ansible, cloud-init) that
+          # depends on the previous all-in-one default opts in via this
+          # env var. Same effect as --yes but env-driven.
+          echo "::group::APPSTRATE_AUTO_INSTALL=1"
+          set +e
+          AUTO_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-auto" \
+            APPSTRATE_AUTO_INSTALL=1 \
+            APPSTRATE_FORCE_DUAL=1 \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$AUTO_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc under APPSTRATE_AUTO_INSTALL=1"; exit 1; }
+          echo "$AUTO_OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
+            || { echo "::error::APPSTRATE_AUTO_INSTALL=1 did not exec the CLI"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ APPSTRATE_AUTO_INSTALL=1 path OK"
 
           # ── Scenario 1b: APPSTRATE_NO_LAUNCH=1 (binary drop, no install) ─
           # Users who want the interactive `appstrate install` flow (once

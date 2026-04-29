@@ -32,6 +32,7 @@ import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
+import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
@@ -146,6 +147,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // through the production module loader registry, so we build the set once
   // here and reuse it for the auth pipeline and the downstream middlewares.
   const modulePublicPaths = new Set(extraModules.flatMap((m) => m.publicPaths ?? []));
+
+  // Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
+  // Better Auth catch-all so the more-specific path wins. Mirrors the
+  // production wiring in `apps/api/src/index.ts`.
+  app.route("/api/auth/bootstrap", createAuthBootstrapRouter());
 
   // Shared auth pipeline — mirrors production exactly. Accessors return the
   // same snapshotted values every call (the test module list does not change

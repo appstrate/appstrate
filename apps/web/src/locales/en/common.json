@@ -100,5 +100,17 @@
   "pagination.previous": "Previous",
   "pagination.next": "Next",
   "pagination.pageOf": "Page {{page}} of {{total}}",
-  "invalidJson": "Invalid JSON"
+  "invalidJson": "Invalid JSON",
+  "claim.title": "Claim this instance",
+  "claim.subtitle": "This Appstrate instance was installed unattended. Paste the token printed by the installer to create the owner account.",
+  "claim.tokenLabel": "Bootstrap token",
+  "claim.tokenPlaceholder": "Paste the token (shown in the install banner or in .env)",
+  "claim.tokenHelp": "Printed at the end of the install, or stored as AUTH_BOOTSTRAP_TOKEN in your .env. Single-use.",
+  "claim.nameLabel": "Full name",
+  "claim.emailLabel": "Email address",
+  "claim.passwordLabel": "Password",
+  "claim.passwordHelp": "Minimum 8 characters.",
+  "claim.submit": "Claim instance",
+  "claim.submitting": "Creating account…",
+  "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md"
 }
