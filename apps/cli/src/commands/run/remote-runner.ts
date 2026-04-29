@@ -342,10 +342,12 @@ function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> =
 }
 
 async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<string> {
-  const url = new URL(
-    `/api/agents/${encodeURIComponent(opts.scope)}/${encodeURIComponent(opts.name)}/run`,
-    opts.instance,
-  );
+  // Don't encode scope/name. They're already validated by `package-spec.ts`
+  // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
+  // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
+  // Hono's RegExpRouter matches against the raw (encoded) path. See the
+  // matching comment in `bundle-fetch.ts:buildBundleUrl`.
+  const url = new URL(`/api/agents/${opts.scope}/${opts.name}/run`, opts.instance);
   if (opts.spec) url.searchParams.set("version", opts.spec);
 
   const body: Record<string, unknown> = {
