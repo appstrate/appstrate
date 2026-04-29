@@ -805,7 +805,18 @@ function buildAuth(
             // Merge realm resolution + email auto-verify into a single data
             // patch returned to BA. The realm resolver falls back to
             // "platform" when no OIDC module is loaded (OSS mode).
-            const realm = _realmResolver ? await _realmResolver(headers) : "platform";
+            //
+            // Bootstrap-token redeem (#344) FORCES "platform": the redeem
+            // route forwards `c.req.raw.headers` to BA, and a stray
+            // `oidc_pending_client` cookie on that request would otherwise
+            // route the bootstrap owner into an end-user realm — wrong
+            // audience for an instance-owner row, and unrecoverable once
+            // committed. Bypass the resolver entirely on this path.
+            const realm = bootstrapTokenBypass
+              ? "platform"
+              : _realmResolver
+                ? await _realmResolver(headers)
+                : "platform";
             const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
             const data: Record<string, unknown> = { realm };
             if (autoVerify) data.emailVerified = true;
