@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, useMemo, useRef } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -48,6 +48,18 @@ export function VersionSelect({
 }) {
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
+  const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
+  const latestRange = ranges[0];
+
+  // If the stored value isn't one of the offered ranges (yanked version
+  // pinned in the manifest, exact pin typed by hand, etc.), migrate it
+  // to caret-of-latest so the Select doesn't render blank. Does NOT fire
+  // for fresh values produced by the editor itself.
+  useEffect(() => {
+    if (!latestRange) return;
+    if (ranges.includes(value)) return;
+    onChange(latestRange);
+  }, [latestRange, ranges, value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {

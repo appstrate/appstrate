@@ -43,9 +43,13 @@ export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
 /**
  * Active (non-terminal) run statuses — the run is still progressing.
  * Mirror of {@link TERMINAL_RUN_STATUSES} for callers that need to gate
- * UI on "in flight" rather than "done".
+ * UI on "in flight" rather than "done". Derived from the same const
+ * tuple pattern so adding a new status to {@link runStatusValues} forces
+ * an explicit decision about which set it belongs to.
  */
-export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(["pending", "running"]);
+export const activeRunStatusValues = ["pending", "running"] as const;
+export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(activeRunStatusValues);
+export type ActiveRunStatus = (typeof activeRunStatusValues)[number];
 
 /**
  * RunEvent types that mark a run as terminal — `run.completed`, `run.failed`,

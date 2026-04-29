@@ -8,7 +8,6 @@ import type { LoadedPackage } from "../types/index.ts";
 import {
   buildBundleFromCatalog,
   formatPackageIdentity,
-  parsePackageIdentity,
   writeBundleToBuffer,
   type Bundle,
   type BundlePackage,
@@ -110,7 +109,6 @@ interface AgentPackageResult {
    * schemas from the SAME source the runner-pi container will load.
    */
   bundle: Bundle;
-  toolDocs: Array<{ id: string; content: string }>;
 }
 
 /**
@@ -159,19 +157,7 @@ export async function buildAgentPackage(
 
   const zipBuffer = writeBundleToBuffer(bundle);
 
-  const toolDocs: Array<{ id: string; content: string }> = [];
-  const decoder = new TextDecoder();
-  for (const [identity, pkg] of bundle.packages) {
-    if (identity === bundle.root) continue;
-    if ((pkg.manifest as { type?: unknown }).type !== "tool") continue;
-    const md = pkg.files.get("TOOL.md");
-    if (!md) continue;
-    const parsed = parsePackageIdentity(identity);
-    if (!parsed) continue;
-    toolDocs.push({ id: parsed.packageId, content: decoder.decode(md) });
-  }
-
-  return { zip: Buffer.from(zipBuffer), bundle, toolDocs };
+  return { zip: Buffer.from(zipBuffer), bundle };
 }
 
 /** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */
