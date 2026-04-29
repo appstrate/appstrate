@@ -390,21 +390,30 @@ function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> =
   return h;
 }
 
+/**
+ * Build a URL relative to `opts.instance`. Path is appended verbatim —
+ * callers must encode their own runId etc. when needed (we deliberately
+ * do NOT encode scope/name here; see `triggerRun` for the rationale).
+ */
+function apiUrl(opts: RunRemoteOptions, path: string): URL {
+  return new URL(path, opts.instance);
+}
+
 async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<string> {
   // Don't encode scope/name. They're already validated by `package-spec.ts`
   // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
   // Hono's RegExpRouter matches against the raw (encoded) path. See the
   // matching comment in `bundle-fetch.ts:buildBundleUrl`.
-  const url = new URL(`/api/agents/${opts.scope}/${opts.name}/run`, opts.instance);
+  const url = apiUrl(opts, `/api/agents/${opts.scope}/${opts.name}/run`);
   if (opts.spec) url.searchParams.set("version", opts.spec);
 
   const body: Record<string, unknown> = {
     input: opts.input,
     config: opts.config,
   };
-  if (opts.modelId !== undefined && opts.modelId !== null) body.modelId = opts.modelId;
-  if (opts.proxyId !== undefined && opts.proxyId !== null) body.proxyId = opts.proxyId;
+  if (opts.modelId != null) body.modelId = opts.modelId;
+  if (opts.proxyId != null) body.proxyId = opts.proxyId;
 
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
   if (opts.idempotencyKey) headers.set("Idempotency-Key", opts.idempotencyKey);
@@ -456,7 +465,7 @@ async function fetchRunRecord(
   runId: string,
   deps: HttpDeps,
 ): Promise<RemoteRunRecord> {
-  const url = new URL(`/api/runs/${encodeURIComponent(runId)}`, opts.instance);
+  const url = apiUrl(opts, `/api/runs/${encodeURIComponent(runId)}`);
   const res = await timeoutFetch(deps, url.toString(), { headers: platformHeaders(opts) });
   if (!res.ok) {
     const detail = await safeReadBody(res);
@@ -474,7 +483,7 @@ async function fetchLogs(
   sinceId: number,
   deps: HttpDeps,
 ): Promise<RemoteRunLog[]> {
-  const url = new URL(`/api/runs/${encodeURIComponent(runId)}/logs`, opts.instance);
+  const url = apiUrl(opts, `/api/runs/${encodeURIComponent(runId)}/logs`);
   // `since=0` is treated as "no cursor" by the server (rows have id ≥ 1),
   // so we send it unconditionally — keeps the URL shape uniform across
   // the first poll and the subsequent ones for easier debugging.
@@ -490,7 +499,7 @@ async function fetchLogs(
 }
 
 async function cancelRun(opts: RunRemoteOptions, runId: string, deps: HttpDeps): Promise<void> {
-  const url = new URL(`/api/runs/${encodeURIComponent(runId)}/cancel`, opts.instance);
+  const url = apiUrl(opts, `/api/runs/${encodeURIComponent(runId)}/cancel`);
   const res = await timeoutFetch(deps, url.toString(), {
     method: "POST",
     headers: platformHeaders(opts, { "Content-Type": "application/json" }),
@@ -642,20 +651,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `$0.0000` line.
  */
 function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
-  const usage = record.tokenUsage ?? undefined;
-  const cost = record.cost ?? undefined;
+  const usage = record.tokenUsage ?? null;
+  const cost = record.cost ?? null;
   const hasUsage =
-    usage !== undefined &&
-    usage !== null &&
-    ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0);
-  if (!hasUsage && (cost === undefined || cost === null)) return null;
+    usage != null && ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0);
+  if (!hasUsage && cost == null) return null;
   const completedAt = record.completedAt ? Date.parse(record.completedAt) : NaN;
   return {
     type: "appstrate.metric",
     timestamp: Number.isFinite(completedAt) ? completedAt : Date.now(),
     runId: record.id,
     ...(hasUsage ? { usage } : {}),
-    ...(cost !== undefined && cost !== null ? { cost } : {}),
+    ...(cost != null ? { cost } : {}),
     ...(record.duration != null ? { durationMs: record.duration } : {}),
   };
 }

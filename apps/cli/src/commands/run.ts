@@ -694,103 +694,78 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
  * status. This is the dashboard-parity path: the platform spawns the Pi
  * container, isolates the agent's tools, and reports the run record
  * natively. The CLI's role is reduced to (a) translating flags into a
- * trigger payload, (b) printing logs as they arrive, and (c) reporting
- * the final status with the right exit code.
+ * trigger payload, (b) printing logs as they arrive via the local
+ * console sink, and (c) reporting the final status with the right exit
+ * code.
  *
- * Path-mode targets are rejected upstream by `resolveExecutionMode`, so
- * `target.kind` is always `"id"` here. We narrow the type via a runtime
- * guard rather than a cast so the invariant survives refactors.
+ * Caller invariants enforced upstream by `resolveExecutionMode`:
+ *   - `target.kind === "id"` (path targets rejected with
+ *     `ExecutionModeError` before reaching here)
+ *   - local-only flags rejected by `validateOptsForMode`
  */
 async function runCommandRemote(
   opts: RunCommandOptions,
   target: ReturnType<typeof parseRunTarget>,
 ): Promise<void> {
   if (target.kind !== "id") {
-    // Defensive: `resolveExecutionMode` is supposed to have rejected
-    // this combination already. Surfacing it here keeps the function
-    // self-contained for direct unit-test invocation.
-    throw new ExecutionModeError(
-      "remote mode requires an `@scope/agent` package id",
-      "Pass an id, or omit --remote to use the path-mode default (local).",
-    );
+    // The dispatcher in runCommand() routes path targets to local mode,
+    // so this is unreachable from the CLI. Keeping a typed early-exit
+    // (rather than a non-null assertion) lets the type narrowing flow
+    // through the rest of the function without `as` casts.
+    throw new ExecutionModeError("remote mode requires an `@scope/agent` package id");
   }
 
-  // Build the resolver inputs — same code path the local run uses for
-  // its remote provider mode. This validates auth (API key / JWT),
-  // surfaces the instance origin, and pins the appId/orgId.
-  const resolverInputs = await buildResolverInputs("remote", opts);
-  if (!resolverInputs || !("bearerToken" in resolverInputs)) {
-    // `buildResolverInputs("remote", …)` always returns a remote-input
-    // shape on success; this branch is unreachable under normal flow.
-    throw new ResolverConfigError(
-      "Remote execution requires a logged-in profile or an API key",
-      "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID.",
-    );
-  }
+  // `buildResolverInputs("remote", …)` always returns a `RemoteResolverInputs`
+  // (with `bearerToken`) or throws — the `null` / `LocalResolverInputs`
+  // branches are reserved for `mode === "local"` / `"none"`.
+  const resolverInputs = (await buildResolverInputs("remote", opts)) as RemoteResolverInputs;
 
   // Parse `--input` / `--input-file` and `--config` flag overrides. The
-  // platform performs the same input/config validation server-side, so
-  // we send the raw flag values verbatim — no client-side schema check.
-  // (The local path validates client-side because PiRunner runs in-
-  // process; here, the server has the authoritative manifest.)
+  // platform performs the same validation server-side, so we send the
+  // flag values verbatim — no client-side schema check. (Local mode
+  // validates client-side because PiRunner runs in-process; here, the
+  // server has the authoritative manifest.)
   const input = await resolveInput(opts);
   const config = opts.config ? safeParseJson(opts.config, "--config") : {};
 
   // Idempotency: a stable per-invocation key so trigger retries don't
-  // create duplicate runs. `--run-id` is honoured here so the user can
-  // safely re-run with the same id (server replays the stored response).
+  // create duplicate runs. `--run-id` is honoured so the user can safely
+  // re-run with the same id (server replays the stored response).
   const idempotencyKey =
     opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
   const bundleLabel = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
 
-  if (!opts.json) {
-    process.stderr.write(`→ triggering remote run for ${bundleLabel}\n`);
-  }
+  const outcome = await runRemote(
+    {
+      instance: resolverInputs.instance,
+      bearerToken: resolverInputs.bearerToken,
+      appId: resolverInputs.appId,
+      orgId: resolverInputs.orgId,
+      scope: target.scope,
+      name: target.name,
+      spec: target.spec,
+      input,
+      config,
+      ...(opts.model != null ? { modelId: opts.model } : {}),
+      ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
+      idempotencyKey,
+      json: opts.json ?? false,
+      ...(opts.output != null ? { outputPath: opts.output } : {}),
+      bundleLabel,
+    },
+    shutdownSignal,
+  );
 
-  try {
-    const outcome = await runRemote(
-      {
-        instance: resolverInputs.instance,
-        bearerToken: resolverInputs.bearerToken,
-        appId: resolverInputs.appId,
-        orgId: resolverInputs.orgId,
-        scope: target.scope,
-        name: target.name,
-        spec: target.spec,
-        input,
-        config,
-        ...(opts.model !== undefined ? { modelId: opts.model } : {}),
-        ...(opts.proxy !== undefined ? { proxyId: opts.proxy } : {}),
-        idempotencyKey,
-        json: opts.json === true,
-        ...(opts.output !== undefined ? { outputPath: opts.output } : {}),
-        bundleLabel,
-      },
-      shutdownSignal,
-    );
+  // Match the local path: a non-success terminal status sets
+  // `process.exitCode` so shell `&& chain` works. The shutdown
+  // coordinator owns SIGINT exit (130); we only mark for the
+  // natural-completion path.
+  if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
 
-    if (outcome.exitCode !== 0) {
-      // Match the local path's convention: a non-success terminal status
-      // sets `process.exitCode` so node-style consumers can `&& chain`.
-      // The shutdown coordinator owns SIGINT exit (130); we only mark
-      // here for the natural-completion path.
-      process.exitCode = outcome.exitCode;
-    }
-  } catch (err) {
-    // RemoteRunError carries the structured platform response — surface
-    // the hint via the standard exitWithError pipeline rather than
-    // raw-printing the body.
-    if (err instanceof RemoteRunError) {
-      throw err;
-    }
-    throw err;
-  }
-
-  // Mirror the local path's defense-in-depth exit on signal abort. The
-  // shutdown coordinator should already have called `process.exit(130)`,
-  // but this backstop guarantees the right exit code if the abort fired
-  // before our `runRemote` returned.
+  // Defense-in-depth backstop matching the local path: if the abort
+  // fired between `runRemote` returning and us getting here, exit 130
+  // explicitly so the CLI doesn't claim natural completion.
   if (shutdownSignal.aborted) process.exit(130);
 }
 
