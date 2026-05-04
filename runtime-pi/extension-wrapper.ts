@@ -5,27 +5,49 @@ import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 type EmitFn = (obj: Record<string, unknown>) => void;
 
 /**
- * Default breadcrumb sink for runtime tool-execution errors. The tool's
- * error content is returned to the LLM via the MCP `content` channel,
- * which is the authoritative surface. Tests inject their own spy to
- * observe breadcrumbs; production defaults to a no-op because the
- * unified protocol does not parse ad-hoc side channels.
+ * Capabilities exposed to a tool's `execute` callback as the 4th argument.
+ *
+ * `providerCall` is the credentialed-call surface for tools, mirroring the
+ * LLM-side `provider_call` MCP tool. The credential is injected server-side
+ * by the sidecar — the tool never sees the raw key (ADR-003 invariant).
  */
+export interface AppstrateToolCtx {
+  providerCall: (
+    providerId: string,
+    args: {
+      method?: string;
+      target: string;
+      headers?: Record<string, string>;
+      body?: string | { fromBytes: string; encoding: "base64" };
+      responseMode?: { maxInlineBytes?: number; maxTotalBytes?: number };
+      substituteBody?: boolean;
+    },
+  ) => Promise<{
+    content: Array<{ type: string; text?: string; resource?: { uri: string } }>;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
+}
+
+/** Late-binding accessor: returns `null` until `entrypoint.ts` Phase C wires the MCP client. */
+export type AppstrateCtxProvider = () => AppstrateToolCtx | null;
+
 const defaultEmit: EmitFn = () => {};
 
 /**
- * Wrap an extension factory to catch errors thrown by tool execute functions.
+ * Wrap an extension factory to:
+ *   1. Convert thrown errors into MCP error results (so a buggy tool doesn't crash the session).
+ *   2. Inject the Appstrate runtime context as the 4th argument when wired.
  *
- * Upload-time validation (`validateToolSource` in @appstrate/core) already
- * rejects tools with wrong execute signatures (1 param instead of 3) and
- * warns about missing `{ content: [...] }` return format. This wrapper
- * only provides runtime safety: if a tool throws, the error is caught and
- * returned as a proper MCP error result instead of crashing the agent session.
+ * Pi passes 5 args to execute (`toolCallId, params, signal, onUpdate, piCtx`); we forward
+ * only the first three plus the optional Appstrate ctx. Tools using the documented
+ * 3-arg signature ignore the extra argument — fully back-compatible.
  */
 export function wrapExtensionFactory(
   factory: ExtensionFactory,
   extensionId: string,
   emitFn: EmitFn = defaultEmit,
+  appstrateCtxProvider?: AppstrateCtxProvider,
 ): ExtensionFactory {
   return (pi) => {
     const wrappedPi = {
@@ -38,9 +60,14 @@ export function wrapExtensionFactory(
 
         const toolName = config.name || "unknown";
 
-        config.execute = async (toolCallId: string, params: unknown, signal: unknown) => {
+        config.execute = async (
+          toolCallId: string,
+          params: unknown,
+          signal: AbortSignal | undefined,
+        ) => {
           try {
-            return await originalExecute(toolCallId, params, signal);
+            const appstrateCtx = appstrateCtxProvider?.() ?? undefined;
+            return await originalExecute(toolCallId, params, signal, appstrateCtx);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             emitFn({

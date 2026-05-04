@@ -139,4 +139,125 @@ describe("wrapExtensionFactory", () => {
     const result = await pi.registeredTools[0].execute("call-1", {}, null);
     expect(result.content[0].text).toContain("my_special_tool");
   });
+
+  // --- AppstrateCtxProvider (4th-arg credentialed-call surface) ---
+
+  it("passes undefined as the 4th argument when appstrateCtxProvider is omitted", async () => {
+    let receivedCtx: unknown = "untouched";
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-no-provider", emitSpy);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBeUndefined();
+  });
+
+  it("passes undefined as the 4th argument when appstrateCtxProvider returns null", async () => {
+    let receivedCtx: unknown = "untouched";
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-null-ctx", emitSpy, () => null);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBeUndefined();
+  });
+
+  it("passes the live ctx as the 4th argument when appstrateCtxProvider resolves", async () => {
+    let receivedCtx: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const liveCtx = {
+      providerCall: async (_pid: string, _args: unknown) => ({
+        content: [{ type: "text", text: "from sidecar" }],
+      }),
+    };
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-live-ctx", emitSpy, () => liveCtx);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBe(liveCtx);
+    expect(typeof receivedCtx.providerCall).toBe("function");
+  });
+
+  it("re-evaluates the provider on each execute (late binding)", async () => {
+    // Simulates the entrypoint flow: factories collected before the MCP
+    // client is wired; ctx populated later. The wrapper must read the
+    // provider at execute time, not at factory invocation time.
+    let liveCtx: any = null;
+
+    let receivedCtx: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-late-bind", emitSpy, () => liveCtx);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    // First call before the ctx is wired → no 4th argument.
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBeUndefined();
+
+    // Wire the ctx (mimicking entrypoint Phase C completion).
+    liveCtx = {
+      providerCall: async () => ({ content: [{ type: "text", text: "wired" }] }),
+    };
+
+    // Second call now sees the wired ctx — same factory, same registered tool.
+    await pi.registeredTools[0].execute("call-2", {}, null);
+    expect(receivedCtx).toBe(liveCtx);
+  });
+
+  it("forwards providerCall return value untouched to the tool", async () => {
+    let providerCallResult: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        providerCallResult = await ctx.providerCall("@scope/test", {
+          target: "https://example.com",
+        });
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const stubbedResponse = {
+      content: [{ type: "text", text: "from upstream" }],
+      isError: false,
+      structuredContent: { foo: "bar" },
+    };
+
+    const liveCtx = {
+      providerCall: async (_pid: string, _args: unknown) => stubbedResponse,
+    };
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-passthrough", emitSpy, () => liveCtx);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(providerCallResult).toEqual(stubbedResponse);
+  });
 });
