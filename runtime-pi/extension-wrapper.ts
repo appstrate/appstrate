@@ -1,36 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AppstrateCtxProvider } from "@appstrate/runner-pi";
 
 type EmitFn = (obj: Record<string, unknown>) => void;
-
-/**
- * Capabilities exposed to a tool's `execute` callback as the 4th argument.
- *
- * `providerCall` is the credentialed-call surface for tools, mirroring the
- * LLM-side `provider_call` MCP tool. The credential is injected server-side
- * by the sidecar — the tool never sees the raw key (ADR-003 invariant).
- */
-export interface AppstrateToolCtx {
-  providerCall: (
-    providerId: string,
-    args: {
-      method?: string;
-      target: string;
-      headers?: Record<string, string>;
-      body?: string | { fromBytes: string; encoding: "base64" };
-      responseMode?: { maxInlineBytes?: number; maxTotalBytes?: number };
-      substituteBody?: boolean;
-    },
-  ) => Promise<{
-    content: Array<{ type: string; text?: string; resource?: { uri: string } }>;
-    isError?: boolean;
-    structuredContent?: unknown;
-  }>;
-}
-
-/** Late-binding accessor: returns `null` until `entrypoint.ts` Phase C wires the MCP client. */
-export type AppstrateCtxProvider = () => AppstrateToolCtx | null;
 
 const defaultEmit: EmitFn = () => {};
 
