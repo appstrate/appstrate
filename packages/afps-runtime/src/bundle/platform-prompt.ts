@@ -330,6 +330,34 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     );
   }
 
+  // --- Pinned Slots (named, non-checkpoint) ---
+  // Surface pinned slots written via `pin({ key, content })` with any key
+  // other than "checkpoint". Honors the documented contract that custom
+  // keys (e.g. "persona", "goals", or app-specific state slots like
+  // "sync_state", "last_processed") render as additional pinned blocks
+  // visible to the agent on every run.
+  if (context.pinnedSlots && Object.keys(context.pinnedSlots).length > 0) {
+    sections.push("## Pinned Slots\n");
+    sections.push(
+      "Named pinned slots written via `pin({ key, content })` (always visible across runs):\n",
+    );
+    // Sort keys for deterministic output (snapshot-friendly).
+    for (const key of Object.keys(context.pinnedSlots).sort()) {
+      const value = context.pinnedSlots[key];
+      // Plain strings render as-is for readability; structured values get a
+      // fenced JSON block so the agent can parse them unambiguously.
+      if (typeof value === "string") {
+        sections.push(`### ${key}`, value, "");
+      } else {
+        sections.push(`### ${key}`, "```json", JSON.stringify(value, null, 2), "```", "");
+      }
+    }
+    sections.push(
+      'To update a slot for the next run, call `pin({ key: "<your-key>", content: ..., scope: "shared" })`. ' +
+        'Use `key: "checkpoint"` for the carry-over slot rendered as `## Checkpoint` instead.\n',
+    );
+  }
+
   // --- Memory ---
   // Two tiers (ADR-012, ADR-013):
   //   - Pinned memories (rendered here)  → working set, always visible.

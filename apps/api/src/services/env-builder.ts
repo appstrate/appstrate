@@ -13,7 +13,13 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getCheckpoint, listPinnedMemories, scopeFromActor } from "./state/index.ts";
+import {
+  CHECKPOINT_KEY,
+  getCheckpoint,
+  listPinnedMemories,
+  listPinnedSlots,
+  scopeFromActor,
+} from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
@@ -92,6 +98,7 @@ export async function buildRunContext(params: {
     agentPackageResult,
     latestVersion,
     memories,
+    pinnedSlotRows,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
     skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
@@ -106,6 +113,12 @@ export async function buildRunContext(params: {
     // Only pinned memories enter the prompt; archive memories load via the
     // `recall_memory` tool on demand. See ADR-012.
     listPinnedMemories(agent.id, applicationId, persistenceScope),
+    // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
+    // already loaded above as `previousCheckpoint`). Renders in the prompt's
+    // `## Pinned Slots` section so cross-run state under custom keys is
+    // visible to the agent. Honors the documented contract: `pin({key, ...})`
+    // with any key produces a slot rendered in this prompt on every run.
+    listPinnedSlots(agent.id, applicationId, persistenceScope),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};
@@ -150,6 +163,16 @@ export async function buildRunContext(params: {
     versionDirty = updatedAt > latestVersion.createdAt;
   }
 
+  // Collapse pinned slot rows to a key→content map. We exclude `checkpoint`
+  // (already surfaced as `context.checkpoint` and rendered as `## Checkpoint`)
+  // and rely on the desc-by-updatedAt order from `listPinnedSlots` for
+  // last-write-wins across actor scopes (shared > member-specific).
+  const pinnedSlots: Record<string, unknown> = {};
+  for (const row of pinnedSlotRows) {
+    if (row.key === CHECKPOINT_KEY) continue;
+    if (!(row.key in pinnedSlots)) pinnedSlots[row.key] = row.content;
+  }
+
   // Step 4: assemble AFPS execution context + platform plan
   const apiEnv = getEnv();
   const runApiUrl =
@@ -169,6 +192,7 @@ export async function buildRunContext(params: {
       createdAt: toEpochMs(m.createdAt),
     })),
     ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
+    ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots } : {}),
     config,
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
