@@ -375,6 +375,10 @@ if (mcpClient) {
         });
         return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
       },
+      readResource: async (uri) => {
+        const result = await mcp.readResource({ uri });
+        return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
+      },
     };
   } catch (err) {
     await emitError(
