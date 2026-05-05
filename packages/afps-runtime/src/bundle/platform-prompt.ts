@@ -147,9 +147,17 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Work efficiently and output your result promptly.",
     );
   }
+  // Workspace bullet — only mention `./documents/` when uploads are actually
+  // wired. Surfacing it unconditionally caused agents with no file fields to
+  // burn tokens listing an empty directory and hypothesising about missing
+  // attachments. The matching `## Documents` section below is also gated on
+  // `opts.uploads`, so the two stay consistent.
+  const hasUploads = (opts.uploads?.length ?? 0) > 0;
   sections.push(
     "- **Workspace**: Your current working directory is the agent workspace. " +
-      "Uploaded documents are available under `./documents/` (relative to cwd). " +
+      (hasUploads
+        ? "Uploaded documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
+        : "") +
       "You may use the filesystem for temporary processing during this run only.\n",
   );
 
