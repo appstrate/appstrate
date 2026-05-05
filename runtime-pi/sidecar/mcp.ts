@@ -56,6 +56,7 @@ import {
   type Resource,
 } from "@appstrate/mcp-transport";
 import {
+  ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
@@ -709,7 +710,15 @@ async function responseToToolResult(
   // Text — bound the read. We stream into a buffer rather than calling
   // res.text() directly so a hypothetical multi-GB response can never
   // be fully materialised before the cap kicks in.
-  const text = await readBodyBounded(res, MAX_RESPONSE_SIZE);
+  //
+  // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE
+  // (1 MB): the spillover path exists precisely to handle bodies larger than
+  // MAX_RESPONSE_SIZE, so capping the read at MAX_RESPONSE_SIZE before deciding
+  // to spill silently truncated text bodies in [256 KB, 1 MB] (they were
+  // spilled, but with a `[truncated]` marker poisoning the JSON). Without a
+  // blob store there's no recovery path, so the conservative cap stays.
+  const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
+  const text = await readBodyBounded(res, readCap);
 
   // If the text body breaches the inline threshold AND we have a blob
   // store, spill it. The agent gets a pointer instead of poisoning its
