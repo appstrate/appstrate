@@ -91,7 +91,9 @@ RUN apk add --no-cache \
         python3 \
         py3-pip \
  && addgroup -g 1001 pi \
- && adduser  -D -u 1001 -G pi -s /bin/bash pi
+ && adduser  -D -u 1001 -G pi -s /bin/bash pi \
+ && mkdir -p /home/pi/.local/lib/python3.12/site-packages \
+ && chown -R pi:pi /home/pi/.local
 
 WORKDIR /runtime
 
