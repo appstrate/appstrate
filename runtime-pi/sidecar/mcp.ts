@@ -667,14 +667,20 @@ async function responseToToolResult(
       };
     }
     // Spill to blob store and return a resource_link.
-    const bytes = await readBodyToBuffer(res, MAX_RESPONSE_SIZE);
+    // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE
+    // (32 MB): the spillover path exists precisely for bodies larger than
+    // MAX_RESPONSE_SIZE, so capping the read at MAX_RESPONSE_SIZE refuses real-world
+    // binaries (PDFs 1-10 MB, images, ZIPs) that the agent would consume via
+    // pdf-toolkit, vision, etc. Symmetrical to the text path below (~ line 720).
+    const binaryReadCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
+    const bytes = await readBodyToBuffer(res, binaryReadCap);
     if (bytes === "exceeded") {
       return {
         content: [
           {
             type: "text",
             text:
-              `provider_call: response exceeds ${MAX_RESPONSE_SIZE} bytes — refused without truncation ` +
+              `provider_call: response exceeds ${binaryReadCap} bytes — refused without truncation ` +
               `(truncating an opaque binary blob is unsafe).`,
           },
         ],
