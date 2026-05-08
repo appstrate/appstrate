@@ -24,7 +24,7 @@ export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — hard cap when blob store is present (covers PDFs/images/archives), aligned with MAX_MCP_ENVELOPE_SIZE × 2
 export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
-export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
+export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /** Absolute hard-cap for any body-size env override. Above this, raising
  *  the limit requires real engineering (streaming refactor, chunked

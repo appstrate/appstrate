@@ -21,9 +21,25 @@ import {
   SIDECAR_INTERNAL_PORT,
 } from "./orchestrator/constants.ts";
 export const getSidecarImage = () => getEnv().SIDECAR_IMAGE;
-const HEALTH_CHECK_RETRIES = 15;
+// Sidecar cold-start can legitimately take 20–45 seconds in Tier 3 self-hosted
+// installs (image pull + container start + Bun runtime warmup + first /health).
+// The original 15 retries × short delays gave a total budget of ~4 seconds —
+// systematically too short, causing every fresh sidecar to be marked failed
+// before it had a chance to listen, and silently breaking the pool replenisher
+// (initSidecarPool() returns size:0 with two "Failed to create pooled sidecar"
+// logs on every API boot).
+//
+// The shape preserves the original fine-grained head (catches warm starts in
+// <500 ms — pool replenish, hot Docker daemon, cached image) and only adds a
+// coarse tail for the cold-start case. Total budget ~75 s, dominated by the
+// tail; the warm path is unchanged.
+const HEALTH_CHECK_RETRIES = 35;
 const HEALTH_CHECK_DELAYS_MS = [
+  // Original fast-path (sum ~4 s) — catches warm starts quickly.
   25, 50, 50, 100, 100, 200, 200, 400, 400, 400, 400, 400, 400, 400, 400,
+  // Cold-start tail (sum ~71 s) — covers 24–45 s container boot.
+  1000, 1000, 1000, 2000, 2000, 2000, 3000, 3000, 3000, 3000, 5000, 5000, 5000, 5000, 5000, 5000,
+  5000, 5000, 5000, 5000,
 ];
 
 interface PooledSidecar {
