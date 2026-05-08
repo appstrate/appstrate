@@ -44,3 +44,10 @@ export {
 } from "./sink-heartbeat.ts";
 
 export type { AppstrateToolCtx, AppstrateCtxProvider } from "./tool-context.ts";
+
+export {
+  RUN_HISTORY_INJECTED_TOOL,
+  RECALL_MEMORY_INJECTED_TOOL,
+  RUNTIME_INJECTED_TOOLS,
+  type RuntimeInjectedTool,
+} from "./runtime-injected-tools.ts";

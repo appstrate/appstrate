@@ -408,14 +408,23 @@ describe("buildEnrichedPrompt — memories", () => {
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("emits memory section even with no memories — surfaces the recall_memory tool to the agent", () => {
-    // ADR-012: the section is always emitted so the LLM discovers
-    // `recall_memory` exists, even before any memory has been pinned.
+  it("omits the Memory section with no memories — recall_memory is discoverable via toolDocs (#368)", () => {
+    // Post-#368: the platform prompt is data-driven. With no pinned
+    // memories the `## Memory` header is suppressed entirely. The LLM
+    // still discovers `recall_memory` because the runtime-injected
+    // tool-doc fragment lists the calling convention in the
+    // `### Tools` block + the dedicated `## recall_memory` doc.
     const ctx = contextWithSystemTools({ memories: [] });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Memory");
-    expect(prompt).toContain("No memories are currently pinned");
+    // `## Memory\n` (header followed by newline) must be absent. Use
+    // the trailing newline to avoid false positives from headers like
+    // `## recall_memory` which share the prefix.
+    expect(prompt).not.toContain("## Memory\n");
+    expect(prompt).not.toContain("No memories are currently pinned");
+    // recall_memory still surfaces — through the runtime-injected
+    // tool-doc flow, not the (now-deleted) hardcoded `## Memory` footer.
     expect(prompt).toContain("recall_memory");
+    expect(prompt).toContain("## recall_memory");
   });
 
   it("includes memories regardless of available tools", () => {

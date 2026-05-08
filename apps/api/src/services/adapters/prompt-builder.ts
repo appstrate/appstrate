@@ -29,37 +29,9 @@
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
-import type { PlatformPromptProvider, PlatformPromptTool } from "@appstrate/afps-runtime/bundle";
+import type { PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
+import { RUNTIME_INJECTED_TOOLS } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
-
-/**
- * Tools the runtime container wires unconditionally for every platform
- * run. They are NOT shipped as bundle packages, so `buildPlatformPrompt-
- * Inputs` cannot derive them from the bundle. We surface them here so
- * the gating in `renderPlatformPrompt` (#368) sees them — without this
- * the prompt would omit `## Memory` for agents that don't ship
- * `@appstrate/note` even though `recall_memory` is always available.
- *
- * Keep this in sync with `runtime-pi/mcp/direct.ts`:
- * `buildMcpDirectFactories` always registers `run_history` and
- * `recall_memory`. The `provider_call` tool is conditional on the
- * bundle declaring at least one provider — handled separately so we
- * don't surface it when the prompt has no `## Connected Providers`
- * section to back it.
- */
-const PLATFORM_INJECTED_TOOLS: ReadonlyArray<PlatformPromptTool> = [
-  {
-    id: "run_history",
-    name: "run_history",
-    description: "Fetch metadata and optionally checkpoint/result of recent past runs.",
-  },
-  {
-    id: "recall_memory",
-    name: "recall_memory",
-    description:
-      "Search the agent's archive memories — durable facts and learnings from past runs.",
-  },
-];
 
 export function buildPlatformSystemPrompt(
   context: ExecutionContext,
@@ -95,11 +67,30 @@ export function buildPlatformSystemPrompt(
     ...(uploads ? { uploads } : {}),
   });
 
-  // Append platform-injected runtime tools. Done AFTER bundle derivation
-  // so bundle-declared tools (incl. dependency-shipped `pin`/`note`)
-  // appear first in the `### Tools` listing — same order they're
-  // discoverable to the LLM via `tools/list`.
-  inputs.availableTools = [...(inputs.availableTools ?? []), ...PLATFORM_INJECTED_TOOLS];
+  // Inject runtime-wired tools (run_history, recall_memory) that are
+  // not bundle packages. Both `availableTools` and `toolDocs` are
+  // appended AFTER bundle-derived entries so user-shipped tools come
+  // first in the `### Tools` listing and have their TOOL.md rendered
+  // ahead of the runtime docs — same order they're discoverable via
+  // MCP `tools/list`.
+  //
+  // The `doc` field carries the equivalent of a TOOL.md file: usage
+  // prose the LLM reads to learn how to call the tool. Without this,
+  // a stripped-down platform prompt (post-#368 refactor) would surface
+  // the runtime tool in `### Tools` but never teach the LLM the
+  // calling convention.
+  inputs.availableTools = [
+    ...(inputs.availableTools ?? []),
+    ...RUNTIME_INJECTED_TOOLS.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+    })),
+  ];
+  inputs.toolDocs = [
+    ...(inputs.toolDocs ?? []),
+    ...RUNTIME_INJECTED_TOOLS.map((t) => ({ id: t.id, content: t.doc })),
+  ];
 
   return renderPlatformPrompt(inputs);
 }

@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from "bun:test";
 import { renderPlatformPrompt } from "../../src/bundle/platform-prompt.ts";
-import type { PlatformPromptTool } from "../../src/bundle/platform-prompt.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
 
 function ctx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
@@ -13,18 +12,6 @@ function ctx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
     ...overrides,
   };
 }
-
-/**
- * Stand-in `availableTools` covering the three reserved AFPS tools that
- * gate the Checkpoint / Pinned Slots / Memory sections per #368.
- * Tests that exercise the rendering paths for those sections should
- * pass this so the gating reflects "all tools wired".
- */
-const ALL_AFPS_TOOLS: ReadonlyArray<PlatformPromptTool> = [
-  { id: "@appstrate/pin", name: "pin", description: "Upsert a pinned slot." },
-  { id: "@appstrate/note", name: "note", description: "Append an archive memory." },
-  { id: "recall_memory", name: "recall_memory", description: "Search archive memories." },
-];
 
 describe("renderPlatformPrompt", () => {
   it("emits a System + Environment section with the default platform name", () => {
@@ -224,17 +211,40 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Documents");
   });
 
-  it("renders the Checkpoint section when context.checkpoint is set", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx({ checkpoint: { cursor: "abc", count: 12 } }),
-      availableTools: ALL_AFPS_TOOLS,
+  describe("Checkpoint section", () => {
+    it("renders the data block when context.checkpoint is set", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ checkpoint: { cursor: "abc", count: 12 } }),
+      });
+      expect(out).toContain("## Checkpoint");
+      expect(out).not.toContain("## Previous State");
+      expect(out).toContain('"cursor": "abc"');
+      expect(out).toContain('"count": 12');
+      // Data-shell prose: present (resume guidance is generic).
+      expect(out).toContain("resume work");
     });
-    expect(out).toContain("## Checkpoint");
-    expect(out).not.toContain("## Previous State");
-    expect(out).toContain('"cursor": "abc"');
-    expect(out).toContain('"count": 12');
-    expect(out).toContain('pin({ key: "checkpoint"');
+
+    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+      // Post-#368 contract: the platform owns the data shell, tools own
+      // their usage prose. The Checkpoint section must not name any
+      // tool — instructions for updating the checkpoint flow in via
+      // `@appstrate/pin`'s TOOL.md when that tool is loaded.
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ checkpoint: { cursor: "abc" } }),
+      });
+      const sectionStart = out.indexOf("## Checkpoint");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("pin(");
+      expect(slice).not.toContain("read-only carry-over");
+    });
+
+    it("omits the section entirely when context.checkpoint is null/undefined", () => {
+      const out = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(out).not.toContain("## Checkpoint");
+    });
   });
 
   describe("Pinned Slots section", () => {
@@ -300,16 +310,19 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain('"secondary"');
     });
 
-    it("includes a footer telling the agent how to update slots and where checkpoint goes", () => {
+    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+      // Post-#368 contract: data block only. The `pin` instructions
+      // for updating slots come from `@appstrate/pin`'s TOOL.md when
+      // that package is in the bundle's dependency tree.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ pinnedSlots: { persona: "anything" } }),
-        availableTools: ALL_AFPS_TOOLS,
       });
-      expect(out).toContain('pin({ key: "<your-key>"');
-      // Must redirect agents to the dedicated checkpoint key for carry-over,
-      // so the two surfaces don't get conflated.
-      expect(out).toContain('key: "checkpoint"');
+      const sectionStart = out.indexOf("## Pinned Slots");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("pin(");
+      expect(slice).not.toContain("read-only in this build");
     });
 
     it("renders after the Checkpoint section when both are present", () => {
@@ -327,205 +340,86 @@ describe("renderPlatformPrompt", () => {
     });
   });
 
-  it("renders the Memory section with pinned memories listed", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx({
-        memories: [
-          { content: "fact one", createdAt: 1_700_000_000_000 },
-          { content: "fact two", createdAt: 1_700_000_100_000 },
-        ],
-      }),
-      availableTools: ALL_AFPS_TOOLS,
-    });
-    expect(out).toContain("## Memory");
-    expect(out).toContain("Pinned memories");
-    expect(out).toContain("- fact one");
-    expect(out).toContain("- fact two");
-    expect(out).toContain("note({ content })");
-    expect(out).toContain("recall_memory");
-    expect(out).toContain("pin({ key, content })");
-    // Memory section should mention scope-default behaviour.
-    expect(out).toMatch(/scope.*"shared"/);
-  });
-
-  it("emits the Memory section with archive hints when archive tools are wired but no memory is pinned", () => {
-    // ADR-012 says the agent needs to discover `recall_memory` exists
-    // even before any memory is pinned. Per #368 that emission is now
-    // gated on the tool actually being available — when wired, the
-    // section MUST still surface so the LLM can find the archive.
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableTools: ALL_AFPS_TOOLS,
-    });
-    expect(out).toContain("## Memory");
-    expect(out).toContain("No memories are currently pinned");
-    expect(out).toContain("recall_memory");
-  });
-
-  describe("reserved-tool gating (#368)", () => {
-    // Each reserved AFPS tool gates a specific footer in the prompt:
-    //   `pin`            → Checkpoint footer + Pinned Slots footer + Memory footer line
-    //   `note`           → Memory footer lines about archive writes
-    //   `recall_memory`  → Memory footer line about archive search
-    // The Memory section as a whole is gated on `hasNote || hasRecall || hasPin`
-    // — when none of those are wired the section serves no purpose.
-    const checkpoint = { cursor: "abc" };
-    const pinnedSlots = { persona: "you are X" };
-    const memoriesCtx = ctx({
-      memories: [{ content: "fact", createdAt: 1_700_000_000_000 }],
-    });
-
-    it("Checkpoint: renders data block but omits pin footer when `pin` is missing", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: ctx({ checkpoint }),
-        availableTools: [],
-      });
-      expect(out).toContain("## Checkpoint");
-      expect(out).toContain('"cursor": "abc"');
-      expect(out).not.toContain('pin({ key: "checkpoint"');
-      expect(out).toContain("read-only carry-over");
-    });
-
-    it("Checkpoint: emits the pin footer when `pin` IS present", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: ctx({ checkpoint }),
-        availableTools: [{ id: "@appstrate/pin", name: "pin" }],
-      });
-      expect(out).toContain('pin({ key: "checkpoint"');
-      expect(out).not.toContain("read-only carry-over");
-    });
-
-    it("Pinned Slots: renders slot data but omits update footer when `pin` is missing", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: ctx({ pinnedSlots }),
-        availableTools: [],
-      });
-      expect(out).toContain("## Pinned Slots");
-      expect(out).toContain("### persona");
-      expect(out).toContain("you are X");
-      expect(out).not.toContain('pin({ key: "<your-key>"');
-      expect(out).toContain("read-only in this build");
-    });
-
-    it("Pinned Slots: emits the update footer when `pin` IS present", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: ctx({ pinnedSlots }),
-        availableTools: [{ id: "@appstrate/pin", name: "pin" }],
-      });
-      expect(out).toContain('pin({ key: "<your-key>"');
-      expect(out).not.toContain("read-only in this build");
-    });
-
-    it("Memory: section omitted entirely when none of pin/note/recall_memory are wired", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: memoriesCtx,
-        availableTools: [],
-      });
-      expect(out).not.toContain("## Memory");
-      expect(out).not.toContain("recall_memory");
-      // Note text from the original footer must not leak.
-      expect(out).not.toContain("note({ content })");
-    });
-
-    it("Memory: section omitted even when memories are present, if no archive tools are wired", () => {
-      // Worst case from the issue: agent dropped @afps/state across versions
-      // but still has rows in package_persistence. The data isn't surfaced,
-      // because there's no actionable tool to teach.
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: ctx({ memories: [{ content: "stale fact", createdAt: 0 }] }),
-        availableTools: [{ id: "@x/other", name: "other-tool" }],
-      });
-      expect(out).not.toContain("## Memory");
-      expect(out).not.toContain("stale fact");
-    });
-
-    it("Memory: only `note` wired → footer mentions note + scope, not recall_memory or pin", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: memoriesCtx,
-        availableTools: [{ id: "@appstrate/note", name: "note" }],
-      });
-      expect(out).toContain("## Memory");
-      expect(out).toContain("note({ content })");
-      // Scope-default sentence is gated on `hasNote` since it talks about `note`.
-      expect(out).toMatch(/scope.*"shared".*on `note`/);
-      // No recall_memory or pin instructions.
-      expect(out).not.toContain("recall_memory({");
-      expect(out).not.toContain("pin({ key, content })");
-    });
-
-    it("Memory: only `recall_memory` wired → footer only mentions recall_memory", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: memoriesCtx,
-        availableTools: [{ id: "recall_memory", name: "recall_memory" }],
-      });
-      expect(out).toContain("## Memory");
-      expect(out).toContain("recall_memory({");
-      expect(out).not.toContain("note({ content })");
-      expect(out).not.toContain("pin({ key, content })");
-    });
-
-    it("Memory: only `pin` wired → footer only mentions pin", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: memoriesCtx,
-        availableTools: [{ id: "@appstrate/pin", name: "pin" }],
-      });
-      expect(out).toContain("## Memory");
-      expect(out).toContain("pin({ key, content })");
-      expect(out).not.toContain("note({ content })");
-      expect(out).not.toContain("recall_memory({");
-    });
-
-    it("Memory: all three wired → full footer surfaces every instruction", () => {
-      const out = renderPlatformPrompt({
-        template: "T",
-        context: memoriesCtx,
-        availableTools: ALL_AFPS_TOOLS,
-      });
-      expect(out).toContain("note({ content })");
-      expect(out).toContain("recall_memory({");
-      expect(out).toContain("pin({ key, content })");
-    });
-
-    it("Memory: pinned memory list still renders when archive tools are wired", () => {
-      // Issue #368 says: keep the per-memory list rendering unchanged;
-      // only the archive-tool footers are gated.
+  describe("Memory section (#368)", () => {
+    it("renders the data block with pinned memories listed", () => {
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({
           memories: [
-            { content: "memory one", createdAt: 1_700_000_000_000 },
-            { content: "memory two", createdAt: 1_700_000_100_000 },
+            { content: "fact one", createdAt: 1_700_000_000_000 },
+            { content: "fact two", createdAt: 1_700_000_100_000 },
           ],
         }),
-        availableTools: [{ id: "@appstrate/note", name: "note" }],
       });
-      expect(out).toContain("- memory one");
-      expect(out).toContain("- memory two");
+      expect(out).toContain("## Memory");
+      expect(out).toContain("Pinned memories");
+      expect(out).toContain("- fact one");
+      expect(out).toContain("- fact two");
     });
 
-    it("custom tools shadowing reserved names still gate the section (name-based detection)", () => {
-      // Per the issue's design Q3: detection is by reserved name. A
-      // custom tool registering `name: "pin"` enables the pin footer.
-      // This is a known accepted side-effect (AFPS reserves the names).
+    it("omits the section entirely when there are no memories", () => {
+      // Post-#368: the platform prompt is data-driven. With no memories
+      // and no fallback prose, the `## Memory` header is suppressed —
+      // the LLM still discovers the archive via the runtime-injected
+      // `recall_memory` tool docs (surfaced in `### Tools` + toolDocs).
+      const out = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(out).not.toContain("## Memory");
+      expect(out).not.toContain("No memories are currently pinned");
+    });
+
+    it("does NOT mention specific tool names — archive APIs belong to TOOL.md", () => {
+      // Post-#368 contract: data block only. Instructions for `note`,
+      // `recall_memory`, `pin` come from each tool's TOOL.md / runtime-
+      // injected doc when the tool is wired.
       const out = renderPlatformPrompt({
         template: "T",
-        context: ctx({ checkpoint }),
-        availableTools: [{ id: "@custom/anything", name: "pin", description: "custom pin impl" }],
+        context: ctx({
+          memories: [{ content: "fact", createdAt: 1_700_000_000_000 }],
+        }),
       });
-      expect(out).toContain('pin({ key: "checkpoint"');
+      const sectionStart = out.indexOf("## Memory");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("note({ content })");
+      expect(slice).not.toContain("recall_memory({");
+      expect(slice).not.toContain("pin({ key");
+    });
+
+    it("renders memories regardless of which tools are wired — data is data", () => {
+      // The v1→v2 dep-removal scenario: agent v1 shipped `@appstrate/note`
+      // and accumulated memories; v2 dropped the dep. The platform
+      // still surfaces the carry-over memory list (it's informative
+      // context); the absence of a `note` TOOL.md in the prompt is
+      // what tells the LLM it cannot write new ones.
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          memories: [{ content: "carry-over fact", createdAt: 1_700_000_000_000 }],
+        }),
+        availableTools: [],
+      });
+      expect(out).toContain("## Memory");
+      expect(out).toContain("- carry-over fact");
+    });
+
+    it("forwards toolDocs verbatim — the LLM learns archive APIs from TOOL.md", () => {
+      // Confirms the TOOL.md flow that replaces the old hardcoded
+      // footer: a runtime-injected `recall_memory` doc (or any bundle
+      // TOOL.md) flows in via `toolDocs` and reaches the LLM.
+      const recallDoc =
+        "## recall_memory\n\nUse `recall_memory({ q?, limit? })` to search the archive.";
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ memories: [{ content: "x", createdAt: 1 }] }),
+        availableTools: [
+          { id: "recall_memory", name: "recall_memory", description: "Search archive." },
+        ],
+        toolDocs: [{ id: "recall_memory", content: recallDoc }],
+      });
+      expect(out).toContain(recallDoc);
     });
   });
+
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
     // Before the run_history tool migration, a `## Run History` section

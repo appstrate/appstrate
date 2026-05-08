@@ -26,6 +26,8 @@ import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transpor
 import {
   buildProviderCallExtensionFactory,
   readProviderRefs,
+  RECALL_MEMORY_INJECTED_TOOL,
+  RUN_HISTORY_INJECTED_TOOL,
   type ProviderEventEmitter,
 } from "@appstrate/runner-pi";
 import { McpProviderResolver } from "./provider-resolver.ts";
@@ -73,8 +75,12 @@ function callToolResultToPi(result: CallToolResult): PiToolResult {
 }
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
-const RUN_HISTORY_TOOL_NAME = "run_history";
-const RECALL_MEMORY_TOOL_NAME = "recall_memory";
+// Pull the canonical names + descriptions from the single-source-of-truth
+// runtime-injected tool descriptors so the Pi-tool registration here,
+// the platform prompt's `### Tools` listing, and the in-prompt usage doc
+// stay in lockstep automatically.
+const RUN_HISTORY_TOOL_NAME = RUN_HISTORY_INJECTED_TOOL.name;
+const RECALL_MEMORY_TOOL_NAME = RECALL_MEMORY_INJECTED_TOOL.name;
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -161,8 +167,7 @@ function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): Extensio
     pi.registerTool({
       name: RUN_HISTORY_TOOL_NAME,
       label: RUN_HISTORY_TOOL_NAME,
-      description:
-        "Fetch metadata and optionally checkpoint/result of recent past runs (current run excluded).",
+      description: RUN_HISTORY_INJECTED_TOOL.description,
       parameters: Type.Unsafe<Record<string, unknown>>({
         type: "object",
         additionalProperties: false,
@@ -206,10 +211,7 @@ function makeRecallMemoryExtension(opts: BuildMcpDirectFactoriesOptions): Extens
     pi.registerTool({
       name: RECALL_MEMORY_TOOL_NAME,
       label: RECALL_MEMORY_TOOL_NAME,
-      description:
-        "Search the agent's archive memories — durable facts and learnings from past runs that " +
-        "are NOT in the system prompt by default. Pass `q` to filter by case-insensitive " +
-        "substring; omit it for the most recent archive memories.",
+      description: RECALL_MEMORY_INJECTED_TOOL.description,
       parameters: Type.Unsafe<Record<string, unknown>>({
         type: "object",
         additionalProperties: false,
