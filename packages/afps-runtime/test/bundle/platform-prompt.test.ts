@@ -189,6 +189,28 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./documents/report.pdf`");
   });
 
+  it("mentions `./documents/` in the Workspace bullet when uploads are wired", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      uploads: [{ name: "r.pdf", path: "./documents/r.pdf", size: 100, type: "application/pdf" }],
+    });
+    // Workspace bullet should reference ./documents/ exactly when uploads exist
+    // — paired with the `## Documents` section gated on the same condition.
+    expect(out).toContain("**Workspace**");
+    expect(out).toContain("./documents/");
+    expect(out).toContain("`## Documents` section");
+  });
+
+  it("omits the `./documents/` mention from the Workspace bullet when no uploads are wired", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    // Workspace bullet itself must still render — only the uploads sentence is gated.
+    expect(out).toContain("**Workspace**");
+    expect(out).toContain("filesystem for temporary processing");
+    expect(out).not.toContain("./documents/");
+    expect(out).not.toContain("## Documents");
+  });
+
   it("renders the Checkpoint section when context.checkpoint is set", () => {
     const out = renderPlatformPrompt({
       template: "T",
@@ -199,6 +221,95 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain('"cursor": "abc"');
     expect(out).toContain('"count": 12');
     expect(out).toContain('pin({ key: "checkpoint"');
+  });
+
+  describe("Pinned Slots section", () => {
+    it("omits the section when pinnedSlots is undefined", () => {
+      const out = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(out).not.toContain("## Pinned Slots");
+    });
+
+    it("omits the section when pinnedSlots is an empty object", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ pinnedSlots: {} }),
+      });
+      expect(out).not.toContain("## Pinned Slots");
+    });
+
+    it("renders the section with sorted keys for deterministic output", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          pinnedSlots: {
+            zeta: "last alphabetically",
+            alpha: "first alphabetically",
+            mu: "middle",
+          },
+        }),
+      });
+      expect(out).toContain("## Pinned Slots");
+      const alphaIdx = out.indexOf("### alpha");
+      const muIdx = out.indexOf("### mu");
+      const zetaIdx = out.indexOf("### zeta");
+      expect(alphaIdx).toBeGreaterThan(-1);
+      expect(muIdx).toBeGreaterThan(alphaIdx);
+      expect(zetaIdx).toBeGreaterThan(muIdx);
+    });
+
+    it("renders string values plain (no JSON fence)", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ pinnedSlots: { persona: "You are a helpful assistant." } }),
+      });
+      expect(out).toContain("### persona");
+      expect(out).toContain("You are a helpful assistant.");
+      // The string slot itself must not be wrapped in a json fence.
+      const slotIdx = out.indexOf("### persona");
+      const slotEnd = out.indexOf("###", slotIdx + 1);
+      const slotBlock = out.slice(slotIdx, slotEnd > -1 ? slotEnd : undefined);
+      expect(slotBlock).not.toContain("```json");
+    });
+
+    it("renders structured values inside a fenced JSON block", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          pinnedSlots: {
+            goals: { primary: "ship", secondary: ["test", "doc"] },
+          },
+        }),
+      });
+      expect(out).toContain("### goals");
+      expect(out).toContain("```json");
+      expect(out).toContain('"primary": "ship"');
+      expect(out).toContain('"secondary"');
+    });
+
+    it("includes a footer telling the agent how to update slots and where checkpoint goes", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ pinnedSlots: { persona: "anything" } }),
+      });
+      expect(out).toContain('pin({ key: "<your-key>"');
+      // Must redirect agents to the dedicated checkpoint key for carry-over,
+      // so the two surfaces don't get conflated.
+      expect(out).toContain('key: "checkpoint"');
+    });
+
+    it("renders after the Checkpoint section when both are present", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          checkpoint: { cursor: "x" },
+          pinnedSlots: { persona: "you are X" },
+        }),
+      });
+      const checkpointIdx = out.indexOf("## Checkpoint");
+      const pinnedIdx = out.indexOf("## Pinned Slots");
+      expect(checkpointIdx).toBeGreaterThan(-1);
+      expect(pinnedIdx).toBeGreaterThan(checkpointIdx);
+    });
   });
 
   it("renders the Memory section with pinned memories listed", () => {

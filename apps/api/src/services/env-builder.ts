@@ -166,7 +166,10 @@ export async function buildRunContext(params: {
   // Collapse pinned slot rows to a key→content map. We exclude `checkpoint`
   // (already surfaced as `context.checkpoint` and rendered as `## Checkpoint`)
   // and rely on the desc-by-updatedAt order from `listPinnedSlots` for
-  // last-write-wins across actor scopes (shared > member-specific).
+  // last-write-wins: when both an actor-specific and a shared row exist for
+  // the same key, the most recently written one is kept regardless of scope.
+  // Visibility itself is already enforced upstream by `buildVisibilityFilter`
+  // (the caller's scope determines which rows are eligible).
   const pinnedSlots: Record<string, unknown> = {};
   for (const row of pinnedSlotRows) {
     if (row.key === CHECKPOINT_KEY) continue;
