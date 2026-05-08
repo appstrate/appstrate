@@ -149,6 +149,12 @@ export class McpProviderResolver implements ProviderResolver {
     };
     if (Object.keys(headers).length > 0) args.headers = headers;
     if (mcpBody !== undefined) args.body = mcpBody;
+    // Forward the substituteBody flag so the sidecar can perform
+    // `{{credential}}` placeholder substitution on the buffered text
+    // body before sending upstream. Without this propagation the agent's
+    // declared substituteBody is silently dropped at the resolver and
+    // upstream receives literal `{{email}}`/`{{password}}` strings.
+    if (req.substituteBody) args.substituteBody = true;
     return args;
   }
 

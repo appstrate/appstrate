@@ -375,6 +375,84 @@ describe("McpProviderResolver — body forwarding", () => {
     }
   });
 
+  // Regression: the agent-side resolver must propagate `substituteBody`
+  // into the MCP `provider_call` arguments. Without this, the sidecar
+  // never sees the opt-in flag and forwards `{{credential}}` placeholders
+  // to upstream verbatim, breaking every transparent username/password
+  // login flow documented in PROVIDER.md (Saneki, Amisgest, OrgaBusiness…).
+  it("forwards substituteBody=true into the MCP arguments", async () => {
+    const { pair, mcp, captured } = await makeServer({});
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      await tool!.execute(
+        {
+          method: "POST",
+          target: "https://api.example.com/login",
+          body: '{"login":"{{email}}","password":"{{password}}"}',
+          substituteBody: true,
+        },
+        ctxBase(workspace),
+      );
+      expect(captured.arguments?.substituteBody).toBe(true);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("omits substituteBody when not set (default off)", async () => {
+    const { pair, mcp, captured } = await makeServer({});
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      await tool!.execute(
+        {
+          method: "POST",
+          target: "https://api.example.com/x",
+          body: "no-op",
+        },
+        ctxBase(workspace),
+      );
+      // Absent rather than `false` — the sidecar defaults to off, so we
+      // keep the wire payload minimal when the agent did not opt in.
+      expect(captured.arguments).not.toHaveProperty("substituteBody");
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("omits substituteBody when explicitly false (no wire noise)", async () => {
+    const { pair, mcp, captured } = await makeServer({});
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      await tool!.execute(
+        {
+          method: "POST",
+          target: "https://api.example.com/x",
+          body: "no-op",
+          substituteBody: false,
+        },
+        ctxBase(workspace),
+      );
+      expect(captured.arguments).not.toHaveProperty("substituteBody");
+    } finally {
+      await pair.close();
+    }
+  });
+
   it("rejects { fromFile } resolving outside the workspace (path traversal)", async () => {
     const { pair, mcp, captured } = await makeServer({});
     try {
