@@ -27,9 +27,16 @@ import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
 export const defaultInlineLimit = 256 * 1024;
 
 /**
- * Hard upper bound on `responseMode.maxInlineBytes`. Mirrors
- * `ABSOLUTE_MAX_RESPONSE_SIZE` in `runtime-pi/sidecar/helpers.ts`. Any
- * agent-supplied value above this is silently capped.
+ * Hard upper bound on `responseMode.maxInlineBytes` — the agent-supplied
+ * inline-bytes budget that controls how much of an upstream response is
+ * returned inline (vs. spilled to a file or blob). 1 MB is deliberately
+ * smaller than the sidecar's `ABSOLUTE_MAX_RESPONSE_SIZE` (32 MB, used as
+ * the upstream-buffer ceiling before spillover): inlining a 32 MB blob into
+ * the agent's tool result would poison its context regardless of whether
+ * the sidecar can buffer it. The two constants thus serve distinct roles
+ * — schema cap for inline payloads vs. transport buffer ceiling — and
+ * intentionally differ. Any agent-supplied value above this is silently
+ * capped.
  */
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
 

@@ -24,8 +24,8 @@ describe("constants", () => {
     expect(MAX_RESPONSE_SIZE).toBe(256 * 1024);
   });
 
-  it("ABSOLUTE_MAX_RESPONSE_SIZE is 1_000_000", () => {
-    expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(1_000_000);
+  it("ABSOLUTE_MAX_RESPONSE_SIZE is 32 MB", () => {
+    expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(32 * 1024 * 1024);
   });
 
   it("OUTBOUND_TIMEOUT_MS is 30_000", () => {

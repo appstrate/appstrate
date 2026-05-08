@@ -137,6 +137,97 @@ describe("POST /mcp — provider_call resource spillover", () => {
     expect(result.content[0]!.mimeType).toContain("json");
   });
 
+  it("spills 500 KB text bodies cleanly (no [truncated] marker leaking into the JSON)", async () => {
+    // Regression test: previously a body in [256 KB, 1 MB] was capped at
+    // MAX_RESPONSE_SIZE before the spillover branch decided to spill, so
+    // the stored blob was truncated and carried the `[truncated: ...]`
+    // marker that polluted downstream JSON parsing.
+    const big = JSON.stringify({ data: "x".repeat(500 * 1024) }); // ~500 KB > 256 KB
+    const fetchFn = mock(
+      async () =>
+        new Response(big, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const callRes = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/medium.json",
+        },
+      },
+    });
+    const callResult = callRes.json.result as {
+      content: Array<{ type: string; uri?: string }>;
+    };
+    expect(callResult.content[0]!.type).toBe("resource_link");
+    const uri = callResult.content[0]!.uri!;
+
+    // Read the spilled blob — content must round-trip byte-exact, with
+    // no `[truncated]` marker appended.
+    const readRes = await rpc(app, { method: "resources/read", params: { uri } });
+    const readResult = readRes.json.result as {
+      contents: Array<{ text?: string }>;
+    };
+    expect(readResult.contents[0]!.text).toBe(big);
+    expect(readResult.contents[0]!.text).not.toContain("[truncated");
+  });
+
+  it("spills 5 MB binary payloads instead of refusing them", async () => {
+    // Regression test for the binary path: previously the read was capped
+    // at MAX_RESPONSE_SIZE (256 KB) before the spillover branch, so any
+    // binary >256 KB was refused with a tool-level error even when a blob
+    // store was configured.
+    const pdfBytes = new Uint8Array(5 * 1024 * 1024); // 5 MB
+    pdfBytes[0] = 0x25; // %
+    pdfBytes[1] = 0x50; // P
+    pdfBytes[2] = 0x44; // D
+    pdfBytes[3] = 0x46; // F
+    pdfBytes[pdfBytes.length - 1] = 0xff;
+    const fetchFn = mock(
+      async () =>
+        new Response(pdfBytes, {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const callRes = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/large.pdf",
+        },
+      },
+    });
+    const callResult = callRes.json.result as {
+      content: Array<{ type: string; uri?: string; mimeType?: string }>;
+      isError?: boolean;
+    };
+    expect(callResult.isError).toBeUndefined();
+    expect(callResult.content[0]!.type).toBe("resource_link");
+    expect(callResult.content[0]!.mimeType).toBe("application/pdf");
+
+    // Read the blob and verify the full 5 MB is retained byte-exact.
+    const readRes = await rpc(app, {
+      method: "resources/read",
+      params: { uri: callResult.content[0]!.uri! },
+    });
+    const readResult = readRes.json.result as {
+      contents: Array<{ blob?: string }>;
+    };
+    const decoded = Uint8Array.from(atob(readResult.contents[0]!.blob!), (c) => c.charCodeAt(0));
+    expect(decoded.byteLength).toBe(pdfBytes.byteLength);
+    expect(decoded[0]).toBe(0x25);
+    expect(decoded[decoded.length - 1]).toBe(0xff);
+  });
+
   it("inlines small text responses as before (no behaviour change for typical traffic)", async () => {
     const fetchFn = mock(
       async () =>

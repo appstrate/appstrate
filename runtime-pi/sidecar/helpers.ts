@@ -21,7 +21,7 @@ export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0
 // to the run-scoped BlobStore and surface as MCP `resource_link`
 // blocks; the absolute ceiling is `ABSOLUTE_MAX_RESPONSE_SIZE`.
 export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
-export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000; // 1MB — hard cap, even when X-Max-Response-Size is larger
+export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — hard cap when blob store is present (covers PDFs/images/archives), aligned with MAX_MCP_ENVELOPE_SIZE × 2
 export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
