@@ -81,6 +81,20 @@ LABEL org.opencontainers.image.title="Appstrate Pi" \
 #   - ca-certificates  TLS trust store for outbound LLM / provider calls
 #   - python3, py3-pip tool compatibility for Python-based agent tools
 #
+# Python isolation via virtualenv (/opt/agent-venv on PATH). Solves three
+# overlapping problems in one move:
+#   1. PEP 370 — `pip install --user X; import X` in the same process used
+#      to fail because Alpine doesn't pre-create ~/.local/lib/pythonX.Y/
+#      site-packages, so site.py wouldn't add it to sys.path at boot.
+#   2. PEP 668 — modern Alpine flags the system Python as
+#      "externally-managed", so plain `pip install` against system Python
+#      is rejected without --break-system-packages.
+#   3. Python version drift — pre-creating .local/lib/python3.12 hardcoded
+#      a version that silently breaks if Alpine bumps Python.
+# A venv sidesteps all three: it's never externally-managed, sys.path is
+# rooted in the venv's own site-packages (always present), and the path
+# self-aligns with whatever python3 ships in the base image.
+#
 # Create the unprivileged `pi` user in the same layer so subsequent
 # `COPY --chown=pi:pi` resolves without a separate chown pass.
 RUN apk add --no-cache \
@@ -92,8 +106,16 @@ RUN apk add --no-cache \
         py3-pip \
  && addgroup -g 1001 pi \
  && adduser  -D -u 1001 -G pi -s /bin/bash pi \
- && mkdir -p /home/pi/.local/lib/python3.12/site-packages \
- && chown -R pi:pi /home/pi/.local
+ && python3 -m venv /opt/agent-venv \
+ && /opt/agent-venv/bin/pip install --no-cache-dir --upgrade pip \
+ && chown -R pi:pi /opt/agent-venv
+
+# Put the venv first on PATH so `python3` and `pip` resolve to the venv
+# binaries from any process the agent spawns. VIRTUAL_ENV is the
+# canonical signal consulted by tools (pip, poetry, uv) to confirm
+# they're operating inside an active environment.
+ENV VIRTUAL_ENV=/opt/agent-venv \
+    PATH="/opt/agent-venv/bin:${PATH}"
 
 WORKDIR /runtime
 
