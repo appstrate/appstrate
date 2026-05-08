@@ -290,16 +290,26 @@ export async function* streamLogs(
 }
 
 export async function waitForExit(containerId: string): Promise<number> {
-  const res = await dockerFetch(
-    `/containers/${containerId}/wait`,
-    { method: "POST" },
-    false, // Long-running — blocks until container exits
-  );
-
-  await assertDockerOk(res, "wait for container");
-
-  const data = (await res.json()) as { StatusCode: number };
-  return data.StatusCode;
+  // PATCH (local) — bypass Docker's POST /wait which is blocking long-running.
+  // Bun's fetch with unix: option has an internal headers timeout (~5 min) that
+  // can't be disabled via signal:undefined or globalThis.fetch replacement.
+  // Polling /containers/{id}/json every 2s keeps each fetch short (< 30s
+  // dockerFetch timeout) and avoids the wall entirely. The CPU cost of
+  // polling is negligible compared to the cost of agent runs failing at 5 min.
+  while (true) {
+    const res = await dockerFetch(`/containers/${containerId}/json`);
+    if (!res.ok) {
+      // Container removed mid-poll → treat as exit code 137 (SIGKILL).
+      if (res.status === 404) return 137;
+      await assertDockerOk(res, "inspect container during waitForExit");
+    }
+    const data = (await res.json()) as { State?: { Status?: string; ExitCode?: number } };
+    const status = data.State?.Status;
+    if (status === "exited" || status === "dead") {
+      return data.State?.ExitCode ?? 0;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 }
 
 export async function removeContainer(containerId: string): Promise<void> {
