@@ -125,6 +125,12 @@ export function FileWidget(props: WidgetProps) {
             .filter(Boolean);
           const ext = f.name.includes(".") ? `.${f.name.split(".").pop()!.toLowerCase()}` : "";
           const mimeMatch = allowed.some((a) => {
+            // Accept-all wildcard ("*/*") is the HTML standard for "any file".
+            // Without this branch, the validator falls through to f.type === "*/*"
+            // which never matches a real MIME, and every file is rejected with
+            // "Extension not allowed (accepted: */*)" — exactly the opposite of
+            // the intent. Cf BUGS-EVO §1.1.
+            if (a === "*/*") return true;
             if (a.startsWith(".")) return a === ext;
             if (a.endsWith("/*")) return f.type.startsWith(a.slice(0, -1));
             return f.type === a;
