@@ -4,7 +4,9 @@ import {
   eq,
   and,
   ne,
+  or,
   desc,
+  isNull,
   isNotNull,
   inArray,
   count,
@@ -681,9 +683,18 @@ export async function listGlobalRuns(
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
 
-  // Kind filter via JOINed `packages.ephemeral`.
-  if (kind === "inline") conditions.push(eq(packages.ephemeral, true));
-  else if (kind === "package") conditions.push(eq(packages.ephemeral, false));
+  // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs
+  // can outlive their source package (`runs.package_id ON DELETE SET NULL`),
+  // in which case the LEFT JOIN produces a NULL `packages.ephemeral`. We
+  // treat orphaned runs as `kind=package` (they were never inline shadows
+  // — inline shadows live in `@inline/*` and persist after their run, so a
+  // NULL `packages.ephemeral` here means the source row was a real catalog
+  // package that has since been deleted).
+  if (kind === "inline") {
+    conditions.push(eq(packages.ephemeral, true));
+  } else if (kind === "package") {
+    conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
+  }
 
   const filter = and(...conditions)!;
 

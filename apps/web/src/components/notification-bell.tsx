@@ -26,7 +26,7 @@ function NotificationContent({
   markAllRead,
 }: {
   unread: number;
-  unreadRuns: Pick<Run, "id" | "packageId" | "status" | "startedAt">[];
+  unreadRuns: Pick<Run, "id" | "packageId" | "agentName" | "status" | "startedAt">[];
   agentNameMap: Map<string, string>;
   onItemClick: (runId: string) => void;
   onClose: () => void;
@@ -68,27 +68,36 @@ function NotificationContent({
         </div>
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
-          {unreadRuns.map((run) => (
-            <Link
-              key={run.id}
-              to={`/agents/${run.packageId}/runs/${run.id}`}
-              onClick={() => onItemClick(run.id)}
-              className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
-            >
-              <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div className="mb-0.5 flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {agentNameMap.get(run.packageId) ?? run.packageId}
-                  </span>
-                  <Badge status={run.status} />
+          {unreadRuns.map((run) => {
+            const displayName = run.packageId
+              ? (agentNameMap.get(run.packageId) ?? run.agentName ?? run.packageId)
+              : (run.agentName ?? t("runs.deletedAgent", { ns: "agents" }));
+            // Source agent gone → no link target. Render as a non-interactive
+            // row so users still see the notification but can't click into a
+            // 404. Marking it read still flows through `onItemClick`.
+            const linkTarget = run.packageId
+              ? `/agents/${run.packageId}/runs/${run.id}`
+              : `/runs/${run.id}`;
+            return (
+              <Link
+                key={run.id}
+                to={linkTarget}
+                onClick={() => onItemClick(run.id)}
+                className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
+              >
+                <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{displayName}</span>
+                    <Badge status={run.status} />
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    {run.startedAt ? formatDateField(run.startedAt) : ""}
+                  </p>
                 </div>
-                <p className="text-muted-foreground text-xs">
-                  {run.startedAt ? formatDateField(run.startedAt) : ""}
-                </p>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
 
