@@ -10,17 +10,13 @@ const defaultEmit: EmitFn = () => {};
 /**
  * Wrap an extension factory to:
  *   1. Convert thrown errors into MCP error results (so a buggy tool doesn't crash the session).
- *   2. Inject the Appstrate runtime context as the 4th argument when wired.
- *
- * Pi passes 5 args to execute (`toolCallId, params, signal, onUpdate, piCtx`); we forward
- * only the first three plus the optional Appstrate ctx. Tools using the documented
- * 3-arg signature ignore the extra argument — fully back-compatible.
+ *   2. Inject the Appstrate runtime context as the 4th argument to `execute`.
  */
 export function wrapExtensionFactory(
   factory: ExtensionFactory,
   extensionId: string,
+  appstrateCtxProvider: AppstrateCtxProvider,
   emitFn: EmitFn = defaultEmit,
-  appstrateCtxProvider?: AppstrateCtxProvider,
 ): ExtensionFactory {
   return (pi) => {
     const wrappedPi = {
@@ -39,8 +35,7 @@ export function wrapExtensionFactory(
           signal: AbortSignal | undefined,
         ) => {
           try {
-            const appstrateCtx = appstrateCtxProvider?.() ?? undefined;
-            return await originalExecute(toolCallId, params, signal, appstrateCtx);
+            return await originalExecute(toolCallId, params, signal, appstrateCtxProvider());
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             emitFn({

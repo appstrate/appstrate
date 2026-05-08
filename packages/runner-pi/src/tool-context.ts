@@ -44,4 +44,4 @@ export interface AppstrateToolCtx {
 }
 
 /** Late-binding accessor consumed by the runtime wrapper layer. */
-export type AppstrateCtxProvider = () => AppstrateToolCtx | null;
+export type AppstrateCtxProvider = () => AppstrateToolCtx;

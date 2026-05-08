@@ -57,7 +57,11 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
-import { readProviderRefs, type AppstrateToolCtx } from "@appstrate/runner-pi";
+import {
+  readProviderRefs,
+  type AppstrateToolCtx,
+  type AppstrateCtxProvider,
+} from "@appstrate/runner-pi";
 import { attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
@@ -212,13 +216,14 @@ async function initGitWorkspace(): Promise<void> {
 
 const extensionFactories: ExtensionFactory[] = [];
 
-// Late-bound runtime context for custom tools. Populated in Phase C once the
-// MCP client is up; consumed by `wrapExtensionFactory` at every `execute`
-// invocation to expose `ctx.providerCall(...)` as a 4th argument. Stays
-// `null` if the sidecar isn't available, in which case tools fall back to
-// the documented 3-arg signature.
-let appstrateRuntimeCtx: AppstrateToolCtx | null = null;
-const appstrateCtxProvider = () => appstrateRuntimeCtx;
+// Runtime context exposed to custom tools as the 4th `execute` argument.
+// Assigned in Phase C once the MCP client is connected; the closure provider
+// is read at every `execute` invocation, so factories registered before
+// Phase C still see the wired ctx by the time a tool actually runs.
+// If MCP wiring fails, the container exits before any tool can execute, so
+// the definite-assignment assertion is safe.
+let appstrateRuntimeCtx!: AppstrateToolCtx;
+const appstrateCtxProvider: AppstrateCtxProvider = () => appstrateRuntimeCtx;
 const loadedRuntimeIds = new Set<string>();
 
 /**
@@ -245,7 +250,7 @@ async function loadExtensionsFromDir(dir: string, label: string) {
           return;
         }
         extensionFactories.push(
-          wrapExtensionFactory(factory as ExtensionFactory, id, undefined, appstrateCtxProvider),
+          wrapExtensionFactory(factory as ExtensionFactory, id, appstrateCtxProvider),
         );
         loadedRuntimeIds.add(id);
       }),
@@ -275,7 +280,7 @@ if (bundle) {
     const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: WORKSPACE,
       extensionWrapper: (factory, id) =>
-        wrapExtensionFactory(factory, id, undefined, appstrateCtxProvider),
+        wrapExtensionFactory(factory, id, appstrateCtxProvider),
       onError: (message, err) => {
         void emitError(
           err ? `${message}: ${err instanceof Error ? err.message : String(err)}` : message,
@@ -308,83 +313,84 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
+if (!sidecarUrl) {
+  await emitError("SIDECAR_URL is required: the agent container cannot run without a sidecar.");
+  process.exit(1);
+}
+
 // Empty stub forwarded to `runner.run({ providerResolver })` to satisfy
 // the AFPS spec contract — PiRunner does not invoke the resolver
 // (provider tools are pre-built MCP-backed factories above), but the
 // `RunOptions.providerResolver` field is REQUIRED on the AFPS interface.
 const providerResolver: ProviderResolver = { resolve: async () => [] };
 
-let mcpClient: AppstrateMcpClient | null = null;
-
-if (sidecarUrl) {
-  try {
-    mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-      ...(env.runToken ? { bearerToken: env.runToken } : {}),
-      clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
-    });
-  } catch (err) {
-    await emitError(
-      `Failed to connect MCP client to sidecar: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    mcpClient = null;
-  }
+let mcpClient: AppstrateMcpClient;
+try {
+  mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+    ...(env.runToken ? { bearerToken: env.runToken } : {}),
+    clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+  });
+} catch (err) {
+  await emitError(
+    `Failed to connect MCP client to sidecar: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
 }
 
-if (mcpClient) {
-  try {
-    const effectiveBundle = bundle ?? buildInContainerBundle(env.agentPrompt);
+try {
+  const effectiveBundle = bundle ?? buildInContainerBundle(env.agentPrompt);
 
-    // `buildMcpDirectFactories` registers `provider_call` (only when
-    // the bundle declares providers — empty enum is rejected by the
-    // SDK), `run_history`, and `recall_memory` in one shot.
-    const factories = await buildMcpDirectFactories({
-      bundle: effectiveBundle,
-      mcp: mcpClient,
-      runId: AGENT_RUN_ID,
-      // The workspace is the path-safety root for `provider_call`'s
-      // `{ fromFile }` / `{ multipart }` body resolution. The container
-      // injects bundle files into this directory at boot, and the agent
-      // can only write inside it — `resolveSafePath` refuses anything
-      // else.
-      workspace: WORKSPACE,
-      emitProvider: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    });
-    extensionFactories.push(...factories);
+  // `buildMcpDirectFactories` registers `provider_call` (only when
+  // the bundle declares providers — empty enum is rejected by the
+  // SDK), `run_history`, and `recall_memory` in one shot.
+  const factories = await buildMcpDirectFactories({
+    bundle: effectiveBundle,
+    mcp: mcpClient,
+    runId: AGENT_RUN_ID,
+    // The workspace is the path-safety root for `provider_call`'s
+    // `{ fromFile }` / `{ multipart }` body resolution. The container
+    // injects bundle files into this directory at boot, and the agent
+    // can only write inside it — `resolveSafePath` refuses anything
+    // else.
+    workspace: WORKSPACE,
+    emitProvider: (event) => {
+      void bridgedSink.handle(event as RunEvent);
+    },
+    emit: (event) => {
+      void bridgedSink.handle(event as RunEvent);
+    },
+  });
+  extensionFactories.push(...factories);
 
-    // Wire the tool-side credentialed-call surface (4th `execute` arg). Same
-    // MCP path as the LLM-side `provider_call` — ADR-003 holds: credential
-    // is injected by the sidecar, never reaches the agent container.
-    const allowedProviderIds = new Set(readProviderRefs(effectiveBundle).map((r) => r.name));
-    const mcp = mcpClient;
-    appstrateRuntimeCtx = {
-      providerCall: async (providerId, args) => {
-        if (!allowedProviderIds.has(providerId)) {
-          throw new Error(
-            `Tool tried to call provider '${providerId}' which is not declared in the agent bundle's dependencies.providers[]. ` +
-              `Allowed: ${[...allowedProviderIds].join(", ") || "(none)"}`,
-          );
-        }
-        const result = await mcp.callTool({
-          name: "provider_call",
-          arguments: { providerId, ...args },
-        });
-        return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
-      },
-      readResource: async (uri) => {
-        const result = await mcp.readResource({ uri });
-        return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
-      },
-    };
-  } catch (err) {
-    await emitError(
-      `Failed to wire MCP-backed tools: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  // Wire the tool-side credentialed-call surface (4th `execute` arg). Same
+  // MCP path as the LLM-side `provider_call` — ADR-003 holds: credential
+  // is injected by the sidecar, never reaches the agent container.
+  const allowedProviderIds = new Set(readProviderRefs(effectiveBundle).map((r) => r.name));
+  const mcp = mcpClient;
+  appstrateRuntimeCtx = {
+    providerCall: async (providerId, args) => {
+      if (!allowedProviderIds.has(providerId)) {
+        throw new Error(
+          `Tool tried to call provider '${providerId}' which is not declared in the agent bundle's dependencies.providers[]. ` +
+            `Allowed: ${[...allowedProviderIds].join(", ") || "(none)"}`,
+        );
+      }
+      const result = await mcp.callTool({
+        name: "provider_call",
+        arguments: { providerId, ...args },
+      });
+      return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
+    },
+    readResource: async (uri) => {
+      const result = await mcp.readResource({ uri });
+      return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
+    },
+  };
+} catch (err) {
+  await emitError(
+    `Failed to wire MCP-backed tools: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
 }
 
 // --- 2d. Zero-knowledge enforcement ---
@@ -504,11 +510,11 @@ try {
     eventSink: bridgedSink,
   });
   heartbeat.stop();
-  if (mcpClient) await mcpClient.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
   process.exit(0);
 } catch (err) {
   heartbeat.stop();
-  if (mcpClient) await mcpClient.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
   const message = err instanceof Error ? err.message : String(err);
   await emitError(message);
   try {
