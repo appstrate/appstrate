@@ -227,6 +227,12 @@ export const providerCallRequestSchema = z.object({
         `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_DISPLAY} (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
         "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
     ),
+  substituteBody: z
+    .boolean()
+    .optional()
+    .describe(
+      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
+    ),
   responseMode: responseModeSchema,
 });
 
