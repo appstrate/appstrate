@@ -84,6 +84,14 @@ export const executionContextSchema = z.object({
   // See AFPS_EXTENSION_ARCHITECTURE.md §3.2 "pure template / impure context".
   memories: z.array(memorySnapshotSchema).optional(),
   checkpoint: z.unknown().optional(),
+  /**
+   * Named pinned slots written via `pin({ key, content })` with any key
+   * other than `"checkpoint"`. Each entry is last-write-wins per `(scope, key)`
+   * after upstream visibility filtering. Surfaced in the prompt's
+   * `## Pinned Slots` section. The `"checkpoint"` slot is intentionally
+   * excluded — it is rendered separately as `## Checkpoint`.
+   */
+  pinnedSlots: z.record(z.string(), z.unknown()).optional(),
   history: z.array(historyEntrySchema).optional(),
 
   /**

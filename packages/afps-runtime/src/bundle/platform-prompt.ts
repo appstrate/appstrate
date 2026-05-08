@@ -147,9 +147,17 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Work efficiently and output your result promptly.",
     );
   }
+  // Workspace bullet — only mention `./documents/` when uploads are actually
+  // wired. Surfacing it unconditionally caused agents with no file fields to
+  // burn tokens listing an empty directory and hypothesising about missing
+  // attachments. The matching `## Documents` section below is also gated on
+  // `opts.uploads`, so the two stay consistent.
+  const hasUploads = (opts.uploads?.length ?? 0) > 0;
   sections.push(
     "- **Workspace**: Your current working directory is the agent workspace. " +
-      "Uploaded documents are available under `./documents/` (relative to cwd). " +
+      (hasUploads
+        ? "Uploaded documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
+        : "") +
       "You may use the filesystem for temporary processing during this run only.\n",
   );
 
@@ -319,6 +327,34 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         'To update the checkpoint for the next run, call `pin({ key: "checkpoint", content: ... })`. ' +
         "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
         'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
+    );
+  }
+
+  // --- Pinned Slots (named, non-checkpoint) ---
+  // Surface pinned slots written via `pin({ key, content })` with any key
+  // other than "checkpoint". Honors the documented contract that custom
+  // keys (e.g. "persona", "goals", or app-specific state slots like
+  // "sync_state", "last_processed") render as additional pinned blocks
+  // visible to the agent on every run.
+  if (context.pinnedSlots && Object.keys(context.pinnedSlots).length > 0) {
+    sections.push("## Pinned Slots\n");
+    sections.push(
+      "Named pinned slots written via `pin({ key, content })` (always visible across runs):\n",
+    );
+    // Sort keys for deterministic output (snapshot-friendly).
+    for (const key of Object.keys(context.pinnedSlots).sort()) {
+      const value = context.pinnedSlots[key];
+      // Plain strings render as-is for readability; structured values get a
+      // fenced JSON block so the agent can parse them unambiguously.
+      if (typeof value === "string") {
+        sections.push(`### ${key}`, value, "");
+      } else {
+        sections.push(`### ${key}`, "```json", JSON.stringify(value, null, 2), "```", "");
+      }
+    }
+    sections.push(
+      'To update a slot for the next run, call `pin({ key: "<your-key>", content: ..., scope: "shared" })`. ' +
+        'Use `key: "checkpoint"` for the carry-over slot rendered as `## Checkpoint` instead.\n',
     );
   }
 
