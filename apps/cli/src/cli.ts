@@ -765,8 +765,14 @@ program
     "--llm-api-key <key>",
     "LLM API key (env mode; default: from env — ANTHROPIC_API_KEY etc.)",
   )
-  .option("--run-id <id>", "Explicit run id (default: generated)")
-  .option("--output <path>", "Write the final RunResult JSON to this path")
+  .option(
+    "--run-id <id>",
+    "Explicit run id (default: generated). In remote mode this is forwarded as the trigger's Idempotency-Key — re-running with the same value replays the original response instead of creating a duplicate run.",
+  )
+  .option(
+    "--output <path>",
+    "Write the final RunResult JSON to this path. Note: in remote mode the `memories` / `pinned` / `logs` fields are emitted as empty defaults — the dashboard remains the source of truth for those surfaces.",
+  )
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",

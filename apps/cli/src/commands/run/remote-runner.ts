@@ -47,6 +47,17 @@ const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"])
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_RECORD_POLL_EVERY_N_TICKS = 4;
+/**
+ * Bound on the in-memory dedup set. The cursor (`?since=lastLogId`) is
+ * the primary defense against re-rendering rows; this set is paranoia
+ * for the rare case where the server returns a row with `id <= lastLogId`
+ * (clock skew on a transactional re-emit, retry duplicating). Capping at
+ * 1024 keeps the runner's memory bounded on hour-long runs while staying
+ * comfortably above any realistic burst the cursor could miss.
+ */
+const DEDUP_WINDOW_SIZE = 1024;
+/** Retry attempts for transient 5xx on the trigger POST + record poll. */
+const TRANSIENT_RETRY_DELAYS_MS = [500, 1_500];
 
 export type TerminalRunStatus = "success" | "failed" | "timeout" | "cancelled";
 export type RunStatus = "pending" | "running" | TerminalRunStatus;
@@ -238,10 +249,13 @@ export async function runRemote(
   // appstrate-event-sink.ts`); we invert that mapping in
   // `runLogToRunEvent()` and re-dispatch through the sink.
   //
-  // JSONL mode delegates entirely to the sink — the runner emits no
-  // bespoke `appstrate.remote.*` envelopes anymore (they were a
-  // pre-parity artefact). That keeps `--json` output identical to local
-  // and unblocks `jq` pipelines that expect canonical events.
+  // For per-event output, JSONL mode delegates entirely to the sink: the
+  // runner emits no bespoke `appstrate.remote.*` envelopes for log rows
+  // anymore (they were a pre-parity artefact), so `jq` pipelines see the
+  // same canonical event stream as local mode. The kickoff
+  // `appstrate.remote.triggered` line emitted just above is the lone
+  // exception — it carries the runId + instance for debugging, has no
+  // local-mode counterpart, and lands before any RunEvents do.
   const consoleSink: EventSink = createConsoleSink({
     json: opts.json,
     verbosity: opts.verbosity ?? "normal",
@@ -279,11 +293,12 @@ export async function runRemote(
   //   activity prevents the previous behaviour where idle runs (waiting
   //   on an LLM) refetched the record every tick.
   //
-  // `seenLogIds` is retained as a defense-in-depth dedup against race
-  //  conditions on the cursor (e.g. server clock skew, retry duplicating a
-  //  row) — under normal conditions `?since=` already returns each row
-  //  exactly once.
-  const seenLogIds = new Set<number>();
+  // `dedup` is a sliding-window safety net against the rare case where
+  // the server returns a row whose id is `<= lastLogId` (transactional
+  // re-emit, retry duplicating). Under normal operation `?since=` already
+  // ensures each row appears exactly once, so the window can stay small —
+  // bounding it keeps memory flat on hour-long runs.
+  const dedup = createBoundedIdSet(DEDUP_WINDOW_SIZE);
   const allLogs: RemoteRunLog[] = [];
   let lastLogId = 0;
   let tick = 0;
@@ -292,8 +307,8 @@ export async function runRemote(
     // Logs first — high-frequency, bounded by the cursor.
     const logs = await fetchLogs(opts, runId, lastLogId, { fetchImpl, requestTimeoutMs });
     for (const log of logs) {
-      if (seenLogIds.has(log.id)) continue;
-      seenLogIds.add(log.id);
+      if (dedup.has(log.id)) continue;
+      dedup.add(log.id);
       allLogs.push(log);
       if (log.id > lastLogId) lastLogId = log.id;
       const event = runLogToRunEvent(log);
@@ -302,10 +317,21 @@ export async function runRemote(
 
     // Record poll runs on a fixed cadence (tick 0, then every N ticks).
     // Independent of `appended` so an idle agent terminates in bounded
-    // time without an unrelated stream of polls.
+    // time without an unrelated stream of polls. Transient failures
+    // (network blip, 5xx) are non-fatal: we warn once and reattempt on
+    // the next cadence — symmetric with `fetchLogs` above. Crashing the
+    // whole runner because a single record refresh hiccupped would lose
+    // the user's already-printed log tail and any in-flight cancellation.
     if (tick % recordPollEveryNTicks === 0) {
-      const record = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
-      if (TERMINAL_STATUSES.has(record.status)) break;
+      try {
+        const record = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
+        if (TERMINAL_STATUSES.has(record.status)) break;
+      } catch (err) {
+        if (!opts.json) {
+          const msg = err instanceof Error ? err.message : String(err);
+          writeStderr(`warn: run record refresh failed (will retry): ${msg}\n`);
+        }
+      }
     }
     tick++;
 
@@ -328,8 +354,8 @@ export async function runRemote(
   const finalRecord = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
   const finalLogs = await fetchLogs(opts, runId, lastLogId, { fetchImpl, requestTimeoutMs });
   for (const log of finalLogs) {
-    if (seenLogIds.has(log.id)) continue;
-    seenLogIds.add(log.id);
+    if (dedup.has(log.id)) continue;
+    dedup.add(log.id);
     allLogs.push(log);
     if (log.id > lastLogId) lastLogId = log.id;
     const event = runLogToRunEvent(log);
@@ -418,11 +444,25 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
   if (opts.idempotencyKey) headers.set("Idempotency-Key", opts.idempotencyKey);
 
-  const res = await timeoutFetch(deps, url.toString(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
+  // Retry on transient 5xx (502/503/504). The Idempotency-Key (set above
+  // when provided) makes the retry safe — a partially-completed first
+  // attempt that landed on the server replays the cached response on the
+  // next try rather than spawning a duplicate run. We don't retry 4xx
+  // (auth, not-found, validation), 408 (request timeout — surface to user),
+  // or network-level errors (DNS / TLS) since those are typically not
+  // transient on a CLI invocation.
+  let res!: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await timeoutFetch(deps, url.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (res.ok) break;
+    const transient = res.status === 502 || res.status === 503 || res.status === 504;
+    if (!transient || attempt >= TRANSIENT_RETRY_DELAYS_MS.length) break;
+    await sleep(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
+  }
 
   if (!res.ok) {
     const detail = await safeReadBody(res);
@@ -708,6 +748,42 @@ function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatu
 // ---------------------------------------------------------------------------
 // Misc
 // ---------------------------------------------------------------------------
+
+/**
+ * Sliding-window id set with a fixed capacity. When the size exceeds the
+ * cap, the oldest-inserted id is evicted. Used as the polling-loop dedup
+ * window — keeps memory bounded on long-running tails without giving up
+ * the defense-in-depth check against an out-of-order log row.
+ */
+function createBoundedIdSet(capacity: number): {
+  has(id: number): boolean;
+  add(id: number): void;
+  size(): number;
+} {
+  const set = new Set<number>();
+  const queue: number[] = [];
+  return {
+    has(id) {
+      return set.has(id);
+    },
+    add(id) {
+      if (set.has(id)) return;
+      set.add(id);
+      queue.push(id);
+      while (queue.length > capacity) {
+        const evicted = queue.shift();
+        if (evicted !== undefined) set.delete(evicted);
+      }
+    },
+    size() {
+      return set.size;
+    },
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

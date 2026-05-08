@@ -948,3 +948,199 @@ describe("runRemote — trigger response shape", () => {
     }
   });
 });
+
+describe("runRemote — trigger retry on transient 5xx", () => {
+  // The trigger POST is the one fetch in the runner that we cannot afford
+  // to lose to a transient backend hiccup — failing it propagates to
+  // `exitWithError` and the user sees an unhelpful "Trigger failed: 503"
+  // when the next attempt would have succeeded. The retry uses fixed
+  // backoffs and is bounded; the Idempotency-Key (when set) makes a retry
+  // semantically equivalent to a single call.
+  it("retries on 503 and succeeds on the second attempt", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": [
+          { status: 503, body: { error: "service unavailable" } },
+          { status: 200, body: { runId: "run_retry_1" } },
+        ],
+        "GET /api/runs/run_retry_1/logs": { status: 200, body: [] },
+        "GET /api/runs/run_retry_1": {
+          status: 200,
+          body: recordSummary({ id: "run_retry_1", status: "success" }),
+        },
+      },
+      calls,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    );
+    expect(outcome.runId).toBe("run_retry_1");
+    expect(outcome.status).toBe("success");
+    // Two trigger POSTs: the 503 and the successful retry.
+    const triggerCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/run"));
+    expect(triggerCalls).toHaveLength(2);
+  });
+
+  it("retries on 502 and 504 too", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": [
+          { status: 502, body: { error: "bad gateway" } },
+          { status: 504, body: { error: "gateway timeout" } },
+          { status: 200, body: { runId: "run_retry_2" } },
+        ],
+        "GET /api/runs/run_retry_2/logs": { status: 200, body: [] },
+        "GET /api/runs/run_retry_2": {
+          status: 200,
+          body: recordSummary({ id: "run_retry_2", status: "success" }),
+        },
+      },
+      calls,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    );
+    expect(outcome.runId).toBe("run_retry_2");
+  });
+
+  it("gives up after the configured retry budget is exhausted", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        // The same 503 response is repeated for every attempt — the
+        // queue with a single entry is replayed indefinitely by the
+        // test harness. The runner caps at 3 total attempts (initial +
+        // 2 retries from TRANSIENT_RETRY_DELAYS_MS).
+        "POST /api/agents/@system/hello-world/run": {
+          status: 503,
+          body: { error: "service unavailable" },
+        },
+      },
+      calls,
+    );
+
+    await expect(
+      runRemote(withCapturedWriters(buildBaseOpts({ fetchImpl })), new AbortController().signal),
+    ).rejects.toMatchObject({ name: "RemoteRunError", status: 503 });
+    const triggerCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/run"));
+    // Initial attempt + 2 retries = 3 total.
+    expect(triggerCalls).toHaveLength(3);
+  });
+
+  it("does NOT retry on 4xx (auth, not-found, validation are not transient)", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 401,
+          body: { detail: "Unauthorized" },
+        },
+      },
+      calls,
+    );
+
+    await expect(
+      runRemote(withCapturedWriters(buildBaseOpts({ fetchImpl })), new AbortController().signal),
+    ).rejects.toMatchObject({ name: "RemoteRunError", status: 401 });
+    // Only a single attempt — 4xx is not retried.
+    const triggerCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/run"));
+    expect(triggerCalls).toHaveLength(1);
+  });
+});
+
+describe("runRemote — record-poll resilience", () => {
+  // A transient 5xx on the run-record refresh used to crash the whole
+  // runner — losing the user's already-printed log tail and any in-flight
+  // cancellation. Symmetric with `fetchLogs`'s soft-fail, the runner now
+  // warns and retries on the next cadence, so a momentary network blip
+  // never aborts an otherwise-successful run.
+  it("ignores a transient 500 on the record poll and reaches terminal on retry", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": { status: 200, body: { runId: "run_rec_5xx" } },
+        "GET /api/runs/run_rec_5xx/logs": { status: 200, body: [] },
+        "GET /api/runs/run_rec_5xx": [
+          // First poll fails — the runner must NOT crash.
+          { status: 500, body: { error: "transient" } },
+          // Subsequent polls succeed and the run terminates normally.
+          { status: 200, body: recordSummary({ id: "run_rec_5xx", status: "success" }) },
+        ],
+      },
+      calls,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(
+        buildBaseOpts({
+          fetchImpl,
+          // Force a record fetch every tick so the test exercises the
+          // retry path within a small number of iterations.
+          recordPollEveryNTicks: 1,
+        }),
+      ),
+      new AbortController().signal,
+    );
+    expect(outcome.status).toBe("success");
+    // The transient failure should have surfaced as a stderr warning so
+    // the user understands why finalization briefly stalled.
+    const stderr = writers.stderr.join("");
+    expect(stderr).toMatch(/run record refresh failed/);
+  });
+
+  it("still propagates a hard failure on the FINAL post-loop record fetch", async () => {
+    // The soft-fail policy applies inside the polling loop only; the
+    // final fetch (after a terminal status was observed) is the runner's
+    // last chance to read authoritative state, so a failure there must
+    // bubble up rather than silently render an incomplete result.
+    const calls: FetchCall[] = [];
+    let recordCallCount = 0;
+    const fetchImpl: typeof fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = (init?.method ?? "GET").toUpperCase();
+      calls.push({ url, method, headers: {}, body: undefined });
+      if (url.endsWith("/run") && method === "POST") {
+        return new Response(JSON.stringify({ runId: "run_final_5xx" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/logs")) {
+        return new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // First record fetch: terminal success → loop exits.
+      // Second record fetch (the post-loop "final" one): hard failure.
+      recordCallCount++;
+      if (recordCallCount === 1) {
+        return new Response(
+          JSON.stringify(recordSummary({ id: "run_final_5xx", status: "success" })),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: "post-loop blew up" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runRemote(
+        withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ name: "RemoteRunError", status: 500 });
+  });
+});
