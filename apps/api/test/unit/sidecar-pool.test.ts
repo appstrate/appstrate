@@ -24,7 +24,7 @@ describe("waitForSidecarHealth", () => {
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).message).toContain("health check failed");
     }
-  }, 30_000); // Long timeout because it retries
+  }, 90_000); // Long timeout because it retries (full budget ~58s of delays + per-attempt fetch timeouts)
 });
 
 describe("getSidecarImage", () => {
