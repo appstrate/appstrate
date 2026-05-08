@@ -21,6 +21,35 @@ interface Attachment {
   size: number;
 }
 
+/**
+ * Tests whether a file matches an HTML `accept` attribute. Mirrors the
+ * MDN-documented matching rules:
+ *   - `*\/*`               → any file (HTML standard accept-any wildcard)
+ *   - `.ext`              → extension match (case-insensitive)
+ *   - `type/*`             → MIME family match (e.g. `image/*`)
+ *   - `type/subtype`       → exact MIME match
+ *
+ * `accept` may be a comma-separated list; the file matches if **any** entry
+ * matches. Empty / whitespace-only entries are ignored.
+ *
+ * Exported for unit tests.
+ */
+export function fileMatchesAccept(file: { name: string; type: string }, accept: string): boolean {
+  const allowed = accept
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.length === 0) return true;
+  const ext = file.name.includes(".") ? `.${file.name.split(".").pop()!.toLowerCase()}` : "";
+  const type = file.type.toLowerCase();
+  return allowed.some((a) => {
+    if (a === "*/*") return true;
+    if (a.startsWith(".")) return a === ext;
+    if (a.endsWith("/*")) return type.startsWith(a.slice(0, -1));
+    return type === a;
+  });
+}
+
 function attachmentsFromValue(value: unknown): Attachment[] {
   const list: Attachment[] = [];
   const raw = Array.isArray(value) ? value : value != null ? [value] : [];
@@ -118,27 +147,9 @@ export function FileWidget(props: WidgetProps) {
         return;
       }
       for (const f of incoming) {
-        if (accept) {
-          const allowed = accept
-            .split(",")
-            .map((e) => e.trim().toLowerCase())
-            .filter(Boolean);
-          const ext = f.name.includes(".") ? `.${f.name.split(".").pop()!.toLowerCase()}` : "";
-          const mimeMatch = allowed.some((a) => {
-            // Accept-all wildcard ("*/*") is the HTML standard for "any file".
-            // Without this branch, the validator falls through to f.type === "*/*"
-            // which never matches a real MIME, and every file is rejected with
-            // "Extension not allowed (accepted: */*)" — exactly the opposite of
-            // the intent. Cf BUGS-EVO §1.1.
-            if (a === "*/*") return true;
-            if (a.startsWith(".")) return a === ext;
-            if (a.endsWith("/*")) return f.type.startsWith(a.slice(0, -1));
-            return f.type === a;
-          });
-          if (!mimeMatch) {
-            setError(labels.extError(f.name, accept));
-            return;
-          }
+        if (accept && !fileMatchesAccept(f, accept)) {
+          setError(labels.extError(f.name, accept));
+          return;
         }
         if (maxSize && f.size > maxSize) {
           setError(labels.sizeError(f.name, formatSize(maxSize)));
