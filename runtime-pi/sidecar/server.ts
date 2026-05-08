@@ -1,27 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Agent, fetch as undiciFetch, setGlobalDispatcher } from "undici";
 import { createApp } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse } from "./helpers.ts";
 import { logger } from "./logger.ts";
-
-// PATCH (local) — undici h2 client has a hardcoded `bodyTimeout = 300_000`
-// (5 min) default that kills LLM streaming for long agentic conversations.
-// The bodyTimeout is the elapsed wall-clock between any TWO chunks of the
-// streamed response — Claude can pause for >5 min between chunks when the
-// agent context is large and the model is processing many tool calls.
-// `setGlobalDispatcher` alone wasn't enough because Bun's native fetch
-// (Zig-based) doesn't honour it; we explicitly replace globalThis.fetch
-// with the undici-backed fetch using a custom agent that disables both
-// timeouts. This is the actual fix that resolves the silent 5-min wall.
-const undiciAgent = new Agent({ bodyTimeout: 0, headersTimeout: 0 });
-setGlobalDispatcher(undiciAgent);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
-  undiciFetch(
-    input as never,
-    { ...(init as never), dispatcher: undiciAgent } as never,
-  )) as typeof fetch;
 
 // Mutable config — can be set via env vars at startup or updated at runtime
 // via POST /configure (used by sidecar pool for pre-warmed containers).
