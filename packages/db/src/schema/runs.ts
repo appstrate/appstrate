@@ -342,8 +342,18 @@ export const llmUsage = pgTable(
     userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
+    // Was: onDelete: "set null". Switched to cascade to resolve a schema-level
+    // contradiction with the `llm_usage_runner_has_run_id` check constraint
+    // below: that check forbids NULL run_id on rows where source='runner', but
+    // the SET NULL cascade tries to NULL exactly that column when a run is
+    // deleted. Net effect was that any DELETE /api/packages/agents/{scope}/{name}
+    // on a package whose runs had emitted runner-source llm_usage rows threw a
+    // CHECK violation, surfaced as a generic 500 with no detail (cf BUGS-EVO §1.2).
+    // CASCADE is the right semantics: an llm_usage row is solidary of its run
+    // (no analytical value if the run is gone), and cascading the delete
+    // satisfies both the FK and the runner-has-run-id invariant.
     runId: text("run_id").references(() => runs.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     // Preset id the caller asked for (what the CLI / client picked from
     // the model catalog). Kept alongside `realModel` for audit. Required
