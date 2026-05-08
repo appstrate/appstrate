@@ -604,7 +604,14 @@ export interface RunRejection {
 export interface RunStatusChangeParams {
   orgId: string;
   runId: string;
-  packageId: string;
+  /**
+   * Source agent id at event time. May be null on terminal events synthesized
+   * after the source agent was deleted (rare — deletion is blocked while a
+   * run is pending/running, so non-terminal events always carry a non-null
+   * id). Modules filtering by package id should treat null as "no package
+   * filter applies" (i.e. skip rather than match).
+   */
+  packageId: string | null;
   applicationId: string;
   status: "started" | "success" | "failed" | "timeout" | "cancelled";
   /** Cost in dollars (only on terminal status). */

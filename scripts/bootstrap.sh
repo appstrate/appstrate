@@ -498,51 +498,69 @@ _appstrate_bootstrap() {
     log "Restart your shell to pick up the new PATH."
   fi
 
-  # APPSTRATE_NO_LAUNCH=1 drops the binary and stops, leaving the user in
-  # control of the next step (e.g. run `appstrate install` interactively
-  # once the Bun macOS setRawMode regression in #199 is fixed, or chain
-  # the binary into their own tooling). Same pattern as rustup's
-  # `--no-modify-path` + skip-default-toolchain combo used for scripted
-  # provisioning where install is a separate concern.
+  # ─── Launch decision (#344 + #199 sidestep) ────────────────────────────────
+  #
+  # Two-step is the new default: drop the verified binary on PATH, print
+  # a copy-pasteable next step, exit 0. The user's interactive shell
+  # launches `appstrate install` from a real TTY where clack's
+  # `setRawMode` works — the Bun macOS keypress/kqueue regressions (#199,
+  # oven-sh/bun #6862, #7033, #24615, #5240, #14483, #18239) are bypassed
+  # by construction because no prompt fires inside this shell-piped child
+  # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
+  # subprocesses (`bun run dev`, `docker compose up`).
+  #
+  # Auto-install (legacy all-in-one behaviour) fires on four signals,
+  # ordered cheapest → broadest:
+  #   1. user passed `--yes` (CI / scripted automation, explicit intent)
+  #   2. APPSTRATE_AUTO_INSTALL=1 (Ansible / cloud-init escape hatch —
+  #      preserves the previous default for existing IaC)
+  #   3. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
+  #      sets the canonical CI flag is by definition non-interactive)
+  #   4. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
+  #      `bash /tmp/inst.sh > out.log`). The user wouldn't see the
+  #      next-step instruction anyway; running `--yes` is friendlier
+  #      than dropping the binary and silently exiting.
+  #
+  # On the auto path, the CLI's `resolveBootstrapEmail` ships a
+  # bootstrap token (closed-by-default) when no
+  # `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is set — no more silently-public
+  # VPS (#344 Layer 2b). The operator claims ownership at `<URL>/claim`
+  # with the printed token.
+  #
+  # Pre-existing escape hatch preserved:
+  #   - APPSTRATE_NO_LAUNCH=1 → drop binary, no install at all (scripted
+  #     provisioning where install is owned by Ansible / cloud-init).
+  _wants_auto=0
+  case " $* " in *" --yes "*) _wants_auto=1 ;; esac
+  if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _wants_auto=1; fi
+  case "${CI:-}" in true | 1 | yes) _wants_auto=1 ;; esac
+  if [ ! -t 1 ]; then _wants_auto=1; fi
+
   if [ "${APPSTRATE_NO_LAUNCH:-0}" = "1" ]; then
-    log "APPSTRATE_NO_LAUNCH=1: skipping \`appstrate install\`. Binary ready at $DEST."
+    log "APPSTRATE_NO_LAUNCH=1: skipping install entirely. Binary at $DEST."
     exit 0
   fi
 
-  log "Launching \`appstrate install\`"
-  # Exec by absolute path, NOT by `appstrate` on PATH. A different
-  # `appstrate` binary earlier in PATH (dev machine with `bun link`,
-  # stale install in /usr/local/bin shadowed by ~/.local/bin, etc.)
-  # would silently shadow the one we just verified — defeating the
-  # whole trust chain. `$DEST` is the exact file we wrote + chmod'd.
-  #
-  # Always pass `--yes` so the CLI never enters `@clack/prompts` raw
-  # mode. See #199: a `bun build --compile` binary on macOS hangs in the
-  # tier select because Bun's runtime fails to deliver keypress events
-  # via the kqueue/poll path on fd 0 (family of oven-sh/bun issues
-  # #6862, #7033, #24615, #5240, #14483 — some closed, some open, the
-  # bug regularly reappears). Zero prompts = zero `setRawMode` = the bug
-  # is bypassed by construction, independent of upstream fix status.
-  # Per-field flags the user forwards via `-s -- --tier 1 --dir ~/foo`
-  # still win: --yes only supplies defaults for fields the user did not
-  # specify (Docker-aware tier, DEFAULT_INSTALL_DIR, auto-start). A user
-  # who genuinely wants the interactive prompts can run
-  # `appstrate install` directly after bootstrap drops the binary (see
-  # APPSTRATE_NO_LAUNCH=1 above).
-  #
-  # We deliberately DO NOT redirect stdin from `/dev/tty`. Previous
-  # revisions did (matching rustup / bun / deno bootstrap patterns) to
-  # reopen a readable stdin under `curl | bash`. With `--yes` no prompt
-  # fires, so the redirect is unnecessary — and on macOS the
-  # `exec </dev/tty "$DEST"` combo triggers a second Bun runtime bug
-  # (`EINVAL: invalid argument, kqueue`) when the CLI later spawns
-  # subprocesses (`bun run dev`, `docker compose up`). The crash is
-  # orthogonal to the setRawMode regression: it manifests AFTER `--yes`
-  # has correctly skipped every prompt, killing the install mid-flow.
-  # Dropping the redirect eliminates both bugs with one change and
-  # keeps the contract tight — if a prompt is ever reintroduced on this
-  # path, the "stdin is not a TTY" guard in `resolveTier`/`resolveDir`
-  # fails loud instead of hanging.
+  if [ "$_wants_auto" = "0" ]; then
+    # New default: drop & instruct.
+    printf '\n'
+    log "Appstrate CLI installed."
+    log ""
+    log "To complete setup, run:"
+    printf '\n    \033[1;36m%s install\033[0m\n\n' "$DEST"
+    log "Or in a new shell (PATH already updated):"
+    printf '\n    \033[1;36mappstrate install\033[0m\n\n'
+    log "For unattended/CI installs: re-run with \`-s -- --yes\`."
+    log "  Closed-by-default semantics ship a bootstrap token; see"
+    log "  https://github.com/appstrate/appstrate/issues/344"
+    exit 0
+  fi
+
+  log "Launching \`appstrate install --yes\` (unattended mode)"
+  # Exec by absolute path, NOT by `appstrate` on PATH. A different binary
+  # earlier in PATH (dev machine with `bun link`, stale /usr/local/bin
+  # shadowed by ~/.local/bin) would silently shadow the verified one —
+  # defeating the trust chain. `$DEST` is the exact file we wrote + chmod'd.
   exec "$DEST" install --yes "$@"
 
 }

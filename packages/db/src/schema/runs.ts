@@ -27,9 +27,18 @@ export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
+    // Source agent. NULL when the agent has been deleted — the run survives
+    // for observability/billing thanks to the `agent_scope` / `agent_name`
+    // / `version_label` / `model_label` snapshots stamped at INSERT below.
+    // Switched from CASCADE to SET NULL in 0017_decouple_runs_from_packages.sql:
+    // before that, deleting an agent wiped its run history (and the cascade
+    // also surfaced the llm_usage CHECK violation that 0016 fixes). Keeping
+    // a FK at all (instead of dropping it entirely and treating package_id
+    // as a free-text snapshot) lets the global runs view LEFT JOIN packages
+    // for the alive case and short-circuit on NULL for the deleted case.
+    packageId: text("package_id").references(() => packages.id, {
+      onDelete: "set null",
+    }),
     dashboardUserId: text("dashboard_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -342,8 +351,18 @@ export const llmUsage = pgTable(
     userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
+    // Was: onDelete: "set null". Switched to cascade to resolve a schema-level
+    // contradiction with the `llm_usage_runner_has_run_id` check constraint
+    // below: that check forbids NULL run_id on rows where source='runner', but
+    // the SET NULL cascade tries to NULL exactly that column when a run is
+    // deleted. Net effect was that any DELETE /api/packages/agents/{scope}/{name}
+    // on a package whose runs had emitted runner-source llm_usage rows threw a
+    // CHECK violation, surfaced as a generic 500 with no detail (cf BUGS-EVO §1.2).
+    // CASCADE is the right semantics: an llm_usage row is solidary of its run
+    // (no analytical value if the run is gone), and cascading the delete
+    // satisfies both the FK and the runner-has-run-id invariant.
     runId: text("run_id").references(() => runs.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     // Preset id the caller asked for (what the CLI / client picked from
     // the model catalog). Kept alongside `realModel` for audit. Required

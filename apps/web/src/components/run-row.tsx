@@ -26,6 +26,11 @@ export function RunRow({
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
   const isInline = run.packageEphemeral === true;
   const isRemote = run.runOrigin === "remote";
+  // Source agent deleted (FK SET NULL after migration 0017): the run row
+  // survives but `/agents/:packageId/runs/:id` would 404. Render as a static
+  // row pointing at the global run page instead, and surface a discreet
+  // badge so users understand why "Re-run" / agent-config links are gone.
+  const isOrphaned = run.packageId == null && !isInline;
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -51,6 +56,14 @@ export function RunRow({
       {isInline && (
         <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
           {t("runs.inlineBadge")}
+        </span>
+      )}
+      {isOrphaned && (
+        <span
+          className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase italic"
+          title={t("runs.deletedAgentTitle")}
+        >
+          {t("runs.deletedAgentBadge")}
         </span>
       )}
       {isRemote && (
@@ -83,7 +96,7 @@ export function RunRow({
     !disableLink && "hover:bg-muted/50",
   );
 
-  if (disableLink) {
+  if (disableLink || isOrphaned) {
     return <div className={className}>{content}</div>;
   }
 

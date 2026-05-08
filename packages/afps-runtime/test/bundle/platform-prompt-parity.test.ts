@@ -119,6 +119,12 @@ function canonicalize(prompt: string): string {
       .replace(/running on the [^\n]* platform\./g, "running on the <PLATFORM> platform.")
       // strip the `## Documents` section (platform-only, DB-backed)
       .replace(/## Documents\n[\s\S]*?(?=\n## |\n---|$)/g, "")
+      // strip the uploads-related sentence in the Workspace bullet
+      // (platform-only when uploads are wired; CLI paths omit it)
+      .replace(
+        /Uploaded documents are available under `\.\/documents\/` \(relative to cwd\) and listed in the `## Documents` section below\. /g,
+        "",
+      )
       // strip the `## Connected Providers` section (may be filtered on
       // the platform by credential availability; CLI paths list all)
       .replace(/## Connected Providers\n[\s\S]*?(?=\n## |\n---|$)/g, "")

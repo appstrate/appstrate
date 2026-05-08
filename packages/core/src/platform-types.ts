@@ -83,7 +83,14 @@ export interface Run {
   readonly status: string;
   readonly orgId: string;
   readonly applicationId: string;
-  readonly packageId: string;
+  /**
+   * Source agent. NULL when the source agent has been deleted — the run
+   * row survives via `runs.package_id ON DELETE SET NULL` (see migration
+   * 0017_decouple_runs_from_packages.sql). Modules reading `packageId` to
+   * route a run to a specific agent must handle null (e.g. skip, or read
+   * the denormalized snapshot exposed by callers when relevant).
+   */
+  readonly packageId: string | null;
   readonly result: unknown;
   readonly error: string | null;
 }

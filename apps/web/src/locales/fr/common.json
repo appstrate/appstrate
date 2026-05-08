@@ -100,5 +100,17 @@
   "pagination.previous": "Précédent",
   "pagination.next": "Suivant",
   "pagination.pageOf": "Page {{page}} sur {{total}}",
-  "invalidJson": "JSON invalide"
+  "invalidJson": "JSON invalide",
+  "claim.title": "Réclamer cette instance",
+  "claim.subtitle": "Cette instance Appstrate a été installée en mode non-interactif. Collez le token affiché par le script d'install pour créer le compte propriétaire.",
+  "claim.tokenLabel": "Token de bootstrap",
+  "claim.tokenPlaceholder": "Coller le token (visible dans le banner d'install ou dans .env)",
+  "claim.tokenHelp": "Affiché à la fin de l'installation, ou dans la variable AUTH_BOOTSTRAP_TOKEN du fichier .env. Usage unique.",
+  "claim.nameLabel": "Nom complet",
+  "claim.emailLabel": "Adresse email",
+  "claim.passwordLabel": "Mot de passe",
+  "claim.passwordHelp": "8 caractères minimum.",
+  "claim.submit": "Réclamer l'instance",
+  "claim.submitting": "Création du compte…",
+  "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md"
 }

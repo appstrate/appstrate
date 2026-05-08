@@ -743,7 +743,7 @@ export function dispatchRunWebhook(
   scope: AppScope,
   status: string,
   runId: string,
-  packageId: string,
+  packageId: string | null,
   extra?: Record<string, unknown>,
 ): void {
   const eventType = `run.${status}` as WebhookEventType;
