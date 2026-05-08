@@ -10,6 +10,18 @@ const emitSpy = (obj: Record<string, unknown>) => {
   emitCalls.push(obj);
 };
 
+// Shared no-op ctx for tests that don't exercise the 4th arg. Throws on use
+// so that any unexpected access surfaces immediately.
+const stubCtx = {
+  providerCall: async () => {
+    throw new Error("stubCtx.providerCall used in a test that did not wire ctx");
+  },
+  readResource: async () => {
+    throw new Error("stubCtx.readResource used in a test that did not wire ctx");
+  },
+};
+const stubCtxProvider = () => stubCtx as any;
+
 // --- Helpers ---
 
 /** Build a minimal pi-like object that records registerTool calls. */
@@ -48,7 +60,7 @@ describe("wrapExtensionFactory", () => {
       async (_id: string, _params: unknown, _signal: unknown) => expected,
     );
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-1", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-1", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -64,7 +76,7 @@ describe("wrapExtensionFactory", () => {
       throw new Error("something broke");
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-err", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-err", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -86,7 +98,7 @@ describe("wrapExtensionFactory", () => {
       throw "raw string error";
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-raw", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-raw", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -99,7 +111,7 @@ describe("wrapExtensionFactory", () => {
       pi.registerTool({ name: "no-exec", description: "test" });
     };
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-noexec", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-noexec", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -114,7 +126,7 @@ describe("wrapExtensionFactory", () => {
       return { content: [{ type: "text", text: "done" }] };
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-args", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-args", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -132,11 +144,111 @@ describe("wrapExtensionFactory", () => {
       throw new Error("fail");
     }, "my_special_tool");
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-name", emitSpy);
+    const wrapped = wrapExtensionFactory(factory as any, "ext-name", stubCtxProvider, emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
     const result = await pi.registeredTools[0].execute("call-1", {}, null);
     expect(result.content[0].text).toContain("my_special_tool");
+  });
+
+  // --- AppstrateCtxProvider (4th-arg credentialed-call surface) ---
+
+  it("passes the live ctx as the 4th argument when appstrateCtxProvider resolves", async () => {
+    let receivedCtx: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const liveCtx = {
+      providerCall: async (_pid: string, _args: unknown) => ({
+        content: [{ type: "text", text: "from sidecar" }],
+      }),
+    };
+
+    const wrapped = wrapExtensionFactory(
+      factory as any,
+      "ext-live-ctx",
+      () => liveCtx as any,
+      emitSpy,
+    );
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBe(liveCtx);
+    expect(typeof receivedCtx.providerCall).toBe("function");
+  });
+
+  it("re-evaluates the provider on each execute (late binding)", async () => {
+    // Simulates the entrypoint flow: factories collected before the MCP
+    // client is wired; the ctx ref is swapped at Phase C. The wrapper must
+    // read the provider at execute time, not at factory invocation time.
+    const stubCtx = {
+      providerCall: async () => {
+        throw new Error("not ready");
+      },
+    };
+    const wiredCtx = {
+      providerCall: async () => ({ content: [{ type: "text", text: "wired" }] }),
+    };
+    let liveCtx: any = stubCtx;
+
+    let receivedCtx: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        receivedCtx = ctx;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const wrapped = wrapExtensionFactory(factory as any, "ext-late-bind", () => liveCtx, emitSpy);
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(receivedCtx).toBe(stubCtx);
+
+    liveCtx = wiredCtx;
+
+    await pi.registeredTools[0].execute("call-2", {}, null);
+    expect(receivedCtx).toBe(wiredCtx);
+  });
+
+  it("forwards providerCall return value untouched to the tool", async () => {
+    let providerCallResult: any = undefined;
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
+        providerCallResult = await ctx.providerCall("@scope/test", {
+          target: "https://example.com",
+        });
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    const stubbedResponse = {
+      content: [{ type: "text", text: "from upstream" }],
+      isError: false,
+      structuredContent: { foo: "bar" },
+    };
+
+    const liveCtx = {
+      providerCall: async (_pid: string, _args: unknown) => stubbedResponse,
+    };
+
+    const wrapped = wrapExtensionFactory(
+      factory as any,
+      "ext-passthrough",
+      () => liveCtx as any,
+      emitSpy,
+    );
+    const pi = createMockPi();
+    wrapped(pi as any);
+
+    await pi.registeredTools[0].execute("call-1", {}, null);
+    expect(providerCallResult).toEqual(stubbedResponse);
   });
 });

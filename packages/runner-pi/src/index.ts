@@ -42,3 +42,5 @@ export {
   type StartSinkHeartbeatOptions,
   type SinkHeartbeatHandle,
 } from "./sink-heartbeat.ts";
+
+export type { AppstrateToolCtx, AppstrateCtxProvider } from "./tool-context.ts";
