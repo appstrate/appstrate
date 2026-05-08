@@ -90,7 +90,12 @@ export function RunList({
     if (run.packageEphemeral === true) {
       return run.agentName || t("runs.inlineBadge");
     }
-    return agentNameMap.get(run.packageId ?? "") ?? run.packageId ?? "\u2014";
+    // Source agent deleted (FK SET NULL): fall back to the denormalized
+    // `agent_name` snapshot stamped at INSERT time, then to a generic label.
+    if (run.packageId == null) {
+      return run.agentName ?? t("runs.deletedAgent", { ns: "agents" });
+    }
+    return agentNameMap.get(run.packageId) ?? run.agentName ?? run.packageId;
   };
 
   return (

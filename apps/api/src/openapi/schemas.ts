@@ -350,10 +350,14 @@ export const schemas = {
   },
   Run: {
     type: "object",
-    required: ["id", "packageId", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
+    required: ["id", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
     properties: {
       id: { type: "string" },
-      packageId: { type: "string" },
+      packageId: {
+        type: ["string", "null"],
+        description:
+          "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible.",
+      },
       dashboardUserId: {
         type: ["string", "null"],
         description: "Dashboard user ID that triggered the run (null for end-user/schedule runs)",

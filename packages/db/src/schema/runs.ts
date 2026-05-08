@@ -27,9 +27,18 @@ export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
+    // Source agent. NULL when the agent has been deleted — the run survives
+    // for observability/billing thanks to the `agent_scope` / `agent_name`
+    // / `version_label` / `model_label` snapshots stamped at INSERT below.
+    // Switched from CASCADE to SET NULL in 0017_decouple_runs_from_packages.sql:
+    // before that, deleting an agent wiped its run history (and the cascade
+    // also surfaced the llm_usage CHECK violation that 0016 fixes). Keeping
+    // a FK at all (instead of dropping it entirely and treating package_id
+    // as a free-text snapshot) lets the global runs view LEFT JOIN packages
+    // for the alive case and short-circuit on NULL for the deleted case.
+    packageId: text("package_id").references(() => packages.id, {
+      onDelete: "set null",
+    }),
     dashboardUserId: text("dashboard_user_id").references(() => user.id, {
       onDelete: "set null",
     }),

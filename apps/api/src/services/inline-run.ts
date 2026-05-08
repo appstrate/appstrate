@@ -32,10 +32,13 @@ export const INLINE_SHADOW_SCOPE = "inline";
 /**
  * Return true when the package id belongs to the reserved inline scope.
  * Cheap string test — no DB. Use this to decorate run events (e.g. webhook
- * `packageEphemeral`) without a `packages` lookup.
+ * `packageEphemeral`) without a `packages` lookup. Accepts null so callers
+ * can pass `runs.package_id` directly without narrowing — a deleted-agent
+ * run is treated as non-inline (the row was never an inline shadow if it
+ * had a real package_id at INSERT time).
  */
-export function isInlineShadowPackageId(packageId: string): boolean {
-  return packageId.startsWith(`@${INLINE_SHADOW_SCOPE}/`);
+export function isInlineShadowPackageId(packageId: string | null): boolean {
+  return packageId !== null && packageId.startsWith(`@${INLINE_SHADOW_SCOPE}/`);
 }
 
 /**
