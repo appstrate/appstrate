@@ -202,6 +202,58 @@ describe("providerCallRequestSchema — valid inputs", () => {
       expect(result.success).toBe(true);
     }
   });
+
+  // Regression: `substituteBody` must be declared on the schema so
+  // `safeParse` does NOT silently strip it before the resolver sees it.
+  // Without this declaration, the `username/password` body-substitution
+  // path documented in PROVIDER.md files is dead — the sidecar receives
+  // no opt-in flag and forwards `{{email}}` / `{{password}}` placeholders
+  // verbatim to upstream.
+  it("preserves substituteBody=true through safeParse", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/login",
+      body: '{"login":"{{email}}","password":"{{password}}"}',
+      substituteBody: true,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.substituteBody).toBe(true);
+  });
+
+  it("preserves substituteBody=false through safeParse", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: "literal",
+      substituteBody: false,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.substituteBody).toBe(false);
+  });
+
+  it("treats missing substituteBody as undefined (default off)", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      body: "no opt-in",
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.substituteBody).toBeUndefined();
+  });
+
+  it("rejects substituteBody as a non-boolean", () => {
+    const result = providerCallRequestSchema.safeParse({
+      method: "POST",
+      target: "https://api.example.com/x",
+      substituteBody: "yes",
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.includes("substituteBody"))).toBe(true);
+  });
 });
 
 describe("providerCallRequestSchema — invalid inputs", () => {
