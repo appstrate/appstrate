@@ -667,11 +667,11 @@ async function responseToToolResult(
       };
     }
     // Spill to blob store and return a resource_link.
-    // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE
-    // (32 MB): the spillover path exists precisely for bodies larger than
-    // MAX_RESPONSE_SIZE, so capping the read at MAX_RESPONSE_SIZE refuses real-world
-    // binaries (PDFs 1-10 MB, images, ZIPs) that the agent would consume via
-    // pdf-toolkit, vision, etc. Symmetrical to the text path below (~ line 720).
+    // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE:
+    // the spillover path exists precisely for bodies larger than MAX_RESPONSE_SIZE,
+    // so capping the read at MAX_RESPONSE_SIZE refuses real-world binaries
+    // (PDFs 1-10 MB, images, ZIPs) that the agent would consume via pdf-toolkit,
+    // vision, etc. Symmetrical to the text path below.
     const binaryReadCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
     const bytes = await readBodyToBuffer(res, binaryReadCap);
     if (bytes === "exceeded") {
@@ -680,7 +680,7 @@ async function responseToToolResult(
           {
             type: "text",
             text:
-              `provider_call: response exceeds ${binaryReadCap} bytes — refused without truncation ` +
+              `provider_call: response exceeds ${binaryReadCap} bytes (${binaryReadCap >= 1024 * 1024 ? `${Math.round(binaryReadCap / 1024 / 1024)} MB` : `${Math.round(binaryReadCap / 1024)} KB`}) — refused without truncation ` +
               `(truncating an opaque binary blob is unsafe).`,
           },
         ],
@@ -717,12 +717,12 @@ async function responseToToolResult(
   // res.text() directly so a hypothetical multi-GB response can never
   // be fully materialised before the cap kicks in.
   //
-  // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE
-  // (1 MB): the spillover path exists precisely to handle bodies larger than
+  // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE:
+  // the spillover path exists precisely to handle bodies larger than
   // MAX_RESPONSE_SIZE, so capping the read at MAX_RESPONSE_SIZE before deciding
-  // to spill silently truncated text bodies in [256 KB, 1 MB] (they were
-  // spilled, but with a `[truncated]` marker poisoning the JSON). Without a
-  // blob store there's no recovery path, so the conservative cap stays.
+  // to spill silently truncated text bodies above 256 KB (they were spilled,
+  // but with a `[truncated]` marker poisoning the JSON). Without a blob store
+  // there's no recovery path, so the conservative cap stays.
   const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
   const text = await readBodyBounded(res, readCap);
 

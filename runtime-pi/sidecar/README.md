@@ -38,7 +38,7 @@ The only path that decodes the request body to UTF-8 is the optional `substitute
 | Constant                     | Value  | Purpose                                                                |
 | ---------------------------- | ------ | ---------------------------------------------------------------------- |
 | `MAX_RESPONSE_SIZE`          | 256 KB | Default cap on upstream response bytes returned inline to the agent.   |
-| `ABSOLUTE_MAX_RESPONSE_SIZE` | 1 MB   | Ceiling on `responseMode.maxInlineBytes` regardless of caller request. |
+| `ABSOLUTE_MAX_RESPONSE_SIZE` | 32 MB  | Ceiling on upstream bytes the sidecar buffers before refusing — only applied when a `BlobStore` is configured (otherwise `MAX_RESPONSE_SIZE` is the cap). Sized to cover real-world binaries (PDFs, images, archives) routed through the spillover path. |
 | `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.     |
 | `STREAMING_THRESHOLD`        | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.     |
 | `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                       |
