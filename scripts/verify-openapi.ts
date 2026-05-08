@@ -65,6 +65,8 @@ const expectedEndpoints = [
   "POST /api/auth/sign-in/email",
   "POST /api/auth/sign-out",
   "GET /api/auth/get-session",
+  // Bootstrap-token redemption (#344 Layer 2b) — platform-owned, not BA
+  "POST /api/auth/bootstrap/redeem",
 
   // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
   "GET /api/agents",

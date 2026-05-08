@@ -16,7 +16,12 @@ import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
-import { evaluateSignupPolicy, isBootstrapOwner, normalizeEmail } from "./auth-policy.ts";
+import {
+  evaluateSignupPolicy,
+  isAllowedSignupDomain,
+  isBootstrapOwner,
+  normalizeEmail,
+} from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
 
 /**
@@ -200,6 +205,28 @@ export interface SmtpOverride {
 }
 
 const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
+
+// ─── Bootstrap-token redemption (per-request bypass) ─────────────────────────
+//
+// `AUTH_BOOTSTRAP_TOKEN` (issue #344 Layer 2b) ships an instance with
+// `AUTH_DISABLE_SIGNUP=true` so a fresh `curl|bash -s -- --yes` install
+// is closed by default. The redemption route (`POST
+// /api/auth/bootstrap/redeem`) needs to bypass that gate exactly once,
+// for exactly the request that submitted a valid token. AsyncLocalStorage
+// scoped to the redeem route's call to `auth.api.signUpEmail()` is the
+// minimum-blast-radius primitive — same shape as `withSmtpOverride`.
+
+const bootstrapTokenRedemptionStore = new AsyncLocalStorage<boolean>();
+
+/** Run `fn` with the bootstrap-token bypass active for any signup-gate eval downstream. */
+export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T> {
+  return bootstrapTokenRedemptionStore.run(true, fn);
+}
+
+/** True when the current async context is inside `withBootstrapTokenRedemption`. */
+export function isBootstrapTokenRedemptionActive(): boolean {
+  return bootstrapTokenRedemptionStore.getStore() === true;
+}
 
 /** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
 export function withSmtpOverride<T>(
@@ -725,18 +752,51 @@ function buildAuth(
             // index-covered (`idx_org_invitations_email`) — negligible cost
             // for the only path where a restriction applies.
             const envForGate = getEnv();
-            if (envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length) {
+            // Bootstrap-token redemption (#344 Layer 2b) — explicitly
+            // bypasses the `AUTH_DISABLE_SIGNUP` gate. The redeem route
+            // has already verified a single-use 256-bit token against
+            // `env.AUTH_BOOTSTRAP_TOKEN` via timing-safe compare; trying
+            // to also satisfy `evaluateSignupPolicy` would force the
+            // operator to also ship `AUTH_PLATFORM_ADMIN_EMAILS`, which
+            // defeats the point of "no email needed at install time".
+            //
+            // The bypass is SCOPED — it covers only the closed-mode
+            // gate (`AUTH_DISABLE_SIGNUP`). An active domain allowlist
+            // (`AUTH_ALLOWED_SIGNUP_DOMAINS`) remains load-bearing
+            // because the operator explicitly chose to lock down which
+            // emails can register; the bootstrap owner must satisfy
+            // that policy too. A pending invitation also overrides
+            // both gates (Infisical-style breakage avoidance), matching
+            // the non-bypass evaluator's logic.
+            const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            const gateActive =
+              envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
+            if (gateActive) {
               const hasInvite = await hasPendingInvitationByEmail(user.email);
-              const decision = evaluateSignupPolicy(user.email, hasInvite);
-              if (!decision.allowed) {
-                logger.info("auth: platform signup gate blocked signup", {
-                  email: user.email,
-                  reason: decision.reason,
-                });
-                throw new APIError("FORBIDDEN", {
-                  message: decision.reason,
-                  code: decision.reason,
-                });
+              if (bootstrapTokenBypass) {
+                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !hasInvite) {
+                  if (!isAllowedSignupDomain(user.email)) {
+                    logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
+                      email: user.email,
+                    });
+                    throw new APIError("FORBIDDEN", {
+                      message: "signup_domain_not_allowed",
+                      code: "signup_domain_not_allowed",
+                    });
+                  }
+                }
+              } else {
+                const decision = evaluateSignupPolicy(user.email, hasInvite);
+                if (!decision.allowed) {
+                  logger.info("auth: platform signup gate blocked signup", {
+                    email: user.email,
+                    reason: decision.reason,
+                  });
+                  throw new APIError("FORBIDDEN", {
+                    message: decision.reason,
+                    code: decision.reason,
+                  });
+                }
               }
             }
             if (_beforeSignupHook) {
@@ -745,7 +805,18 @@ function buildAuth(
             // Merge realm resolution + email auto-verify into a single data
             // patch returned to BA. The realm resolver falls back to
             // "platform" when no OIDC module is loaded (OSS mode).
-            const realm = _realmResolver ? await _realmResolver(headers) : "platform";
+            //
+            // Bootstrap-token redeem (#344) FORCES "platform": the redeem
+            // route forwards `c.req.raw.headers` to BA, and a stray
+            // `oidc_pending_client` cookie on that request would otherwise
+            // route the bootstrap owner into an end-user realm — wrong
+            // audience for an instance-owner row, and unrecoverable once
+            // committed. Bypass the resolver entirely on this path.
+            const realm = bootstrapTokenBypass
+              ? "platform"
+              : _realmResolver
+                ? await _realmResolver(headers)
+                : "platform";
             const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
             const data: Record<string, unknown> = { realm };
             if (autoVerify) data.emailVerified = true;

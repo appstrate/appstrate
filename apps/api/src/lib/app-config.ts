@@ -2,6 +2,7 @@
 
 import { getEnv } from "@appstrate/env";
 import { applyModuleFeatures } from "./modules/module-loader.ts";
+import { isBootstrapTokenPending } from "./bootstrap-token.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 // Platform config — computed once at boot, injected into SPA HTML.
@@ -32,6 +33,9 @@ export function buildAppConfig(): AppConfig {
       // so RegisterForm can pre-fill + lock the email field.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       orgCreationDisabled: env.AUTH_DISABLE_ORG_CREATION,
+      // Surface ONLY the boolean — the token value stays server-side,
+      // gated by timing-safe compare in /api/auth/bootstrap/redeem.
+      bootstrapTokenPending: isBootstrapTokenPending(),
     },
     ...(legalTerms && legalPrivacy
       ? {
