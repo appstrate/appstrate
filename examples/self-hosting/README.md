@@ -40,6 +40,36 @@ back to Tier 0 as the highlighted default.
 `docker-compose.yml`, runs `docker compose up -d`, waits for the
 healthcheck, and opens http://localhost:3000 in your browser.
 
+### Managing the stack post-install
+
+Once installed, the lifecycle commands manage the stack from any
+working directory — they read the Compose project name from
+`<dir>/.appstrate/project.json` so you never have to remember the
+derived hash:
+
+```bash
+appstrate start           # docker compose up -d
+appstrate stop            # docker compose stop (volumes preserved)
+appstrate restart         # docker compose restart
+appstrate logs -f         # docker compose logs -f
+appstrate logs postgres   # filter to a single service
+appstrate status          # docker compose ps
+appstrate uninstall       # docker compose down (containers gone, data preserved)
+appstrate uninstall --purge   # destructive: down -v + rm -rf <dir>
+```
+
+All commands accept `--dir <path>` to target a non-default install
+directory. `--purge` prompts for confirmation unless `--yes` (or
+`APPSTRATE_YES=1`) is set; the prompt enumerates exactly what gets
+destroyed (Postgres / Redis / MinIO data + the install dir).
+
+If you prefer the raw form (e.g. for scripting against a specific
+flag the wrapper doesn't expose):
+
+```bash
+docker compose --project-name "$(jq -r .projectName ~/appstrate/.appstrate/project.json)" <verb>
+```
+
 ### Unattended install (CI / cloud-init / Ansible)
 
 ```bash
@@ -321,7 +351,10 @@ Three named volumes store persistent data:
 - `redisdata` -- Redis AOF/RDB snapshots
 - `miniodata` -- MinIO object storage
 
-To reset all data: `docker compose down -v` (destroys volumes).
+To reset all data: `appstrate uninstall --purge` (or, raw:
+`docker compose down -v` from the install directory). Both destroy
+the named volumes — the Appstrate CLI form additionally removes the
+install dir itself, so use it only when you intend a full wipe.
 
 ## Production Considerations
 

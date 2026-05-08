@@ -21,6 +21,7 @@ import {
   type PathScanFs,
 } from "./path-scan.ts";
 import { upgradeHint, type InstallSource } from "./install-source.ts";
+import { defaultInstallDir, readProjectFile } from "./install/project.ts";
 
 export interface InstallationInfo {
   /** PATH directory containing the binary. */
@@ -46,6 +47,13 @@ export interface ConnectionProfileCheck {
   hint?: string;
 }
 
+export interface LocalInstallInfo {
+  /** Absolute path to the install directory (defaults to `~/appstrate`). */
+  dir: string;
+  /** Compose project name read from `<dir>/.appstrate/project.json`. */
+  projectName: string;
+}
+
 export interface DoctorReport {
   /** All discovered installations in PATH order — first one wins resolution. */
   installations: InstallationInfo[];
@@ -57,6 +65,13 @@ export interface DoctorReport {
   multiSource: boolean;
   /** Connection-profile health for the active CLI profile, when one is pinned. */
   connectionProfile?: ConnectionProfileCheck;
+  /**
+   * Local Docker-tier install detected at `~/appstrate` (or wherever
+   * `--dir` was last installed). When present, the doctor surfaces the
+   * lifecycle command hints (`appstrate logs / stop / uninstall`) so
+   * the user doesn't have to memorize the derived project hash.
+   */
+  localInstall?: LocalInstallInfo;
 }
 
 export interface ProbeBinary {
@@ -121,6 +136,14 @@ export interface RunDoctorOptions {
    * Tests inject a stub.
    */
   checkConnectionProfile?: CheckConnectionProfile;
+  /**
+   * Override the install-directory probe for tests. Returns the parsed
+   * sidecar info when an install is detected at `dir`, or `null`.
+   * Defaults to reading `<dir>/.appstrate/project.json` from disk.
+   */
+  probeLocalInstall?: (dir: string) => Promise<LocalInstallInfo | null>;
+  /** Override the install dir probed (defaults to `~/appstrate`). */
+  installDir?: string;
 }
 
 /**
@@ -194,13 +217,40 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     // intentional swallow — see ConnectionProfileCheck.status="unknown"
   }
 
+  // Local-install probe (#343) — surfaces the lifecycle command hints
+  // when a Docker-tier install exists. Soft-fails on any error: a
+  // missing or unreadable sidecar is the normal state for users who
+  // never ran `appstrate install`, and must not perturb the rest of
+  // the report.
+  const installDir = opts.installDir ?? defaultInstallDir();
+  const probeLocal = opts.probeLocalInstall ?? defaultProbeLocalInstall;
+  let localInstall: LocalInstallInfo | undefined;
+  try {
+    const found = await probeLocal(installDir);
+    if (found) localInstall = found;
+  } catch {
+    // intentional swallow — sidecar absence is not a doctor finding.
+  }
+
   return {
     installations,
     runningIndex,
     dualInstall: installations.length > 1,
     multiSource: sources.size > 1,
     ...(connectionProfile ? { connectionProfile } : {}),
+    ...(localInstall ? { localInstall } : {}),
   };
+}
+
+/**
+ * Default local-install probe — reads `<dir>/.appstrate/project.json`.
+ * Returns `null` for the common "no install at this path" case so the
+ * doctor can soft-skip the section.
+ */
+async function defaultProbeLocalInstall(dir: string): Promise<LocalInstallInfo | null> {
+  const file = await readProjectFile(dir);
+  if (!file) return null;
+  return { dir, projectName: file.projectName };
 }
 
 /**
@@ -259,6 +309,19 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
     } else {
       lines.push(`Connection profile ${cp.profileId} is healthy.`);
     }
+  }
+
+  if (report.localInstall) {
+    lines.push(``);
+    lines.push(
+      `Local Docker-tier install detected at ${report.localInstall.dir} (project: ${report.localInstall.projectName}).`,
+    );
+    lines.push(`Manage the stack via:`);
+    lines.push(`  • appstrate logs -f         (stream container logs)`);
+    lines.push(`  • appstrate status          (compose ps)`);
+    lines.push(`  • appstrate stop / start    (containers off / on, volumes intact)`);
+    lines.push(`  • appstrate uninstall       (down — data preserved)`);
+    lines.push(`  • appstrate uninstall --purge   (down -v + rm <dir>, destructive)`);
   }
 
   if (report.dualInstall) {

@@ -60,6 +60,14 @@ import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
+import {
+  startCommand,
+  stopCommand,
+  restartCommand,
+  logsCommand,
+  statusCommand,
+  uninstallCommand,
+} from "./commands/lifecycle.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { internalInfoCommand } from "./commands/internal.ts";
 import {
@@ -212,6 +220,81 @@ program
         typeof opts.minioConsolePort === "string" ? opts.minioConsolePort : undefined,
       force: opts.force === true,
       autoConfirm,
+    });
+  });
+
+// ─── Lifecycle commands (#343) — manage a Docker-tier install ────
+//
+// Each command reads `<dir>/.appstrate/project.json` for the Compose
+// project name (never re-derived) and forwards to `docker compose`
+// with `--project-name <name>`. The shared resolver lives in
+// `lib/install/project.ts::resolveInstall` so a future Tier 0
+// dispatcher can plug in without touching cli.ts.
+
+program
+  .command("start")
+  .description("Start the Appstrate stack (`docker compose up -d`)")
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .action(async (opts) => {
+    await startCommand({ dir: typeof opts.dir === "string" ? opts.dir : undefined });
+  });
+
+program
+  .command("stop")
+  .description("Stop the Appstrate stack (`docker compose stop`). Volumes are preserved.")
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .action(async (opts) => {
+    await stopCommand({ dir: typeof opts.dir === "string" ? opts.dir : undefined });
+  });
+
+program
+  .command("restart")
+  .description("Restart the Appstrate stack (`docker compose restart`).")
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .action(async (opts) => {
+    await restartCommand({ dir: typeof opts.dir === "string" ? opts.dir : undefined });
+  });
+
+program
+  .command("logs [service]")
+  .description("Stream Compose logs for the install (optionally scoped to a single service).")
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .option("-f, --follow", "Stream new lines as they arrive (`docker compose logs -f`).")
+  .action(async (service: string | undefined, opts) => {
+    await logsCommand({
+      dir: typeof opts.dir === "string" ? opts.dir : undefined,
+      follow: opts.follow === true,
+      service: typeof service === "string" ? service : undefined,
+    });
+  });
+
+program
+  .command("status")
+  .description("Show container status for the install (`docker compose ps`).")
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .action(async (opts) => {
+    await statusCommand({ dir: typeof opts.dir === "string" ? opts.dir : undefined });
+  });
+
+program
+  .command("uninstall")
+  .description(
+    "Tear down the Appstrate stack. By default `docker compose down` (containers gone, named volumes preserved). With --purge, also removes volumes and the install directory — destructive, prompts for confirmation.",
+  )
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .option(
+    "--purge",
+    "Also remove named volumes (Postgres, Redis, MinIO data) and the install directory. Destructive — prompts unless --yes / APPSTRATE_YES=1 is set.",
+  )
+  .option(
+    "-y, --yes",
+    "Skip the destructive-action confirmation. Required for --purge in non-interactive contexts. Equivalent to APPSTRATE_YES=1.",
+  )
+  .action(async (opts) => {
+    await uninstallCommand({
+      dir: typeof opts.dir === "string" ? opts.dir : undefined,
+      purge: opts.purge === true,
+      yes: opts.yes === true,
     });
   });
 

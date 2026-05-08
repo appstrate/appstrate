@@ -1017,10 +1017,18 @@ async function installDockerTier(
 
   await openBrowser(appUrl);
   printBootstrapFollowup(appUrl, opts.bootstrap);
+  // The lifecycle commands (#343) read `<dir>/.appstrate/project.json`
+  // to find the right `--project-name`, so the user never has to type
+  // (or remember) the derived hash. We pass `--dir` only when the
+  // install isn't at the default `~/appstrate`, to keep the hint short
+  // for the most common path.
+  const dirHint = resolve(dir) === resolve(DEFAULT_INSTALL_DIR) ? "" : ` --dir ${dir}`;
   outro(
     `Appstrate is running at ${appUrl}.\n` +
-      `Manage the stack from ${dir}:\n` +
-      `  docker compose --project-name ${project.name} logs -f\n` +
-      `  docker compose --project-name ${project.name} down`,
+      `Manage the stack:\n` +
+      `  appstrate logs -f${dirHint}\n` +
+      `  appstrate stop${dirHint}\n` +
+      `  appstrate uninstall${dirHint}\n` +
+      `Raw form (for advanced cases): docker compose --project-name ${project.name} <verb> from ${dir}.`,
   );
 }

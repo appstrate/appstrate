@@ -22,7 +22,8 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 /**
@@ -109,6 +110,62 @@ export async function readProjectFile(dir: string): Promise<ProjectFile | null> 
   } catch {
     return null;
   }
+}
+
+/**
+ * Default install directory used by `appstrate install` (and therefore
+ * by every lifecycle command that needs to find an existing install).
+ * Kept in this module — alongside the other install-dir primitives —
+ * so the lifecycle commands and the installer agree on a single source
+ * of truth (no second copy in `commands/install.ts` to drift).
+ */
+export function defaultInstallDir(): string {
+  return join(homedir(), "appstrate");
+}
+
+/**
+ * Error raised by `resolveInstall` when the requested directory does
+ * not contain a recorded `.appstrate/project.json`. Callers route this
+ * through `exitWithError` (see `lib/ui.ts`) so the message renders as
+ * a clean cancel banner rather than a stack trace — but the explicit
+ * subclass also lets tests assert on the failure mode without matching
+ * a free-form string.
+ */
+export class InstallNotFoundError extends Error {
+  constructor(
+    readonly dir: string,
+    readonly filePath: string,
+  ) {
+    super(
+      `No Appstrate install found at ${dir}.\n` +
+        `Either pass --dir <path>, or run 'appstrate install' first.\n` +
+        `(Looked for ${filePath})`,
+    );
+    this.name = "InstallNotFoundError";
+  }
+}
+
+/**
+ * Resolve an install directory + its bound Compose project name.
+ * Single source of truth for every lifecycle command (start / stop /
+ * restart / logs / status / uninstall): the project name is read from
+ * the on-disk sidecar — never re-derived — so a user who edits the
+ * directory's basename or moves their `~/appstrate` somewhere else
+ * still gets the exact name their containers were registered with.
+ *
+ * Fail-fast on a missing sidecar: silently falling back to a derived
+ * name would produce `--project-name <fresh-hash>`, miss the running
+ * containers, and the user would think `appstrate stop` is broken.
+ * The error message points at the two recovery paths (re-run install,
+ * or pass --dir explicitly).
+ */
+export async function resolveInstall(
+  opts: { dir?: string } = {},
+): Promise<{ dir: string; projectName: string }> {
+  const dir = resolve(opts.dir ?? defaultInstallDir());
+  const file = await readProjectFile(dir);
+  if (!file) throw new InstallNotFoundError(dir, projectFilePath(dir));
+  return { dir, projectName: file.projectName };
 }
 
 /**
