@@ -124,6 +124,22 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const platformName = opts.platformName ?? "Appstrate";
   const connectedProviders = opts.providers ?? [];
 
+  // ─── Reserved AFPS tool gating ────────────────────────────────────
+  // The Checkpoint / Pinned Slots / Memory sections each reference one
+  // or more reserved AFPS tools (`pin`, `note`, `recall_memory`). These
+  // tools are not ambient — agents must declare them in dependencies
+  // (`@appstrate/pin`, `@appstrate/note`, …) or have them platform-
+  // injected (e.g. runtime-pi wires `recall_memory` for every run).
+  // Gating each section's footer (and, for Memory, the section itself
+  // when no archive tool is present) on tool availability prevents the
+  // prompt from instructing the LLM to call tools that aren't
+  // registered — the failure mode flagged in #368.
+  const hasTool = (name: string): boolean =>
+    opts.availableTools?.some((t) => t.name === name) ?? false;
+  const hasPin = hasTool("pin");
+  const hasNote = hasTool("note");
+  const hasRecall = hasTool("recall_memory");
+
   // --- System identity & environment ---
   sections.push("## System\n");
   sections.push(`You are an AI agent running on the ${platformName} platform.`);
@@ -313,6 +329,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   }
 
   // --- Checkpoint ---
+  // Data block always renders (resume context is informative even when
+  // the agent can't write the next checkpoint). The update-instructions
+  // footer is gated on `hasPin`; without it we surface a one-liner so
+  // the LLM doesn't try to write a slot it cannot reach.
   if (context.checkpoint !== undefined && context.checkpoint !== null) {
     sections.push("## Checkpoint\n");
     sections.push(
@@ -322,12 +342,20 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("```json");
     sections.push(JSON.stringify(context.checkpoint, null, 2));
     sections.push("```\n");
-    sections.push(
-      "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
-        'To update the checkpoint for the next run, call `pin({ key: "checkpoint", content: ... })`. ' +
-        "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
-        'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
-    );
+    if (hasPin) {
+      sections.push(
+        "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
+          'To update the checkpoint for the next run, call `pin({ key: "checkpoint", content: ... })`. ' +
+          "By default checkpoints are scoped to the run's actor (the user or end-user that triggered the run); " +
+          'pass `scope: "shared"` for an app-wide checkpoint visible to every actor.\n',
+      );
+    } else {
+      sections.push(
+        "Use this checkpoint to resume work, avoid reprocessing data, or build on previous results. " +
+          "This snapshot is read-only carry-over — `pin` is not registered in this build, so the " +
+          "checkpoint cannot be updated from within the agent.\n",
+      );
+    }
   }
 
   // --- Pinned Slots (named, non-checkpoint) ---
@@ -352,39 +380,71 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         sections.push(`### ${key}`, "```json", JSON.stringify(value, null, 2), "```", "");
       }
     }
-    sections.push(
-      'To update a slot for the next run, call `pin({ key: "<your-key>", content: ..., scope: "shared" })`. ' +
-        'Use `key: "checkpoint"` for the carry-over slot rendered as `## Checkpoint` instead.\n',
-    );
+    if (hasPin) {
+      sections.push(
+        'To update a slot for the next run, call `pin({ key: "<your-key>", content: ..., scope: "shared" })`. ' +
+          'Use `key: "checkpoint"` for the carry-over slot rendered as `## Checkpoint` instead.\n',
+      );
+    } else {
+      sections.push(
+        "These slots are read-only in this build — `pin` is not registered, so existing values " +
+          "cannot be updated from within the agent.\n",
+      );
+    }
   }
 
   // --- Memory ---
   // Two tiers (ADR-012, ADR-013):
   //   - Pinned memories (rendered here)  → working set, always visible.
   //   - Archive memories (NOT rendered) → reachable via `recall_memory`.
-  // We always emit the section so the agent knows the archive exists,
-  // even when no memories are pinned yet.
-  sections.push("## Memory\n");
-  if (context.memories && context.memories.length > 0) {
-    sections.push("Pinned memories (always visible across runs):\n");
-    for (const mem of context.memories) {
-      const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
-      sections.push(`- ${mem.content}${date}`);
+  //
+  // Gated on tool availability per #368: the section's purpose is to
+  // teach the agent about archive APIs (`note` / `recall_memory`) and
+  // pinned slots (`pin`). When none of those are wired the section has
+  // no actionable content, so we omit it entirely — emitting it would
+  // tell the LLM to call tools that aren't registered.
+  if (hasNote || hasRecall || hasPin) {
+    sections.push("## Memory\n");
+    if (context.memories && context.memories.length > 0) {
+      sections.push("Pinned memories (always visible across runs):\n");
+      for (const mem of context.memories) {
+        const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
+        sections.push(`- ${mem.content}${date}`);
+      }
+      sections.push("");
+    } else {
+      sections.push("No memories are currently pinned to this prompt.\n");
     }
-    sections.push("");
-  } else {
-    sections.push("No memories are currently pinned to this prompt.\n");
+    const memoryFooter: string[] = [];
+    if (hasNote) {
+      memoryFooter.push(
+        "To save a new archive memory, call `note({ content })` — it goes to the **archive** " +
+          "(not visible in this prompt on future runs).",
+      );
+    }
+    if (hasRecall) {
+      memoryFooter.push(
+        "To search the archive, call `recall_memory({ q?, limit? })`: pass `q` to filter by " +
+          "case-insensitive substring, omit it for the most recent entries.",
+      );
+    }
+    if (hasNote) {
+      memoryFooter.push(
+        'By default notes are scoped to the current actor; pass `scope: "shared"` on `note` ' +
+          "to make it app-wide.",
+      );
+    }
+    if (hasPin) {
+      memoryFooter.push(
+        "Use `pin({ key, content })` to upsert a pinned slot rendered into this prompt on " +
+          'every run — `key: "checkpoint"` for the carry-over checkpoint, or any other key ' +
+          '(e.g. "persona", "goals") for additional pinned blocks.',
+      );
+    }
+    if (memoryFooter.length > 0) {
+      sections.push(memoryFooter.join(" ") + "\n");
+    }
   }
-  sections.push(
-    "To save a new archive memory, call `note({ content })` — it goes to the **archive** " +
-      "(not visible in this prompt on future runs). " +
-      "To search the archive, call `recall_memory({ q?, limit? })`: pass `q` to filter by " +
-      "case-insensitive substring, omit it for the most recent entries. " +
-      'By default notes are scoped to the current actor; pass `scope: "shared"` on `note` ' +
-      "to make it app-wide. Use `pin({ key, content })` to upsert a pinned slot rendered " +
-      'into this prompt on every run — `key: "checkpoint"` for the carry-over checkpoint, ' +
-      'or any other key (e.g. "persona", "goals") for additional pinned blocks.\n',
-  );
 
   // --- Output format ---
   // Rendered LAST so the constraint is freshly in the LLM's context when

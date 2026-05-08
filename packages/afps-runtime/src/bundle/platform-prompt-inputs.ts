@@ -95,14 +95,28 @@ function asPromptSchema(
 
 /**
  * Build `PlatformPromptTool` from a bundle package's manifest.
- * Falls back to the parsed package id when name is absent.
+ *
+ * Name precedence: `manifest.tool.name` (the LLM-facing tool name per
+ * AFPS 1.5+ tool packages) wins over `manifest.name` (the package
+ * display name). Falls back to the parsed package id when neither is
+ * present. Gating in `renderPlatformPrompt` matches `t.name` against
+ * reserved AFPS tool names (`pin`, `note`, `recall_memory`), so this
+ * field MUST carry the LLM-facing identifier when known — otherwise
+ * the prompt instructs the agent to call tools that aren't registered.
  */
 function toolFromPackage(pkg: BundlePackage): PlatformPromptTool {
   const manifest = pkg.manifest as Record<string, unknown>;
   const parsed = parsePackageIdentity(pkg.identity);
   const id = parsed ? parsed.packageId : pkg.identity;
   const out: PlatformPromptTool = { id };
-  if (typeof manifest["name"] === "string") out.name = manifest["name"] as string;
+  const toolBlock = isPlainObject(manifest["tool"]) ? manifest["tool"] : undefined;
+  const llmName =
+    toolBlock && typeof toolBlock["name"] === "string" ? toolBlock["name"] : undefined;
+  if (typeof llmName === "string") {
+    out.name = llmName;
+  } else if (typeof manifest["name"] === "string") {
+    out.name = manifest["name"] as string;
+  }
   if (typeof manifest["description"] === "string") {
     out.description = manifest["description"] as string;
   }

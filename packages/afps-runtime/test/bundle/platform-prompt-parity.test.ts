@@ -73,6 +73,28 @@ function makeFixtureBundle(): Bundle {
     { name: "search", type: "tool", description: "Search the web" },
     { "TOOL.md": "# search\nUse it wisely." },
   );
+  // Bundle the three reserved AFPS tools so the parity test continues to
+  // exercise the Checkpoint footer, Pinned Slots footer, and Memory
+  // section. `manifest.tool.name` carries the LLM-facing name (the gate
+  // signal per #368) — package display name (`name`) is incidental.
+  const pinTool = pkg("@fixture/pin@1.0.0", {
+    name: "@fixture/pin",
+    type: "tool",
+    description: "Upsert a pinned slot",
+    tool: { name: "pin" },
+  });
+  const noteTool = pkg("@fixture/note@1.0.0", {
+    name: "@fixture/note",
+    type: "tool",
+    description: "Append an archive memory",
+    tool: { name: "note" },
+  });
+  const recallTool = pkg("@fixture/recall@1.0.0", {
+    name: "@fixture/recall",
+    type: "tool",
+    description: "Search archive memories",
+    tool: { name: "recall_memory" },
+  });
   const skill = pkg("@fixture/writing@1.0.0", {
     name: "writing",
     type: "skill",
@@ -89,7 +111,8 @@ function makeFixtureBundle(): Bundle {
   });
 
   const packages = new Map<PackageIdentity, BundlePackage>();
-  for (const p of [root, tool, skill, provider]) packages.set(p.identity, p);
+  for (const p of [root, tool, pinTool, noteTool, recallTool, skill, provider])
+    packages.set(p.identity, p);
   return {
     bundleFormatVersion: "1.0",
     root: root.identity,

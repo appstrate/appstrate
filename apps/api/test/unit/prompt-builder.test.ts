@@ -699,10 +699,16 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     expect(prompt).toContain("Translator");
   });
 
-  it("omits tools section when no tools", () => {
+  it("always surfaces the platform-injected runtime tools (run_history, recall_memory)", () => {
+    // The platform's prompt-builder appends `run_history` and
+    // `recall_memory` to availableTools because runtime-pi wires them
+    // unconditionally for every run (#368). Bundle-derived tools come
+    // first in the listing, then platform-injected ones.
     const ctx = baseContext({ availableTools: [] });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("### Tools");
+    expect(prompt).toContain("### Tools");
+    expect(prompt).toContain("run_history");
+    expect(prompt).toContain("recall_memory");
   });
 
   it("includes available skills", () => {
