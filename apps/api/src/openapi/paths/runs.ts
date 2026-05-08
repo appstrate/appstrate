@@ -528,11 +528,20 @@ export const runsPaths = {
       operationId: "getRunLogs",
       tags: ["Runs"],
       summary: "Get run logs",
-      description: "Get persisted log entries for a run.",
+      description:
+        "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth. `id` is a monotonic BIGSERIAL; an invalid cursor falls back to the full list rather than 400.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "since",
+          in: "query",
+          required: false,
+          schema: { type: "integer", format: "int64", minimum: 0 },
+          description:
+            "Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll.",
+        },
       ],
       responses: {
         "200": {
