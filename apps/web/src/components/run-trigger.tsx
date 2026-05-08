@@ -44,13 +44,21 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
     );
   }
   if (run.runnerName) {
+    const tooltip = run.runnerKind ? `${run.runnerName} (${run.runnerKind})` : run.runnerName;
     return (
       <span
         className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs"
-        title={run.runnerKind ? `${run.runnerName} (${run.runnerKind})` : run.runnerName}
+        title={run.dashboardUserName ? `${tooltip} · ${run.dashboardUserName}` : tooltip}
       >
         <RunnerIcon kind={run.runnerKind} />
         <span className="truncate">{run.runnerName}</span>
+        {run.dashboardUserName ? (
+          <>
+            <span className="shrink-0">·</span>
+            <User size={12} className="shrink-0" />
+            <span className="truncate">{run.dashboardUserName}</span>
+          </>
+        ) : null}
       </span>
     );
   }
