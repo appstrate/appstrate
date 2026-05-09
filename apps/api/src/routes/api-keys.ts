@@ -15,6 +15,7 @@ import {
   listApiKeys,
   revokeApiKey,
 } from "../services/api-keys.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { getAppScope, getOrgScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
@@ -87,7 +88,7 @@ export function createApiKeysRouter() {
       return c.json({ id, key: rawKey, keyPrefix, scopes: validatedScopes }, 201);
     } catch (err) {
       logger.error("API key creation failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -117,7 +118,7 @@ export function createApiKeysRouter() {
       if (err instanceof ApiError) throw err;
       logger.error("API key revocation failed", {
         keyId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

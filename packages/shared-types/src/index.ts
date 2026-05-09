@@ -358,6 +358,32 @@ export const tokenUsageSchema = z.object({
 });
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
+/**
+ * In-place accumulator for {@link TokenUsage} totals.
+ *
+ * Adds every field of `addition` onto `total`. Optional fields default to
+ * zero on both sides — `undefined` on `addition` is a no-op, and the
+ * cache-creation / cache-read totals are coerced to a numeric zero on
+ * `total` so subsequent reads always yield a number.
+ *
+ * Shared helper for the runner-event ingestion path
+ * (`apps/api/src/services/run-launcher/appstrate-event-sink.ts`). The
+ * older inline accumulator in `packages/runner-pi/src/pi-runner.ts` uses
+ * the legacy `{ input, output, cacheRead, cacheWrite }` shape; rather
+ * than translate at the inline call site (and risk drift in the cost
+ * computation), that site is left untouched as a follow-up — the helper
+ * here exists so the canonical Anthropic-shape accumulator has one
+ * implementation and one test target.
+ */
+export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
+  total.input_tokens += addition.input_tokens ?? 0;
+  total.output_tokens += addition.output_tokens ?? 0;
+  total.cache_creation_input_tokens =
+    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
+  total.cache_read_input_tokens =
+    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+}
+
 // --- Package Version Types ---
 
 interface PackageVersionInfo {
@@ -451,7 +477,7 @@ export interface OrgModelInfo {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+  cost?: ModelCost | null;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";

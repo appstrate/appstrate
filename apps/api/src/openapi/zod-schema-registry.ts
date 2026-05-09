@@ -97,9 +97,6 @@ import {
 // --- Package schemas (routes/packages.ts) ---
 import { githubImportSchema, forkSchema } from "../routes/packages.ts";
 
-// --- Internal schemas (routes/internal.ts) ---
-import { reportAuthFailureSchema } from "../routes/internal.ts";
-
 // --- Application schemas (routes/applications.ts) ---
 import {
   createApplicationSchema,
@@ -457,14 +454,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/app-profiles/{id}/bind",
     jsonSchema: toJsonSchema(bindAppProfileSchema),
     description: "Bind provider to app profile",
-  },
-
-  // ─── Internal ──────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/internal/connections/report-auth-failure",
-    jsonSchema: toJsonSchema(reportAuthFailureSchema),
-    description: "Report auth failure from sidecar",
   },
 ];
 

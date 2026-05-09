@@ -17,6 +17,7 @@ import { db } from "@appstrate/db/client";
 import { auditEvents } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
@@ -57,7 +58,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
       action: input.action,
       resourceType: input.resourceType,
       resourceId: input.resourceId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

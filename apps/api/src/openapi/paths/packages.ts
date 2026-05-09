@@ -1522,12 +1522,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  agent: { $ref: "#/components/schemas/AgentDetail" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/AgentDetail" },
             },
           },
         },
@@ -2775,12 +2770,7 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  agent: { $ref: "#/components/schemas/AgentDetail" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/AgentDetail" },
             },
           },
         },

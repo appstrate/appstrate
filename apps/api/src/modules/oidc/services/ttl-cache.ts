@@ -20,6 +20,7 @@
 
 import { getPubSub } from "../../../infra/index.ts";
 import { logger } from "../../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const PER_APP_TTL_MS = 60_000;
 const NULL_TTL_MS = 10_000;
@@ -51,7 +52,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
     } catch (err) {
       logger.warn("oidc per-app cache: pub/sub subscribe failed, running single-instance", {
         channel,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   })();
@@ -79,7 +80,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
         logger.warn("oidc per-app cache: pub/sub publish failed", {
           channel,
           key,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }
     },

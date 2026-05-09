@@ -41,7 +41,7 @@ export function useOAuthScopes() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["oauth-scopes", orgId, appId],
-    queryFn: () => api<{ data: string[] }>("/oauth/scopes").then((d) => d.data),
+    queryFn: () => apiList<string>("/oauth/scopes"),
     enabled: !!orgId && !!appId,
     staleTime: Infinity, // scope list is static within a deploy
   });

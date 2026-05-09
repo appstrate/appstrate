@@ -24,6 +24,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, credentialProxyUsage } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 // `credentialProxyUsage` is still used by `insertCredentialProxyUsage`
 // below; not by `computeRunCost` (see header comment).
 import { logger } from "../lib/logger.ts";
@@ -73,7 +74,7 @@ export async function insertCredentialProxyUsage(
     // for auth / data plane lives elsewhere.
     logger.error("Failed to record credential proxy usage", {
       requestId: input.requestId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

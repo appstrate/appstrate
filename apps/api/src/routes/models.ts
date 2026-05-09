@@ -18,6 +18,7 @@ import {
   testModelConfig,
   loadModel,
 } from "../services/org-models.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -114,7 +115,7 @@ export function createModelsRouter() {
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Model create failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -137,7 +138,7 @@ export function createModelsRouter() {
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default model failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -224,7 +225,7 @@ export function createModelsRouter() {
         });
       }
       logger.error("OpenRouter model search failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw new ApiError({
         status: 502,
@@ -264,7 +265,7 @@ export function createModelsRouter() {
       return c.json(result);
     } catch (err) {
       logger.error("Model inline test failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -283,7 +284,7 @@ export function createModelsRouter() {
     } catch (err) {
       logger.error("Model test failed", {
         modelId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -312,7 +313,7 @@ export function createModelsRouter() {
     } catch (err) {
       logger.error("Model update failed", {
         modelId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -338,7 +339,7 @@ export function createModelsRouter() {
     } catch (err) {
       logger.error("Model delete failed", {
         modelId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

@@ -18,6 +18,7 @@ import {
   createAuth,
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
@@ -72,7 +73,7 @@ export async function boot(): Promise<void> {
   // visitors back through `/claim`, where redemption then 410s.
   await reconcileBootstrapTokenAtBoot().catch((err) => {
     logger.warn("Could not reconcile bootstrap token at boot", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   });
 
@@ -164,7 +165,7 @@ export async function boot(): Promise<void> {
   // Load system packages from ZIPs, sync to DB + S3
   await loadAndSyncSystemPackages().catch((err) => {
     logger.warn("Could not load/sync system packages", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   });
 
@@ -174,12 +175,12 @@ export async function boot(): Promise<void> {
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
         logger.warn("Could not install NOTIFY triggers", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
     initRealtime().catch((err) => {
       logger.warn("Could not initialize realtime LISTEN", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }),
   ]);
@@ -193,7 +194,7 @@ export async function boot(): Promise<void> {
     }
   } catch (err) {
     logger.warn("Could not clean orphaned runs", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 
@@ -205,7 +206,7 @@ export async function boot(): Promise<void> {
     }
   } catch (err) {
     logger.warn("Could not clean up orphaned resources", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 
@@ -216,17 +217,17 @@ export async function boot(): Promise<void> {
   const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize sidecar pool", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize schedule worker", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }),
     initInlineCompactionWorker().catch((err) => {
       logger.warn("Could not initialize inline compaction worker", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }),
     startRunWatchdog({
@@ -235,7 +236,7 @@ export async function boot(): Promise<void> {
       maxFinalizesPerTick: 200,
     }).catch((err) => {
       logger.warn("Could not start run watchdog", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }),
     expireOldInvitations()
@@ -244,7 +245,7 @@ export async function boot(): Promise<void> {
       })
       .catch((err) => {
         logger.warn("Could not expire old invitations", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
     cleanupExpiredKeys()
@@ -254,7 +255,7 @@ export async function boot(): Promise<void> {
       })
       .catch((err) => {
         logger.warn("Could not clean up expired API keys", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
     cleanupExpiredUploads()
@@ -263,7 +264,7 @@ export async function boot(): Promise<void> {
       })
       .catch((err) => {
         logger.warn("Could not clean up expired uploads", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
   ];
@@ -356,7 +357,7 @@ async function loadAndSyncSystemPackages(): Promise<void> {
       syncCanonical(id, entry).catch((err) => {
         logger.warn("Failed to sync canonical system package", {
           packageId: id,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
     ),
@@ -367,7 +368,7 @@ async function loadAndSyncSystemPackages(): Promise<void> {
         logger.warn("Failed to register system package version", {
           packageId: entry.packageId,
           version: entry.version,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }),
     ),

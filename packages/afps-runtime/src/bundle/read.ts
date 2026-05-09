@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
 import { BundleError } from "./errors.ts";
+import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, sumSizes } from "./archive-utils.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
 import {
@@ -242,20 +243,7 @@ export function readBundleFromBuffer(buffer: Uint8Array, opts: ReadBundleOptions
         identity,
       });
     }
-    let manifest: AfpsManifest;
-    try {
-      const parsedManifest = JSON.parse(new TextDecoder().decode(manifestBytes));
-      if (!parsedManifest || typeof parsedManifest !== "object" || Array.isArray(parsedManifest)) {
-        throw new Error("manifest.json must be a JSON object");
-      }
-      manifest = parsedManifest as AfpsManifest;
-    } catch (err) {
-      throw new BundleError(
-        "BUNDLE_JSON_INVALID",
-        `manifest.json for ${identity} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-        { identity },
-      );
-    }
+    const manifest = parseAfpsManifestBytes(manifestBytes, { identity }) as AfpsManifest;
 
     packages.set(identity, {
       identity,

@@ -2,15 +2,15 @@
 
 import { getEnv } from "@appstrate/env";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
-import type { ContainerOrchestrator } from "./interface.ts";
 import type {
+  ContainerOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
   SidecarConfig,
   CleanupReport,
   StopResult,
-} from "./types.ts";
+} from "@appstrate/core/platform-types";
 import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";

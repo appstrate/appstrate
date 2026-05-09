@@ -2,6 +2,7 @@
 
 import { listenClient } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export type RealtimeEvent = {
   event: string;
@@ -54,7 +55,7 @@ export async function initRealtime(): Promise<void> {
       }
     } catch (err) {
       logger.error("Failed to parse run_update payload", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   });
@@ -72,7 +73,7 @@ export async function initRealtime(): Promise<void> {
       }
     } catch (err) {
       logger.error("Failed to parse run_log_insert payload", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   });

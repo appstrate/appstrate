@@ -765,7 +765,7 @@ export const oidcPaths = {
       operationId: "deviceAuthorizationCode",
       summary: "Request a device + user code (RFC 8628 §3.2)",
       description:
-        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/device/token` with. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
+        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with (issue #165). Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
       requestBody: {
         required: true,
         content: {
@@ -832,91 +832,6 @@ export const oidcPaths = {
                 type: "object",
                 properties: {
                   error: { type: "string", enum: ["invalid_client", "invalid_request"] },
-                  error_description: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/auth/device/token": {
-    post: {
-      tags: ["Device Authorization"],
-      operationId: "deviceAuthorizationToken",
-      summary: "Exchange approved device_code for an access token (RFC 8628 §3.4)",
-      description:
-        "Polled by the CLI until the user approves or the code expires. On success, returns a BA session token as `access_token`. The token is opaque (not a JWT) and must be sent back as `Authorization: Bearer <token>` on subsequent requests. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.4, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them.",
-      requestBody: {
-        required: true,
-        content: {
-          "application/x-www-form-urlencoded": {
-            schema: {
-              type: "object",
-              required: ["grant_type", "device_code", "client_id"],
-              properties: {
-                grant_type: {
-                  type: "string",
-                  enum: ["urn:ietf:params:oauth:grant-type:device_code"],
-                },
-                device_code: { type: "string" },
-                client_id: { type: "string" },
-              },
-            },
-          },
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["grant_type", "device_code", "client_id"],
-              properties: {
-                grant_type: {
-                  type: "string",
-                  enum: ["urn:ietf:params:oauth:grant-type:device_code"],
-                },
-                device_code: { type: "string" },
-                client_id: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "User approved — access token issued.",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["access_token", "token_type", "expires_in"],
-                properties: {
-                  access_token: { type: "string" },
-                  token_type: { type: "string", enum: ["Bearer"] },
-                  expires_in: { type: "integer" },
-                  scope: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": {
-          description: "Authorization pending, slow down, or terminal error.",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: [
-                      "authorization_pending",
-                      "slow_down",
-                      "expired_token",
-                      "access_denied",
-                      "invalid_request",
-                      "invalid_grant",
-                    ],
-                  },
                   error_description: { type: "string" },
                 },
               },

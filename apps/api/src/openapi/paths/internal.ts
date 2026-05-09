@@ -249,48 +249,4 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/connections/report-auth-failure": {
-    post: {
-      operationId: "reportAuthFailure",
-      tags: ["Internal"],
-      summary: "Report upstream auth failure",
-      description:
-        "Called by sidecar when an upstream provider returns 401. Flags the connection as needs_reconnection. Container-to-host only. Auth via Bearer run token.",
-      security: [{ bearerExecToken: [] }],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                providerId: {
-                  type: "string",
-                  minLength: 1,
-                  description: "Provider ID that returned 401",
-                },
-              },
-              required: ["providerId"],
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Acknowledgement",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  flagged: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
 } as const;

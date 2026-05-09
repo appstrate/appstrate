@@ -143,58 +143,56 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   );
 
   return c.json({
-    agent: {
-      id: agent.id,
-      displayName: m.displayName,
-      description: m.description,
-      source: agent.source,
-      scope: parsed?.scope ?? null,
-      version: m.version ?? null,
-      dependencies: {
-        providers: providerStatuses,
-        skills: agent.skills.map((s) => ({
-          id: s.id,
-          ...(s.version ? { version: s.version } : {}),
-          ...(s.name ? { name: s.name } : {}),
-          ...(s.description ? { description: s.description } : {}),
-        })),
-        tools: agent.tools.map((e) => ({
-          id: e.id,
-          ...(e.version ? { version: e.version } : {}),
-          ...(e.name ? { name: e.name } : {}),
-          ...(e.description ? { description: e.description } : {}),
-        })),
-      },
-      ...(m.input ? { input: m.input } : {}),
-      ...(m.output ? { output: m.output } : {}),
-      config: {
-        ...(m.config ?? { schema: { type: "object", properties: {} } }),
-        current: configWithDefaults,
-      },
-      runningRuns: runningCount,
-      lastRun: lastRun
-        ? {
-            id: lastRun.id,
-            status: lastRun.status,
-            startedAt: lastRun.startedAt,
-            duration: lastRun.duration,
-          }
-        : null,
-      populatedProviders,
-      callbackUrl: getOAuthCallbackUrl(),
-      versionCount,
-      hasUnarchivedChanges,
-      agentAppProfileId,
-      agentAppProfileName,
-      forkedFrom: rawItem?.forkedFrom ?? null,
-      ...(agent.source !== "system" && rawItem
-        ? {
-            manifest: agent.manifest,
-            updatedAt: rawItem.updatedAt,
-            lockVersion: rawItem.lockVersion,
-            prompt: agent.prompt,
-          }
-        : {}),
+    id: agent.id,
+    displayName: m.displayName,
+    description: m.description,
+    source: agent.source,
+    scope: parsed?.scope ?? null,
+    version: m.version ?? null,
+    dependencies: {
+      providers: providerStatuses,
+      skills: agent.skills.map((s) => ({
+        id: s.id,
+        ...(s.version ? { version: s.version } : {}),
+        ...(s.name ? { name: s.name } : {}),
+        ...(s.description ? { description: s.description } : {}),
+      })),
+      tools: agent.tools.map((e) => ({
+        id: e.id,
+        ...(e.version ? { version: e.version } : {}),
+        ...(e.name ? { name: e.name } : {}),
+        ...(e.description ? { description: e.description } : {}),
+      })),
     },
+    ...(m.input ? { input: m.input } : {}),
+    ...(m.output ? { output: m.output } : {}),
+    config: {
+      ...(m.config ?? { schema: { type: "object", properties: {} } }),
+      current: configWithDefaults,
+    },
+    runningRuns: runningCount,
+    lastRun: lastRun
+      ? {
+          id: lastRun.id,
+          status: lastRun.status,
+          startedAt: lastRun.startedAt,
+          duration: lastRun.duration,
+        }
+      : null,
+    populatedProviders,
+    callbackUrl: getOAuthCallbackUrl(),
+    versionCount,
+    hasUnarchivedChanges,
+    agentAppProfileId,
+    agentAppProfileName,
+    forkedFrom: rawItem?.forkedFrom ?? null,
+    ...(agent.source !== "system" && rawItem
+      ? {
+          manifest: agent.manifest,
+          updatedAt: rawItem.updatedAt,
+          lockVersion: rawItem.lockVersion,
+          prompt: agent.prompt,
+        }
+      : {}),
   });
 }

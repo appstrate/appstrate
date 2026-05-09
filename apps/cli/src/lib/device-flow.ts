@@ -26,6 +26,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { hostname } from "node:os";
 import { assertSafeVerificationUrl, normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Headers sent on every device-flow request that should be associated
@@ -160,11 +161,7 @@ export async function startDeviceFlow(
     assertSafeVerificationUrl(json.verification_uri, normalizedInstance);
     assertSafeVerificationUrl(json.verification_uri_complete, normalizedInstance);
   } catch (err) {
-    throw new DeviceFlowError(
-      "invalid_request",
-      err instanceof Error ? err.message : String(err),
-      res.status,
-    );
+    throw new DeviceFlowError("invalid_request", getErrorMessage(err), res.status);
   }
   return {
     deviceCode: json.device_code,

@@ -9,6 +9,7 @@ import {
   getOrgItem,
   type CreateItemInput,
 } from "./package-items/crud.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles } from "./package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -90,7 +91,7 @@ export async function postInstallPackage(params: {
   } catch (err) {
     logger.error("Failed to create package version", {
       packageId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

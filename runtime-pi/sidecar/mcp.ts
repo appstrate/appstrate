@@ -55,6 +55,7 @@ import {
   type ReadResourceResult,
   type Resource,
 } from "@appstrate/mcp-transport";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
@@ -771,7 +772,7 @@ async function responseToToolResult(
         content: [
           {
             type: "text",
-            text: `provider_call: blob store rejected upstream response — ${err instanceof Error ? err.message : String(err)}`,
+            text: `provider_call: blob store rejected upstream response — ${getErrorMessage(err)}`,
           },
         ],
         isError: true,

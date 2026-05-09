@@ -5,7 +5,7 @@
 // configurable so the same widget works against Appstrate's `/api/uploads`
 // and Portal's `/share/:token/uploads` proxy.
 
-interface UploadDescriptor {
+export interface UploadDescriptor {
   id: string;
   uri: string;
   url: string;

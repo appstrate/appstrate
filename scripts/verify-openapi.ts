@@ -286,7 +286,6 @@ const expectedEndpoints = [
   "GET /internal/memories",
   "GET /internal/credentials/{scope}/{name}",
   "POST /internal/credentials/{scope}/{name}/refresh",
-  "POST /internal/connections/report-auth-failure",
 
   // Meta
   "GET /api/openapi.json",

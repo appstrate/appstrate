@@ -29,6 +29,7 @@ import type {
   ResolvedProxyModel,
   UpstreamUsage,
 } from "./types.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelCost } from "@appstrate/shared-types";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
@@ -98,7 +99,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
       upstreamUrl,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     throw err;
   }
@@ -279,7 +280,7 @@ async function tapSseStream(
     if (buffer.trim().length > 0) frames.push(buffer);
   } catch (err) {
     logger.warn("llm-proxy: stream tap read failed — usage not recorded", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   }
@@ -325,7 +326,7 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
     logger.error("llm-proxy: failed to record usage", {
       orgId: inputs.principal.orgId,
       presetId: inputs.resolved.presetId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

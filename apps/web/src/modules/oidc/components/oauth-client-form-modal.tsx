@@ -29,6 +29,7 @@ import {
   type OAuthClient,
   type SignupRole,
 } from "../hooks/use-oauth-clients";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
 const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
@@ -187,7 +188,7 @@ function OAuthClientFormBody({
             handleClose();
           },
           onError: (err) => {
-            setError("root", { message: err instanceof Error ? err.message : String(err) });
+            setError("root", { message: getErrorMessage(err) });
           },
         },
       );
@@ -207,7 +208,7 @@ function OAuthClientFormBody({
             setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
           },
           onError: (err) => {
-            setError("root", { message: err instanceof Error ? err.message : String(err) });
+            setError("root", { message: getErrorMessage(err) });
           },
         },
       );

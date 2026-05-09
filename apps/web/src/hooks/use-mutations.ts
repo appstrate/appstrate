@@ -374,7 +374,6 @@ function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
   const cfg = PACKAGE_CONFIG.provider;
   qc.invalidateQueries({ queryKey: ["providers"] });
   qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
-  qc.invalidateQueries({ queryKey: ["packages", cfg.detailKey] });
   qc.invalidateQueries({ queryKey: ["version-info"] });
   qc.invalidateQueries({ queryKey: ["available-providers"] });
 }

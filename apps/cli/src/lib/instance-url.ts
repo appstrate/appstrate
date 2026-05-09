@@ -20,8 +20,8 @@
  *   - `login` command (before the initial `/device/code` call, so the
  *     user sees the rejection before typing their credentials).
  *   - `device-flow.ts` helpers (before the device-code and polling
- *     requests — no bearer token yet, but `/device/token` response
- *     carries the freshly-minted session we must not leak).
+ *     requests — no bearer token yet, but the `/cli/token` response
+ *     carries the freshly-minted JWT + refresh pair we must not leak).
  */
 
 // Static names we always treat as loopback. IPv6 literals round-trip

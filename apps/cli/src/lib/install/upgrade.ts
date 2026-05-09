@@ -43,6 +43,7 @@ import { stat, readFile, copyFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { EnvVars } from "./secrets.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export type InstallMode = "fresh" | "upgrade";
 
@@ -299,14 +300,14 @@ export async function runWithRollback<T>(
     try {
       await restoreBackups(dir, backedUp);
     } catch (restoreErr) {
-      const originalMsg = err instanceof Error ? err.message : String(err);
-      const restoreMsg = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+      const originalMsg = getErrorMessage(err);
+      const restoreMsg = getErrorMessage(restoreErr);
       throw new Error(
         `Upgrade failed (${originalMsg}). Rollback also failed (${restoreMsg}); ` +
           `.backup files are preserved in ${dir} for manual recovery.`,
       );
     }
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = getErrorMessage(err);
     throw new Error(
       `Upgrade failed (${msg}). Original files restored from backup; ` +
         `run \`docker compose up -d\` in ${dir} to resume on the previous config.`,

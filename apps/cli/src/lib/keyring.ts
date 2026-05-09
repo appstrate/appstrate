@@ -27,6 +27,7 @@ import { readFile, unlink, mkdir, stat } from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { Mutex } from "async-mutex";
 import { getConfigDir } from "./config.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Opt-in escape hatch for environments where the keyring daemon is
@@ -117,7 +118,7 @@ const MISSING_BACKEND_MARKERS = ["Platform secure storage failure", "No storage"
 let _backendWarningEmitted = false;
 
 function classifyKeyringError(err: unknown): "missing-backend" | "entry-missing" | "broken" {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = getErrorMessage(err);
   if (msg.includes("No matching entry")) return "entry-missing";
   if (MISSING_BACKEND_MARKERS.some((marker) => msg.includes(marker))) return "missing-backend";
   return "broken";
@@ -144,7 +145,7 @@ export function _shouldRefuseWindowsFallback(platform: string, err: unknown): bo
 }
 
 function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): never {
-  const cause = err instanceof Error ? err.message : String(err);
+  const cause = getErrorMessage(err);
   throw new Error(
     `Cannot ${op} Appstrate credentials: Windows Credential Manager is unavailable.\n` +
       `  Cause: ${cause}\n` +
@@ -168,7 +169,7 @@ function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): n
  * full account takeover for anyone with read access to the file.
  */
 function refuseBrokenKeyring(op: "read" | "write" | "delete", err: unknown): never {
-  const cause = err instanceof Error ? err.message : String(err);
+  const cause = getErrorMessage(err);
   throw new Error(
     `Cannot ${op} Appstrate credentials: the OS keyring is installed but not serving.\n` +
       `  Cause: ${cause}\n` +
@@ -192,7 +193,7 @@ function refuseBrokenKeyring(op: "read" | "write" | "delete", err: unknown): nev
 function warnBackendOnce(op: "read" | "write" | "delete", err: unknown): void {
   if (_backendWarningEmitted) return;
   _backendWarningEmitted = true;
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = getErrorMessage(err);
   process.stderr.write(
     `[appstrate] OS keyring ${op} failed (${msg}) — falling back to ~/.config/appstrate/credentials.json (0600). ` +
       `If this was unexpected, fix the keyring backend to restore secure storage.\n`,

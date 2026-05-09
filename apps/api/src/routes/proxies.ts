@@ -15,6 +15,7 @@ import {
   setDefaultProxy,
   testProxyConnection,
 } from "../services/org-proxies.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -67,7 +68,7 @@ export function createProxiesRouter() {
       });
       return c.json({ id }, 201);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
@@ -93,7 +94,7 @@ export function createProxiesRouter() {
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default proxy failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -112,7 +113,7 @@ export function createProxiesRouter() {
     } catch (err) {
       logger.error("Proxy test failed", {
         proxyId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -139,7 +140,7 @@ export function createProxiesRouter() {
       });
       return c.json({ id: proxyId });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       if (msg.includes("blocked network")) {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
@@ -168,7 +169,7 @@ export function createProxiesRouter() {
     } catch (err) {
       logger.error("Proxy delete failed", {
         proxyId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

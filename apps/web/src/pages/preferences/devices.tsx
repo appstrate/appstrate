@@ -8,14 +8,8 @@ import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
-import { apiFetch } from "../../api";
+import { apiFetch, type ListEnvelope } from "../../api";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-
-interface CliSessionsResponse {
-  object: "list";
-  data: CliSessionDisplay[];
-  hasMore: boolean;
-}
 
 const SESSIONS_QUERY_KEY = ["cli-sessions"] as const;
 
@@ -26,7 +20,7 @@ export function PreferencesDevicesPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: SESSIONS_QUERY_KEY,
     queryFn: async () => {
-      const env = await apiFetch<CliSessionsResponse>("/api/auth/cli/sessions");
+      const env = await apiFetch<ListEnvelope<CliSessionDisplay>>("/api/auth/cli/sessions");
       return env.data;
     },
   });

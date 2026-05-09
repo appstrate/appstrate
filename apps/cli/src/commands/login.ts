@@ -8,7 +8,7 @@
  *   2. Ask for instance URL if not passed via `--instance`.
  *   3. POST /api/auth/device/code → receive user_code + verification URL.
  *   4. Print the code in the terminal + open the browser.
- *   5. Poll /api/auth/device/token until approval.
+ *   5. Poll /api/auth/cli/token until approval.
  *   6. Store the JWT access + rotating refresh pair in the keyring
  *      (issue #165); decode `sub` + `email` from the JWT payload
  *      (via `lib/jwt-identity.ts`) to capture userId + email;
@@ -35,6 +35,7 @@ import {
   formatUserCode,
   exitWithError,
 } from "../lib/ui.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { readConfig, resolveProfileName, setProfile, updateProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
@@ -298,9 +299,7 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   } catch (err) {
     // Don't fail the login if /api/orgs is temporarily down — tokens
     // are already persisted and the user can retry with `org switch`.
-    process.stderr.write(
-      `Failed to list organizations: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`Failed to list organizations: ${getErrorMessage(err)}\n`);
     return null;
   }
 
@@ -363,9 +362,7 @@ async function pinAppOnProfile(
   try {
     apps = await listApplications(profileName);
   } catch (err) {
-    process.stderr.write(
-      `Failed to list applications: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`Failed to list applications: ${getErrorMessage(err)}\n`);
     return null;
   }
 

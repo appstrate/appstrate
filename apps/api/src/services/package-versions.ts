@@ -11,6 +11,7 @@ import {
   unzipAndNormalize,
   buildMinimalZip,
 } from "./package-storage.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
@@ -121,7 +122,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     logger.error("Failed to create package version", {
       packageId,
       version,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   }
@@ -310,7 +311,7 @@ export async function getVersionDetail(
     logger.warn("Failed to extract ZIP for version detail", {
       packageId,
       version: row.version,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 

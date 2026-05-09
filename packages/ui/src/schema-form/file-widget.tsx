@@ -4,16 +4,12 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
+import { formatBytes as formatSize } from "@appstrate/core/format";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Button, LABEL_CLASS } from "./primitives.tsx";
 import { cn } from "./cn.ts";
 import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
 import type { SchemaFormContext } from "./context.ts";
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
 
 interface Attachment {
   uri: string;
@@ -176,7 +172,7 @@ export function FileWidget(props: WidgetProps) {
         commit(next);
       } catch (e) {
         if ((e as { name?: string }).name === "AbortError") return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(getErrorMessage(e));
       } finally {
         setUploading(false);
         if (abortRef.current === ctrl) abortRef.current = null;

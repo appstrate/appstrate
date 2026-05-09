@@ -19,6 +19,7 @@ import { AuthLayout } from "../components/auth-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface RedeemResponse {
   bootstrap?: { orgId: string; orgSlug: string };
@@ -65,7 +66,7 @@ export function ClaimPage() {
       // and the SPA flows into the normal authenticated path.
       window.location.href = "/";
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       setErrorMsg(msg);
       setSubmitting(false);
     }

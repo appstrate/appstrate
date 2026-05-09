@@ -3,18 +3,21 @@
 /**
  * CLI token service (issue #165).
  *
- * Replaces the 7-day Better Auth session token returned by BA's
- * `/device/token` endpoint with a **15-minute signed JWT access token +
- * 30-day opaque rotating refresh token** pair. Follows RFC 6749
- * §1.5 semantics + RFC 6819 §5.2.2.3 reuse detection.
+ * Mints a **15-minute signed JWT access token + 30-day opaque rotating
+ * refresh token** pair for the Appstrate CLI's device-authorization
+ * flow. Follows RFC 6749 §1.5 semantics + RFC 6819 §5.2.2.3 reuse
+ * detection. The CLI never uses BA's built-in `/device/token` (which
+ * mints a 7-day BA session) — that endpoint stays mounted by BA's
+ * plugin but is not exercised by any first-party Appstrate client.
  *
- * ## Why a separate endpoint instead of intercepting `/device/token`?
+ * ## Why a separate endpoint instead of replacing BA's?
  *
- * Better Auth's `deviceAuthorization()` plugin hard-codes `/device/token`
- * to return a BA session via `ctx.context.internalAdapter.createSession()`.
- * There is no hook to substitute the response body. Rather than monkey-
- * patching the plugin or deleting its endpoint, this module exposes a
- * *parallel* endpoint at `/api/auth/cli/token` that:
+ * Better Auth's `deviceAuthorization()` plugin hard-codes its built-in
+ * `/device/token` handler to return a BA session via
+ * `ctx.context.internalAdapter.createSession()`. There is no hook to
+ * substitute the response body. Rather than monkey-patching the plugin,
+ * this module exposes a *parallel* endpoint at `/api/auth/cli/token`
+ * that:
  *
  *   1. Reads the BA-owned `device_codes` table directly via Drizzle.
  *   2. Validates status / expiry / polling interval identically to BA's
@@ -24,9 +27,6 @@
  *      `jwt()` plugin already maintains) + an opaque refresh token
  *      stored in `cli_refresh_tokens`.
  *   4. Deletes the `device_codes` row to preserve the one-shot contract.
- *
- * The old `/device/token` endpoint remains reachable for backward
- * compatibility but is no longer used by the CLI.
  *
  * ## Access token shape
  *
@@ -75,6 +75,7 @@ import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** 15 minutes — the industry-standard short-lived access token window
  *  (gh, gcloud, aws sso all sit in the 15 min – 1 h band). Tight enough
@@ -856,7 +857,7 @@ export async function checkFamilyAndTouch(params: {
       logger.warn("oidc: cli last_used_at bump failed — auth still allowed", {
         module: "oidc",
         familyId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }
@@ -911,7 +912,7 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
     logger.warn("oidc: cli device-name lookup failed (runner attribution)", {
       module: "oidc",
       familyId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   }

@@ -49,12 +49,13 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
+import { accumulateTokenUsage } from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 
 export interface PersistingEventSinkOptions {
@@ -232,7 +233,7 @@ export class AggregatingEventSink extends PersistingEventSink {
     if (event.type === "appstrate.metric") {
       const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
       const cost = typeof event.cost === "number" ? event.cost : null;
-      if (usage) accumulateUsage(this.accumulatedUsage, usage);
+      if (usage) accumulateTokenUsage(this.accumulatedUsage, usage);
       if (cost !== null) this.accumulatedCost += cost;
     }
 
@@ -318,38 +319,7 @@ export async function writeRunnerLedgerRow(
   } catch (err) {
     logger.error("Failed to write runner ledger row", {
       runId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
-}
-
-/**
- * Whether a runner-source row has already been persisted for this run.
- * Used by the finalize-time fallback to decide whether to synthesise the
- * row or trust the metric event handler that already ran.
- */
-export async function hasRunnerLedgerRow(runId: string): Promise<boolean> {
-  try {
-    const [row] = await db
-      .select({ id: llmUsage.id })
-      .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")))
-      .limit(1);
-    return row !== undefined;
-  } catch (err) {
-    logger.warn("Failed to read runner ledger; assuming row absent", {
-      runId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
-}
-
-function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
-  total.input_tokens += addition.input_tokens ?? 0;
-  total.output_tokens += addition.output_tokens ?? 0;
-  total.cache_creation_input_tokens =
-    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
-  total.cache_read_input_tokens =
-    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
 }

@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { UploadFn } from "@appstrate/ui/schema-form";
+import type { UploadDescriptor, UploadFn } from "@appstrate/ui/schema-form";
 import { getCurrentOrgId } from "./hooks/use-org";
 import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
-
-interface UploadDescriptor {
-  id: string;
-  uri: string;
-  url: string;
-  method: "PUT";
-  headers: Record<string, string>;
-}
 
 /**
  * Authed uploader for `<SchemaForm upload={...} />`. The UI package's default
@@ -100,7 +92,7 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   return apiFetch<T>(`${API_BASE}${path}`, options);
 }
 
-interface ListEnvelope<T> {
+export interface ListEnvelope<T> {
   object: "list";
   data: T[];
   hasMore: boolean;

@@ -26,6 +26,7 @@ import {
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   readBundleFromBuffer,
   readBundleFromFile,
@@ -422,9 +423,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     workspaceDir,
     onError: (message, err) => {
       if (!opts.json) {
-        process.stderr.write(
-          `warn: ${message}${err ? `: ${err instanceof Error ? err.message : String(err)}` : ""}\n`,
-        );
+        process.stderr.write(`warn: ${message}${err ? `: ${getErrorMessage(err)}` : ""}\n`);
       }
     },
   });
@@ -574,9 +573,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
           SAFETY_NET_FINALIZE_TIMEOUT_MS,
         ).catch((err) => {
           if (!opts.json) {
-            process.stderr.write(
-              `warn: finalize on cancel failed: ${err instanceof Error ? err.message : String(err)}\n`,
-            );
+            process.stderr.write(`warn: finalize on cancel failed: ${getErrorMessage(err)}\n`);
           }
         });
       }
@@ -623,9 +620,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // own retry loop has already done what it could. A warning to
       // stderr keeps the failure visible without masking it.
       if (!opts.json) {
-        process.stderr.write(
-          `warn: runtime ready event failed: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`warn: runtime ready event failed: ${getErrorMessage(err)}\n`);
       }
     });
 
@@ -641,9 +636,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
         runSecret: reportSession.runSecret,
         onError: (err) => {
           if (!opts.json) {
-            process.stderr.write(
-              `warn: heartbeat failed: ${err instanceof Error ? err.message : String(err)}\n`,
-            );
+            process.stderr.write(`warn: heartbeat failed: ${getErrorMessage(err)}\n`);
           }
         },
       });
@@ -668,9 +661,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // remains visible, but don't compete for the exit code.
     await runCleanup().catch((err) => {
       if (!opts.json) {
-        process.stderr.write(
-          `warn: cleanup failed: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`warn: cleanup failed: ${getErrorMessage(err)}\n`);
       }
     });
   }

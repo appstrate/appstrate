@@ -77,12 +77,6 @@ export function expectedRealmForClient(metadata: ClientAudienceMetadata): string
  * renders a clean auth error instead of a generic 500. Users recover by
  * logging out + re-authenticating with an account provisioned for the
  * target audience.
- *
- * Legacy users with NULL realm (pre-migration rows, should not exist
- * after `0001_add_user_realm` due to the default clause) are treated as
- * `"platform"` — safer default since the request-time realm guard in the
- * auth pipeline already blocks non-platform sessions from platform
- * routes.
  */
 export async function assertUserRealm(
   userId: string,
@@ -94,7 +88,7 @@ export async function assertUserRealm(
     .from(userTable)
     .where(eq(userTable.id, userId))
     .limit(1);
-  const actual = row?.realm ?? "platform";
+  const actual = row?.realm;
   if (actual === expected) return;
   logger.warn("oidc: realm mismatch at token mint — rejecting", {
     module: "oidc",

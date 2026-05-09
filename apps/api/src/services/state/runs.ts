@@ -17,6 +17,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { db } from "@appstrate/db/client";
 import {
   runs,
@@ -27,6 +28,7 @@ import {
   apiKeys,
   schedules,
   runStatusValues,
+  activeRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
@@ -130,41 +132,9 @@ type EnrichedRunRow = {
   packageEphemeral: boolean | null;
 };
 
-/**
- * Derive the "default vs override" boolean for one slot. The columns
- * `model_overridden` / `proxy_overridden` / `version_overridden` were
- * dropped (migration 0018) — the booleans are computed here so the wire
- * shape stays stable. Best-effort: when `config?.defaults?.<slot>` is
- * missing (no codified `defaults` block in the snapshot), the badge
- * defaults to `false`. The dashboard treats these flags as informational
- * — `false` on missing data is the safe degradation.
- */
-function isOverridden(
-  config: Record<string, unknown> | null,
-  slot: "model" | "proxy" | "version",
-  label: string | null,
-): boolean {
-  if (!label) return false;
-  const defaults =
-    config && typeof config === "object" && "defaults" in config
-      ? (config as { defaults?: unknown }).defaults
-      : undefined;
-  if (!defaults || typeof defaults !== "object") return false;
-  const def = (defaults as Record<string, unknown>)[slot];
-  if (typeof def !== "string") return false;
-  return def !== label;
-}
-
 function mapEnrichedRun(r: EnrichedRunRow) {
-  const config =
-    r.run.config && typeof r.run.config === "object"
-      ? (r.run.config as Record<string, unknown>)
-      : null;
   return {
     ...r.run,
-    modelOverridden: isOverridden(config, "model", r.run.modelLabel),
-    proxyOverridden: isOverridden(config, "proxy", r.run.proxyLabel),
-    versionOverridden: isOverridden(config, "version", r.run.versionLabel),
     userName: r.userName ?? null,
     endUserName: r.endUserName ?? null,
     apiKeyName: r.apiKeyName ?? null,
@@ -367,7 +337,7 @@ export async function updateRun(
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }
@@ -510,7 +480,7 @@ export async function appendRunLog(
   } catch (err) {
     logger.error("Failed to append run log", {
       runId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return 0;
   }
@@ -524,7 +494,7 @@ export async function getRunningRunsForPackage(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    inArray(runs.status, ["running", "pending"]),
+    inArray(runs.status, [...activeRunStatusValues]),
   ];
 
   conditions.push(eq(runs.applicationId, scope.applicationId));
@@ -553,7 +523,7 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        extra: [inArray(runs.status, ["running", "pending"])],
+        extra: [inArray(runs.status, [...activeRunStatusValues])],
       }),
     );
   return row?.count ?? 0;
@@ -567,7 +537,7 @@ export async function getRunningRunCounts(scope: AppScope): Promise<Record<strin
       scopedWhere(runs, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
-        extra: [inArray(runs.status, ["running", "pending"])],
+        extra: [inArray(runs.status, [...activeRunStatusValues])],
       }),
     )
     .groupBy(runs.packageId);
@@ -885,7 +855,7 @@ export async function markOrphanRunsFailed(): Promise<{
       error: "Server restarted while run was in progress. Please retry.",
       completedAt: new Date(),
     })
-    .where(inArray(runs.status, ["running", "pending"]))
+    .where(inArray(runs.status, [...activeRunStatusValues]))
     .returning({ id: runs.id });
   return { count: updated.length, runIds: updated.map((r) => r.id) };
 }

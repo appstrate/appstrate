@@ -18,6 +18,7 @@ import {
   scopeFromActor,
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { getPackage } from "../services/package-catalog.ts";
 import {
   resolveCredentialsForProxy,
@@ -29,8 +30,6 @@ import {
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
-
-export const reportAuthFailureSchema = z.object({ providerId: z.string().min(1) });
 
 /**
  * Safety margin used when deciding whether a stored access token is still
@@ -194,7 +193,7 @@ export function createInternalRouter() {
     } catch (err) {
       logger.error("Failed to fetch run history", {
         runId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -243,7 +242,7 @@ export function createInternalRouter() {
     } catch (err) {
       logger.error("Failed to recall memories", {
         runId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -401,49 +400,11 @@ export function createInternalRouter() {
         profileId,
         kind: err instanceof RefreshError ? err.kind : "unknown",
         status: err instanceof RefreshError ? err.status : undefined,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
 
       throw unauthorized(`Token refresh failed for provider '${providerId}' (transient)`);
     }
-  });
-
-  // POST /internal/connections/report-auth-failure — sidecar reports upstream 401
-  //
-  // A single 401 on an agent-generated request is NOT reliable evidence that
-  // the stored credential is dead. LLM agents frequently produce malformed
-  // requests (wrong header name, wrong auth scheme, wrong endpoint, missing
-  // API version header, wrong HTTP method) that providers reject with 401
-  // even when the token is perfectly valid. Flagging the connection on that
-  // basis forces users to reconnect unnecessarily and blocks all subsequent
-  // runs via dependency-validation.
-  //
-  // The only reliable "credential is dead" signal is a failed token refresh
-  // with HTTP 400 + body.error === "invalid_grant" (RFC 6749 §5.2), handled
-  // in the /credentials/:scope/:name/refresh route above.
-  //
-  // This endpoint is kept for telemetry — the sidecar still reports the
-  // failure so we can surface patterns in logs (provider returning 401
-  // frequently, specific agent generating malformed requests) — but it
-  // never mutates the connection.
-  router.post("/connections/report-auth-failure", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-    const body = await c.req.json();
-    const parsed = reportAuthFailureSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest("Missing or invalid providerId");
-    }
-    const { providerId } = parsed.data;
-    const profileId = run.providerProfileIds?.[providerId];
-
-    logger.info("Upstream 401 reported by sidecar (connection not flagged)", {
-      runId,
-      providerId,
-      profileId: profileId ?? null,
-      reason: "single-request 401 is ambiguous (agent syntax error vs dead credential)",
-    });
-
-    return c.json({ flagged: false });
   });
 
   return router;

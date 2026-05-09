@@ -63,6 +63,7 @@
     "./schemas": "./src/schemas.ts",
     "./schema-validation": "./src/schema-validation.ts",
     "./form": "./src/form.ts",
+    "./format": "./src/format.ts",
     "./module": "./src/module.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",

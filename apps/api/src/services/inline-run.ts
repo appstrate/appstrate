@@ -22,6 +22,7 @@ import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { runInlinePreflight, type InlineRunBody } from "./inline-run-preflight.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export type { InlineRunBody };
 
@@ -229,7 +230,7 @@ export async function deleteOrphanShadowPackage(id: string): Promise<void> {
     // original pipeline failure the caller is already re-throwing.
     logger.warn("Failed to delete orphan shadow package", {
       id,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

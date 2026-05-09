@@ -22,6 +22,7 @@ import { logger } from "./logger.ts";
 import { emitEvent } from "./modules/module-loader.ts";
 import { createDefaultApplication } from "../services/applications.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface PostBootstrapOrgArgs {
   orgId: string;
@@ -36,7 +37,7 @@ export async function triggerPostBootstrapOrg(args: PostBootstrapOrgArgs): Promi
   const defaultApp = await createDefaultApplication(orgId, userId).catch((err) => {
     logger.warn("Failed to create default application for bootstrap org", {
       orgId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   });
@@ -44,7 +45,7 @@ export async function triggerPostBootstrapOrg(args: PostBootstrapOrgArgs): Promi
     await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch((err) => {
       logger.warn("Failed to provision default agent for bootstrap org", {
         orgId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     });
   }

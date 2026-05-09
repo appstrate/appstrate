@@ -12,6 +12,7 @@ import {
   type Bundle,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 
@@ -77,7 +78,7 @@ export async function deleteVersionZip(packageId: string, version: string): Prom
     logger.warn("Failed to delete version ZIP (best-effort)", {
       packageId,
       version,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     });
   }
 }
@@ -95,7 +96,7 @@ export async function uploadPackageZip(
     logger.error("Failed to upload agent package", {
       packageId,
       version,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     });
     throw error;
   }

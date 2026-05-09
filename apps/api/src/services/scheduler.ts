@@ -15,6 +15,7 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
@@ -93,8 +94,8 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     connectionProfileId: schedule.connectionProfileId,
     orgId,
     applicationId: schedule.applicationId,
-    input: asRecordOrNull(schedule.input) ?? undefined,
-    configOverride: asRecordOrNull(schedule.configOverride) ?? undefined,
+    input: schedule.input ?? undefined,
+    configOverride: schedule.configOverride ?? undefined,
     modelIdOverride: schedule.modelIdOverride ?? undefined,
     proxyIdOverride: schedule.proxyIdOverride ?? undefined,
     versionOverride: schedule.versionOverride ?? undefined,
@@ -247,7 +248,7 @@ async function triggerScheduledRun(
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
         runId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }
@@ -314,12 +315,9 @@ async function triggerScheduledRun(
       logger.error("Unexpected error during schedule preflight", {
         scheduleId,
         packageId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
-      await failSchedule(
-        `Preflight error: ${err instanceof Error ? err.message : String(err)}`,
-        actor,
-      );
+      await failSchedule(`Preflight error: ${getErrorMessage(err)}`, actor);
       return;
     }
 
@@ -411,7 +409,7 @@ async function triggerScheduledRun(
     logger.error("Failed to trigger schedule", {
       scheduleId,
       packageId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

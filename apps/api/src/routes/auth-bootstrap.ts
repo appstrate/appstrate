@@ -57,6 +57,7 @@ import {
   tryAcquireRedemption,
   verifyBootstrapToken,
 } from "../lib/bootstrap-token.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
 const redeemSchema = z.object({
@@ -183,7 +184,7 @@ export function createAuthBootstrapRouter(): Hono {
           }),
         )) as Response;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
         if (msg.includes("already exists") || msg.includes("duplicate")) {
@@ -293,7 +294,7 @@ export function createAuthBootstrapRouter(): Hono {
             userId: row.id,
             userEmail: data.email,
           }).catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
+            const msg = getErrorMessage(err);
             logger.error("bootstrap-redeem: post-hook failed", { error: msg });
             warnings.push("default_app_provisioning_failed");
           });
@@ -302,7 +303,7 @@ export function createAuthBootstrapRouter(): Hono {
         logger.error("bootstrap-redeem: org creation failed", {
           userId: row.id,
           email: data.email,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
         throw new ApiError({
           status: 500,
@@ -354,7 +355,7 @@ export function createAuthBootstrapRouter(): Hono {
             SELECT pg_advisory_unlock(${String(BOOTSTRAP_REDEEM_LOCK_KEY)}::bigint)
           `.catch((err: unknown) =>
             logger.error("bootstrap-redeem: failed to release advisory lock", {
-              error: err instanceof Error ? err.message : String(err),
+              error: getErrorMessage(err),
             }),
           );
         }

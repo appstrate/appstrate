@@ -28,6 +28,7 @@ import { confirm, spinner } from "../../lib/ui.ts";
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 import type { ReadinessProviderEntry, ReadinessReport } from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Backwards-compatible alias for callers that named the missing entry
@@ -159,9 +160,7 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
   try {
     open(connectUrl);
   } catch (err) {
-    process.stderr.write(
-      `warn: could not open browser automatically: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`warn: could not open browser automatically: ${getErrorMessage(err)}\n`);
     process.stderr.write(`  Copy this URL: ${connectUrl}\n`);
   }
 

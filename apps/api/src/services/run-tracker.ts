@@ -5,6 +5,7 @@
 
 import { getPubSub } from "../infra/index.ts";
 import { logger } from "../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const CANCEL_CHANNEL = "runs:cancel";
 const PUBLISH_MAX_RETRIES = 3;
@@ -32,7 +33,7 @@ export function abortRun(runId: string): void {
     logger.error("Failed to publish run cancel after retries", {
       runId,
       retries: PUBLISH_MAX_RETRIES,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   });
 }
@@ -48,7 +49,7 @@ async function publishCancelWithRetry(runId: string): Promise<void> {
       logger.warn("Retrying run cancel publish", {
         runId,
         attempt: attempt + 1,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       // Linear backoff: 100ms, 200ms, 300ms
       await new Promise((r) => setTimeout(r, PUBLISH_BASE_DELAY_MS * (attempt + 1)));
@@ -75,7 +76,7 @@ export async function initCancelSubscriber(): Promise<void> {
   } catch (err) {
     logger.error("Failed to subscribe to run cancel channel", {
       channel: CANCEL_CHANNEL,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }
@@ -87,7 +88,7 @@ export async function stopCancelSubscriber(): Promise<void> {
     logger.info("Unsubscribed from run cancel channel");
   } catch (err) {
     logger.warn("Error unsubscribing from cancel channel", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

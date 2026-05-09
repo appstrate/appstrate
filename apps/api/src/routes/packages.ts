@@ -31,6 +31,7 @@ import {
   deleteOrgItem,
   PackageAlreadyExistsError,
 } from "../services/package-items/crud.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
@@ -303,7 +304,6 @@ interface PackageRouteConfig {
     requiredFile: string | null;
     contentFileExt: string | null;
   };
-  responseKey: string;
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
   /** Validates the secondary source file (e.g. .ts for tools). */
   validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
@@ -338,7 +338,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
-    responseKey: "skill",
     storageFileName: () => "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
@@ -347,7 +346,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     cfg: CONFIG_BY_TYPE.tool,
     path: "tools",
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
-    responseKey: "tool",
     validateSource: validateToolSource,
     storageFileName: () => "TOOL.md",
     sourceFileName: () => "tool.ts",
@@ -357,7 +355,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    responseKey: "agent",
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
     requireContent: true,
@@ -368,7 +365,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     cfg: CONFIG_BY_TYPE.provider,
     path: "providers",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    responseKey: "provider",
     storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
     afterCreate: async ({ packageId, applicationId }) => {
@@ -674,17 +670,15 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     }
 
     return c.json({
-      [rcfg.responseKey]: {
-        ...item,
-        ...(sourceText != null ? { sourceCode: sourceText } : {}),
+      ...item,
+      ...(sourceText != null ? { sourceCode: sourceText } : {}),
+      versionCount,
+      hasUnarchivedChanges: computeHasUnpublishedChanges(
+        item.source,
         versionCount,
-        hasUnarchivedChanges: computeHasUnpublishedChanges(
-          item.source,
-          versionCount,
-          item.updatedAt ? new Date(item.updatedAt) : null,
-          latestVersionDate,
-        ),
-      },
+        item.updatedAt ? new Date(item.updatedAt) : null,
+        latestVersionDate,
+      ),
     });
   };
 }
@@ -1379,7 +1373,7 @@ export function createPackagesRouter() {
         zipBuffer: buffer,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
       throw new ApiError({
         status: 400,

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { parsePackageZip } from "./zip.ts";
 import { parseScopedName, buildPackageId } from "./naming.ts";
 import type { PackageType } from "./validation.ts";
+import { getErrorMessage } from "./errors";
 
 /** A parsed system package loaded from an AFPS file on disk. */
 export interface SystemPackageEntry {
@@ -63,7 +64,7 @@ export async function loadSystemPackages(dir: string): Promise<LoadSystemPackage
     } catch (err) {
       warnings.push({
         file: entry,
-        error: `Could not read file: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Could not read file: ${getErrorMessage(err)}`,
       });
       continue;
     }
@@ -97,7 +98,7 @@ export async function loadSystemPackages(dir: string): Promise<LoadSystemPackage
     } catch (err) {
       warnings.push({
         file: entry,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

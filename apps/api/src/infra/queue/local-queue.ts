@@ -18,6 +18,7 @@ import type {
   CronPattern,
   WorkerOptions,
 } from "./interface.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { PermanentJobError } from "./interface.ts";
 
 interface PendingJob<T> {
@@ -138,7 +139,7 @@ export class LocalQueue<T> implements JobQueue<T> {
           logger.warn(`${this.name} job failed, retrying in ${delay}ms`, {
             jobId: currentJob.id,
             attempt: nextAttempt,
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
           // Schedule retry — await a timer so the outer .finally() waits
           await new Promise<void>((resolve) => {
@@ -152,7 +153,7 @@ export class LocalQueue<T> implements JobQueue<T> {
 
         logger.error(`${this.name} job failed after ${maxAttempts} attempts`, {
           jobId: currentJob.id,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }
     };

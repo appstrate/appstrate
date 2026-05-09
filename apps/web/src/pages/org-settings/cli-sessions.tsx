@@ -7,7 +7,7 @@ import { Laptop } from "lucide-react";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
-import { api } from "../../api";
+import { api, apiList } from "../../api";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 
@@ -15,12 +15,6 @@ interface AdminCliSession extends CliSessionDisplay {
   userId: string;
   userEmail: string | null;
   userName: string | null;
-}
-
-interface AdminCliSessionsResponse {
-  object: "list";
-  data: AdminCliSession[];
-  hasMore: boolean;
 }
 
 function memberLabel(s: AdminCliSession): string {
@@ -35,10 +29,7 @@ export function OrgSettingsCliSessionsPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["org-cli-sessions", orgId],
-    queryFn: async () => {
-      const env = await api<AdminCliSessionsResponse>(`/orgs/${orgId}/cli-sessions`);
-      return env.data;
-    },
+    queryFn: () => apiList<AdminCliSession>(`/orgs/${orgId}/cli-sessions`),
     enabled: !!orgId,
   });
 

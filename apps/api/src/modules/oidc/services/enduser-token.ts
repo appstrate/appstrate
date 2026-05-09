@@ -31,8 +31,10 @@
 
 import * as jose from "jose";
 import { getEnv } from "@appstrate/env";
+import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Polymorphic access-token claim shape. Every OIDC-minted token carries
@@ -56,7 +58,7 @@ export interface AccessTokenClaims {
   /** Org scope for dashboard users and (derived) for end-users. */
   orgId?: string;
   /** Dashboard flow: `owner` / `admin` / `member` / `viewer`. */
-  orgRole?: "owner" | "admin" | "member" | "viewer";
+  orgRole?: OrgRole;
   /** End-user flow: owning application id. */
   applicationId?: string;
   /** End-user flow: `eu_…` id of the impersonated end-user. */
@@ -188,14 +190,14 @@ export async function verifyEndUserAccessToken(
       } catch (retryErr) {
         logger.debug("oidc: verifyEndUserAccessToken retry-after-refresh failed", {
           module: "oidc",
-          error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+          error: getErrorMessage(retryErr),
         });
         return null;
       }
     } else {
       logger.debug("oidc: verifyEndUserAccessToken failed", {
         module: "oidc",
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       return null;
     }
@@ -215,7 +217,7 @@ export async function verifyEndUserAccessToken(
       extra.org_role === "admin" ||
       extra.org_role === "member" ||
       extra.org_role === "viewer")
-      ? (extra.org_role as "owner" | "admin" | "member" | "viewer")
+      ? (extra.org_role as OrgRole)
       : undefined;
   return {
     authUserId: payload.sub,

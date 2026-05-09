@@ -9,6 +9,7 @@ import { sendEmail } from "./email.ts";
 import { getAuth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
@@ -183,7 +184,7 @@ export async function sendMagicLinkInvitation(invitation: {
     });
   } catch (err) {
     logger.error("Failed to send magic link invitation", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
       email: invitation.email,
       invitationId: invitation.id,
     });

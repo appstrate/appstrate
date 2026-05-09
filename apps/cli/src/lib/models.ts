@@ -10,6 +10,7 @@
  * the real upstream credentials.
  */
 
+import type { ModelCost } from "@appstrate/shared-types";
 import { apiList } from "./api.ts";
 
 export interface ModelPreset {
@@ -30,12 +31,7 @@ export interface ModelPreset {
   maxTokens: number | null;
   reasoning: boolean | null;
   input: string[] | null;
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-  } | null;
+  cost: ModelCost | null;
   /**
    * Anthropic-only: shape of the upstream credential. When `oauth`, the
    * CLI hands pi-ai an `sk-ant-oat-…`-shaped placeholder so pi-ai's

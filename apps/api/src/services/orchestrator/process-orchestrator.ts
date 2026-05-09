@@ -21,16 +21,17 @@
 import { mkdir, rm, readdir, open as fsOpen } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
-import type { ContainerOrchestrator } from "./interface.ts";
 import type {
+  ContainerOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
   SidecarConfig,
   CleanupReport,
   StopResult,
-} from "./types.ts";
+} from "@appstrate/core/platform-types";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -419,7 +420,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       logger.warn("Failed to write sidecar/workload pidfile", {
         runId,
         role,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

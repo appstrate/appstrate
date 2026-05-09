@@ -33,6 +33,7 @@ import {
   parsePackageIdentity,
   readBundleFromBuffer,
 } from "@appstrate/afps-runtime/bundle";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
@@ -268,9 +269,7 @@ export async function importBundle(
     try {
       parsedZip = parsePackageZip(reconstructed);
     } catch (err) {
-      throw invalidRequest(
-        `Invalid package '${identity}' in bundle: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
     }
 
     // Ensure a packages row exists before the version snapshot. If a
@@ -327,7 +326,7 @@ export async function importBundle(
     // Conflict or already-installed is fine — surface the root id + swallow.
     logger.debug("Root install skipped", {
       packageId: rootParsed.packageId,
-      err: err instanceof Error ? err.message : String(err),
+      err: getErrorMessage(err),
     });
   }
 

@@ -2,6 +2,7 @@
 
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { AppstrateCtxProvider } from "@appstrate/runner-pi";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 type EmitFn = (obj: Record<string, unknown>) => void;
 
@@ -37,7 +38,7 @@ export function wrapExtensionFactory(
           try {
             return await originalExecute(toolCallId, params, signal, appstrateCtxProvider());
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             emitFn({
               type: "error",
               message: `[extension-wrapper] Extension '${extensionId}' tool '${toolName}': ${message}`,

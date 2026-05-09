@@ -25,6 +25,7 @@ import {
   deleteFile as storageDelete,
   createUploadUrl,
 } from "@appstrate/db/storage";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -336,7 +337,7 @@ export async function consumeUpload(
     await storageDelete(bucket!, path).catch((delErr) => {
       logger.warn("failed to delete upload storage after consume", {
         uploadId,
-        error: delErr instanceof Error ? delErr.message : String(delErr),
+        error: getErrorMessage(delErr),
       });
     });
 
@@ -361,7 +362,7 @@ export async function consumeUpload(
     await storageDelete(bucket!, path).catch((delErr) => {
       logger.warn("failed to delete upload storage after consume error", {
         uploadId,
-        error: delErr instanceof Error ? delErr.message : String(delErr),
+        error: getErrorMessage(delErr),
       });
     });
     // Release the claim so the row can be re-consumed after the client re-uploads.
@@ -375,7 +376,7 @@ export async function consumeUpload(
       .catch((releaseErr) => {
         logger.warn("failed to release upload claim after consume error", {
           uploadId,
-          error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+          error: getErrorMessage(releaseErr),
         });
       });
     throw err;
@@ -470,7 +471,7 @@ export async function cleanupExpiredUploads(): Promise<number> {
         } catch (err) {
           logger.warn("failed to delete expired upload storage", {
             uploadId: row.id,
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
         }
       }),
@@ -506,7 +507,7 @@ export function startUploadGc(): void {
       })
       .catch((err) => {
         logger.warn("Periodic upload GC failed", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       });
   }, UPLOAD_GC_INTERVAL_MS);

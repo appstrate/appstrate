@@ -13,6 +13,7 @@
 
 import semver from "semver";
 import { BundleError } from "./errors.ts";
+import { resolveVersionString } from "./semver-resolve.ts";
 import {
   formatPackageIdentity,
   parsePackageIdentity,
@@ -80,24 +81,17 @@ export class InMemoryPackageCatalog implements PackageCatalog {
     const versions = this.versions.get(name);
     if (!versions || versions.length === 0) return null;
 
-    // 1. Exact version
-    if (semver.valid(versionSpec) && versions.includes(versionSpec)) {
-      return this.toResolved(name, versionSpec);
-    }
-
-    // 2. Dist-tag
-    const tag = this.distTags[name]?.[versionSpec];
-    if (tag && versions.includes(tag)) {
-      return this.toResolved(name, tag);
-    }
-
-    // 3. Semver range (incl. `*`, `^`, `~`, `>=`…)
-    if (semver.validRange(versionSpec)) {
-      const best = semver.maxSatisfying(versions, versionSpec);
-      if (best) return this.toResolved(name, best);
-    }
-
-    return null;
+    // In-memory catalogs have no yank concept — every known version is
+    // visible to all three resolution steps. Pass the same array as
+    // both the exact-eligible and range-eligible sets.
+    const matched = resolveVersionString(
+      versionSpec,
+      versions,
+      versions,
+      this.distTags[name] ?? {},
+    );
+    if (matched === null) return null;
+    return this.toResolved(name, matched);
   }
 
   async fetch(identity: PackageIdentity): Promise<BundlePackage> {

@@ -10,19 +10,18 @@ describe("formatBytes", () => {
     expect(formatBytes(1023)).toBe("1023 B");
   });
 
-  it("renders KB with one decimal", () => {
+  it("renders single-tier values < 10 with one decimal", () => {
     expect(formatBytes(1024)).toBe("1.0 KB");
     expect(formatBytes(4096)).toBe("4.0 KB");
     expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(1024 * 1024)).toBe("1.0 MB");
+    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
+    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
   });
 
-  it("renders MB with two decimals", () => {
-    expect(formatBytes(1024 * 1024)).toBe("1.00 MB");
-    expect(formatBytes(5 * 1024 * 1024)).toBe("5.00 MB");
-  });
-
-  it("renders GB with two decimals", () => {
-    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.00 GB");
+  it("rounds values ≥ 10 in their tier to an integer", () => {
+    expect(formatBytes(12 * 1024)).toBe("12 KB");
+    expect(formatBytes(50 * 1024 * 1024)).toBe("50 MB");
   });
 
   it("falls back gracefully on negative or NaN input", () => {

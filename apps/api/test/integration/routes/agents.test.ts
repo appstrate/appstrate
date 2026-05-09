@@ -96,8 +96,8 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent).toBeDefined();
-      expect(body.agent.id).toBe("@myorg/detail-agent");
+      expect(body).toBeDefined();
+      expect(body.id).toBe("@myorg/detail-agent");
     });
 
     it("returns 404 for non-existent agent", async () => {
@@ -144,7 +144,7 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.id).toBe("@myorg/default-installed");
+      expect(body.id).toBe("@myorg/default-installed");
     });
 
     it("returns 404 from custom app when agent is not installed", async () => {
@@ -182,7 +182,7 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.id).toBe("@myorg/custom-installed");
+      expect(body.id).toBe("@myorg/custom-installed");
     });
   });
 
@@ -649,8 +649,8 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentAppProfileId).toBe(appProfile.id);
-      expect(body.agent.agentAppProfileName).toBe("Prod Creds");
+      expect(body.agentAppProfileId).toBe(appProfile.id);
+      expect(body.agentAppProfileName).toBe("Prod Creds");
     });
 
     it("returns null agentAppProfileId when no app profile configured", async () => {
@@ -666,8 +666,8 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentAppProfileId).toBeNull();
-      expect(body.agent.agentAppProfileName).toBeNull();
+      expect(body.agentAppProfileId).toBeNull();
+      expect(body.agentAppProfileName).toBeNull();
     });
 
     it("returns null agentAppProfileId when configured profile was deleted", async () => {
@@ -698,8 +698,8 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentAppProfileId).toBeNull();
-      expect(body.agent.agentAppProfileName).toBeNull();
+      expect(body.agentAppProfileId).toBeNull();
+      expect(body.agentAppProfileName).toBeNull();
     });
   });
 

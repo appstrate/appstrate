@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Play } from "lucide-react";
@@ -10,7 +10,7 @@ import { Spinner } from "./spinner";
 import { RunModal } from "./run-modal";
 import { ConnectionSummaryModal } from "./connection-summary-modal";
 import { useRunAgent } from "../hooks/use-mutations";
-import { api } from "../api";
+import { usePackageDetail } from "../hooks/use-packages";
 import { hasDisconnectedProviders } from "../lib/provider-status";
 import { packageDetailPath } from "../lib/package-paths";
 import { usePermissions } from "../hooks/use-permissions";
@@ -44,27 +44,16 @@ export function RunAgentButton({
   const navigate = useNavigate();
   const { isMember } = usePermissions();
   const runAgent = useRunAgent(packageId);
-  const [fetchedDetail, setFetchedDetail] = useState<AgentDetail | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
-  const [fetching, setFetching] = useState(false);
 
-  const detail = providedDetail ?? fetchedDetail;
+  // Skip the lazy fetch when the parent already provided the detail.
+  const { data: fetchedDetail, isFetching } = usePackageDetail(
+    "agent",
+    providedDetail ? undefined : packageId,
+  );
 
-  // Eagerly fetch agent detail on mount (for cards in list/dashboard) so the
-  // orange warning badge is visible before the user clicks the button.
-  useEffect(() => {
-    if (providedDetail || fetchedDetail) return;
-    let cancelled = false;
-    api<{ agent: AgentDetail }>(`/packages/agents/${packageId}`)
-      .then((data) => {
-        if (!cancelled) setFetchedDetail(data.agent);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [packageId, providedDetail, fetchedDetail]);
+  const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
 
   const providers = detail?.dependencies?.providers ?? [];
   const hasProviders = providers.length > 0;
@@ -91,36 +80,21 @@ export function RunAgentButton({
     }
   };
 
-  const handleClick = async (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    // Detail already available (provided or eagerly fetched)
+    // Detail already available (provided or fetched via React Query)
     if (detail) {
       startRun();
       return;
     }
 
-    // Fallback: fetch on click if eager fetch hasn't completed yet
-    setFetching(true);
-    try {
-      const data = await api<{ agent: AgentDetail }>(`/packages/agents/${packageId}`);
-      setFetchedDetail(data.agent);
-
-      const agentHasProviders = (data.agent.dependencies?.providers?.length ?? 0) > 0;
-      if (agentHasProviders) {
-        setSummaryOpen(true);
-      } else {
-        setInputOpen(true);
-      }
-    } catch {
-      toast.error(t("error.generic", { ns: "common" }));
-    } finally {
-      setFetching(false);
-    }
+    // Fetch hasn't completed yet — surface a generic error rather than racing
+    toast.error(t("error.generic", { ns: "common" }));
   };
 
-  const isPending = fetching || runAgent.isPending;
+  const isPending = isFetching || runAgent.isPending;
   const isDisabled = disabled || isPending;
 
   if (!isMember) return null;

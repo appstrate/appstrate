@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { ApplicationInfo } from "@appstrate/shared-types";
 export type { ApplicationInfo } from "@appstrate/shared-types";
@@ -10,7 +10,7 @@ export function useApplications() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["applications", orgId],
-    queryFn: () => api<{ data: ApplicationInfo[] }>("/applications").then((d) => d.data),
+    queryFn: () => apiList<ApplicationInfo>("/applications"),
     enabled: !!orgId,
   });
 }
