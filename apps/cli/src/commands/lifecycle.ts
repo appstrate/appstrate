@@ -67,42 +67,29 @@ export interface UninstallOptions extends LifecycleOptions {
 
 /**
  * Run `docker compose --project-name <name> <verb...>` against the
- * resolved install dir. Pulls stdout/stderr through the parent's stdio
- * so the user sees Compose's normal output (progress bars, logs,
- * errors) inline. Throws on non-zero so commander's error handler
- * turns it into the standard cancel banner instead of swallowing the
- * exit code.
+ * resolved install dir with stdio inherited, so the user sees
+ * Compose's normal output (progress bars, logs, errors) inline.
+ * Throws on non-zero so commander's error handler renders the
+ * standard cancel banner instead of swallowing the exit code.
  */
-async function runCompose(
-  dir: string,
-  projectName: string,
-  args: string[],
-  // `inherit` is the default — what every interactive verb needs.
-  // `pipe` is rare (only when a follow-up command needs to inspect
-  // Compose's output); the option exists so `runCompose` can stay the
-  // single docker invocation site without callers reaching for `runCommand` again.
-  stdio: "inherit" | "pipe" = "inherit",
-): Promise<void> {
+async function runCompose(dir: string, projectName: string, args: string[]): Promise<void> {
   const res = await runCommand("docker", ["compose", "--project-name", projectName, ...args], {
     cwd: dir,
-    stdio,
+    stdio: "inherit",
   });
   if (res.ok) return;
   // SIGINT (130) / SIGTERM (143) are graceful Ctrl-C exits — surface
-  // them as a clean process exit with the same code rather than as a
+  // them as a clean process exit with the same code rather than a
   // thrown error. Without this, `appstrate logs -f` followed by Ctrl-C
   // would render "docker compose logs failed with exit code 130" via
   // `exitWithError`, masking the fact that the user intentionally
-  // ended the stream. The CLI's own shutdown coordinator (lib/shutdown.ts)
-  // also calls `process.exit(130)` on SIGINT, so picking the same code
-  // here keeps shell pipelines coherent.
+  // ended the stream. The CLI's own shutdown coordinator
+  // (lib/shutdown.ts) also calls `process.exit(130)` on SIGINT, so
+  // picking the same code here keeps shell pipelines coherent.
   if (res.exitCode === 130 || res.exitCode === 143) {
     process.exit(res.exitCode);
   }
-  throw new Error(
-    `docker compose ${args.join(" ")} failed with exit code ${res.exitCode}` +
-      (stdio === "pipe" && res.stderr ? `\n${res.stderr.trim()}` : ""),
-  );
+  throw new Error(`docker compose ${args.join(" ")} failed with exit code ${res.exitCode}`);
 }
 
 /** `appstrate start` → `docker compose up -d` (idempotent). */
