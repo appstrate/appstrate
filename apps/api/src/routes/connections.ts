@@ -22,7 +22,7 @@ import {
 import {
   saveApiKeyConnection,
   saveCredentialsConnection,
-} from "../services/connection-manager/credentials.ts";
+} from "../services/connection-manager/connections.ts";
 import {
   getAvailableProvidersWithStatus,
   getProviderAuthMode,

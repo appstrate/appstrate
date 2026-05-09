@@ -5,7 +5,7 @@ import { getProviderCredentialId } from "@appstrate/connect";
 
 /**
  * Resolve the credential ID for a provider in an application, or throw.
- * Shared by oauth.ts and credentials.ts.
+ * Shared by oauth.ts and connections.ts.
  */
 export async function resolveProviderCredentialId(
   applicationId: string,
