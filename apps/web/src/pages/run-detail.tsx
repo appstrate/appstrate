@@ -235,31 +235,30 @@ export function RunDetailPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
-          {/* Live token + cost readout — only while the run is active. The
-              `onMetric` SSE handler patches `run.tokenUsage` and `run.cost`
-              in place; this pill re-renders at the throttled cadence (250 ms
-              window) without polling. Shown for every running run, including
-              remote-origin ones (which still stream metrics even though the
-              Cancel button is hidden for them). */}
-          {isRunning &&
-            (() => {
-              const liveUsage = run.tokenUsage as {
-                input_tokens?: number;
-                output_tokens?: number;
-              } | null;
-              const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
-              if (totalTokens === 0 && run.cost == null) return null;
-              return (
-                <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+          {/* Token + cost readout — shown at all times (pending, running,
+              terminal). While the run is active the pulse dot animates and
+              `onMetric` SSE patches `run.tokenUsage` + `run.cost` in place
+              at the throttled 250 ms cadence; once finalized, the same
+              fields hold the authoritative aggregate written by
+              `finalizeRun`. Defaults to zeros for runs that never produced
+              tokens (the readout is structural, not conditional on data). */}
+          {(() => {
+            const liveUsage = run.tokenUsage as {
+              input_tokens?: number;
+              output_tokens?: number;
+            } | null;
+            const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
+            return (
+              <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+                {isRunning && (
                   <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                  {totalTokens > 0 && <span>{totalTokens.toLocaleString()} tokens</span>}
-                  {totalTokens > 0 && run.cost != null && <span aria-hidden>·</span>}
-                  {run.cost != null && (
-                    <span className="text-foreground font-medium">${run.cost.toFixed(4)}</span>
-                  )}
-                </div>
-              );
-            })()}
+                )}
+                <span>{totalTokens.toLocaleString()} tokens</span>
+                <span aria-hidden>·</span>
+                <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
+              </div>
+            );
+          })()}
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
               <Play className="size-3.5" />
