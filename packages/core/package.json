@@ -69,7 +69,7 @@
     "./sidecar-types": "./src/sidecar-types.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.4.0",
+    "@afps-spec/schema": "^1.5.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",

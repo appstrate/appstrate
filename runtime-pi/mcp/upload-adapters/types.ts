@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
+import {
+  UPLOAD_PROTOCOLS as AFPS_UPLOAD_PROTOCOLS,
+  type UploadProtocol as AfpsUploadProtocol,
+} from "@appstrate/core/validation";
+
 /**
  * `UploadAdapter` interface — the contract every chunked-upload
  * protocol implementation conforms to.
@@ -28,12 +33,16 @@
  * `uploadProtocol` enum and through provider manifests'
  * `definition.uploadProtocols[]`.
  *
- * Add a new entry here ONLY together with a registered adapter in
- * `./index.ts` — the resolver's `ADAPTERS[protocol]` lookup yields
- * `undefined` for any value not present in the registry, which the
- * resolver surfaces to the agent as a structured failure.
+ * Sourced from `@afps-spec/schema` (re-exported via `@appstrate/core/validation`)
+ * so the runtime's gating enum cannot drift from the AFPS canonical set.
+ *
+ * Add a new entry by extending `uploadProtocolEnum` in `@afps-spec/schema`,
+ * publishing a minor bump, and registering a matching adapter in `./index.ts` —
+ * the resolver's `ADAPTERS[protocol]` lookup yields `undefined` for any value
+ * not present in the registry, which the resolver surfaces to the agent as a
+ * structured failure.
  */
-export type UploadProtocol = "google-resumable" | "s3-multipart" | "tus" | "ms-resumable";
+export type UploadProtocol = AfpsUploadProtocol;
 
 /**
  * Outcome of a single `providerCall` issued by an adapter.
@@ -243,11 +252,7 @@ export interface UploadAdapter {
 
 /**
  * Set of all valid `uploadProtocol` values. Useful for schema
- * validation in the Pi tool surface.
+ * validation in the Pi tool surface. Single source of truth lives in
+ * `@afps-spec/schema` (`uploadProtocolEnum`).
  */
-export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = [
-  "google-resumable",
-  "s3-multipart",
-  "tus",
-  "ms-resumable",
-];
+export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = AFPS_UPLOAD_PROTOCOLS;
