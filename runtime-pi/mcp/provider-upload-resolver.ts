@@ -325,12 +325,19 @@ export class McpProviderUploadResolver {
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
         .join("");
-      // When sidecar shipped meta, use it; else fall back to a
-      // synthetic 200 / no headers (matches legacy `provider_call`
-      // behaviour and lets adapters running against a stub server
-      // that never set meta still work).
+      // Three flavours of result, distinguished here so the adapter
+      // never confuses them:
+      //  - meta present → use upstream status/headers verbatim.
+      //  - no meta + isError → sidecar pre-flight failure (cred fetch,
+      //    URL not in authorizedUris, etc). The body is a sidecar
+      //    message, NOT an upstream payload. Surface as status 0 so
+      //    adapters and failure() distinguish "no upstream contact"
+      //    from "upstream returned 5xx".
+      //  - no meta + ok → synthetic 200 (legacy sidecar pre-`_meta`,
+      //    or a test stub that doesn't ship meta).
+      const status = meta?.status ?? (result.isError ? 0 : 200);
       return {
-        status: meta?.status ?? (result.isError ? 502 : 200),
+        status,
         headers: meta?.headers ?? {},
         body,
       };
@@ -377,7 +384,17 @@ async function* chunkBytes(
   partSizeBytes: number,
   totalBytes: number,
 ): AsyncIterable<ChunkInfo> {
-  let buffer = new Uint8Array(0);
+  // Pre-allocate one chunk buffer and refill it sequentially from
+  // reader bytes. Each source read is copied in once; we never grow
+  // or re-merge a working buffer — that's the difference vs the
+  // previous concat-on-each-read strategy, which was O(n²) over the
+  // chunk-fill window (a 64 KiB read into a buffer growing to 8 MiB
+  // = ~512 MB of copies per chunk). After yielding a full chunk we
+  // hand the buffer to the adapter and allocate a fresh one, since
+  // the adapter may retain the bytes (base64 encoder, parts list,
+  // SHA hasher) past the next loop iteration.
+  let work = new Uint8Array(partSizeBytes);
+  let workLen = 0;
   let offset = 0;
   let chunkIndex = 0;
   let done = false;
@@ -385,45 +402,50 @@ async function* chunkBytes(
     const { value, done: streamDone } = await reader.read();
     if (streamDone) {
       done = true;
-    } else if (value) {
-      const merged = new Uint8Array(buffer.byteLength + value.byteLength);
-      merged.set(buffer, 0);
-      merged.set(value, buffer.byteLength);
-      buffer = merged;
+      continue;
     }
-    while (buffer.byteLength >= partSizeBytes) {
-      const slice = buffer.subarray(0, partSizeBytes);
-      const remaining = buffer.subarray(partSizeBytes);
-      // `final` is determined purely by byte arithmetic against the
-      // pre-known totalBytes — we don't need to wait for `done`. This
-      // matters because the source stream's read-block size (typically
-      // 64 KiB) is much smaller than partSizeBytes, so a `done=true`
-      // tick frequently arrives in a SUBSEQUENT iteration after the
-      // last full slice is already in the buffer.
-      const isFinal = offset + slice.byteLength === totalBytes;
-      yield {
-        index: chunkIndex,
-        start: offset,
-        end: offset + slice.byteLength - 1,
-        bytes: slice,
-        final: isFinal,
-      };
-      chunkIndex += 1;
-      offset += slice.byteLength;
-      // Re-anchor `buffer` so we don't keep large slices alive when
-      // the source emits big blocks.
-      buffer = new Uint8Array(remaining);
+    if (!value || value.byteLength === 0) continue;
+    let pos = 0;
+    while (pos < value.byteLength) {
+      const remainingInRead = value.byteLength - pos;
+      const remainingInWork = partSizeBytes - workLen;
+      const take = Math.min(remainingInRead, remainingInWork);
+      work.set(value.subarray(pos, pos + take), workLen);
+      workLen += take;
+      pos += take;
+      if (workLen === partSizeBytes) {
+        // `final` is determined purely by byte arithmetic against the
+        // pre-known totalBytes — we don't need to wait for `done`. The
+        // source stream's read-block size (~64 KiB) is much smaller
+        // than partSizeBytes, so `done=true` typically arrives in a
+        // later iteration after the last full slice is already out.
+        const isFinal = offset + partSizeBytes === totalBytes;
+        yield {
+          index: chunkIndex,
+          start: offset,
+          end: offset + partSizeBytes - 1,
+          bytes: work,
+          final: isFinal,
+        };
+        chunkIndex += 1;
+        offset += partSizeBytes;
+        work = new Uint8Array(partSizeBytes);
+        workLen = 0;
+      }
     }
   }
-  if (buffer.byteLength > 0) {
+  if (workLen > 0) {
+    // Partial last chunk: slice down to the actual length. `work`
+    // goes out of scope when the generator returns, so the subarray
+    // alias is safe to hand off.
     yield {
       index: chunkIndex,
       start: offset,
-      end: offset + buffer.byteLength - 1,
-      bytes: buffer,
+      end: offset + workLen - 1,
+      bytes: work.subarray(0, workLen),
       final: true,
     };
-    offset += buffer.byteLength;
+    offset += workLen;
   }
   if (offset !== totalBytes) {
     throw new Error(

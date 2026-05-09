@@ -35,7 +35,10 @@ import {
 } from "./types.ts";
 
 const GRID_BYTES = 320 * 1024; // 320 KiB
-const DEFAULT_PART_SIZE = 5 * 1024 * 1024; // 5 MiB — divisible by 320 KiB? No — but the protocol's grid only applies to non-final chunks
+// 5 MiB = 5 242 880 B = 16 × 320 KiB → divisible by the Graph grid, so it
+// works as a default for non-final chunks. Graph only enforces the 320-KiB
+// alignment on chunks that aren't the last one in the upload.
+const DEFAULT_PART_SIZE = 5 * 1024 * 1024; // 5 MiB
 const MAX_PART_SIZE = 60 * 1024 * 1024; // 60 MiB upper bound per Graph
 
 interface MsSessionState {

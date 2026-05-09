@@ -84,6 +84,21 @@ The agent's mental model is "upload this file via this protocol". The same resol
 - Cross-run resume is explicitly **out of scope**. Drive sessions live 7 days, S3 multipart uploads live ~7 days too, but persisting the session ID across runs drifts toward stateful long-running ops that need a different design entirely.
 - Each new protocol (e.g. Slack, Box, Dropbox) is a new ~100 LoC adapter file. The adapter interface keeps the per-protocol delta small but not zero.
 
+### Operational consequence: upstream session leak window on hard crash
+
+`adapter.abort()` is dispatched **best-effort** from the resolver's error and cancellation paths (`provider-upload-resolver.ts:247, 257`). It is fire-and-forget — we do not block the failure response on its completion, and we swallow its rejections. This is deliberate: the resolver's own error path must surface fast to the agent, and the abort is a one-shot DELETE/cancel that adds no value if the agent has already moved on.
+
+The implication: when an agent crashes (OOM, container kill, host reboot) **after** an upload session was created but **before** abort fired, the upstream session lingers until the provider's own TTL reaps it. Concretely:
+
+| Provider                 | Session TTL on crash               | Cost vector                                                                                                                                                  |
+| ------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Google Drive (resumable) | 7 days                             | Storage quota on the user's Drive (no charge per session)                                                                                                    |
+| AWS S3 multipart         | Forever (until lifecycle rule)     | **Billable**: parts accumulate on the bucket as "incomplete multipart uploads" — set a `AbortIncompleteMultipartUpload` lifecycle rule per AWS best practice |
+| tus servers              | Server-policy (Cloudflare: 7 days) | Implementation-specific                                                                                                                                      |
+| Microsoft Graph          | `expirationDateTime` (default ~1d) | OneDrive storage quota                                                                                                                                       |
+
+This is the right trade-off — blocking the failure path on cleanup would gate every error on a network round-trip — but operators running self-hosted Appstrate against S3 should configure a bucket-side lifecycle rule cleaning incomplete multipart uploads. A future improvement could persist session URLs in a `pending_uploads` table and have a sweeper job retry the abort, but that's the same cross-run-resume scope explicitly punted above.
+
 ### Out of scope (deferred)
 
 - **Cross-run resume.** Would need DB persistence of session URLs.

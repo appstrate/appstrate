@@ -824,4 +824,263 @@ describe("McpProviderUploadResolver — cross-cutting", () => {
       await pair.close();
     }
   });
+
+  it("rejects files larger than MAX_STREAMED_BODY_SIZE (100 MB ceiling)", async () => {
+    // Use a sparse file: `truncate(path, size)` reports the size via
+    // stat without writing real bytes to disk, so the test runs in
+    // milliseconds while exercising the real `totalBytes >
+    // MAX_STREAMED_BODY_SIZE` branch in the resolver.
+    let providerCallCount = 0;
+    const { pair, mcp } = await makePair(async () => {
+      providerCallCount += 1;
+      return { status: 200, headers: {}, body: "" };
+    });
+    try {
+      const ws = mkdtempSync(join(tmpdir(), "upload-"));
+      const path = join(ws, "huge.bin");
+      const fd = await import("node:fs/promises");
+      const handle = await fd.open(path, "w");
+      try {
+        await handle.truncate(101 * 1024 * 1024); // 101 MB > 100 MB cap
+      } finally {
+        await handle.close();
+      }
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/drive",
+          target: "https://example.test/upload?uploadType=resumable",
+          fromFile: "huge.bin",
+          uploadProtocol: "google-resumable",
+        },
+        ctxBase(ws),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.status).toBe(0);
+      expect(result.error).toMatch(/exceeds streaming ceiling|MAX_STREAMED_BODY_SIZE/);
+      // The resolver must reject before issuing any provider_call.
+      expect(providerCallCount).toBe(0);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("surfaces sidecar pre-flight errors with status 0 (not synthetic 502)", async () => {
+    // Simulate a sidecar that returns isError without _meta — the
+    // historical pre-`_meta` shape, plus the modern shape on
+    // pre-flight failures (cred fetch, allowlist denied). The body
+    // is a sidecar message, not an upstream payload. The resolver
+    // must surface status=0 so adapters and the agent distinguish
+    // "no upstream contact" from "upstream returned 5xx".
+    const tool: AppstrateToolDefinition = {
+      descriptor: { name: "provider_call", description: "mock", inputSchema: { type: "object" } },
+      handler: (async () => ({
+        content: [{ type: "text", text: "credential fetch failed: 401 from upstream auth" }],
+        isError: true,
+        // Deliberately no `_meta` — this is the legacy/pre-flight shape.
+      })) as never,
+    };
+    const pair = await createInProcessPair([tool]);
+    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/drive",
+          target: "https://example.test/upload?uploadType=resumable",
+          fromFile: "big.bin",
+          uploadProtocol: "google-resumable",
+          partSizeBytes: 4 * 1024 * 1024,
+        },
+        ctxBase(workspace),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      // Status 0 = "no upstream contact" (sidecar pre-flight failure).
+      // Synthetic 502 would lie about a real upstream answer.
+      expect(result.status).toBe(0);
+      // The sidecar's message is preserved as the upstream-body so
+      // the agent sees what actually went wrong.
+      expect(result.body ?? "").toContain("credential fetch failed");
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
+// ─── Cancellation parity across adapters ──────────────────────────
+
+describe("McpProviderUploadResolver — cancellation parity", () => {
+  it("s3-multipart aborts gracefully when ctx.signal fires mid-upload", async () => {
+    const stub = new S3StubServer();
+    let chunkCount = 0;
+    const ac = new AbortController();
+    const { pair, mcp } = await makePair(async (args) => {
+      const r = stub.handle(args);
+      const target = args.target as string;
+      if ((args.method as string) === "PUT" && new URL(target).searchParams.has("partNumber")) {
+        chunkCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (chunkCount === 2) ac.abort(new Error("user cancelled"));
+      }
+      return r;
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/s3",
+          target: "https://s3.test/bucket/x",
+          fromFile: "big.bin",
+          uploadProtocol: "s3-multipart",
+          partSizeBytes: 5 * 1024 * 1024,
+        },
+        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error).toMatch(/cancelled|aborted|abort/i);
+      expect(chunkCount).toBeLessThan(3);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("tus aborts gracefully when ctx.signal fires mid-upload", async () => {
+    const stub = new TusStubServer();
+    let chunkCount = 0;
+    const ac = new AbortController();
+    const { pair, mcp } = await makePair(async (args) => {
+      const r = stub.handle(args);
+      if ((args.method as string) === "PATCH") {
+        chunkCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (chunkCount === 2) ac.abort(new Error("user cancelled"));
+      }
+      return r;
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/cf-stream",
+          target: "https://tus.test/files",
+          fromFile: "big.bin",
+          uploadProtocol: "tus",
+          partSizeBytes: 4 * 1024 * 1024,
+        },
+        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error).toMatch(/cancelled|aborted|abort/i);
+      expect(chunkCount).toBeLessThan(3);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("ms-resumable aborts gracefully when ctx.signal fires mid-upload", async () => {
+    const stub = new MsStubServer();
+    let chunkCount = 0;
+    const ac = new AbortController();
+    const { pair, mcp } = await makePair(async (args) => {
+      const r = stub.handle(args);
+      const target = args.target as string;
+      if ((args.method as string) === "PUT" && /upload\/ms-/.test(target)) {
+        chunkCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (chunkCount === 2) ac.abort(new Error("user cancelled"));
+      }
+      return r;
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/onedrive",
+          target: "https://graph.test/me/drive/root:/foo.bin:/createUploadSession",
+          fromFile: "big.bin",
+          uploadProtocol: "ms-resumable",
+          partSizeBytes: 5 * 1024 * 1024,
+        },
+        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error).toMatch(/cancelled|aborted|abort/i);
+      expect(chunkCount).toBeLessThan(3);
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
+// ─── S3 ETag verbatim transmission ────────────────────────────────
+
+describe("McpProviderUploadResolver — s3-multipart ETag round-trip", () => {
+  it("emits ETags verbatim in CompleteMultipartUpload XML (no &quot; escape)", async () => {
+    // Some S3-compatible servers (notably MinIO) compare the ETag
+    // bytes in `<ETag>` against the issued ETag without unescaping
+    // first — so XML-escaping the literal `"` characters AWS wraps
+    // around the ETag would fail the byte-exact match. The XML 1.0
+    // spec only requires escaping `&`, `<`, `>` in element text,
+    // not `"` (which is only special in attribute values), so we
+    // pass the raw ETag through. AWS itself accepts both forms;
+    // emitting the stricter form keeps every clone happy.
+    let completeBody = "";
+    const { pair, mcp } = await makePair(async (args) => {
+      const method = args.method as string;
+      const target = args.target as string;
+      if (method === "POST" && /\?uploads$/.test(target)) {
+        return {
+          status: 200,
+          headers: { "content-type": "application/xml" },
+          body: `<?xml version="1.0"?><InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>`,
+        };
+      }
+      if (method === "PUT") {
+        return {
+          status: 200,
+          headers: { etag: '"abc123def456"' },
+          body: "",
+        };
+      }
+      if (method === "POST" && /uploadId=/.test(target)) {
+        completeBody = (args.body as string) ?? "";
+        return {
+          status: 200,
+          headers: { "content-type": "application/xml" },
+          body: `<?xml version="1.0"?><CompleteMultipartUploadResult><Location>https://s3.test/x</Location></CompleteMultipartUploadResult>`,
+        };
+      }
+      return { status: 400, headers: {}, body: "x", isError: true };
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/s3",
+          target: "https://s3.test/bucket/x",
+          fromFile: "big.bin",
+          uploadProtocol: "s3-multipart",
+          partSizeBytes: 5 * 1024 * 1024,
+        },
+        ctxBase(workspace),
+      );
+      expect(result.ok).toBe(true);
+      // The literal quote bytes from the AWS-issued ETag must appear
+      // verbatim in the request body — never as `&quot;`.
+      expect(completeBody).toContain('<ETag>"abc123def456"</ETag>');
+      expect(completeBody).not.toContain("&quot;");
+    } finally {
+      await pair.close();
+    }
+  });
 });

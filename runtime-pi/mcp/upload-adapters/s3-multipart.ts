@@ -147,10 +147,12 @@ export const s3MultipartAdapter: UploadAdapter = {
         res.body,
       );
     }
-    return {
-      uploadId: s.uploadId,
-      parts: [...s.parts, { partNumber, etag }],
-    } satisfies S3SessionState;
+    // Append in place: spread-on-each-chunk is O(n²) over a 10000-part
+    // ceiling. Mutating is safe because the resolver never holds prior
+    // session-state references — it threads each adapter return value
+    // straight back into the next `uploadChunk` call.
+    s.parts.push({ partNumber, etag });
+    return s;
   },
 
   async finalize(state: SessionState, ctx: AdapterContext): Promise<UploadResult> {
@@ -217,8 +219,14 @@ function parseUploadId(xml: string): string | undefined {
  * order which is already ascending, so a defensive sort is just
  * insurance.
  *
- * ETags are XML-escaped — they may contain `"` characters in the
- * AWS response (the leading/trailing quotes are part of the value).
+ * ETags arrive from AWS wrapped in literal double quotes (`"abc"`).
+ * They are reproduced verbatim in the `<ETag>` element: the `"` byte
+ * is legal in XML element content (the XML 1.0 spec only requires
+ * escaping `&`, `<`, and `>`), and some S3-compatible servers (e.g.
+ * MinIO) compare the element bytes against the issued ETag without
+ * round-tripping through an XML unescaper, so `&quot;` would fail
+ * the byte-exact match. AWS itself accepts both, but emitting the
+ * stricter form keeps every clone happy.
  */
 function buildCompleteMultipartUploadXml(
   parts: ReadonlyArray<{ partNumber: number; etag: string }>,
@@ -227,18 +235,14 @@ function buildCompleteMultipartUploadXml(
   const parts_xml = sorted
     .map(
       (p) =>
-        `<Part><PartNumber>${p.partNumber}</PartNumber><ETag>${escapeXml(p.etag)}</ETag></Part>`,
+        `<Part><PartNumber>${p.partNumber}</PartNumber><ETag>${escapeXmlText(p.etag)}</ETag></Part>`,
     )
     .join("");
   return `<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUpload>${parts_xml}</CompleteMultipartUpload>`;
 }
 
-function escapeXml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function escapeXmlText(s: string): string {
+  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function truncateForError(s: string): string {
