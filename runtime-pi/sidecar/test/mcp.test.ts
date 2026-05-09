@@ -971,15 +971,16 @@ describe("POST /mcp — bounded response read", () => {
   // memory or context window even when no upstream-side cap fires
   // first. Defence-in-depth.
 
-  it("truncates oversized upstream responses with an explicit marker", async () => {
-    const oversized = "y".repeat(512 * 1024); // 512 KB > 256 KB MAX_RESPONSE_SIZE
+  it("spills oversized upstream responses to the blob store as a resource_link", async () => {
+    const oversized = "y".repeat(512 * 1024); // 512 KB → far above any inline budget
     const fetchFn = mock(
       async () =>
         new Response(oversized, {
           status: 200,
           // Hit `run_history`, mocked to return the oversized body
-          // directly, so the MCP-layer cap is the only thing standing
-          // between us and the full 512 KB.
+          // directly. With the token-budget guard wired into
+          // run_history, the response should spill to the blob store
+          // rather than poison the agent's context.
           headers: { "Content-Type": "application/json" },
         }),
     );
@@ -988,14 +989,14 @@ describe("POST /mcp — bounded response read", () => {
       method: "tools/call",
       params: { name: "run_history", arguments: { limit: 1 } },
     });
-    const result = res.json.result as { content: Array<{ text: string }> };
-    // The MCP-layer cap must have kicked in. The result is bounded —
-    // never the full 512 KB.
-    expect(result.content[0]!.text.length).toBeLessThanOrEqual(MAX_RESPONSE_SIZE_PLUS_MARKER);
+    const result = res.json.result as {
+      content: Array<{ type: string; uri?: string; text?: string }>;
+    };
+    // The token-budget gate must have triggered the blob spill.
+    expect(result.content[0]!.type).toBe("resource_link");
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/provider-response\//);
   });
 });
-
-const MAX_RESPONSE_SIZE_PLUS_MARKER = 256 * 1024 + 200; // 256 KB + room for "[truncated: ...]"
 
 describe("StreamableHTTPClientTransport interop (smoke test)", () => {
   it("`enableJsonResponse: true` is wired so SDK clients without SSE work", async () => {

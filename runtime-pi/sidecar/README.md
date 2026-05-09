@@ -29,24 +29,61 @@ Third-party MCP servers can be mounted alongside the first-party tools via `Subp
 
 ## Binary safety
 
-`provider_call` upstream responses are byte-exact: the sidecar reads the upstream body via `arrayBuffer()` and either returns the bytes inline (text under `INLINE_RESPONSE_THRESHOLD`) or stores them in the run-scoped `BlobStore` and returns a `resource_link` block. No `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting.
+`provider_call` upstream responses are byte-exact: the sidecar reads the upstream body via `arrayBuffer()` and either returns the bytes inline (text under the per-call token cap and within the run-level cumulative budget — see "Token-aware context budgeting" below) or stores them in the run-scoped `BlobStore` and returns a `resource_link` block. No `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting.
 
 The only path that decodes the request body to UTF-8 is the optional `substituteBody: true` argument, which performs `{{variable}}` placeholder substitution on a buffered body.
 
 ## Size limits
 
-| Constant                     | Value  | Purpose                                                                                                                                                                                                                                                  |
-| ---------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_RESPONSE_SIZE`          | 256 KB | Default cap on upstream response bytes returned inline to the agent.                                                                                                                                                                                     |
-| `ABSOLUTE_MAX_RESPONSE_SIZE` | 32 MB  | Ceiling on upstream bytes the sidecar buffers before refusing — only applied when a `BlobStore` is configured (otherwise `MAX_RESPONSE_SIZE` is the cap). Sized to cover real-world binaries (PDFs, images, archives) routed through the spillover path. |
-| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.                                                                                                                                                                                       |
-| `STREAMING_THRESHOLD`        | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.                                                                                                                                                                                       |
-| `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                                                                                                                                                                                                         |
-| `INLINE_RESPONSE_THRESHOLD`  | 32 KB  | Above this responses spill to the `BlobStore` as a `resource_link`.                                                                                                                                                                                      |
-| `OUTBOUND_TIMEOUT_MS`        | 30 s   | Upstream `provider_call` request timeout.                                                                                                                                                                                                                |
-| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions).                                                                                                                                                                                |
+| Constant                          | Value  | Purpose                                                                                                                                                                                                                                                  |
+| --------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_RESPONSE_SIZE`               | 256 KB | Default cap on upstream response bytes returned inline to the agent.                                                                                                                                                                                     |
+| `ABSOLUTE_MAX_RESPONSE_SIZE`      | 32 MB  | Ceiling on upstream bytes the sidecar buffers before refusing — only applied when a `BlobStore` is configured (otherwise `MAX_RESPONSE_SIZE` is the cap). Sized to cover real-world binaries (PDFs, images, archives) routed through the spillover path. |
+| `MAX_SUBSTITUTE_BODY_SIZE`        | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.                                                                                                                                                                                       |
+| `STREAMING_THRESHOLD`             | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.                                                                                                                                                                                       |
+| `MAX_STREAMED_BODY_SIZE`          | 100 MB | Ceiling on streamed request and response bodies.                                                                                                                                                                                                         |
+| `INLINE_RESPONSE_THRESHOLD_BYTES` | 32 KB  | Legacy byte threshold; only consulted when no `TokenBudget` is configured. Production always wires a budget — see "Token-aware context budgeting" below.                                                                                                 |
+| `OUTBOUND_TIMEOUT_MS`             | 30 s   | Upstream `provider_call` request timeout.                                                                                                                                                                                                                |
+| `LLM_PROXY_TIMEOUT_MS`            | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions).                                                                                                                                                                                |
 
 When the upstream response exceeds the inline threshold, the bytes are stored in the run-scoped `BlobStore` (256 MB cap, ULID URIs, traversal-safe) and the tool returns a `resource_link` block. The agent reads the bytes on demand via `client.readResource({ uri })`.
+
+## Token-aware context budgeting
+
+Byte caps protect the sidecar from OOM but do not reflect the true cost of a tool output in the agent's **context window**: 256 KB of dense JSON or base64 ≈ 60-90 K tokens, and 50 successive 30 KB calls (each well under the byte threshold) accumulate ~450 K tokens of context with no guard rail under a byte-only policy.
+
+The sidecar layers two token-aware checks on top of the byte caps (see `token-budget.ts`):
+
+| Knob                                    | Default        | Purpose                                                                                                                                                                                                                 |
+| --------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SIDECAR_INLINE_TOOL_OUTPUT_TOKENS`     | 8 000 tokens   | Per-call inline cap. Tool outputs above this spill to the `BlobStore` regardless of size — keeps the agent's context cost per call bounded.                                                                             |
+| `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS` | 200 000 tokens | Cumulative ceiling per run. As the agent's tool outputs accumulate, the inline path tightens; once the ceiling is breached, every text response spills. Operators on 1 M-context Sonnet 4.6 deployments can raise this. |
+
+Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `provider_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
+
+Each text-path tool result carries an `appstrate://token-budget` `_meta` payload so the agent runtime can surface accounting and react to structured truncation events:
+
+```jsonc
+{
+  "content": [{ "type": "text", "text": "<upstream body>" }],
+  "_meta": {
+    "appstrate://token-budget": {
+      "estimatedTokens": 1234,
+      "consumedTokens": 5000,
+      "runBudgetTokens": 200000,
+      "inlineCapTokens": 8000,
+      "decision": "inline",
+      "reason": "under_inline_cap",
+    },
+  },
+}
+```
+
+`reason` is one of:
+
+- `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` — what the budget tracker decided.
+- `blob_store_full` — the budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the override is recorded in the meta.
+- `no_blob_store_configured` — the budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct reason so operators can tell misconfiguration from saturation.
 
 ## The `body.fromFile` contract
 

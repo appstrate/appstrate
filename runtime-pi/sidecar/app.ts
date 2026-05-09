@@ -12,6 +12,12 @@ import {
   type CredentialsResponse,
   type LlmProxyConfig,
 } from "./helpers.ts";
+import {
+  DEFAULT_INLINE_OUTPUT_TOKENS,
+  DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+  TokenBudget,
+  readPositiveTokenEnv,
+} from "./token-budget.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -199,8 +205,22 @@ export function createApp(deps: AppDeps): Hono {
   // `provider_call` directly to `executeProviderCall` via the shared
   // `proxyDeps` (no header round-trip).
   const blobStore = new BlobStore(deps.runId ?? "unknown");
+  // Token-aware budgeting (issue #390): every tool output is gated by
+  // a per-call inline cap and a cumulative run-level ceiling. Both
+  // are configurable via env vars; defaults stay conservative for
+  // OSS / dev (200 K-token context window equivalent).
+  const inlineCapTokens = readPositiveTokenEnv(
+    "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
+    DEFAULT_INLINE_OUTPUT_TOKENS,
+  );
+  const runBudgetTokens = readPositiveTokenEnv(
+    "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
+    DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+  );
+  const tokenBudget = new TokenBudget({ inlineCapTokens, runBudgetTokens });
   mountMcp(app, {
     blobStore,
+    tokenBudget,
     proxyDeps: {
       config,
       cookieJar,
