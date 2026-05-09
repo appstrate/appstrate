@@ -63,7 +63,8 @@ import {
   MAX_RESPONSE_SIZE,
   PROVIDER_ID_RE,
 } from "./helpers.ts";
-import { TokenBudget, estimateTokens, type BudgetDecision } from "./token-budget.ts";
+import { TokenBudget } from "./token-budget.ts";
+import { logger } from "./logger.ts";
 
 /**
  * Strict standard base64 decoder (RFC 4648 §4). Refuses URL-safe
@@ -233,6 +234,19 @@ const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
 export const TOKEN_BUDGET_META_KEY = "appstrate://token-budget";
 
 /**
+ * Discriminated reason surfaced in the agent-facing `_meta` payload.
+ * Wider than {@link BudgetDecision.reason} because it adds the
+ * caller-driven fallback states (no blob store wired, blob store full)
+ * the budget tracker itself cannot produce.
+ */
+type TokenBudgetMetaReason =
+  | "under_inline_cap"
+  | "exceeds_inline_cap"
+  | "exceeds_run_budget"
+  | "blob_store_full"
+  | "no_blob_store_configured";
+
+/**
  * Shape of the {@link TOKEN_BUDGET_META_KEY} payload. Stable wire
  * contract — extensions append, never rename.
  */
@@ -245,10 +259,10 @@ interface TokenBudgetMeta {
   runBudgetTokens: number;
   /** Configured per-call inline cap. */
   inlineCapTokens: number;
-  /** What the budget tracker decided. */
-  decision: BudgetDecision["decision"];
+  /** What the budget tracker decided (after caller overrides). */
+  decision: "inline" | "spill";
   /** Why it decided that way (machine-readable). */
-  reason: BudgetDecision["reason"];
+  reason: TokenBudgetMetaReason;
 }
 
 /**
@@ -713,6 +727,43 @@ interface ResponseToToolResultOptions {
 }
 
 /**
+ * Pure helper: decide whether a text body should spill, and produce
+ * the agent-facing `_meta` payload describing the decision.
+ *
+ * Folded out of {@link responseToToolResult} so the budget logic is
+ * unit-testable in isolation and the surrounding async flow stays
+ * linear. When a {@link TokenBudget} is wired, calls
+ * {@link TokenBudget.tryReserve} so the inline-record is atomic with
+ * the decision (no decide/record interleave under concurrent calls).
+ *
+ * Returns `meta: undefined` when no budget is configured — the agent
+ * sees no `_meta` payload and the legacy byte threshold drives the
+ * spill decision.
+ */
+function evaluateBudget(args: {
+  text: string;
+  tokenBudget: TokenBudget | undefined;
+  byteThreshold: number;
+}): { shouldSpill: boolean; meta: TokenBudgetMeta | undefined } {
+  if (!args.tokenBudget) {
+    return { shouldSpill: args.text.length > args.byteThreshold, meta: undefined };
+  }
+  const estimated = args.tokenBudget.estimate(args.text);
+  const decision = args.tokenBudget.tryReserve(estimated);
+  return {
+    shouldSpill: decision.decision === "spill",
+    meta: {
+      estimatedTokens: estimated,
+      consumedTokens: decision.consumedTokens,
+      runBudgetTokens: decision.runBudgetTokens,
+      inlineCapTokens: decision.inlineCapTokens,
+      decision: decision.decision,
+      reason: decision.reason,
+    },
+  };
+}
+
+/**
  * Convert an upstream `Response` into an MCP CallToolResult.
  *
  * Non-OK responses become tool-level errors (`isError: true`) — the
@@ -868,27 +919,19 @@ async function responseToToolResult(
   const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
   const text = await readBodyBounded(res, readCap);
 
-  // Token-aware spill decision. With a TokenBudget we estimate the
-  // tokens this response would burn, then ask the budget tracker
-  // whether it fits inline (per-call cap + cumulative budget). Without
-  // a TokenBudget we fall back to the legacy byte threshold so older
+  // Token-aware spill decision. The token-budget path uses an atomic
+  // tryReserve() so cumulative state doesn't drift under concurrent
+  // calls (two awaits between decide() and record() would otherwise
+  // let two callers both observe a stale `consumed`). Without a
+  // TokenBudget we fall back to the legacy byte threshold so older
   // tests + embedders that don't wire a budget keep working.
-  const shouldSpillForBudget = ((): boolean => {
-    if (options.tokenBudget) {
-      const estimated = estimateTokens(text);
-      const decision = options.tokenBudget.decide(estimated);
-      budgetMeta = {
-        estimatedTokens: estimated,
-        consumedTokens: decision.consumedTokens,
-        runBudgetTokens: decision.runBudgetTokens,
-        inlineCapTokens: decision.inlineCapTokens,
-        decision: decision.decision,
-        reason: decision.reason,
-      };
-      return decision.decision === "spill";
-    }
-    return text.length > byteThreshold;
-  })();
+  const evaluation = evaluateBudget({
+    text,
+    tokenBudget: options.tokenBudget,
+    byteThreshold,
+  });
+  budgetMeta = evaluation.meta;
+  const shouldSpillForBudget = evaluation.shouldSpill;
 
   // If the text body should spill AND we have a blob store, spill it.
   // The agent gets a pointer instead of poisoning its context with a
@@ -901,30 +944,32 @@ async function responseToToolResult(
         mimeType: ct || "text/plain",
         ...(options.source !== undefined ? { source: options.source } : {}),
       });
-    } catch {
-      // Blob store full — fall back to inline. We do NOT record the
-      // tokens against the budget when the blob store rejects the put
-      // because the budget is a *delivery* counter (we are about to
-      // deliver this content inline as a last resort) — recording
-      // happens below on the inline path.
-      if (options.tokenBudget && budgetMeta) {
-        // Update the meta to reflect the forced fallback so the agent
-        // can see we exceeded the inline cap but had no spill path.
-        budgetMeta = {
-          ...budgetMeta,
-          decision: "inline",
-          reason: "no_blob_store_fallback_inline",
-        };
+    } catch (err) {
+      // Blob store full — surface a distinct reason and record the
+      // forced-inline tokens against the budget. tryReserve() did NOT
+      // record on the spill path, so we record explicitly here.
+      if (budgetMeta) {
+        budgetMeta = { ...budgetMeta, decision: "inline", reason: "blob_store_full" };
+        options.tokenBudget?.record(budgetMeta.estimatedTokens);
       }
+      logger.warn("token-budget: blob store full, forced inline", {
+        source: options.source,
+        estimatedTokens: budgetMeta?.estimatedTokens,
+        consumedTokens: options.tokenBudget?.consumedTokens(),
+        error: getErrorMessage(err),
+      });
       const fallback: Result = res.ok
         ? { content: [{ type: "text", text }] }
         : { content: [{ type: "text", text }], isError: true };
-      // Best-effort recording — caller already paid the context cost.
-      if (options.tokenBudget && budgetMeta) {
-        options.tokenBudget.record(budgetMeta.estimatedTokens);
-      }
       return withMeta(fallback);
     }
+    logger.info("token-budget: spilled to blob store", {
+      source: options.source,
+      reason: budgetMeta?.reason,
+      estimatedTokens: budgetMeta?.estimatedTokens,
+      consumedTokens: budgetMeta?.consumedTokens,
+      uri: record.uri,
+    });
     const link = {
       type: "resource_link" as const,
       uri: record.uri,
@@ -934,19 +979,18 @@ async function responseToToolResult(
     return withMeta(res.ok ? { content: [link] } : { content: [link], isError: true });
   }
 
-  // Inline path — record the actual delivered tokens against the
-  // budget. If the budget said `spill` but no blob store was
-  // configured, surface the forced-inline reason so the agent can
-  // flag the missing spill path rather than silently overspending.
-  if (options.tokenBudget && budgetMeta) {
-    if (shouldSpillForBudget && !options.blobStore) {
-      budgetMeta = {
-        ...budgetMeta,
-        decision: "inline",
-        reason: "no_blob_store_fallback_inline",
-      };
-    }
-    options.tokenBudget.record(budgetMeta.estimatedTokens);
+  // Inline path — when the budget said spill but no blob store is
+  // configured, surface the distinct reason and record the
+  // forced-inline tokens. tryReserve() did NOT record on the spill
+  // path, so we record explicitly here.
+  if (shouldSpillForBudget && !options.blobStore && budgetMeta) {
+    budgetMeta = { ...budgetMeta, decision: "inline", reason: "no_blob_store_configured" };
+    options.tokenBudget?.record(budgetMeta.estimatedTokens);
+    logger.warn("token-budget: no blob store configured, forced inline", {
+      source: options.source,
+      estimatedTokens: budgetMeta.estimatedTokens,
+      consumedTokens: options.tokenBudget?.consumedTokens(),
+    });
   }
 
   if (!res.ok) {

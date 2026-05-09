@@ -8,10 +8,10 @@
  * Coverage focus:
  *   - estimateTokens — chars/3.5 heuristic, edge cases (empty, unicode,
  *     short strings round up).
- *   - estimateBinaryTokens — base64 inflation factor applied.
  *   - readPositiveTokenEnv — fail-loud parsing of env overrides.
- *   - TokenBudget — constructor invariants, decide() rules, record()
- *     accumulation + saturation, run-level cumulative pressure.
+ *   - TokenBudget — constructor invariants, decide() purity, record()
+ *     accumulation + saturation, run-level cumulative pressure,
+ *     tryReserve() atomicity, injected estimator, dev-loud record().
  */
 
 import { describe, it, expect } from "bun:test";
@@ -19,9 +19,9 @@ import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   TokenBudget,
-  estimateBinaryTokens,
   estimateTokens,
   readPositiveTokenEnv,
+  type TokenEstimator,
 } from "../token-budget.ts";
 
 describe("estimateTokens", () => {
@@ -61,25 +61,6 @@ describe("estimateTokens", () => {
   it("is deterministic (same input → same output)", () => {
     const s = "lorem ipsum dolor sit amet ".repeat(500);
     expect(estimateTokens(s)).toBe(estimateTokens(s));
-  });
-});
-
-describe("estimateBinaryTokens", () => {
-  it("returns 0 for zero or negative byte length", () => {
-    expect(estimateBinaryTokens(0)).toBe(0);
-    expect(estimateBinaryTokens(-100)).toBe(0);
-  });
-
-  it("applies base64 inflation (4/3) and chars-per-token (3.5)", () => {
-    // 1024 bytes → 1024 * 4 / 3 ≈ 1365 base64 chars → /3.5 ≈ 390 tokens
-    expect(estimateBinaryTokens(1024)).toBe(Math.ceil((1024 * 4) / 3 / 3.5));
-  });
-
-  it("monotonically increases with byte length", () => {
-    // Adjacent small inputs may tie at the ceil() floor, so step up
-    // to inputs large enough that the ratio dominates.
-    expect(estimateBinaryTokens(100)).toBeLessThanOrEqual(estimateBinaryTokens(200));
-    expect(estimateBinaryTokens(1_000_000)).toBeGreaterThan(estimateBinaryTokens(100_000));
   });
 });
 
@@ -230,6 +211,43 @@ describe("TokenBudget — decide()", () => {
   });
 });
 
+describe("TokenBudget — tryReserve() atomicity", () => {
+  it("records on inline so subsequent calls see the updated consumed count", () => {
+    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 100 });
+    const first = b.tryReserve(80);
+    expect(first.decision).toBe("inline");
+    expect(first.consumedTokens).toBe(80); // post-record snapshot
+    expect(b.consumedTokens()).toBe(80);
+
+    // Without atomic record, the second call would still see consumed=0
+    // and decide inline; with atomic record it sees 80 and spills.
+    const second = b.tryReserve(80);
+    expect(second.decision).toBe("spill");
+    expect(second.reason).toBe("exceeds_run_budget");
+    expect(b.consumedTokens()).toBe(80); // spill did NOT record
+  });
+
+  it("does not record on spill (per-call cap exceeded)", () => {
+    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
+    b.tryReserve(150);
+    expect(b.consumedTokens()).toBe(0);
+  });
+
+  it("does not record on spill (run budget exhausted)", () => {
+    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 100 });
+    b.tryReserve(80); // inline → consumed = 80
+    const d = b.tryReserve(80); // 80+80 > 100 → spill
+    expect(d.decision).toBe("spill");
+    expect(b.consumedTokens()).toBe(80); // unchanged
+  });
+
+  it("preserves the same reason union as decide()", () => {
+    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
+    const d = b.tryReserve(50);
+    expect(d.reason).toBe("under_inline_cap");
+  });
+});
+
 describe("TokenBudget — record() + accumulation", () => {
   it("accumulates over multiple calls", () => {
     const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
@@ -237,15 +255,6 @@ describe("TokenBudget — record() + accumulation", () => {
     b.record(50);
     expect(b.consumedTokens()).toBe(100);
     expect(b.remainingTokens()).toBe(900);
-  });
-
-  it("ignores zero / negative / non-finite", () => {
-    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
-    b.record(0);
-    b.record(-50);
-    b.record(NaN);
-    b.record(Infinity);
-    expect(b.consumedTokens()).toBe(0);
   });
 
   it("rounds up fractional inputs (defence-in-depth — caller should pass integers)", () => {
@@ -262,6 +271,37 @@ describe("TokenBudget — record() + accumulation", () => {
     expect(b.remainingTokens()).toBe(0);
   });
 
+  it("throws in non-production on invalid input (catches caller bugs)", () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    try {
+      const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
+      expect(() => b.record(0)).toThrow(/positive finite/);
+      expect(() => b.record(-50)).toThrow(/positive finite/);
+      expect(() => b.record(NaN)).toThrow(/positive finite/);
+      expect(() => b.record(Infinity)).toThrow(/positive finite/);
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original;
+    }
+  });
+
+  it("silently ignores invalid input in production (defence-in-depth)", () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
+      b.record(0);
+      b.record(-50);
+      b.record(NaN);
+      b.record(Infinity);
+      expect(b.consumedTokens()).toBe(0);
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original;
+    }
+  });
+
   it("models the issue #390 scenario: 50 small calls accumulate budget pressure", () => {
     // 50 × 30 KB JSON ≈ 50 × 9000 tokens (30000 chars / 3.5) = 450 K
     // tokens. With a 200 K-token budget the tracker should hit
@@ -273,26 +313,47 @@ describe("TokenBudget — record() + accumulation", () => {
     let inlineCount = 0;
     let spillCount = 0;
     for (let i = 0; i < 50; i++) {
-      const d = b.decide(perCall);
-      if (d.decision === "inline") {
-        b.record(perCall);
-        inlineCount++;
-      } else {
-        spillCount++;
-      }
+      const d = b.tryReserve(perCall);
+      if (d.decision === "inline") inlineCount++;
+      else spillCount++;
     }
     // Around 200_000 / 8572 ≈ 23 calls fit before run-budget triggers.
     expect(inlineCount).toBeLessThan(50);
     expect(spillCount).toBeGreaterThan(0);
     expect(b.consumedTokens()).toBeLessThanOrEqual(runBudget);
   });
+});
 
-  it("reset() clears consumed back to zero (test-only)", () => {
-    const b = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 1000 });
-    b.record(500);
-    b.reset();
-    expect(b.consumedTokens()).toBe(0);
-    expect(b.remainingTokens()).toBe(1000);
+describe("TokenBudget — pluggable estimator", () => {
+  it("uses the default heuristic when no estimator is injected", () => {
+    const b = new TokenBudget();
+    expect(b.estimate("x".repeat(350))).toBe(100);
+  });
+
+  it("uses the injected estimator for estimate() and budget decisions", () => {
+    // Mock tokenizer that always returns 5 — operators wiring a real
+    // tokenizer get the same code path.
+    const fakeEstimator: TokenEstimator = () => 5;
+    const b = new TokenBudget({
+      inlineCapTokens: 10,
+      runBudgetTokens: 100,
+      estimate: fakeEstimator,
+    });
+    expect(b.estimate("anything")).toBe(5);
+    expect(b.estimate("a".repeat(100_000))).toBe(5);
+  });
+
+  it("the injected estimator drives spill decisions in tryReserve()", () => {
+    // Estimator overstates so even short text spills.
+    const overEstimator: TokenEstimator = () => 999_999;
+    const b = new TokenBudget({
+      inlineCapTokens: 1_000,
+      runBudgetTokens: 10_000,
+      estimate: overEstimator,
+    });
+    const d = b.tryReserve(b.estimate("hi"));
+    expect(d.decision).toBe("spill");
+    expect(d.reason).toBe("exceeds_inline_cap");
   });
 });
 

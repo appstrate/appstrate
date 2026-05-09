@@ -79,7 +79,11 @@ Each text-path tool result carries an `appstrate://token-budget` `_meta` payload
 }
 ```
 
-`reason` is one of `under_inline_cap`, `exceeds_inline_cap`, `exceeds_run_budget`, or `no_blob_store_fallback_inline` (the last set when a forced spill failed because the blob store was already full — the agent paid the context cost as a last resort and the meta records the override).
+`reason` is one of:
+
+- `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` — what the budget tracker decided.
+- `blob_store_full` — the budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the override is recorded in the meta.
+- `no_blob_store_configured` — the budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct reason so operators can tell misconfiguration from saturation.
 
 ## The `body.fromFile` contract
 

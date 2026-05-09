@@ -21,10 +21,11 @@
  *
  * This module adds two layers on top of the existing byte caps:
  *
- *   1. **Per-call token estimate** — `estimateTokens()` converts a
- *      response body to an estimated token count via the
- *      Anthropic-recommended heuristic of ~3.5 chars/token. The
- *      sidecar chooses inline vs. spill on tokens, not bytes.
+ *   1. **Per-call token estimate** — the configured estimator converts
+ *      a response body to an estimated token count. The default uses
+ *      the Anthropic-recommended ~3.5 chars/token heuristic; operators
+ *      can inject a real tokenizer via {@link TokenBudgetOptions.estimate}.
+ *      The sidecar chooses inline vs. spill on tokens, not bytes.
  *
  *   2. **Cumulative budget per run** — `TokenBudget` tracks how many
  *      tool-output tokens the agent has consumed over the run's
@@ -33,7 +34,7 @@
  *      ceiling, every text response spills to the blob store with a
  *      structured truncation marker.
  *
- * Why a heuristic and not the real Anthropic / OpenAI tokenizer?
+ * Why a heuristic by default?
  *
  *   - The sidecar runs in-container, on the hot path of every
  *     `provider_call`. A real tokenizer (`@anthropic-ai/tokenizer`
@@ -52,12 +53,9 @@
  *     the LLM provider's responsibility (and modern Sonnet/Opus
  *     models surface remaining context themselves).
  *
- *   - The heuristic is deterministic, allocation-free, and so cheap
- *     it is dominated by the upstream HTTP hop the tool already
- *     performs.
- *
- * Operators who need exact counts can run a tokenizer-backed proxy
- * upstream of the sidecar. The shape of the contract here is the same.
+ *   - Operators who *do* need exact counts can pass a custom
+ *     `estimate` callback at construction time. The shape of the
+ *     contract is the same; only the cost of the estimate changes.
  *
  * Out of scope (issue #390 deliberately leaves these to follow-ups):
  *   - Auto-compaction of conversational history (lives above the SDK).
@@ -70,11 +68,6 @@
  * Documented in the Claude API token-counting guide as
  * "1 token ≈ 3.5 English characters". Conservative for JSON / code
  * (which trends slightly higher tokens-per-char), generous for prose.
- *
- * We treat one byte of a non-text payload (binary spill candidate) as
- * one token equivalent so callers don't have to special-case binary —
- * the calling code already routes binary responses through the blob
- * store before consulting the budget.
  */
 const CHARS_PER_TOKEN = 3.5;
 
@@ -99,8 +92,18 @@ export const DEFAULT_INLINE_OUTPUT_TOKENS = 8_000;
 export const DEFAULT_RUN_OUTPUT_BUDGET_TOKENS = 200_000;
 
 /**
- * Estimate the token count of a string using the Anthropic-recommended
- * heuristic. Returns a non-negative integer. Empty input returns 0.
+ * Pluggable token estimator. Receives a text payload, returns a
+ * non-negative integer count. Implementations should be deterministic
+ * for a given input. The default is the Anthropic-recommended
+ * heuristic ({@link estimateTokens}); operators can inject a real
+ * tokenizer (tiktoken, `count_tokens` API, …) at the cost of a
+ * per-call hop.
+ */
+export type TokenEstimator = (text: string) => number;
+
+/**
+ * Default estimator using the Anthropic-recommended chars/token ratio.
+ * Returns a non-negative integer. Empty input returns 0.
  *
  * Uses `Math.ceil` so any non-empty string costs at least one token —
  * matches real tokenizer behaviour (the smallest encoded sequence is a
@@ -111,39 +114,27 @@ export const DEFAULT_RUN_OUTPUT_BUDGET_TOKENS = 200_000;
  * header, not by iterating. This keeps the sidecar's hot path
  * allocation-free.
  */
-export function estimateTokens(text: string): number {
+export const estimateTokens: TokenEstimator = (text) => {
   if (text.length === 0) return 0;
   return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
+};
 
 /**
- * Estimate the token cost of a binary payload (base64 inflation
- * factor applied if/when the agent reads it). Used for symmetry with
- * `estimateTokens` so callers don't branch on text vs. binary —
- * binary always spills, but the budget bookkeeper still wants a number.
+ * Decision returned by {@link TokenBudget.decide} and
+ * {@link TokenBudget.tryReserve}.
  *
- * Conservative: assumes the agent will eventually base64-read the
- * blob (1.37× inflation) and tokenise the resulting string at the
- * heuristic ratio.
- */
-export function estimateBinaryTokens(byteLength: number): number {
-  if (byteLength <= 0) return 0;
-  // Base64 inflates by 4/3, then chars-per-token.
-  return Math.ceil((byteLength * 4) / 3 / CHARS_PER_TOKEN);
-}
-
-/**
- * Decision returned by `TokenBudget.decide()`. The caller (today:
- * `responseToToolResult` in `mcp.ts`) acts on `decision`; `reason` is
- * surfaced to the agent as structured `_meta` so it can react.
+ * The reason union is intentionally narrow: only the three states the
+ * tracker itself can produce. Fallback states triggered by the caller
+ * (no blob store configured, blob store full, …) are surfaced through
+ * a wider union in the agent-facing `_meta` payload — they are not
+ * decisions the budget can make.
  */
 export interface BudgetDecision {
   /**
    * - `inline`  — agent receives the full content as a `text` block.
    * - `spill`   — agent receives a `resource_link`; bytes are stashed
-   *               in the blob store. May be triggered by per-call
-   *               size, by cumulative budget pressure, or by absence
-   *               of a viable inline path.
+   *               in the blob store. Triggered by per-call size or
+   *               by cumulative budget pressure.
    */
   decision: "inline" | "spill";
   /**
@@ -151,11 +142,7 @@ export interface BudgetDecision {
    * `inline` — observability and tests both depend on the reason
    * being explicit rather than implied by `decision === "inline"`.
    */
-  reason:
-    | "under_inline_cap"
-    | "exceeds_inline_cap"
-    | "exceeds_run_budget"
-    | "no_blob_store_fallback_inline";
+  reason: "under_inline_cap" | "exceeds_inline_cap" | "exceeds_run_budget";
   /** Estimated tokens for *this* response. */
   estimatedTokens: number;
   /** Cumulative tokens consumed by tool outputs so far in this run. */
@@ -179,6 +166,13 @@ export interface TokenBudgetOptions {
    * inline.
    */
   runBudgetTokens?: number;
+  /**
+   * Optional override of the token-counting function. Defaults to
+   * {@link estimateTokens} (the chars/3.5 heuristic). Operators who
+   * need exact counts can inject a real tokenizer here at the cost
+   * of a per-call hop.
+   */
+  estimate?: TokenEstimator;
 }
 
 /**
@@ -207,10 +201,25 @@ export function readPositiveTokenEnv(name: string, defaultValue: number): number
  * and at read time the bytes are tokenised by the LLM's actual
  * tokenizer, not by our heuristic. Double-counting would penalise
  * the agent for content it never read.
+ *
+ * **Concurrency model.** The sidecar runs on Bun's single-threaded
+ * event loop, so no two `decide()` calls execute simultaneously.
+ * However, `responseToToolResult` is async: between `decide()` and
+ * `record()`, the event loop may interleave another tool call. Two
+ * parallel calls could therefore both observe the pre-record
+ * `consumed` snapshot and both decide `inline`, then both record —
+ * briefly over-spending the inline budget by one call's worth.
+ *
+ * Use {@link tryReserve} for the inline path: it folds decide + record
+ * into a single synchronous step, eliminating the interleave window.
+ * The two-phase {@link decide} + {@link record} API is preserved for
+ * paths that deliver content the budget didn't authorize (e.g.
+ * blob-store-full fallback) and need to record after the fact.
  */
 export class TokenBudget {
   readonly inlineCapTokens: number;
   readonly runBudgetTokens: number;
+  private readonly estimator: TokenEstimator;
   private consumed = 0;
 
   constructor(options: TokenBudgetOptions = {}) {
@@ -229,6 +238,7 @@ export class TokenBudget {
     }
     this.inlineCapTokens = inlineCap;
     this.runBudgetTokens = runBudget;
+    this.estimator = options.estimate ?? estimateTokens;
   }
 
   /** Tokens consumed so far by inline tool outputs in this run. */
@@ -242,59 +252,93 @@ export class TokenBudget {
   }
 
   /**
-   * Decide whether a response of `estimatedTokens` should be inlined.
+   * Estimate the token cost of a text payload using the configured
+   * estimator (defaults to the {@link estimateTokens} heuristic).
+   * Exposed so callers don't need to know which estimator was wired
+   * at construction time.
+   */
+  estimate(text: string): number {
+    return this.estimator(text);
+  }
+
+  /**
+   * Pure decision function — answers "would `estimatedTokens` fit?"
+   * without mutating budget state. Use this when the caller may
+   * deliver content the budget didn't authorize (blob-store-full
+   * fallback) and needs to {@link record} after the fact.
    *
-   * The caller still has the option of forcing `spill` (e.g. when no
-   * blob store is configured we have no spill path). This method
-   * only answers the budget question; the integration is in
-   * `responseToToolResult` (`mcp.ts`), which combines this decision
-   * with the blob-store presence check.
+   * For the common inline path, prefer {@link tryReserve} which folds
+   * decide + record into a single synchronous step.
    */
   decide(estimatedTokens: number): BudgetDecision {
     if (estimatedTokens > this.inlineCapTokens) {
-      return {
-        decision: "spill",
-        reason: "exceeds_inline_cap",
-        estimatedTokens,
-        consumedTokens: this.consumed,
-        runBudgetTokens: this.runBudgetTokens,
-        inlineCapTokens: this.inlineCapTokens,
-      };
+      return this.snapshot("spill", "exceeds_inline_cap", estimatedTokens);
     }
     if (this.consumed + estimatedTokens > this.runBudgetTokens) {
-      return {
-        decision: "spill",
-        reason: "exceeds_run_budget",
-        estimatedTokens,
-        consumedTokens: this.consumed,
-        runBudgetTokens: this.runBudgetTokens,
-        inlineCapTokens: this.inlineCapTokens,
-      };
+      return this.snapshot("spill", "exceeds_run_budget", estimatedTokens);
     }
+    return this.snapshot("inline", "under_inline_cap", estimatedTokens);
+  }
+
+  /**
+   * Atomic decide-and-reserve. If the decision is `inline`, records
+   * the tokens against the budget *before returning*, eliminating the
+   * decide/record interleave window described in the class JSDoc.
+   * On `spill`, the budget is left unchanged.
+   *
+   * The returned snapshot reflects the *post-record* consumed count,
+   * so callers building observability `_meta` see the same total the
+   * next caller will see.
+   */
+  tryReserve(estimatedTokens: number): BudgetDecision {
+    const decision = this.decide(estimatedTokens);
+    if (decision.decision === "inline") {
+      this.commit(estimatedTokens);
+      return this.snapshot(decision.decision, decision.reason, estimatedTokens);
+    }
+    return decision;
+  }
+
+  /**
+   * Record tokens delivered outside the {@link tryReserve} path
+   * (e.g. blob-store-full fallback where we deliver inline despite a
+   * spill decision). Saturates at the ceiling.
+   *
+   * In non-production environments invalid input throws — internal
+   * callers should never pass a bad number, and a silent no-op masks
+   * real bugs. Production stays defensive (silent no-op) so a runtime
+   * misuse cannot crash an active run.
+   */
+  record(tokens: number): void {
+    if (!Number.isFinite(tokens) || tokens <= 0) {
+      if (process.env.NODE_ENV !== "production") {
+        throw new Error(
+          `TokenBudget.record: expected a positive finite number, got ${String(tokens)}`,
+        );
+      }
+      return;
+    }
+    this.commit(tokens);
+  }
+
+  /** Internal: actually mutate the consumed counter (saturating). */
+  private commit(tokens: number): void {
+    this.consumed = Math.min(this.runBudgetTokens, this.consumed + Math.ceil(tokens));
+  }
+
+  /** Internal: build a {@link BudgetDecision} from current state. */
+  private snapshot(
+    decision: BudgetDecision["decision"],
+    reason: BudgetDecision["reason"],
+    estimatedTokens: number,
+  ): BudgetDecision {
     return {
-      decision: "inline",
-      reason: "under_inline_cap",
+      decision,
+      reason,
       estimatedTokens,
       consumedTokens: this.consumed,
       runBudgetTokens: this.runBudgetTokens,
       inlineCapTokens: this.inlineCapTokens,
     };
-  }
-
-  /**
-   * Record `tokens` against the budget. Saturates at the ceiling so
-   * the tracker never reports a negative remaining figure even if a
-   * caller records more than `decide()` recommended (the caller
-   * always gets the chance to abort first; record-after-deliver is
-   * the contract).
-   */
-  record(tokens: number): void {
-    if (!Number.isFinite(tokens) || tokens <= 0) return;
-    this.consumed = Math.min(this.runBudgetTokens, this.consumed + Math.ceil(tokens));
-  }
-
-  /** Test-only: reset the tracker. */
-  reset(): void {
-    this.consumed = 0;
   }
 }

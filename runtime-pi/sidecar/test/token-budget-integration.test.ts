@@ -84,7 +84,8 @@ interface BudgetMeta {
     | "under_inline_cap"
     | "exceeds_inline_cap"
     | "exceeds_run_budget"
-    | "no_blob_store_fallback_inline";
+    | "blob_store_full"
+    | "no_blob_store_configured";
 }
 
 interface ContentBlock {
@@ -291,8 +292,10 @@ describe("token-aware spill — `_meta` accounting", () => {
     expect(meta).toBeDefined();
     expect(meta!.runBudgetTokens).toBe(100_000);
     expect(meta!.inlineCapTokens).toBe(4_000);
-    expect(meta!.consumedTokens).toBe(0); // before this call
     expect(meta!.estimatedTokens).toBeGreaterThan(0);
+    // tryReserve records on inline before returning the snapshot, so
+    // consumedTokens reflects the post-record total (this call included).
+    expect(meta!.consumedTokens).toBe(meta!.estimatedTokens);
   });
 
   it("reports increasing consumedTokens across successive inline calls", async () => {
@@ -324,9 +327,10 @@ describe("token-aware spill — `_meta` accounting", () => {
       const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
       consumed.push(meta.consumedTokens);
     }
-    // The reported `consumedTokens` is the value BEFORE this call's
-    // record(), so call N+1 sees what call N delivered.
-    expect(consumed[0]).toBe(0);
+    // tryReserve records before returning the snapshot, so each meta
+    // includes its own call's contribution. Call N's reported
+    // consumedTokens equals the running total through call N.
+    expect(consumed[0]).toBeGreaterThan(0);
     expect(consumed[1]).toBeGreaterThan(consumed[0]!);
     expect(consumed[2]).toBeGreaterThan(consumed[1]!);
   });
@@ -499,7 +503,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {
-  it("falls back to inline with no_blob_store_fallback_inline reason when blob store is full", async () => {
+  it("falls back to inline with blob_store_full reason when blob store is full", async () => {
     // Blob store with cumulative cap of 100 bytes; first put exhausts.
     const blobStore = new BlobStore("run-test", { maxTotalBytes: 100 });
     blobStore.put(new Uint8Array(95)); // leave only 5 bytes
@@ -531,7 +535,7 @@ describe("token-aware spill — fallback when blob store is full", () => {
     expect(result.content[0]!.type).toBe("text");
     const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta;
     expect(meta.decision).toBe("inline");
-    expect(meta.reason).toBe("no_blob_store_fallback_inline");
+    expect(meta.reason).toBe("blob_store_full");
     // The forced-inline tokens are still recorded against the budget
     // — the agent paid the context cost.
     expect(tokenBudget.consumedTokens()).toBe(meta.estimatedTokens);
