@@ -123,6 +123,7 @@ WORKDIR /runtime
 # per-package trees into it — both levels are required at import time.
 COPY --from=deps --chown=pi:pi /build/node_modules                       ./node_modules
 COPY --from=deps --chown=pi:pi /build/packages/afps-runtime/node_modules  ./packages/afps-runtime/node_modules
+COPY --from=deps --chown=pi:pi /build/packages/core/node_modules          ./packages/core/node_modules
 COPY --from=deps --chown=pi:pi /build/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
 COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules     ./packages/runner-pi/node_modules
 COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runtime-pi/node_modules
