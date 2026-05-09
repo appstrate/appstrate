@@ -14,12 +14,16 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  InstallNotFoundError,
   PROJECT_FILE_RELPATH,
+  defaultInstallDir,
   deriveProjectName,
   projectFilePath,
   readProjectFile,
+  resolveInstall,
   writeProjectFile,
 } from "../../src/lib/install/project.ts";
+import { homedir } from "node:os";
 
 let workDir: string;
 
@@ -119,5 +123,61 @@ describe("readProjectFile / writeProjectFile", () => {
     );
     const read = await readProjectFile(workDir);
     expect(read).toBeNull();
+  });
+});
+
+describe("defaultInstallDir", () => {
+  // Sanity check the wire format every lifecycle command depends on.
+  // If this changes, the installer's outro hint and the doctor's
+  // local-install probe both need to follow.
+  it("returns ~/appstrate (homedir + 'appstrate')", () => {
+    expect(defaultInstallDir()).toBe(join(homedir(), "appstrate"));
+  });
+});
+
+describe("resolveInstall", () => {
+  it("returns the dir + recorded projectName when the sidecar is present", async () => {
+    await writeProjectFile(workDir, "appstrate-test-deadbeef");
+    const resolved = await resolveInstall({ dir: workDir });
+    expect(resolved.projectName).toBe("appstrate-test-deadbeef");
+    expect(resolved.dir).toBe(workDir);
+  });
+
+  it("throws InstallNotFoundError with an actionable message when the sidecar is missing", async () => {
+    await expect(resolveInstall({ dir: workDir })).rejects.toBeInstanceOf(InstallNotFoundError);
+    try {
+      await resolveInstall({ dir: workDir });
+    } catch (err) {
+      expect(err).toBeInstanceOf(InstallNotFoundError);
+      const e = err as InstallNotFoundError;
+      // The error must name the dir, suggest the two recovery paths,
+      // and point at the exact file we looked for. Anything less and
+      // a confused user has to spelunk through the source.
+      expect(e.message).toContain(workDir);
+      expect(e.message).toContain("--dir");
+      expect(e.message).toContain("appstrate install");
+      expect(e.message).toContain(PROJECT_FILE_RELPATH);
+      expect(e.dir).toBe(workDir);
+      expect(e.filePath).toBe(projectFilePath(workDir));
+    }
+  });
+
+  it("normalizes the dir to absolute (relative input becomes absolute)", async () => {
+    // The lifecycle commands always thread the dir into `cwd` for
+    // `docker compose`, which expects an absolute path. The resolver
+    // normalizes so callers never have to. We only assert the path
+    // shape (absolute) since `mkdtemp` on macOS lives behind a
+    // `/var → /private/var` symlink that `path.resolve` doesn't
+    // canonicalize — a `===` check would flake on macOS CI.
+    await writeProjectFile(workDir, "appstrate-test-deadbeef");
+    const cwd = process.cwd();
+    try {
+      process.chdir(workDir);
+      const resolved = await resolveInstall({ dir: "." });
+      expect(resolved.dir.startsWith("/")).toBe(true);
+      expect(resolved.projectName).toBe("appstrate-test-deadbeef");
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });

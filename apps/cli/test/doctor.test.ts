@@ -51,6 +51,7 @@ describe("runDoctor", () => {
       pathScanFs: fs({}),
       probeBinary: probe({}),
       execPath: "/some/where",
+      probeLocalInstall: async () => null,
     });
     expect(report.installations).toEqual([]);
     expect(report.runningIndex).toBe(-1);
@@ -66,6 +67,7 @@ describe("runDoctor", () => {
         "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" },
       }),
       execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => null,
     });
     expect(report.installations).toHaveLength(1);
     expect(report.installations[0]!.source).toBe("curl");
@@ -87,6 +89,7 @@ describe("runDoctor", () => {
         "/b/appstrate": { version: "1.2.0", source: "bun" },
       }),
       execPath: "/a/appstrate",
+      probeLocalInstall: async () => null,
     });
     expect(report.installations).toHaveLength(2);
     expect(report.dualInstall).toBe(true);
@@ -100,6 +103,7 @@ describe("runDoctor", () => {
       pathScanFs: fs({ "/a/appstrate": { exec: true } }),
       probeBinary: probe({ "/a/appstrate": { error: "timeout" } }),
       execPath: "/a/appstrate",
+      probeLocalInstall: async () => null,
     });
     expect(report.installations[0]!.version).toBeNull();
     expect(report.installations[0]!.probeError).toBe("timeout");
@@ -116,6 +120,7 @@ describe("runDoctor", () => {
         "/usr/local/bin/appstrate": { version: "1.0.0", source: "curl" },
       }),
       execPath: "/opt/appstrate/bin/appstrate",
+      probeLocalInstall: async () => null,
     });
     expect(report.runningIndex).toBe(0);
   });
@@ -140,6 +145,7 @@ describe("runDoctor", () => {
         "/opt/appstrate/bin/appstrate": { version: "1.0.0", source: "curl" },
       }),
       execPath: "/home/user/.local/bin/appstrate",
+      probeLocalInstall: async () => null,
     });
     expect(report.runningIndex).toBe(0);
   });
@@ -261,6 +267,7 @@ describe("connection-profile check", () => {
       pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
       probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
       execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => null,
       checkConnectionProfile: async () => ({
         profileId: "abc",
         status: "missing",
@@ -280,6 +287,7 @@ describe("connection-profile check", () => {
       pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
       probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
       execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => null,
       checkConnectionProfile: async () => null,
     });
     expect(report.connectionProfile).toBeUndefined();
@@ -291,6 +299,7 @@ describe("connection-profile check", () => {
       pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
       probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
       execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => null,
       checkConnectionProfile: async () => {
         throw new Error("network down");
       },
@@ -329,6 +338,92 @@ describe("connection-profile check", () => {
       "/usr/local/bin/appstrate",
     );
     expect(text).toContain("could not be verified");
+  });
+});
+
+describe("local Docker-tier install probe (#343)", () => {
+  // The doctor surfaces a hint block when a Tier 1/2/3 install is
+  // detected on the host so users find the lifecycle commands without
+  // having to read the issue.
+
+  const baseInstall = {
+    pathEntry: "/usr/local/bin",
+    binary: "/usr/local/bin/appstrate",
+    realPath: "/usr/local/bin/appstrate",
+    version: "1.2.3",
+    source: "curl" as const,
+  };
+
+  it("attaches a `localInstall` field when the probe finds a sidecar", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async (dir) => ({ dir, projectName: "appstrate-prod-cafebabe" }),
+      installDir: "/srv/appstrate",
+    });
+    expect(report.localInstall).toEqual({
+      dir: "/srv/appstrate",
+      projectName: "appstrate-prod-cafebabe",
+    });
+  });
+
+  it("omits `localInstall` when the probe returns null", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => null,
+    });
+    expect(report.localInstall).toBeUndefined();
+  });
+
+  it("fails soft (no `localInstall`) when the probe throws", async () => {
+    const report = await runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => {
+        throw new Error("disk error");
+      },
+    });
+    expect(report.localInstall).toBeUndefined();
+  });
+
+  it("renders the lifecycle command hints when a local install is detected", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [baseInstall],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+        localInstall: { dir: "/home/alice/appstrate", projectName: "appstrate-alice-deadbeef" },
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).toContain("Local Docker-tier install detected at /home/alice/appstrate");
+    expect(text).toContain("appstrate-alice-deadbeef");
+    expect(text).toContain("appstrate logs -f");
+    expect(text).toContain("appstrate stop");
+    expect(text).toContain("appstrate uninstall");
+    expect(text).toContain("--purge");
+  });
+
+  it("does NOT render the lifecycle hint block when localInstall is absent", () => {
+    const text = formatDoctorReport(
+      {
+        installations: [baseInstall],
+        runningIndex: 0,
+        dualInstall: false,
+        multiSource: false,
+      },
+      "/usr/local/bin/appstrate",
+    );
+    expect(text).not.toContain("Local Docker-tier install detected");
+    expect(text).not.toContain("appstrate logs -f");
   });
 });
 

@@ -35,6 +35,12 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | Command                 | Purpose                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `appstrate install`     | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
+| `appstrate start`       | Start the installed Docker stack (`docker compose up -d`).                      |
+| `appstrate stop`        | Stop the stack — containers off, volumes preserved.                             |
+| `appstrate restart`     | Restart all containers.                                                         |
+| `appstrate logs`        | Stream Compose logs (with `-f` and an optional service-name positional).        |
+| `appstrate status`      | Show container status (`docker compose ps`).                                    |
+| `appstrate uninstall`   | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
 | `appstrate login`       | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
 | `appstrate logout`      | Revoke the active session server-side and wipe local credentials.               |
 | `appstrate whoami`      | Print the identity attached to the active profile.                              |
@@ -79,6 +85,49 @@ appstrate install --tier 0 --dir ~/demo-appstrate
 **Tier 0 specifics**: `git clone`s the `appstrate/appstrate` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
 
 **Tier 1/2/3 specifics**: checks `docker info`, writes `docker-compose.yml` from an embedded template (`examples/self-hosting/docker-compose.tier{1,2,3}.yml`), writes `.env`, runs `docker compose up -d`, polls `/` for up to 120s.
+
+---
+
+### Lifecycle commands
+
+After `appstrate install` (Tiers 1/2/3) every Compose verb has a thin
+wrapper that reads the recorded project name from
+`<dir>/.appstrate/project.json` — you never type the derived hash.
+
+```sh
+appstrate start                       # docker compose up -d (idempotent)
+appstrate stop                        # docker compose stop (volumes intact)
+appstrate restart                     # docker compose restart
+appstrate logs -f                     # docker compose logs -f
+appstrate logs -f postgres            # filter to a single service
+appstrate status                      # docker compose ps
+appstrate uninstall                   # docker compose down (data preserved)
+appstrate uninstall --purge --yes     # destructive: down -v + rm -rf <dir>
+```
+
+**Flags (all subcommands)**
+
+| Flag          | Description                                             |
+| ------------- | ------------------------------------------------------- |
+| `-d`, `--dir` | Override the install directory (default `~/appstrate`). |
+
+**`appstrate logs`**
+
+| Flag             | Description                                       |
+| ---------------- | ------------------------------------------------- |
+| `-f`, `--follow` | Stream new lines as they arrive.                  |
+| `[service]`      | Optional positional — filter to a single service. |
+
+**`appstrate uninstall`**
+
+| Flag          | Description                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `--purge`     | Also remove named volumes (Postgres, Redis, MinIO data) and the install directory. Destructive — prompts unless `--yes`.       |
+| `-y`, `--yes` | Skip the destructive-action confirmation. Equivalent to `APPSTRATE_YES=1`. Required for `--purge` in non-interactive contexts. |
+
+The raw `docker compose --project-name <hash> <verb>` form remains
+supported — useful when you need a flag the wrapper doesn't expose.
+The project name is in `~/appstrate/.appstrate/project.json`.
 
 ---
 
