@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 
-export type { Profile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
+export type { UserProfile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {
   PackageType,
   ProviderSetupGuide,
