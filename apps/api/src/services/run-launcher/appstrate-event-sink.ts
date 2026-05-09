@@ -51,12 +51,14 @@ import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
+import { sql } from "drizzle-orm";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import { accumulateTokenUsage } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
+import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
 
 export interface PersistingEventSinkOptions {
   scope: AppScope;
@@ -188,10 +190,17 @@ export class PersistingEventSink implements EventSink {
             tokenUsage: usage as unknown as Record<string, unknown>,
           });
         }
-        // Ledger row — only the ingestion path opts in. Concurrent
-        // writers race via ON CONFLICT DO NOTHING.
+        // Ledger row — only the ingestion path opts in. The runner
+        // emits cumulative running totals on each metric event, so
+        // concurrent writers (a later metric event, the finalize-time
+        // fallback) UPSERT the row with monotonic-max semantics.
         if (this.writeLedger) {
           await writeRunnerLedgerRow(this.scope, this.runId, { cost, usage });
+          // Best-effort live broadcast — never blocks the ingestion
+          // hot path nor fails it. The broadcaster throttles per-run
+          // to avoid flooding SSE subscribers under bursty metric
+          // emission (e.g. tool-heavy turns).
+          scheduleRunMetricBroadcast(this.runId);
         }
         break;
       }
@@ -279,13 +288,20 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
 }
 
 /**
- * Write the runner-source row for a run to the `llm_usage` ledger.
+ * Write (upsert) the runner-source row for a run in the `llm_usage` ledger.
  *
- * The metric event carries the runner's full LLM cost + token usage for
- * the run. At most one runner row per run — concurrent writers (the
- * `appstrate.metric` event handler and the finalize-time fallback)
- * race via the partial unique index `uq_llm_usage_runner_run_id`;
- * whichever lands first wins, the other no-ops.
+ * The runner emits cumulative running totals on every `appstrate.metric`
+ * event, so the row tracks the latest total seen — concurrent writers
+ * (a later metric event, the finalize-time fallback) UPSERT into the
+ * partial unique index `uq_llm_usage_runner_run_id`. The conflict
+ * clause is monotonic: an UPDATE only takes effect when the incoming
+ * `cost_usd` is at least as large as the stored value, so:
+ *
+ *   - rapid-fire metric events keep the row in sync with the latest total
+ *   - a finalize-fallback emit with a smaller `result.cost` (e.g. when
+ *     a fresh metric already landed) cannot regress the bill
+ *   - reorder is safe — the highest-seen cost wins regardless of arrival
+ *     order
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.
  * Errors are logged.
@@ -315,7 +331,24 @@ export async function writeRunnerLedgerRow(
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
       })
-      .onConflictDoNothing();
+      // Upsert via the partial unique index. `setWhere` keeps the
+      // update monotonic — only the highest-seen cumulative total ever
+      // wins, so out-of-order metric events and the finalize fallback
+      // can never regress the recorded cost. Token columns are bumped
+      // alongside the cost so the snapshot stays internally consistent
+      // (cost ≥ stored cost ⇒ tokens are at least as large too).
+      .onConflictDoUpdate({
+        target: llmUsage.runId,
+        targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
+        set: {
+          inputTokens: sql`EXCLUDED.input_tokens`,
+          outputTokens: sql`EXCLUDED.output_tokens`,
+          cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
+          cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
+          costUsd: sql`EXCLUDED.cost_usd`,
+        },
+        setWhere: sql`EXCLUDED.cost_usd >= ${llmUsage.costUsd}`,
+      });
   } catch (err) {
     logger.error("Failed to write runner ledger row", {
       runId,

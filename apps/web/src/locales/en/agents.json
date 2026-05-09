@@ -125,6 +125,7 @@
   "exec.usageOutputTokens": "Output tokens",
   "exec.usageCacheCreation": "Cache creation tokens",
   "exec.usageCacheRead": "Cache read tokens",
+  "exec.usageLive": "Live",
   "import.title": "Import package",
   "import.dropText": "Drop an AFPS, AFPS-bundle, or ZIP file here",
   "import.dropHint": "or click to browse",

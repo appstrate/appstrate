@@ -50,6 +50,7 @@ import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { computeRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
+import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -352,8 +353,16 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
   if (rowsAffected.length === 0) {
     logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
+    // Even on the no-op branch, clear any lingering throttle state so
+    // a long-running API process doesn't leak entries for retry-storm
+    // runs that all collapse onto the same id.
+    clearRunMetricBroadcastState(run.id);
     return;
   }
+
+  // Drop the per-run throttle state — the run is terminal, no further
+  // metric events will arrive. Bounds the broadcaster's in-memory map.
+  clearRunMetricBroadcastState(run.id);
 
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.

@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -187,5 +187,47 @@ describe("run watchdog — unified stall detection", () => {
     const stillRunning = rows.filter((r) => ids.includes(r.id) && r.status === "running");
     expect(failed.length).toBe(2);
     expect(stillRunning.length).toBe(1);
+  });
+
+  // Regression coverage for #391 — "users perceive that failed/timed-
+  // out runs are not counted". Verifies the existing convergence:
+  // metric events that arrived BEFORE the container crashed have
+  // already written `llm_usage` rows; the watchdog's call to
+  // `finalizeRun` reads `computeRunCost` from that ledger and
+  // persists `runs.cost` on the failed terminal status, so the
+  // afterRun (cloud billing) hook fires with the right value even
+  // when the container never posted /finalize itself.
+  it("captures cost for a crashed run whose metric event landed before the crash", async () => {
+    const stale = new Date(Date.now() - 3600_000);
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "running",
+      lastHeartbeatAt: stale,
+    });
+
+    // Simulate a metric event having landed before the container
+    // crashed: a runner-source `llm_usage` row exists with a non-zero
+    // cost. The watchdog must finalize the run AND surface that cost
+    // on the terminal `runs.cost` column for the billing hook.
+    await db.insert(llmUsage).values({
+      source: "runner",
+      orgId: ctx.orgId,
+      runId,
+      inputTokens: 1500,
+      outputTokens: 800,
+      costUsd: 0.0234,
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(1);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    // Cost MUST survive the terminal status — it's the input cloud
+    // billing reads off the run row to charge the org.
+    expect(row?.cost).toBeCloseTo(0.0234, 5);
   });
 });

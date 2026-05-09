@@ -375,6 +375,143 @@ describe("realtime service (integration)", () => {
     });
   });
 
+  // ── run_metric dispatching ───────────────────────────────
+
+  describe("run_metric", () => {
+    it("dispatches to subscriber matching orgId, applicationId, and runId", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const id = "sub-metric-match";
+      trackSubscriber(id);
+      addSubscriber({
+        id,
+        filter: { orgId: "org-m", applicationId: "app-m", runId: "exec-m", isAdmin: true },
+        send,
+      });
+
+      await pgNotify("run_metric", {
+        org_id: "org-m",
+        application_id: "app-m",
+        run_id: "exec-m",
+        package_id: "@scope/agent",
+        token_usage: { input_tokens: 10, output_tokens: 5 },
+        cost_so_far: 0.0042,
+      });
+      await wait();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const call = send.mock.calls[0]![0]!;
+      expect(call.event).toBe("run_metric");
+      expect(call.data).toEqual({
+        orgId: "org-m",
+        applicationId: "app-m",
+        runId: "exec-m",
+        packageId: "@scope/agent",
+        tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        costSoFar: 0.0042,
+      });
+    });
+
+    it("filters by runId", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const id = "sub-metric-run-filter";
+      trackSubscriber(id);
+      addSubscriber({
+        id,
+        filter: { orgId: "org-mr", applicationId: "app-mr", runId: "target", isAdmin: true },
+        send,
+      });
+
+      await pgNotify("run_metric", {
+        org_id: "org-mr",
+        application_id: "app-mr",
+        run_id: "other",
+        package_id: "@scope/agent",
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      expect(send).not.toHaveBeenCalled();
+
+      await pgNotify("run_metric", {
+        org_id: "org-mr",
+        application_id: "app-mr",
+        run_id: "target",
+        package_id: "@scope/agent",
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it("filters by packageId for agent-scoped streams", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const id = "sub-metric-pkg-filter";
+      trackSubscriber(id);
+      addSubscriber({
+        id,
+        filter: {
+          orgId: "org-mp",
+          applicationId: "app-mp",
+          packageId: "@scope/want",
+          isAdmin: true,
+        },
+        send,
+      });
+
+      await pgNotify("run_metric", {
+        org_id: "org-mp",
+        application_id: "app-mp",
+        run_id: "rA",
+        package_id: "@scope/skip",
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      expect(send).not.toHaveBeenCalled();
+
+      await pgNotify("run_metric", {
+        org_id: "org-mp",
+        application_id: "app-mp",
+        run_id: "rB",
+        package_id: "@scope/want",
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not leak across orgs", async () => {
+      const sendA = mock((_e: RealtimeEvent) => {});
+      const sendB = mock((_e: RealtimeEvent) => {});
+      trackSubscriber("sub-metric-orgA");
+      trackSubscriber("sub-metric-orgB");
+      addSubscriber({
+        id: "sub-metric-orgA",
+        filter: { orgId: "org-A", applicationId: "app-A", isAdmin: true },
+        send: sendA,
+      });
+      addSubscriber({
+        id: "sub-metric-orgB",
+        filter: { orgId: "org-B", applicationId: "app-B", isAdmin: true },
+        send: sendB,
+      });
+
+      await pgNotify("run_metric", {
+        org_id: "org-A",
+        application_id: "app-A",
+        run_id: "x",
+        package_id: "@scope/p",
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      expect(sendA).toHaveBeenCalledTimes(1);
+      expect(sendB).not.toHaveBeenCalled();
+    });
+  });
+
   // ── initRealtime idempotency ────────────────────────────────
 
   describe("initRealtime idempotency", () => {
