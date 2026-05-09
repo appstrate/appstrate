@@ -14,6 +14,10 @@
  * Signature wire format used by `signAuthHmac` / `verifyAuthHmac`:
  *
  *     <kid>$<base64url-hmac>
+ *
+ * Verifiers also accept the legacy un-prefixed `<base64url-hmac>` form
+ * (computed against the active secret only) so a deployment can roll the
+ * helper in without invalidating in-flight cookies.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -60,19 +64,23 @@ export function signAuthHmac(payload: string): string {
 }
 
 /**
- * Verifies a signature against any known secret. Requires the prefixed
- * `<kid>$<sig>` form — un-prefixed signatures are rejected.
+ * Verifies a signature against any known secret. Accepts the prefixed
+ * `<kid>$<sig>` form (preferred) and the legacy un-prefixed `<sig>` form
+ * (verified against the active secret only) for rollout compatibility.
  */
 export function verifyAuthHmac(payload: string, signature: string): boolean {
   const { map } = loadSecrets();
 
-  const sep = signature.indexOf("$");
-  if (sep < 0) return false;
-  const kid = signature.slice(0, sep);
-  const sig = signature.slice(sep + 1);
-  const secret = map[kid];
-  if (!secret) return false;
-  return constantTimeEquals(hmacBase64Url(secret, payload), sig);
+  if (signature.includes("$")) {
+    const sep = signature.indexOf("$");
+    const kid = signature.slice(0, sep);
+    const sig = signature.slice(sep + 1);
+    const secret = map[kid];
+    if (!secret) return false;
+    return constantTimeEquals(hmacBase64Url(secret, payload), sig);
+  }
+
+  return constantTimeEquals(hmacBase64Url(getActiveAuthSecret(), payload), signature);
 }
 
 function constantTimeEquals(a: string, b: string): boolean {

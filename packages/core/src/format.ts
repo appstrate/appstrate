@@ -17,14 +17,22 @@
  * back to `"<n> B"` so callers never see a misleading positive
  * megabyte/gigabyte figure for malformed input.
  *
- * Tier breakpoints are powers of 1024 (binary). Precision: 1 decimal for
- * KB, 2 decimals for MB and GB, matching the dominant prior art in the
- * repo so visual-regression risk is minimal.
+ * Tier breakpoints are powers of 1024 (binary). Precision rule
+ * (matches CLI prior art the audit consolidated): values ≥ 10 in their
+ * tier are rounded to an integer (e.g. `12 KB`); values < 10 carry one
+ * decimal (e.g. `2.0 KB`, `5.2 MB`).
  */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return formatTier(kb, "KB");
+  const mb = kb / 1024;
+  if (mb < 1024) return formatTier(mb, "MB");
+  const gb = mb / 1024;
+  return formatTier(gb, "GB");
+}
+
+function formatTier(value: number, unit: string): string {
+  return value >= 10 ? `${Math.round(value)} ${unit}` : `${value.toFixed(1)} ${unit}`;
 }
