@@ -6,13 +6,13 @@ import { authClient } from "../lib/auth-client";
 import { api } from "../api";
 import { authStore } from "../stores/auth-store";
 import i18n from "../i18n";
-import type { Profile } from "@appstrate/shared-types";
+import type { UserProfile } from "@appstrate/shared-types";
 
-async function fetchProfile(): Promise<Profile | null> {
+async function fetchProfile(): Promise<UserProfile | null> {
   try {
     const data = await api<{ id: string; displayName: string; language: string }>("/profile");
     const language = data.language === "fr" || data.language === "en" ? data.language : "fr";
-    const profile: Profile = {
+    const profile: UserProfile = {
       id: data.id,
       displayName: data.displayName,
       language,
@@ -34,7 +34,7 @@ function clearAuth() {
 
 function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
-  profile: Profile | null,
+  profile: UserProfile | null,
 ) {
   authStore.setState({
     user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },

@@ -30,7 +30,7 @@ import type {
   orgModels,
 } from "./organizations.ts";
 
-export type Profile = InferSelectModel<typeof profiles>;
+export type UserProfile = InferSelectModel<typeof profiles>;
 
 export type Package = InferSelectModel<typeof packages>;
 
