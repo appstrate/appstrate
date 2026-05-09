@@ -85,9 +85,9 @@ async function setupSmtpFixture(): Promise<{
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const appId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(applications).values({
-    id: appId,
+    id: applicationId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -98,7 +98,7 @@ async function setupSmtpFixture(): Promise<{
     level: "application",
     name: "Verify Email Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: appId,
+    referencedApplicationId: applicationId,
     // This suite exercises brand-new end-user sign-ups through the
     // OIDC verify-email / magic-link / password flows — JIT provisioning
     // must be ON for the happy-path tests to mint a token.
@@ -110,16 +110,16 @@ async function setupSmtpFixture(): Promise<{
   // flows — it would mix customer email traffic on the platform domain).
   // Wire a jsonTransport config here so the verify-email / magic-link /
   // forgot-password branches stay reachable under test.
-  await upsertSmtpConfig(appId, {
+  await upsertSmtpConfig(applicationId, {
     host: "__test_json__",
     port: 587,
     username: "test",
     pass: "test",
-    fromAddress: `no-reply@${appId}.test`,
+    fromAddress: `no-reply@${applicationId}.test`,
     fromName: "Verify Email App",
   });
 
-  return { orgId: org!.id, defaultAppId: appId, clientId: client.clientId };
+  return { orgId: org!.id, defaultAppId: applicationId, clientId: client.clientId };
 }
 
 async function getCsrfFromGet(res: Response): Promise<{ csrfToken: string; cookie: string }> {

@@ -20,7 +20,7 @@ import { webhooks } from "../../../schema.ts";
 describe("Webhooks cascade deletion", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -28,7 +28,7 @@ describe("Webhooks cascade deletion", () => {
     userId = id;
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
   });
 
   it("deleting an application cascades to its webhooks", async () => {
@@ -43,13 +43,13 @@ describe("Webhooks cascade deletion", () => {
   });
 
   it("deleting a custom app does not affect webhooks in the default app", async () => {
-    const defaultWh = await seedWebhook({ orgId, applicationId: appId });
+    const defaultWh = await seedWebhook({ orgId, applicationId: applicationId });
 
     const customApp = await seedApplication({ orgId, name: "Expendable", createdBy: userId });
     await seedWebhook({ orgId, applicationId: customApp.id });
     await deleteApplication(orgId, customApp.id);
 
     await assertDbHas(webhooks, eq(webhooks.id, defaultWh.id));
-    expect(defaultWh.applicationId).toBe(appId);
+    expect(defaultWh.applicationId).toBe(applicationId);
   });
 });

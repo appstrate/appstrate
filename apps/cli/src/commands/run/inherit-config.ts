@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fetch the per-application run-config for `<appId, packageId>` and
+ * Fetch the per-application run-config for `<applicationId, packageId>` and
  * merge it with the user's CLI flags + env vars. Source of truth lives
- * server-side at `GET /api/applications/{appId}/packages/{scope}/{name}/run-config`
+ * server-side at `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
  * reproduces the UI run byte-for-byte.
  *
@@ -50,7 +50,7 @@ export interface InheritedRunConfig {
 export interface FetchRunConfigInput {
   instance: string;
   bearerToken: string;
-  appId: string;
+  applicationId: string;
   orgId?: string;
   scope: string;
   name: string;
@@ -65,7 +65,7 @@ export class RunConfigFetchError extends Error {
 }
 
 /**
- * Call `GET /api/applications/{appId}/packages/{scope}/{name}/run-config`
+ * Call `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
  * and return the parsed payload. Returns `null` on 404 (no inheritance);
  * any other non-2xx surfaces as `RunConfigFetchError`.
  */
@@ -74,16 +74,16 @@ export async function fetchRunConfigPayload(
 ): Promise<ResolvedRunConfigPayload | null> {
   const fetchFn = input.fetchImpl ?? fetch;
   const instance = normalizeInstance(input.instance);
-  // appId is `app_<uuid>` — safe characters, no encoding needed.
+  // applicationId is `app_<uuid>` — safe characters, no encoding needed.
   // scope is `@<slug>` — must NOT be percent-encoded (see bundle-fetch.ts:buildBundleUrl):
   // Hono's `:scope{@[^/]+}` route rejects `%40scope` as 404. Both scope
   // and name are validated upstream to a strict `[a-z0-9-]` charset.
-  const url = `${instance}/api/applications/${input.appId}/packages/${input.scope}/${input.name}/run-config`;
+  const url = `${instance}/api/applications/${input.applicationId}/packages/${input.scope}/${input.name}/run-config`;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${input.bearerToken}`,
     "User-Agent": CLI_USER_AGENT,
-    "X-App-Id": input.appId,
+    "X-Application-Id": input.applicationId,
   };
   if (input.orgId) headers["X-Org-Id"] = input.orgId;
 

@@ -91,7 +91,7 @@ function authHeaders(h: Harness, extra?: Record<string, string>): Record<string,
   return {
     Authorization: `Bearer ${h.apiKey}`,
     "X-Org-Id": h.ctx.orgId,
-    "X-App-Id": h.ctx.defaultAppId,
+    "X-Application-Id": h.ctx.defaultAppId,
     "Content-Type": "application/json",
     ...extra,
   };
@@ -257,7 +257,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       headers: {
         Cookie: h.ctx.cookie,
         "X-Org-Id": h.ctx.orgId,
-        "X-App-Id": h.ctx.defaultAppId,
+        "X-Application-Id": h.ctx.defaultAppId,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

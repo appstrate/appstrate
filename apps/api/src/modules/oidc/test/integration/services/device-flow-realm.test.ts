@@ -13,7 +13,7 @@
  * route, but the right place to refuse the attempt is at approve time.
  *
  * This test exercises the specific pathway the production flow follows:
- * one user signed up with `realm="end_user:<appId>"` tries to approve a
+ * one user signed up with `realm="end_user:<applicationId>"` tries to approve a
  * device code issued for the instance-level CLI client. Expected: 403
  * `access_denied`; the device code row stays `pending`.
  */
@@ -84,7 +84,7 @@ describe("device-flow realm enforcement on /device/approve", () => {
     await ensureCliClient();
   });
 
-  it("rejects approval by an end-user realm (realm=end_user:<appId>, client level=instance)", async () => {
+  it("rejects approval by an end-user realm (realm=end_user:<applicationId>, client level=instance)", async () => {
     const { cookie } = await signUpUserWithRealm("enduser@example.com", "end_user:app_some_id");
     const { userCode } = await requestDeviceCode();
 

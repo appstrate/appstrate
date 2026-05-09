@@ -85,7 +85,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request("/api/agents", {
       headers: {
         "X-Test-Strategy": "valid",
-        "X-App-Id": currentCtx!.defaultAppId,
+        "X-Application-Id": currentCtx!.defaultAppId,
       },
     });
     // 200 OK = strategy authenticated, org context resolved, route reached
@@ -96,7 +96,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request("/api/agents", {
       headers: {
         "X-Test-Strategy": "unknown",
-        "X-App-Id": currentCtx!.defaultAppId,
+        "X-Application-Id": currentCtx!.defaultAppId,
       },
     });
     // 401 = fell through strategies, hit cookie auth fallback, no session
@@ -105,7 +105,7 @@ describe("module auth strategy pipeline", () => {
 
   it("falls through to core auth when the header is absent", async () => {
     const res = await app.request("/api/agents", {
-      headers: { "X-App-Id": currentCtx!.defaultAppId },
+      headers: { "X-Application-Id": currentCtx!.defaultAppId },
     });
     expect(res.status).toBe(401);
   });
@@ -128,7 +128,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request(`/api/end-users/${euId}`, {
       headers: {
         "X-Test-Strategy": "admin",
-        "X-App-Id": currentCtx!.defaultAppId,
+        "X-Application-Id": currentCtx!.defaultAppId,
       },
     });
     expect(res.status).toBe(200);

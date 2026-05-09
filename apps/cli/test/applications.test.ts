@@ -131,7 +131,7 @@ describe("listApplications", () => {
     expect(apps[0]!.id).toBe("app_1");
     expect(fetchCalls[0]!.method ?? "GET").toBe("GET");
     // The pinned org is forwarded as X-Org-Id — listApplications is
-    // org-scoped even though it doesn't require X-App-Id.
+    // org-scoped even though it doesn't require X-Application-Id.
     expect(fetchCalls[0]!.headers["X-Org-Id"]).toBe("org_1");
   });
 

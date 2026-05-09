@@ -19,7 +19,7 @@ import {
 const BASE_INPUTS = {
   instance: "https://app.example.com",
   bearerToken: "ask_test_token",
-  appId: "app_test",
+  applicationId: "app_test",
   scope: "@scope",
   name: "agent",
   json: false,

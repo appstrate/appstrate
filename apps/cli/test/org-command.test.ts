@@ -145,13 +145,13 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedIn(orgId?: string, profile = "default", appId?: string): Promise<void> {
+async function seedLoggedIn(orgId?: string, profile = "default", applicationId?: string): Promise<void> {
   await setProfile(profile, {
     instance: "https://app.example.com",
     userId: "u_1",
     email: "alice@example.com",
     ...(orgId ? { orgId } : {}),
-    ...(appId ? { appId } : {}),
+    ...(applicationId ? { applicationId } : {}),
   });
   await saveTokens(profile, {
     accessToken: "tok-abc",
@@ -166,7 +166,7 @@ async function pinnedOrgId(profile = "default"): Promise<string | undefined> {
 }
 
 async function pinnedAppId(profile = "default"): Promise<string | undefined> {
-  return (await readConfig()).profiles[profile]?.appId;
+  return (await readConfig()).profiles[profile]?.applicationId;
 }
 
 const twoOrgs = {
@@ -429,7 +429,7 @@ describe("org create", () => {
 
 // ─── App cascade on org change (issue #217) ───────────────────────────
 //
-// An `appId` pinned to org A is invalid under org B — the server returns
+// An `applicationId` pinned to org A is invalid under org B — the server returns
 // 404 on the next app-scoped call. `org switch` and `org create` must
 // both (a) clear the stale app pin and (b) re-pin the new org's default
 // app so `appstrate api` keeps working without manual intervention.

@@ -171,7 +171,7 @@ applyAuthPipeline(app, {
   authStrategies: getModuleAuthStrategies,
 });
 
-// App context middleware: resolve X-App-Id for app-scoped routes.
+// App context middleware: resolve X-Application-Id for app-scoped routes.
 // Core prefixes listed statically; module-owned prefixes (e.g. webhooks)
 // are contributed by modules via `appScopedPaths` and merged lazily after
 // boot (modules are not yet loaded at top-level eval time).

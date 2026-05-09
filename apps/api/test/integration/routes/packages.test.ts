@@ -282,7 +282,7 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/skills/@pkgorg/hidden-skill", {
-        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
       });
 
       expect(res.status).toBe(404);
@@ -314,7 +314,7 @@ describe("Packages API", () => {
       );
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
-        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
       });
 
       expect(res.status).toBe(200);

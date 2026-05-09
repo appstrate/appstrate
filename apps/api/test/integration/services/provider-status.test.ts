@@ -11,7 +11,7 @@ import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/
 describe("resolveProviderStatuses", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
   let profileId: string;
 
   beforeEach(async () => {
@@ -20,7 +20,7 @@ describe("resolveProviderStatuses", () => {
     userId = id;
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
 
     const profile = await seedConnectionProfile({ userId, name: "Alice Profile" });
     profileId = profile.id;
@@ -41,7 +41,7 @@ describe("resolveProviderStatuses", () => {
       },
     });
     await db.insert(applicationProviderCredentials).values({
-      applicationId: appId,
+      applicationId: applicationId,
       providerId: id,
       credentialsEncrypted: "{}",
       enabled: true,
@@ -51,7 +51,7 @@ describe("resolveProviderStatuses", () => {
   it("returns source and profileName for user_profile entry", async () => {
     const providerId = "@system/test-status";
     await seedProvider(providerId);
-    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, applicationId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
@@ -59,7 +59,7 @@ describe("resolveProviderStatuses", () => {
     };
 
     const statuses = await resolveProviderStatuses(
-      { orgId: orgId, applicationId: appId },
+      { orgId: orgId, applicationId: applicationId },
       providers,
       profiles,
     );
@@ -74,7 +74,7 @@ describe("resolveProviderStatuses", () => {
   it("returns source org_binding with correct profile info", async () => {
     const providerId = "@system/test-org-bind";
     await seedProvider(providerId);
-    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, applicationId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
@@ -82,7 +82,7 @@ describe("resolveProviderStatuses", () => {
     };
 
     const statuses = await resolveProviderStatuses(
-      { orgId: orgId, applicationId: appId },
+      { orgId: orgId, applicationId: applicationId },
       providers,
       profiles,
     );
@@ -105,7 +105,7 @@ describe("resolveProviderStatuses", () => {
     };
 
     const statuses = await resolveProviderStatuses(
-      { orgId: orgId, applicationId: appId },
+      { orgId: orgId, applicationId: applicationId },
       providers,
       profiles,
     );
@@ -122,7 +122,7 @@ describe("resolveProviderStatuses", () => {
     const profiles: ProviderProfileMap = {};
 
     const statuses = await resolveProviderStatuses(
-      { orgId: orgId, applicationId: appId },
+      { orgId: orgId, applicationId: applicationId },
       providers,
       profiles,
     );

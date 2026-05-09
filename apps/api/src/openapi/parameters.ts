@@ -52,11 +52,11 @@ export const parameters = {
     schema: { type: "string", maxLength: 255 },
   },
   SseAppId: {
-    name: "appId",
+    name: "applicationId",
     in: "query" as const,
     required: false,
     description:
-      "Application ID. Required for cookie auth (SSE cannot send X-App-Id header). Not needed for API key auth (app resolved from key).",
+      "Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key).",
     schema: { type: "string" },
   },
   SseToken: {
@@ -68,7 +68,7 @@ export const parameters = {
     schema: { type: "string" },
   },
   XAppId: {
-    name: "X-App-Id",
+    name: "X-Application-Id",
     in: "header" as const,
     description:
       "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",

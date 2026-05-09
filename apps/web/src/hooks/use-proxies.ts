@@ -86,14 +86,14 @@ export function useTestProxy() {
 
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-proxy", orgId, appId, packageId],
+    queryKey: ["agent-proxy", orgId, applicationId, packageId],
     queryFn: () =>
       api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
         `/agents/${packageId}/proxy`,
       ),
-    enabled: !!orgId && !!appId && !!packageId,
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
 

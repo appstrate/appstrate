@@ -448,8 +448,8 @@ describe("instance token strategy", () => {
       },
     });
     // Should work since the user is a member of the org
-    // (may need X-App-Id too depending on route, but the auth + org resolution should pass)
-    expect([200, 400]).toContain(res.status); // 400 if missing X-App-Id, but NOT 401/403
+    // (may need X-Application-Id too depending on route, but the auth + org resolution should pass)
+    expect([200, 400]).toContain(res.status); // 400 if missing X-Application-Id, but NOT 401/403
   });
 
   it("rejects instance token when user does not exist", async () => {

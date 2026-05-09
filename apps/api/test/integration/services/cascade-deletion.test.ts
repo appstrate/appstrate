@@ -37,7 +37,7 @@ import type { Actor } from "../../../src/lib/actor.ts";
 describe("Cascade Deletion", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
   let actor: Actor;
 
   beforeEach(async () => {
@@ -46,13 +46,13 @@ describe("Cascade Deletion", () => {
     userId = id;
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
     actor = { type: "user", id: userId };
   });
 
   describe("when source profile (user profile) is deleted", () => {
     it("removes app profile bindings referencing it via FK CASCADE", async () => {
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Org Profile" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Org Profile" });
       const userProfile = await seedConnectionProfile({ userId, name: "User Source" });
 
       await bindAppProfileProvider(appProfile.id, "@test/gmail", userProfile.id, userId);
@@ -101,13 +101,13 @@ describe("Cascade Deletion", () => {
 
   describe("when app profile is deleted", () => {
     it("nullifies application_packages.appProfileId via FK SET NULL", async () => {
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Org Profile" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Org Profile" });
 
       const agent = await seedAgent({ id: "@testorg/org-agent", orgId, createdBy: userId });
-      await installPackage({ orgId: orgId, applicationId: appId }, agent.id);
+      await installPackage({ orgId: orgId, applicationId: applicationId }, agent.id);
 
       // Set app profile on the agent config
-      await updateInstalledPackage({ orgId, applicationId: appId }, agent.id, {
+      await updateInstalledPackage({ orgId, applicationId: applicationId }, agent.id, {
         appProfileId: appProfile.id,
       });
 
@@ -115,7 +115,7 @@ describe("Cascade Deletion", () => {
       const configBefore = await getDbRow(
         applicationPackages,
         and(
-          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.applicationId, applicationId),
           eq(applicationPackages.packageId, agent.id),
         )!,
       );
@@ -128,7 +128,7 @@ describe("Cascade Deletion", () => {
       const configAfter = await getDbRow(
         applicationPackages,
         and(
-          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.applicationId, applicationId),
           eq(applicationPackages.packageId, agent.id),
         )!,
       );
@@ -136,7 +136,7 @@ describe("Cascade Deletion", () => {
     });
 
     it("removes all app_profile_provider_bindings for the app profile", async () => {
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Org Profile" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Org Profile" });
       const userProfile = await seedConnectionProfile({ userId, name: "Source" });
 
       await bindAppProfileProvider(appProfile.id, "@test/gmail", userProfile.id, userId);
@@ -160,8 +160,8 @@ describe("Cascade Deletion", () => {
     });
 
     it("does not affect other app profiles or their bindings", async () => {
-      const appProfile1 = await seedConnectionProfile({ applicationId: appId, name: "Profile 1" });
-      const appProfile2 = await seedConnectionProfile({ applicationId: appId, name: "Profile 2" });
+      const appProfile1 = await seedConnectionProfile({ applicationId: applicationId, name: "Profile 1" });
+      const appProfile2 = await seedConnectionProfile({ applicationId: applicationId, name: "Profile 2" });
       const userProfile = await seedConnectionProfile({ userId, name: "Source" });
 
       await bindAppProfileProvider(appProfile1.id, "@test/gmail", userProfile.id, userId);
@@ -180,19 +180,19 @@ describe("Cascade Deletion", () => {
 
     it("nullifies appProfileId on multiple agents that referenced the deleted profile", async () => {
       const appProfile = await seedConnectionProfile({
-        applicationId: appId,
+        applicationId: applicationId,
         name: "Shared Org Profile",
       });
 
       const agent1 = await seedAgent({ id: "@testorg/agent-a", orgId, createdBy: userId });
       const agent2 = await seedAgent({ id: "@testorg/agent-b", orgId, createdBy: userId });
-      await installPackage({ orgId: orgId, applicationId: appId }, agent1.id);
-      await installPackage({ orgId: orgId, applicationId: appId }, agent2.id);
+      await installPackage({ orgId: orgId, applicationId: applicationId }, agent1.id);
+      await installPackage({ orgId: orgId, applicationId: applicationId }, agent2.id);
 
-      await updateInstalledPackage({ orgId, applicationId: appId }, agent1.id, {
+      await updateInstalledPackage({ orgId, applicationId: applicationId }, agent1.id, {
         appProfileId: appProfile.id,
       });
-      await updateInstalledPackage({ orgId, applicationId: appId }, agent2.id, {
+      await updateInstalledPackage({ orgId, applicationId: applicationId }, agent2.id, {
         appProfileId: appProfile.id,
       });
 
@@ -203,14 +203,14 @@ describe("Cascade Deletion", () => {
       const config1 = await getDbRow(
         applicationPackages,
         and(
-          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.applicationId, applicationId),
           eq(applicationPackages.packageId, agent1.id),
         )!,
       );
       const config2 = await getDbRow(
         applicationPackages,
         and(
-          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.applicationId, applicationId),
           eq(applicationPackages.packageId, agent2.id),
         )!,
       );
@@ -266,7 +266,7 @@ describe("Cascade Deletion", () => {
     it("does not affect the default application or its resources", async () => {
       const defaultKey = await seedApiKey({
         orgId,
-        applicationId: appId,
+        applicationId: applicationId,
         createdBy: userId,
       });
 
@@ -276,12 +276,12 @@ describe("Cascade Deletion", () => {
       await deleteApplication(orgId, customApp.id);
 
       // Default app and its api key should still exist
-      await assertDbHas(applications, eq(applications.id, appId));
+      await assertDbHas(applications, eq(applications.id, applicationId));
       await assertDbHas(apiKeys, eq(apiKeys.id, defaultKey.id));
     });
 
     it("rejects deletion of the default application", async () => {
-      await expect(deleteApplication(orgId, appId)).rejects.toThrow();
+      await expect(deleteApplication(orgId, applicationId)).rejects.toThrow();
     });
   });
 
@@ -298,7 +298,7 @@ describe("Cascade Deletion", () => {
         userId: member.id,
         name: "Member Prof",
       });
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Org Prof" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Org Prof" });
 
       await bindAppProfileProvider(appProfile.id, "@test/gmail", memberProfile.id, member.id);
 

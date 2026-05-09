@@ -162,7 +162,7 @@ const oidcModule: AppstrateModule = {
 
   // OIDC admin routes are org-scoped (dashboard clients) — end_user clients
   // are created with a `referencedApplicationId` passed explicitly in the
-  // request body. No `X-App-Id` header is required.
+  // request body. No `X-Application-Id` header is required.
   publicPaths: [
     "/api/oauth/login",
     "/api/oauth/register",

@@ -33,11 +33,11 @@ const NONE_VALUE = "__none__";
  */
 export function MyApplicationProfileSection() {
   const { t } = useTranslation(["settings"]);
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const { data: applications } = useApplications();
   const currentApp = useMemo(
-    () => applications?.find((a) => a.id === appId),
-    [applications, appId],
+    () => applications?.find((a) => a.id === applicationId),
+    [applications, applicationId],
   );
 
   const { data: userProfiles } = useConnectionProfiles();
@@ -45,7 +45,7 @@ export function MyApplicationProfileSection() {
   const { data: sticky } = useMyApplicationProfile();
   const setSticky = useSetMyApplicationProfile();
 
-  if (!appId || !currentApp) return null;
+  if (!applicationId || !currentApp) return null;
 
   const stickyId = sticky?.profileId ?? null;
 

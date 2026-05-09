@@ -288,7 +288,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //     instance (with deps inlined) into memory only. The bytes are
   //     verified against the server's integrity header and discarded
   //     when the run finishes — no on-disk cache. Requires a remote
-  //     provider mode so we already have the bearer token + appId in
+  //     provider mode so we already have the bearer token + applicationId in
   //     `resolverInputs`. The inherited `versionPin` is applied as the
   //     spec when the user did not type `@spec` themselves.
   const bundleTarget =
@@ -318,7 +318,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     await preflightCheck({
       instance: resolverInputs.instance,
       bearerToken: resolverInputs.bearerToken,
-      appId: resolverInputs.appId,
+      applicationId: resolverInputs.applicationId,
       orgId: resolverInputs.orgId,
       scope: target.scope,
       name: target.name,
@@ -731,7 +731,7 @@ async function runCommandRemote(
     {
       instance: resolverInputs.instance,
       bearerToken: resolverInputs.bearerToken,
-      appId: resolverInputs.appId,
+      applicationId: resolverInputs.applicationId,
       orgId: resolverInputs.orgId,
       scope: target.scope,
       name: target.name,
@@ -919,7 +919,7 @@ async function buildResolverInputs(
   //   2. Interactive: a device-flow JWT from `appstrate login`, pulled
   //      from the keyring via `resolveAuthContext` (silent refresh
   //      against `/api/auth/cli/token` included). The profile also
-  //      supplies `instance` + `appId`.
+  //      supplies `instance` + `applicationId`.
   //
   // Mixing the two is rejected — an explicit env-var API key overrides
   // the profile credential entirely so there's no ambiguity about which
@@ -936,15 +936,15 @@ async function buildHeadlessRemoteInputs(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
   let instance = process.env.APPSTRATE_INSTANCE;
-  let appId = process.env.APPSTRATE_APP_ID;
+  let applicationId = process.env.APPSTRATE_APP_ID;
   let orgId = process.env.APPSTRATE_ORG_ID;
 
-  if (!instance || !appId || !orgId) {
+  if (!instance || !applicationId || !orgId) {
     const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
     const profile = resolved?.profile;
     if (profile) {
       instance ??= profile.instance;
-      appId ??= profile.appId;
+      applicationId ??= profile.applicationId;
       orgId ??= profile.orgId;
     }
   }
@@ -955,14 +955,14 @@ async function buildHeadlessRemoteInputs(
       "Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile",
     );
   }
-  if (!appId) {
+  if (!applicationId) {
     throw new ResolverConfigError(
       "No application id pinned",
       "Set APPSTRATE_APP_ID, or run `appstrate app switch` from a logged-in profile",
     );
   }
 
-  return { instance, bearerToken: apiKey, appId, orgId };
+  return { instance, bearerToken: apiKey, applicationId, orgId };
 }
 
 async function buildInteractiveRemoteInputs(
@@ -976,7 +976,7 @@ async function buildInteractiveRemoteInputs(
       "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
     );
   }
-  if (!profile.appId) {
+  if (!profile.applicationId) {
     throw new ResolverConfigError(
       `Profile "${resolved.profileName}" has no application pinned`,
       "Run `appstrate app switch` to select one",
@@ -992,7 +992,7 @@ async function buildInteractiveRemoteInputs(
     return {
       instance: ctx.instance,
       bearerToken: ctx.accessToken,
-      appId: profile.appId,
+      applicationId: profile.applicationId,
       orgId: profile.orgId,
     };
   } catch (err) {
@@ -1046,7 +1046,7 @@ async function resolveReportSession(
       ? ({
           instance: resolverInputs.instance,
           bearerToken: resolverInputs.bearerToken,
-          appId: resolverInputs.appId,
+          applicationId: resolverInputs.applicationId,
           orgId: resolverInputs.orgId ?? null,
         } satisfies ReportContext)
       : null;
@@ -1199,7 +1199,7 @@ async function maybeFetchRunConfig(
   const payload = await fetchRunConfigPayload({
     instance: remoteInputs.instance,
     bearerToken: remoteInputs.bearerToken,
-    appId: remoteInputs.appId,
+    applicationId: remoteInputs.applicationId,
     orgId: remoteInputs.orgId,
     scope: idTarget.scope,
     name: idTarget.name,
@@ -1248,7 +1248,7 @@ async function resolveBundleSource(
     return { kind: "path", path: abs, label: path.basename(abs) };
   }
 
-  // id mode — needs remote provider context so we have a bearer + appId
+  // id mode — needs remote provider context so we have a bearer + applicationId
   // to authenticate the bundle download against the pinned instance.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new PackageSpecError(
@@ -1260,7 +1260,7 @@ async function resolveBundleSource(
   const fetched = await fetchBundleForRun({
     instance: resolverInputs.instance,
     bearerToken: resolverInputs.bearerToken,
-    appId: resolverInputs.appId,
+    applicationId: resolverInputs.applicationId,
     orgId: resolverInputs.orgId,
     packageId: target.packageId,
     spec: target.spec,

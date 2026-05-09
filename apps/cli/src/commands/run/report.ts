@@ -47,7 +47,7 @@ export interface ReportContext {
    */
   instance: string;
   bearerToken: string;
-  appId: string;
+  applicationId: string;
   orgId: string | null;
 }
 
@@ -149,15 +149,15 @@ export async function startReportSession(
     "Content-Type": "application/json",
     Authorization: `Bearer ${ctx.bearerToken}`,
     // `/api/runs/*` is app-scoped; dashboard-user JWTs don't pin an app,
-    // so the middleware requires `X-App-Id` explicitly. Missing this
+    // so the middleware requires `X-Application-Id` explicitly. Missing this
     // rejects every remote run with `application_context_required`.
-    "X-App-Id": ctx.appId,
+    "X-Application-Id": ctx.applicationId,
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 
   const sink = opts.ttlSeconds ? { sink: { ttlSeconds: opts.ttlSeconds } } : {};
   const baseBody = {
-    applicationId: ctx.appId,
+    applicationId: ctx.applicationId,
     input: {},
     contextSnapshot: truncateSnapshot(contextSnapshot),
     ...sink,

@@ -601,7 +601,7 @@ export interface InstalledPackage {
 
 /**
  * Per-application resolved run-config returned by
- * `GET /api/applications/{appId}/packages/{scope}/{name}/run-config`.
+ * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-app agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.

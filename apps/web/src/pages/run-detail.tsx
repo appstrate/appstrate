@@ -40,7 +40,7 @@ export function RunDetailPage() {
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -105,20 +105,20 @@ export function RunDetailPage() {
 
   // Per-run SSE for log inserts only. Status patches come from
   // `useGlobalRunSync` (mounted in MainLayout), which writes directly into
-  // the same `["run", orgId, appId, runId]` cache key. Terminal-status
+  // the same `["run", orgId, applicationId, runId]` cache key. Terminal-status
   // refetch is also already triggered globally via
   // `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
       (newLog: Record<string, unknown>) => {
         const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, appId, runId], (prev) => {
+        qc.setQueryData<RunLog[]>(["run-logs", orgId, applicationId, runId], (prev) => {
           if (!prev) return [log];
           if (prev.some((l) => l.id === log.id)) return prev;
           return [...prev, log];
         });
       },
-      [qc, orgId, appId, runId],
+      [qc, orgId, applicationId, runId],
     ),
   });
 

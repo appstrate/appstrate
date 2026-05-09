@@ -447,7 +447,7 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
  * internal adapter path — it does NOT flow through `@better-auth/oauth-provider`,
  * so `customAccessTokenClaims` (where `assertUserRealm` normally fires
  * for `/oauth2/token`) never runs for device-flow approvals. Without this
- * hook, an end-user of application X (realm=`"end_user:<appId>"`) could
+ * hook, an end-user of application X (realm=`"end_user:<applicationId>"`) could
  * approve an `appstrate-cli` (level=`"instance"`) device code and obtain
  * a session attached to their identity. The session would be blocked by
  * `requirePlatformRealm` on every subsequent platform request — but the

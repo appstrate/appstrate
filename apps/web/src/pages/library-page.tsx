@@ -91,10 +91,10 @@ function LibraryMatrix({
     return <EmptyState message={t("library.empty")} icon={Package} />;
   }
 
-  const handleToggle = (pkg: LibraryPackageItem, appId: string, installed: boolean) => {
+  const handleToggle = (pkg: LibraryPackageItem, applicationId: string, installed: boolean) => {
     if (pkg.source === "system") return;
     toggle.mutate(
-      { appId, packageId: pkg.id, installed },
+      { applicationId, packageId: pkg.id, installed },
       {
         onError: (err) => {
           toast.error(err instanceof Error ? err.message : t("error.generic"));

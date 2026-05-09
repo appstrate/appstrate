@@ -140,8 +140,8 @@ export interface RunRemoteOptions {
   instance: string;
   /** Bearer token (`ask_…` or OIDC JWT). */
   bearerToken: string;
-  /** Application id (`X-App-Id`). */
-  appId: string;
+  /** Application id (`X-Application-Id`). */
+  applicationId: string;
   /** Organization id (`X-Org-Id`). Required for cookie/JWT auth contexts. */
   orgId?: string | undefined;
 
@@ -415,7 +415,7 @@ interface HttpDeps {
 function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> = {}): Headers {
   const h = new Headers({
     Authorization: `Bearer ${opts.bearerToken}`,
-    "X-App-Id": opts.appId,
+    "X-Application-Id": opts.applicationId,
     Accept: "application/json",
     ...extra,
   });

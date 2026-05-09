@@ -45,7 +45,7 @@ interface Principal {
   userId: string;
   cookie: string;
   orgId: string;
-  appId: string;
+  applicationId: string;
   accessToken: string;
 }
 
@@ -111,7 +111,7 @@ async function createJwtPrincipal(): Promise<Principal> {
     userId: testUser.id,
     cookie: testUser.cookie,
     orgId: org.id,
-    appId: defaultAppId,
+    applicationId: defaultAppId,
     accessToken: tokens.access_token,
   };
 }
@@ -136,7 +136,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${p.accessToken}`,
-        "X-App-Id": p.appId,
+        "X-Application-Id": p.applicationId,
         "X-Org-Id": p.orgId,
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
@@ -158,7 +158,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Cookie: p.cookie,
-        "X-App-Id": p.appId,
+        "X-Application-Id": p.applicationId,
         "X-Org-Id": p.orgId,
         "X-Provider": "@test/example",
         "X-Target": "https://example.test/echo",
@@ -181,7 +181,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: "Bearer not-a-real-token",
-        "X-App-Id": "app_x",
+        "X-Application-Id": "app_x",
         "X-Provider": "@test/example",
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
@@ -205,7 +205,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${p.accessToken}`,
-        "X-App-Id": p.appId,
+        "X-Application-Id": p.applicationId,
         "X-Org-Id": p.orgId,
         "X-Provider": "@missing/provider",
         "X-Target": "https://example.test/echo",

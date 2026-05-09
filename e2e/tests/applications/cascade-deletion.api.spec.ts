@@ -31,7 +31,7 @@ test.describe("Application cascade deletion", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
     const wh = await createWebhook(customClient, {
       level: "application",
@@ -95,7 +95,7 @@ test.describe("Application cascade deletion", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     const profile = await createConnectionProfile(

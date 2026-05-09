@@ -12,7 +12,7 @@
  * The realm model itself is documented on `user.realm` in the auth schema
  * and inside `assertUserRealm` below. The short version: a single BA
  * `user` table stores both platform operators (realm=`"platform"`) and
- * end-users of `level=application` OIDC clients (realm=`"end_user:<appId>"`).
+ * end-users of `level=application` OIDC clients (realm=`"end_user:<applicationId>"`).
  * Without these checks, a session minted for one audience could mint a
  * token for another.
  */

@@ -30,7 +30,7 @@ describe("Application Provider Credentials", () => {
     });
   });
 
-  describe("PUT /api/applications/:appId/providers/:scope/:name/credentials", () => {
+  describe("PUT /api/applications/:applicationId/providers/:scope/:name/credentials", () => {
     it("sets app-level credentials", async () => {
       const res = await app.request(
         `/api/applications/${ctx.defaultAppId}/providers/@testorg/test-provider/credentials`,
@@ -85,7 +85,7 @@ describe("Application Provider Credentials", () => {
     });
   });
 
-  describe("DELETE /api/applications/:appId/providers/:scope/:name/credentials", () => {
+  describe("DELETE /api/applications/:applicationId/providers/:scope/:name/credentials", () => {
     it("removes app-level override", async () => {
       // First set an override
       await app.request(
@@ -130,7 +130,7 @@ describe("Application Provider Credentials", () => {
     });
   });
 
-  describe("GET /api/applications/:appId/providers", () => {
+  describe("GET /api/applications/:applicationId/providers", () => {
     it("returns empty list when no overrides exist", async () => {
       const res = await app.request(`/api/applications/${ctx.defaultAppId}/providers`, {
         headers: orgOnlyHeaders(ctx),

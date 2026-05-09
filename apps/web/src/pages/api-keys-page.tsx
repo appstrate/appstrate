@@ -29,7 +29,7 @@ function isExpired(expiresAt: string | null): boolean {
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
@@ -37,7 +37,8 @@ export function ApiKeysPage() {
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   if (!isAdmin) return null;
-  if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
+  if (!applicationId)
+    return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;

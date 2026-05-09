@@ -7,7 +7,7 @@ import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateRunAndNotificationQueries } from "./use-notifications";
 import { type Run, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
 
-function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: string) {
+function handleSSEMessage(qc: QueryClient, orgId: string, applicationId: string, raw: string) {
   try {
     const newRow = JSON.parse(raw) as Record<string, unknown>;
     const packageId = newRow.packageId as string;
@@ -15,12 +15,12 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
     const status = newRow.status as string;
     const scheduleId = newRow.scheduleId as string | null;
 
-    qc.setQueryData<Run>(["run", orgId, appId, runId], (prev) => {
+    qc.setQueryData<Run>(["run", orgId, applicationId, runId], (prev) => {
       if (!prev) return prev;
       return { ...prev, ...newRow } as Run;
     });
 
-    qc.setQueryData<Run[]>(["runs", orgId, appId, packageId], (prev) => {
+    qc.setQueryData<Run[]>(["runs", orgId, applicationId, packageId], (prev) => {
       if (!prev) return prev;
       const exists = prev.some((ex) => ex.id === runId);
       if (exists) {
@@ -35,9 +35,9 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
 
     // Invalidate schedule-specific caches
     if (scheduleId) {
-      qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, appId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedule", orgId, appId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedules", orgId, appId] });
+      qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, applicationId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedule", orgId, applicationId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedules", orgId, applicationId] });
     }
 
     if (TERMINAL_RUN_STATUSES.has(status as RunStatus)) {
@@ -57,19 +57,19 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
 export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
   useEffect(() => {
-    if (!orgId || !appId) return;
+    if (!orgId || !applicationId) return;
 
     const controller = new AbortController();
 
     (async () => {
       try {
         const res = await fetch(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true`,
           {
             credentials: "include",
             signal: controller.signal,
@@ -97,7 +97,7 @@ export function useGlobalRunSync() {
               else if (line.startsWith("data:")) data = line.slice(5).trim();
             }
             if (event === "run_update" && data) {
-              handleSSEMessage(qcRef.current, orgId, appId, data);
+              handleSSEMessage(qcRef.current, orgId, applicationId, data);
             }
           }
         }
@@ -107,5 +107,5 @@ export function useGlobalRunSync() {
     })();
 
     return () => controller.abort();
-  }, [orgId, appId]);
+  }, [orgId, applicationId]);
 }

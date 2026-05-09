@@ -50,21 +50,21 @@ async function getOrNull<T>(path: string): Promise<T | null> {
 
 export function useSmtpConfig() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["smtp-config", orgId, appId],
-    queryFn: () => getOrNull<SmtpConfigView>(`/applications/${appId}/smtp-config`),
-    enabled: !!orgId && !!appId,
+    queryKey: ["smtp-config", orgId, applicationId],
+    queryFn: () => getOrNull<SmtpConfigView>(`/applications/${applicationId}/smtp-config`),
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 export function useUpsertSmtpConfig() {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (data: UpsertSmtpInput) => {
       const parsed = upsertSmtpSchema.parse(data);
-      return api<SmtpConfigView>(`/applications/${appId}/smtp-config`, {
+      return api<SmtpConfigView>(`/applications/${applicationId}/smtp-config`, {
         method: "PUT",
         body: JSON.stringify(parsed),
       });
@@ -77,9 +77,9 @@ export function useUpsertSmtpConfig() {
 
 export function useDeleteSmtpConfig() {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: () => api(`/applications/${appId}/smtp-config`, { method: "DELETE" }),
+    mutationFn: () => api(`/applications/${applicationId}/smtp-config`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["smtp-config"] });
     },
@@ -87,13 +87,13 @@ export function useDeleteSmtpConfig() {
 }
 
 export function useTestSmtp() {
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const toSchema = z.email("Invalid email address");
   return useMutation({
     mutationFn: (to: string) => {
       const parsed = toSchema.parse(to);
       return api<{ ok: boolean; messageId?: string; error?: string }>(
-        `/applications/${appId}/smtp-config/test`,
+        `/applications/${applicationId}/smtp-config/test`,
         { method: "POST", body: JSON.stringify({ to: parsed }) },
       );
     },
@@ -102,25 +102,28 @@ export function useTestSmtp() {
 
 export function useSocialProvider(provider: SocialProviderId) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["social-provider", orgId, appId, provider],
+    queryKey: ["social-provider", orgId, applicationId, provider],
     queryFn: () =>
-      getOrNull<SocialProviderView>(`/applications/${appId}/social-providers/${provider}`),
-    enabled: !!orgId && !!appId,
+      getOrNull<SocialProviderView>(`/applications/${applicationId}/social-providers/${provider}`),
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 export function useUpsertSocialProvider(provider: SocialProviderId) {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (data: UpsertSocialInput) => {
       const parsed = upsertSocialSchema.parse(data);
-      return api<SocialProviderView>(`/applications/${appId}/social-providers/${provider}`, {
-        method: "PUT",
-        body: JSON.stringify(parsed),
-      });
+      return api<SocialProviderView>(
+        `/applications/${applicationId}/social-providers/${provider}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(parsed),
+        },
+      );
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["social-provider"] });
@@ -130,10 +133,10 @@ export function useUpsertSocialProvider(provider: SocialProviderId) {
 
 export function useDeleteSocialProvider(provider: SocialProviderId) {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: () =>
-      api(`/applications/${appId}/social-providers/${provider}`, { method: "DELETE" }),
+      api(`/applications/${applicationId}/social-providers/${provider}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["social-provider"] });
     },

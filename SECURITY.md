@@ -462,7 +462,7 @@ await markOrphanRunsFailed();
 
 **Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state.ts`, all route handlers
 
-Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-App-Id`) validates the application belongs to the org.
+Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-Application-Id`) validates the application belongs to the org.
 
 | Table                              | Scoping          | SELECT         | INSERT                | UPDATE                | DELETE                |
 | ---------------------------------- | ---------------- | -------------- | --------------------- | --------------------- | --------------------- |
@@ -476,17 +476,17 @@ Data access uses a **two-tier isolation model**: all resources are scoped by `or
 | `application_provider_credentials` | App              | App members    | App admins            | App admins            | App admins            |
 | `user_provider_connections`        | Org + Credential | Own user + org | Own user + org member | Own user + org member | Own user + org member |
 
-App-context middleware resolves the application from the `X-App-Id` header (session auth) or from the API key's `applicationId`:
+App-context middleware resolves the application from the `X-Application-Id` header (session auth) or from the API key's `applicationId`:
 
 ```typescript
 // app-context.ts — verify application belongs to org
 const app = await db
   .select({ id: applications.id, isDefault: applications.isDefault })
   .from(applications)
-  .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+  .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
   .limit(1);
 if (!app) throw notFound("Application not found in this organization");
-c.set("applicationId", appId);
+c.set("applicationId", applicationId);
 
 // Every app-scoped query filters by both orgId and applicationId
 const rows = await db

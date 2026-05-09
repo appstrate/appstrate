@@ -44,7 +44,7 @@ import oidcModule from "../../../index.ts";
 const app = getTestApp({ modules: [oidcModule] });
 
 async function setupAppClient(opts: { smtp: boolean }): Promise<{
-  appId: string;
+  applicationId: string;
   clientId: string;
 }> {
   const ownerId = `user-${crypto.randomUUID()}`;
@@ -64,9 +64,9 @@ async function setupAppClient(opts: { smtp: boolean }): Promise<{
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const appId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(applications).values({
-    id: appId,
+    id: applicationId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -77,24 +77,24 @@ async function setupAppClient(opts: { smtp: boolean }): Promise<{
     level: "application",
     name: "E2E Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: appId,
+    referencedApplicationId: applicationId,
     // Signup tests exercise the happy path — opt in explicitly since
     // `allowSignup` is secure-by-default `false` on every level.
     allowSignup: true,
   });
 
   if (opts.smtp) {
-    await upsertSmtpConfig(appId, {
+    await upsertSmtpConfig(applicationId, {
       host: "__test_json__",
       port: 587,
       username: "u",
       pass: "p",
-      fromAddress: `no-reply@${appId}.test`,
+      fromAddress: `no-reply@${applicationId}.test`,
       fromName: "Tenant",
     });
   }
 
-  return { appId, clientId: client.clientId };
+  return { applicationId, clientId: client.clientId };
 }
 
 async function getCsrf(res: Response): Promise<{ csrfToken: string; cookie: string }> {

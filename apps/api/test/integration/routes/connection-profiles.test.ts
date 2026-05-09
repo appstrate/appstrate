@@ -148,14 +148,14 @@ describe("Connection Profiles API", () => {
 
   // ─── App Profile Routes ──────────────────────────────────
 
-  describe("app-profile routes require X-App-Id", () => {
-    it("returns 400 when X-App-Id is missing on app-profile routes", async () => {
+  describe("app-profile routes require X-Application-Id", () => {
+    it("returns 400 when X-Application-Id is missing on app-profile routes", async () => {
       const res = await app.request("/api/app-profiles", {
         headers: orgOnlyHeaders(ctx),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.param).toBe("X-App-Id");
+      expect(body.param).toBe("X-Application-Id");
     });
   });
 

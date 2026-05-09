@@ -9,7 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
  * and provider status. Over-invalidation is negligible because
  * React Query's staleTime prevents unnecessary refetches.
  *
- * Connection queries are scoped by the current application via X-App-Id header
+ * Connection queries are scoped by the current application via X-Application-Id header
  * (sent automatically by api.ts). Cache keys don't include applicationId because
  * switching apps triggers a full query removal via useCurrentApplication.
  */

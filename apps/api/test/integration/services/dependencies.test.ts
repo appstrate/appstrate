@@ -23,7 +23,7 @@ describe("manifest-based dependency resolution", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
-  let appId: string;
+  let applicationId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -32,7 +32,7 @@ describe("manifest-based dependency resolution", () => {
     const { org, defaultAppId } = await createTestOrg(userId, { slug: "deporg" });
     orgId = org.id;
     orgSlug = org.slug;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
   });
 
   // ── buildDependencies ─────────────────────────────────────
@@ -311,8 +311,8 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      await installPackage({ orgId: orgId, applicationId: appId }, `@${orgSlug}/counted-tool`);
-      const items = await listOrgItems(orgId, TOOL_CONFIG, appId);
+      await installPackage({ orgId: orgId, applicationId: applicationId }, `@${orgSlug}/counted-tool`);
+      const items = await listOrgItems(orgId, TOOL_CONFIG, applicationId);
       const tool = items.find((i) => i.id === `@${orgSlug}/counted-tool`);
 
       expect(tool).toBeDefined();
@@ -332,8 +332,8 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      await installPackage({ orgId: orgId, applicationId: appId }, `@${orgSlug}/unused-skill`);
-      const items = await listOrgItems(orgId, SKILL_CONFIG, appId);
+      await installPackage({ orgId: orgId, applicationId: applicationId }, `@${orgSlug}/unused-skill`);
+      const items = await listOrgItems(orgId, SKILL_CONFIG, applicationId);
       const skill = items.find((i) => i.id === `@${orgSlug}/unused-skill`);
 
       expect(skill).toBeDefined();

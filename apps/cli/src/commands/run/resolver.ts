@@ -43,7 +43,7 @@ export interface RemoteResolverInputs {
    * Bearer …` header and lets the platform decide.
    */
   bearerToken: string;
-  appId: string;
+  applicationId: string;
   /**
    * Org id pinned on the profile (interactive) or passed via
    * `APPSTRATE_ORG_ID` (headless). Required for JWT auth on routes that
@@ -114,16 +114,16 @@ export function buildResolver(
           "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
         );
       }
-      if (!remote.instance || !remote.bearerToken || !remote.appId) {
+      if (!remote.instance || !remote.bearerToken || !remote.applicationId) {
         throw new ResolverConfigError(
-          "--providers=remote requires instance + bearerToken + appId",
-          "Ensure your profile has an appId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
+          "--providers=remote requires instance + bearerToken + applicationId",
+          "Ensure your profile has an applicationId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
         );
       }
       return new RemoteAppstrateProviderResolver({
         instance: remote.instance,
         apiKey: remote.bearerToken,
-        appId: remote.appId,
+        applicationId: remote.applicationId,
         ...(remote.orgId ? { orgId: remote.orgId } : {}),
         endUserId: remote.endUserId,
         extraHeaders: remote.extraHeaders,

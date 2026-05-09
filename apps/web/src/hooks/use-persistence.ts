@@ -43,16 +43,16 @@ function usePersistenceQuery<T>(
   pick: (res: PersistenceResponse) => T,
 ) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-persistence", scopeTag, orgId, appId, packageId, params],
+    queryKey: ["agent-persistence", scopeTag, orgId, applicationId, packageId, params],
     queryFn: async () => {
       const res = await api<PersistenceResponse>(
         `/agents/${packageId}/persistence${buildQs(params)}`,
       );
       return pick(res);
     },
-    enabled: !!orgId && !!appId && !!packageId,
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
 

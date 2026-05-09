@@ -13,47 +13,47 @@ import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
 
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["schedule-runs", orgId, appId, scheduleId],
+    queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
     queryFn: () => apiList<Run>(`/schedules/${scheduleId}/runs`),
-    enabled: !!scheduleId && !!appId,
+    enabled: !!scheduleId && !!applicationId,
   });
 }
 
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["schedules", orgId, appId],
+    queryKey: ["schedules", orgId, applicationId],
     queryFn: async () => {
       return api<EnrichedSchedule[]>("/schedules");
     },
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["schedule", orgId, appId, id],
+    queryKey: ["schedule", orgId, applicationId, id],
     queryFn: async () => {
       return api<EnrichedSchedule>(`/schedules/${id}`);
     },
-    enabled: !!id && !!appId,
+    enabled: !!id && !!applicationId,
   });
 }
 
 export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["schedules", orgId, appId, packageId],
+    queryKey: ["schedules", orgId, applicationId, packageId],
     queryFn: async () => {
       return api<EnrichedSchedule[]>(`/agents/${packageId}/schedules`);
     },
-    enabled: !!packageId && !!appId,
+    enabled: !!packageId && !!applicationId,
   });
 }
 

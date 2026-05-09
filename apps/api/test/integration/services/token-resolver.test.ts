@@ -27,9 +27,9 @@ describe("token-resolver", () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: applicationId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
 
     // Create a default connection profile for this user
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
@@ -60,10 +60,10 @@ describe("token-resolver", () => {
     providerId: string,
     connOrgId: string,
     credentials: Record<string, unknown>,
-    appId?: string,
+    applicationId?: string,
   ) {
     const cred = await seedProviderCredentials({
-      applicationId: appId ?? defaultAppId,
+      applicationId: applicationId ?? defaultAppId,
       providerId,
     });
     await saveConnection(db, connProfileId, providerId, connOrgId, credentials, {

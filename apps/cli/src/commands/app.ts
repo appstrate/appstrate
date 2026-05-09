@@ -2,7 +2,7 @@
 
 /**
  * `appstrate app` — manage the pinned application for the active CLI
- * profile. Counterpart to the `appId` written at `appstrate login` time
+ * profile. Counterpart to the `applicationId` written at `appstrate login` time
  * (issue #217): lets users re-pin, create, or inspect their application
  * without re-running the device flow.
  *
@@ -85,7 +85,7 @@ export async function appListCommand(opts: AppBaseOptions): Promise<void> {
       return;
     }
     for (const a of apps) {
-      const marker = a.id === profile.appId ? "*" : " ";
+      const marker = a.id === profile.applicationId ? "*" : " ";
       const def = a.isDefault ? " [default]" : "";
       process.stdout.write(`${marker} ${a.name.padEnd(24)}  ${a.id}${def}\n`);
     }
@@ -100,11 +100,11 @@ export async function appCurrentCommand(opts: AppBaseOptions): Promise<void> {
     process.stderr.write("Not logged in. Run: appstrate login\n");
     process.exit(1);
   }
-  if (!profile.appId) {
+  if (!profile.applicationId) {
     process.stderr.write("No application pinned. Run: appstrate app switch\n");
     process.exit(1);
   }
-  process.stdout.write(`${profile.appId}\n`);
+  process.stdout.write(`${profile.applicationId}\n`);
 }
 
 export async function appSwitchCommand(
@@ -126,7 +126,7 @@ export async function appSwitchCommand(
     if (opts.ref !== undefined) {
       chosen = resolveApplicationRef(apps, opts.ref);
     } else {
-      const picked = await picker.pickApp(apps, profile.appId);
+      const picked = await picker.pickApp(apps, profile.applicationId);
       if (!picked) {
         process.stderr.write(
           "Cannot prompt in non-TTY — pass an id: `appstrate app switch <id>`.\n",
@@ -136,7 +136,7 @@ export async function appSwitchCommand(
       chosen = picked;
     }
 
-    await updateProfile(profileName, { appId: chosen.id });
+    await updateProfile(profileName, { applicationId: chosen.id });
     process.stdout.write(`Pinned "${chosen.name}" (${chosen.id}) on profile "${profileName}".\n`);
   } catch (err) {
     exitWithError(err);
@@ -166,7 +166,7 @@ export async function appCreateCommand(
       name = prompted.name;
     }
     const created = await createApplication(profileName, name);
-    await updateProfile(profileName, { appId: created.id });
+    await updateProfile(profileName, { applicationId: created.id });
     process.stdout.write(
       `Created "${created.name}" (${created.id}) and pinned it on profile "${profileName}".\n`,
     );

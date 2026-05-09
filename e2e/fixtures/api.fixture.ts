@@ -21,7 +21,7 @@ export interface OrgContext {
 interface ApiFixtures {
   /** Authenticated API client scoped to a fresh org + default app */
   apiClient: ApiClient;
-  /** Org-only client (no X-App-Id) for org-scoped routes */
+  /** Org-only client (no X-Application-Id) for org-scoped routes */
   orgOnlyClient: ReturnType<typeof createOrgOnlyClient>;
   /** Auth + org details for the current test context */
   orgContext: OrgContext;
@@ -38,7 +38,7 @@ export const test = base.extend<ApiFixtures>({
     const client = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: orgContext.org.defaultAppId,
+      applicationId: orgContext.org.defaultAppId,
     });
     await use(client);
   },

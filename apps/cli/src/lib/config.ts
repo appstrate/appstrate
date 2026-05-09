@@ -30,7 +30,7 @@ export interface Profile {
   userId: string;
   email: string;
   orgId?: string;
-  appId?: string;
+  applicationId?: string;
   /**
    * Sticky default connection profile UUID — applied to every
    * credential-proxy call as `X-Connection-Profile-Id` unless the user
@@ -116,7 +116,7 @@ export async function readConfig(): Promise<Config> {
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
-      appId: typeof row.appId === "string" ? row.appId : undefined,
+      applicationId: typeof row.applicationId === "string" ? row.applicationId : undefined,
       connectionProfileId:
         typeof row.connectionProfileId === "string" ? row.connectionProfileId : undefined,
     };
@@ -156,7 +156,7 @@ export async function getProfile(name: string): Promise<Profile | null> {
 /**
  * Merge a partial update into an existing profile. Used by the login
  * org→app cascade and the `org switch` / `app switch` commands to rewrite
- * a single field (`orgId`, `appId`) without re-reading the whole profile
+ * a single field (`orgId`, `applicationId`) without re-reading the whole profile
  * at each call site.
  *
  * `undefined` in the patch means "clear the key" — strip it before write

@@ -80,7 +80,7 @@ export function AgentActions({
       case "uninstallAgent":
         if (!currentAppId) return;
         uninstallMutation.mutate(
-          { appId: currentAppId, packageId, installed: true },
+          { applicationId: currentAppId, packageId, installed: true },
           { onSuccess },
         );
         break;

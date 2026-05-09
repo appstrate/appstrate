@@ -324,17 +324,17 @@ const expectedEndpoints = [
   "DELETE /api/applications/{id}",
 
   // Application Packages
-  "GET /api/applications/{appId}/packages",
-  "POST /api/applications/{appId}/packages",
-  "GET /api/applications/{appId}/packages/{scope}/{name}",
-  "PUT /api/applications/{appId}/packages/{scope}/{name}",
-  "DELETE /api/applications/{appId}/packages/{scope}/{name}",
-  "GET /api/applications/{appId}/packages/{scope}/{name}/run-config",
+  "GET /api/applications/{applicationId}/packages",
+  "POST /api/applications/{applicationId}/packages",
+  "GET /api/applications/{applicationId}/packages/{scope}/{name}",
+  "PUT /api/applications/{applicationId}/packages/{scope}/{name}",
+  "DELETE /api/applications/{applicationId}/packages/{scope}/{name}",
+  "GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config",
 
   // Application Providers
-  "GET /api/applications/{appId}/providers",
-  "PUT /api/applications/{appId}/providers/{scope}/{name}/credentials",
-  "DELETE /api/applications/{appId}/providers/{scope}/{name}/credentials",
+  "GET /api/applications/{applicationId}/providers",
+  "PUT /api/applications/{applicationId}/providers/{scope}/{name}/credentials",
+  "DELETE /api/applications/{applicationId}/providers/{scope}/{name}/credentials",
 
   // End-Users
   "POST /api/end-users",

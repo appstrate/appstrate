@@ -127,7 +127,7 @@ The end-user-facing HTML pages (login, register, consent, magic-link, forgot/res
 
 ## Routing scope
 
-The OIDC admin endpoints (`/api/oauth/clients*`, `/api/oauth/scopes`) are **org-scoped** and gated by the `X-Org-Id` header (same as any other org-scoped core route). They do NOT require `X-App-Id`: clients are created against a specific `referencedOrgId` (org-level clients) or `referencedApplicationId` (application-level clients) passed in the request body, so the binding is explicit per-call. The module manifest therefore declares no `appScopedPaths`.
+The OIDC admin endpoints (`/api/oauth/clients*`, `/api/oauth/scopes`) are **org-scoped** and gated by the `X-Org-Id` header (same as any other org-scoped core route). They do NOT require `X-Application-Id`: clients are created against a specific `referencedOrgId` (org-level clients) or `referencedApplicationId` (application-level clients) passed in the request body, so the binding is explicit per-call. The module manifest therefore declares no `appScopedPaths`.
 
 End-user-facing routes under `/api/oauth/*` resolve the target application from the `client_id` query parameter, not from a header.
 

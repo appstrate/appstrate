@@ -18,7 +18,7 @@ import type { AppEnv } from "../types/index.ts";
  * These types are intentionally not branded. The required `applicationId`
  * field on `AppScope` is the constraint — you cannot construct an
  * `AppScope` without it, which is enough to block the bug class. Branding
- * would add stronger guarantees (can't pass an ad-hoc `{ orgId, appId }`
+ * would add stronger guarantees (can't pass an ad-hoc `{ orgId, applicationId }`
  * object from outside the helpers) but at significant ergonomics cost.
  */
 

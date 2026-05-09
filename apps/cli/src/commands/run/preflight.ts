@@ -57,7 +57,7 @@ export class PreflightAbortError extends Error {
 export interface PreflightInputs {
   instance: string;
   bearerToken: string;
-  appId: string;
+  applicationId: string;
   orgId?: string;
   scope: string;
   name: string;
@@ -101,7 +101,7 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
     const headers: Record<string, string> = {
       Authorization: `Bearer ${inputs.bearerToken}`,
       "User-Agent": CLI_USER_AGENT,
-      "X-App-Id": inputs.appId,
+      "X-Application-Id": inputs.applicationId,
     };
     if (inputs.orgId) headers["X-Org-Id"] = inputs.orgId;
     const res = await fetchFn(url, { headers });

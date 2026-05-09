@@ -27,13 +27,13 @@ async function seedConnection(
   profileId: string,
   providerId: string,
   orgId: string,
-  appId: string,
+  applicationId: string,
 ): Promise<{ connectionId: string; credentialId: string }> {
   const encrypted = encryptCredentials({ test: "value" });
   // Ensure provider package exists (FK target for applicationProviderCredentials)
   const pkgId = providerId.startsWith("@") ? providerId : `@system/${providerId}`;
   await seedPackage({ orgId: null, id: pkgId, type: "provider", source: "system" }).catch(() => {});
-  const cred = await seedProviderCredentials({ applicationId: appId, providerId: pkgId });
+  const cred = await seedProviderCredentials({ applicationId: applicationId, providerId: pkgId });
 
   const [row] = await db
     .insert(userProviderConnections)

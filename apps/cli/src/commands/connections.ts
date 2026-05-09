@@ -5,7 +5,7 @@
  * inspect existing OAuth/API-key connections.
  *
  * The pinned `connectionProfileId` lives on the CLI profile alongside
- * `appId`/`orgId` (TOML, see `lib/config.ts`). Switching it makes every
+ * `applicationId`/`orgId` (TOML, see `lib/config.ts`). Switching it makes every
  * subsequent `appstrate run` use that profile by default. Per-call
  * overrides go through the `--connection-profile` flag on `run`.
  *

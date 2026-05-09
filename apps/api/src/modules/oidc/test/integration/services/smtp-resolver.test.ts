@@ -32,15 +32,15 @@ async function seedApp(): Promise<string> {
       createdBy: ownerId,
     })
     .returning();
-  const appId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(applications).values({
-    id: appId,
+    id: applicationId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
     createdBy: ownerId,
   });
-  return appId;
+  return applicationId;
 }
 
 describe("resolveSmtpForClient", () => {
@@ -50,17 +50,17 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("returns null for level=application when no config exists", async () => {
-    const appId = await seedApp();
+    const applicationId = await seedApp();
     const resolved = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(resolved).toBeNull();
   });
 
   it("returns a transport + from metadata when per-app config exists", async () => {
-    const appId = await seedApp();
-    await upsertSmtpConfig(appId, {
+    const applicationId = await seedApp();
+    await upsertSmtpConfig(applicationId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -70,7 +70,7 @@ describe("resolveSmtpForClient", () => {
     });
     const resolved = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(resolved).not.toBeNull();
     expect(resolved!.source).toBe("per-app");
@@ -79,13 +79,13 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const appId = await seedApp();
+    const applicationId = await seedApp();
     // First call: null, cached.
     expect(
-      await resolveSmtpForClient({ level: "application", referencedApplicationId: appId }),
+      await resolveSmtpForClient({ level: "application", referencedApplicationId: applicationId }),
     ).toBeNull();
     // Upsert invalidates the cache → next call picks up the row.
-    await upsertSmtpConfig(appId, {
+    await upsertSmtpConfig(applicationId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -94,14 +94,14 @@ describe("resolveSmtpForClient", () => {
     });
     const afterUpsert = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(afterUpsert).not.toBeNull();
     // Delete invalidates again.
-    await deleteSmtpConfig(appId);
+    await deleteSmtpConfig(applicationId);
     const afterDelete = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(afterDelete).toBeNull();
   });
@@ -116,8 +116,8 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("invalidateSmtpCache forces a DB re-read", async () => {
-    const appId = await seedApp();
-    await upsertSmtpConfig(appId, {
+    const applicationId = await seedApp();
+    await upsertSmtpConfig(applicationId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -126,23 +126,23 @@ describe("resolveSmtpForClient", () => {
     });
     const first = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(first!.fromAddress).toBe("first@tenant.example");
 
     // Direct DB update bypassing the service → cache would still have the
     // old row. Manually invalidate to force re-read.
-    await upsertSmtpConfig(appId, {
+    await upsertSmtpConfig(applicationId, {
       host: "__test_json__",
       port: 587,
       username: "u",
       pass: "p",
       fromAddress: "second@tenant.example",
     });
-    invalidateSmtpCache(appId);
+    invalidateSmtpCache(applicationId);
     const second = await resolveSmtpForClient({
       level: "application",
-      referencedApplicationId: appId,
+      referencedApplicationId: applicationId,
     });
     expect(second!.fromAddress).toBe("second@tenant.example");
   });

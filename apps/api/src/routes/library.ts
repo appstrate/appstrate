@@ -34,7 +34,7 @@ export function createLibraryRouter() {
           type: packages.type,
           source: packages.source,
           draftManifest: packages.draftManifest,
-          appId: applicationPackages.applicationId,
+          applicationId: applicationPackages.applicationId,
         })
         .from(packages)
         .leftJoin(
@@ -76,8 +76,8 @@ export function createLibraryRouter() {
         };
         pkgMap.set(row.id, entry);
       }
-      if (row.appId) {
-        entry.installedIn.push(row.appId);
+      if (row.applicationId) {
+        entry.installedIn.push(row.applicationId);
       }
     }
 

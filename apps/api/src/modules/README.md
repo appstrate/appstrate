@@ -57,7 +57,7 @@ const myModule: AppstrateModule = {
   },
 
   /**
-   * Route prefixes that require the `X-App-Id` header and go through the
+   * Route prefixes that require the `X-Application-Id` header and go through the
    * app context middleware. Aggregated with core prefixes at boot — core
    * has no hardcoded knowledge of module paths.
    */
@@ -77,7 +77,7 @@ const myModule: AppstrateModule = {
 export default myModule;
 ```
 
-Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `appScopedPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks), and `appScopedPaths` for routes that require `X-App-Id`.
+Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `appScopedPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks), and `appScopedPaths` for routes that require `X-Application-Id`.
 
 ## Database ownership rules
 

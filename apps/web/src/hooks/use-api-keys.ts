@@ -8,11 +8,11 @@ import type { ApiKeyInfo } from "@appstrate/shared-types";
 
 export function useApiKeys() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["api-keys", orgId, appId],
+    queryKey: ["api-keys", orgId, applicationId],
     queryFn: () => api<{ apiKeys: ApiKeyInfo[] }>("/api-keys").then((d) => d.apiKeys),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 

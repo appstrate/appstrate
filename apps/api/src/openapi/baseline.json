@@ -7835,7 +7835,7 @@
               "schema": {
                 "type": "object",
                 "required": ["name"],
-                "description": "The API key is scoped to the application specified by the X-App-Id header.",
+                "description": "The API key is scoped to the application specified by the X-Application-Id header.",
                 "properties": {
                   "name": {
                     "type": "string",
@@ -14918,7 +14918,7 @@
         }
       }
     },
-    "/api/applications/{appId}/packages": {
+    "/api/applications/{applicationId}/packages": {
       "get": {
         "operationId": "listInstalledPackages",
         "tags": ["Application Packages"],
@@ -14929,7 +14929,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -14993,7 +14993,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15061,7 +15061,7 @@
         }
       }
     },
-    "/api/applications/{appId}/packages/{scope}/{name}": {
+    "/api/applications/{applicationId}/packages/{scope}/{name}": {
       "get": {
         "operationId": "getInstalledPackage",
         "tags": ["Application Packages"],
@@ -15072,7 +15072,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15120,7 +15120,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15197,7 +15197,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15224,7 +15224,7 @@
         }
       }
     },
-    "/api/applications/{appId}/packages/{scope}/{name}/run-config": {
+    "/api/applications/{applicationId}/packages/{scope}/{name}/run-config": {
       "get": {
         "operationId": "getApplicationPackageRunConfig",
         "tags": ["Application Packages"],
@@ -15235,7 +15235,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15304,7 +15304,7 @@
         }
       }
     },
-    "/api/applications/{appId}/providers": {
+    "/api/applications/{applicationId}/providers": {
       "get": {
         "operationId": "listAppProviderOverrides",
         "tags": ["Application Providers"],
@@ -15315,7 +15315,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15371,7 +15371,7 @@
         }
       }
     },
-    "/api/applications/{appId}/providers/{scope}/{name}/credentials": {
+    "/api/applications/{applicationId}/providers/{scope}/{name}/credentials": {
       "put": {
         "operationId": "setAppProviderCredentials",
         "tags": ["Application Providers"],
@@ -15382,7 +15382,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -15463,7 +15463,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "appId",
+            "name": "applicationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -16160,7 +16160,7 @@
         ],
         "parameters": [
           {
-            "name": "X-App-Id",
+            "name": "X-Application-Id",
             "in": "header",
             "required": true,
             "description": "Application id (app_…) the API key is scoped to.",
@@ -16300,7 +16300,7 @@
         ],
         "parameters": [
           {
-            "name": "X-App-Id",
+            "name": "X-Application-Id",
             "in": "header",
             "required": true,
             "description": "Application id (app_…) the API key is scoped to.",
@@ -16447,7 +16447,7 @@
         ],
         "parameters": [
           {
-            "name": "X-App-Id",
+            "name": "X-Application-Id",
             "in": "header",
             "required": true,
             "description": "Application id (app_…) the API key is scoped to.",
@@ -16594,7 +16594,7 @@
         ],
         "parameters": [
           {
-            "name": "X-App-Id",
+            "name": "X-Application-Id",
             "in": "header",
             "required": true,
             "description": "Application id (app_…) the API key is scoped to.",
@@ -16741,7 +16741,7 @@
         ],
         "parameters": [
           {
-            "name": "X-App-Id",
+            "name": "X-Application-Id",
             "in": "header",
             "required": true,
             "description": "Application id (app_…) the API key is scoped to.",
@@ -17386,10 +17386,10 @@
         }
       },
       "SseAppId": {
-        "name": "appId",
+        "name": "applicationId",
         "in": "query",
         "required": false,
-        "description": "Application ID. Required for cookie auth (SSE cannot send X-App-Id header). Not needed for API key auth (app resolved from key).",
+        "description": "Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key).",
         "schema": {
           "type": "string"
         }
@@ -17404,7 +17404,7 @@
         }
       },
       "XAppId": {
-        "name": "X-App-Id",
+        "name": "X-Application-Id",
         "in": "header",
         "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
         "schema": {

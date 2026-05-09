@@ -41,7 +41,7 @@ export class BundleFetchError extends Error {
 export interface BundleFetchInput {
   instance: string;
   bearerToken: string;
-  appId: string;
+  applicationId: string;
   orgId?: string;
   /** `@scope/name`. */
   packageId: string;
@@ -85,7 +85,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   const headers: Record<string, string> = {
     Authorization: `Bearer ${input.bearerToken}`,
     "User-Agent": CLI_USER_AGENT,
-    "X-App-Id": input.appId,
+    "X-Application-Id": input.applicationId,
   };
   if (input.orgId) headers["X-Org-Id"] = input.orgId;
 
@@ -102,7 +102,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
       throw new BundleFetchError(
         "package_not_installed_in_app",
         `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned application`,
-        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/applications/${input.appId}/packages -d '{"packageId":"${input.packageId}"}'`,
+        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/applications/${input.applicationId}/packages -d '{"packageId":"${input.packageId}"}'`,
       );
     }
     if (/version/i.test(text) && input.spec) {

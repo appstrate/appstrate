@@ -87,7 +87,7 @@ async function seedProviderCredentialsForApp(
 describe("OAuth2 flows", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
   let profileId: string;
   let actor: Actor;
 
@@ -110,14 +110,14 @@ describe("OAuth2 flows", () => {
     userId = user.id;
     const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
     actor = { type: "user", id: userId };
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
     profileId = profile.id;
 
     await seedOAuth2Provider(orgId, PROVIDER_ID);
-    await seedProviderCredentialsForApp(PROVIDER_ID, appId, {
+    await seedProviderCredentialsForApp(PROVIDER_ID, applicationId, {
       clientId: CLIENT_ID,
       clientSecret: CLIENT_SECRET,
     });
@@ -128,7 +128,7 @@ describe("OAuth2 flows", () => {
   describe("initiateConnection", () => {
     it("returns an auth URL with required OAuth2 params", async () => {
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -147,7 +147,7 @@ describe("OAuth2 flows", () => {
 
     it("includes PKCE code_challenge and method when pkce is enabled", async () => {
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -160,7 +160,7 @@ describe("OAuth2 flows", () => {
 
     it("includes scopes in the auth URL", async () => {
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -174,7 +174,7 @@ describe("OAuth2 flows", () => {
 
     it("merges default and requested scopes", async () => {
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -190,7 +190,7 @@ describe("OAuth2 flows", () => {
 
     it("stores state in the oauth state store", async () => {
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -210,13 +210,13 @@ describe("OAuth2 flows", () => {
 
     it("stores a unique state per invocation", async () => {
       const r1 = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
       );
       const r2 = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -228,7 +228,7 @@ describe("OAuth2 flows", () => {
     it("throws when provider does not exist", async () => {
       await expect(
         initiateConnection(
-          { orgId: orgId, applicationId: appId },
+          { orgId: orgId, applicationId: applicationId },
           "@testorg/nonexistent",
           actor,
           profileId,
@@ -242,7 +242,7 @@ describe("OAuth2 flows", () => {
 
       await expect(
         initiateConnection(
-          { orgId: orgId, applicationId: appId },
+          { orgId: orgId, applicationId: applicationId },
           "@testorg/no-creds-provider",
           actor,
           profileId,
@@ -257,7 +257,7 @@ describe("OAuth2 flows", () => {
     it("exchanges code for tokens and stores the connection", async () => {
       // Step 1: Initiate to create the state
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -277,7 +277,7 @@ describe("OAuth2 flows", () => {
 
     it("sends correct token exchange request to the provider", async () => {
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -303,7 +303,7 @@ describe("OAuth2 flows", () => {
 
     it("saves encrypted credentials in user_provider_connections", async () => {
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -331,7 +331,7 @@ describe("OAuth2 flows", () => {
 
     it("cleans up oauth state after successful callback", async () => {
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -350,7 +350,7 @@ describe("OAuth2 flows", () => {
 
     it("throws on expired state", async () => {
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -367,7 +367,7 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenResponse({ error: "invalid_grant" });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -388,7 +388,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -413,7 +413,7 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenResponse({ error: "invalid_client" });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -446,7 +446,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -483,7 +483,7 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenResponse({ error: "invalid_grant" });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -509,7 +509,7 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenResponse({ error: "server_error" });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -531,7 +531,7 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenResponse({ token_type: "Bearer" });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -548,7 +548,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -569,7 +569,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -593,7 +593,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -619,7 +619,7 @@ describe("OAuth2 flows", () => {
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -641,7 +641,7 @@ describe("OAuth2 flows", () => {
   describe("PKCE flow", () => {
     it("sends the stored code_verifier in the token exchange", async () => {
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
         profileId,
@@ -661,13 +661,13 @@ describe("OAuth2 flows", () => {
     it("omits PKCE params when pkceEnabled is false", async () => {
       const noPkceProvider = "@testorg/no-pkce-provider";
       await seedOAuth2Provider(orgId, noPkceProvider, { pkceEnabled: false });
-      await seedProviderCredentialsForApp(noPkceProvider, appId, {
+      await seedProviderCredentialsForApp(noPkceProvider, applicationId, {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
       });
 
       const { authUrl, state } = await initiateConnection(
-        { orgId, applicationId: appId },
+        { orgId, applicationId: applicationId },
         noPkceProvider,
         actor,
         profileId,
@@ -696,13 +696,13 @@ describe("OAuth2 flows", () => {
       await seedOAuth2Provider(orgId, basicProvider, {
         tokenAuthMethod: "client_secret_basic",
       });
-      await seedProviderCredentialsForApp(basicProvider, appId, {
+      await seedProviderCredentialsForApp(basicProvider, applicationId, {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
       });
 
       const { state } = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         basicProvider,
         actor,
         profileId,
@@ -736,13 +736,13 @@ describe("OAuth2 flows", () => {
     it("resolves a system provider (orgId null) for any org", async () => {
       const systemProvider = "@system/gmail";
       await seedOAuth2Provider(null, systemProvider);
-      await seedProviderCredentialsForApp(systemProvider, appId, {
+      await seedProviderCredentialsForApp(systemProvider, applicationId, {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
       });
 
       const result = await initiateConnection(
-        { orgId: orgId, applicationId: appId },
+        { orgId: orgId, applicationId: applicationId },
         systemProvider,
         actor,
         profileId,

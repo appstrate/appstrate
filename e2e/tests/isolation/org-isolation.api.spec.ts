@@ -257,29 +257,29 @@ test.describe("Cross-org notification isolation", () => {
 });
 
 // ═══════════════════════════════════════════════
-// X-App-Id validation (middleware enforcement)
+// X-Application-Id validation (middleware enforcement)
 // ═══════════════════════════════════════════════
 
-test.describe("X-App-Id middleware enforcement", () => {
-  test("OrgB cannot use OrgA appId as X-App-Id", async ({ request, ctxA, ctxB }) => {
-    // Try to access agents using OrgB's cookie + orgId but OrgA's appId
+test.describe("X-Application-Id middleware enforcement", () => {
+  test("OrgB cannot use OrgA applicationId as X-Application-Id", async ({ request, ctxA, ctxB }) => {
+    // Try to access agents using OrgB's cookie + orgId but OrgA's applicationId
     const res = await request.get("/api/agents", {
       headers: {
         Cookie: ctxB.auth.cookie,
         "X-Org-Id": ctxB.org.orgId,
-        "X-App-Id": ctxA.org.defaultAppId, // OrgA's app!
+        "X-Application-Id": ctxA.org.defaultAppId, // OrgA's app!
       },
     });
     // Should fail because OrgA's app doesn't belong to OrgB
     expect(res.status()).toBe(404);
   });
 
-  test("Missing X-App-Id on app-scoped route returns 400", async ({ request, ctxA }) => {
+  test("Missing X-Application-Id on app-scoped route returns 400", async ({ request, ctxA }) => {
     const res = await request.get("/api/agents", {
       headers: {
         Cookie: ctxA.auth.cookie,
         "X-Org-Id": ctxA.org.orgId,
-        // No X-App-Id
+        // No X-Application-Id
       },
     });
     expect(res.status()).toBe(400);

@@ -14,10 +14,10 @@ import { addMemories, upsertPinned } from "../../../src/services/state/package-p
 const app = getTestApp();
 
 /** Seed an agent and install it in the default app. */
-async function seedInstalledAgent(overrides: Parameters<typeof seedAgent>[0] & { appId: string }) {
-  const { appId, ...rest } = overrides;
+async function seedInstalledAgent(overrides: Parameters<typeof seedAgent>[0] & { applicationId: string }) {
+  const { applicationId, ...rest } = overrides;
   const pkg = await seedAgent(rest);
-  await installPackage({ orgId: rest.orgId!, applicationId: appId }, pkg.id);
+  await installPackage({ orgId: rest.orgId!, applicationId: applicationId }, pkg.id);
   return pkg;
 }
 
@@ -46,7 +46,7 @@ describe("Agents API", () => {
         id: "@myorg/test-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents", {
@@ -87,7 +87,7 @@ describe("Agents API", () => {
         id: "@myorg/detail-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/packages/agents/@myorg/detail-agent", {
@@ -135,7 +135,7 @@ describe("Agents API", () => {
         id: "@myorg/default-installed",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/packages/agents/@myorg/default-installed", {
@@ -157,7 +157,7 @@ describe("Agents API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@myorg/custom-hidden", {
-        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
       });
 
       expect(res.status).toBe(404);
@@ -177,7 +177,7 @@ describe("Agents API", () => {
       );
 
       const res = await app.request("/api/packages/agents/@myorg/custom-installed", {
-        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
       });
 
       expect(res.status).toBe(200);
@@ -269,7 +269,7 @@ describe("Agents API", () => {
         id: "@myorg/installed-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/installed-agent/bundle", {
@@ -292,7 +292,7 @@ describe("Agents API", () => {
         id: "@myorg/draft-only",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/draft-only/bundle?source=draft", {
@@ -321,7 +321,7 @@ describe("Agents API", () => {
         id: "@myorg/draft-with-version",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request(
@@ -349,7 +349,7 @@ describe("Agents API", () => {
         id: "@myorg/counted-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       await seedRun({
         packageId: "@myorg/counted-agent",
@@ -393,7 +393,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/pp-agent/provider-profiles", {
@@ -409,7 +409,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-agent-noauth",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/pp-agent-noauth/provider-profiles");
@@ -421,7 +421,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-agent-set",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "Alt" });
 
@@ -446,7 +446,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-put",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "P" });
 
@@ -465,7 +465,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-put-bad",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/pp-put-bad/provider-profiles", {
@@ -481,7 +481,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-put-noprov",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/pp-put-noprov/provider-profiles", {
@@ -497,7 +497,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-put-app",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -519,7 +519,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-del",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "D" });
 
@@ -550,7 +550,7 @@ describe("Agents API", () => {
         id: "@myorg/pp-del-bad",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/pp-del-bad/provider-profiles", {
@@ -570,7 +570,7 @@ describe("Agents API", () => {
         id: "@myorg/appp-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -593,7 +593,7 @@ describe("Agents API", () => {
         id: "@myorg/appp-unset",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/appp-unset/app-profile", {
@@ -610,7 +610,7 @@ describe("Agents API", () => {
         id: "@myorg/appp-bad",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/agents/@myorg/appp-bad/app-profile", {
@@ -631,7 +631,7 @@ describe("Agents API", () => {
         id: "@myorg/detail-appp",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -658,7 +658,7 @@ describe("Agents API", () => {
         id: "@myorg/detail-nop",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request("/api/packages/agents/@myorg/detail-nop", {
@@ -675,7 +675,7 @@ describe("Agents API", () => {
         id: "@myorg/detail-del",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -711,7 +711,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-list",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       // Two distinct scopes write pinned `checkpoint` slots
@@ -754,7 +754,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-named-pin",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       // Mix of keys: `checkpoint` + Letta-style `persona` + `goals`
@@ -803,7 +803,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-runid",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       const r1 = await seedRun({
         packageId: "@myorg/persist-runid",
@@ -853,7 +853,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-del-cp",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       await upsertPinned(
         "@myorg/persist-del-cp",
@@ -891,7 +891,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-del-persona",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
       await upsertPinned(
         "@myorg/persist-del-persona",
@@ -922,7 +922,7 @@ describe("Agents API", () => {
         id: "@myorg/persist-del-404",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        appId: ctx.defaultAppId,
+        applicationId: ctx.defaultAppId,
       });
 
       const res = await app.request(

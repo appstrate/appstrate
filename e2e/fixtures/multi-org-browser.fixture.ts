@@ -42,7 +42,7 @@ export const test = base.extend<MultiOrgBrowserFixtures>({
       createApiClient(request, {
         cookie: auth.cookie,
         orgId: orgA.orgId,
-        appId: orgA.defaultAppId,
+        applicationId: orgA.defaultAppId,
       }),
     );
   },
@@ -52,7 +52,7 @@ export const test = base.extend<MultiOrgBrowserFixtures>({
       createApiClient(request, {
         cookie: auth.cookie,
         orgId: orgB.orgId,
-        appId: orgB.defaultAppId,
+        applicationId: orgB.defaultAppId,
       }),
     );
   },

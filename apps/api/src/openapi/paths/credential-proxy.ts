@@ -32,7 +32,7 @@ const proxySharedDescription =
 
 const proxyParameters = [
   {
-    name: "X-App-Id",
+    name: "X-Application-Id",
     in: "header",
     required: true,
     description: "Application id (app_…) the API key is scoped to.",

@@ -132,7 +132,7 @@ router.get("/models", requirePermission("models", "read"), async (c) => {
  * Member-only: end-users have their own auto-created default elsewhere on
  * `connection_profiles` itself, so these routes reject `endUser`-bound
  * callers. The application id comes from `requireAppContext()` (header
- * `X-App-Id` for cookie sessions, embedded for API keys).
+ * `X-Application-Id` for cookie sessions, embedded for API keys).
  */
 const setProfileSchema = z.object({ profileId: z.uuid() });
 

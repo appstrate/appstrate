@@ -122,13 +122,13 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedIn(appId?: string, profile = "default", orgId = "org_1"): Promise<void> {
+async function seedLoggedIn(applicationId?: string, profile = "default", orgId = "org_1"): Promise<void> {
   await setProfile(profile, {
     instance: "https://app.example.com",
     userId: "u_1",
     email: "alice@example.com",
     orgId,
-    ...(appId ? { appId } : {}),
+    ...(applicationId ? { applicationId } : {}),
   });
   await saveTokens(profile, {
     accessToken: "tok-abc",
@@ -139,7 +139,7 @@ async function seedLoggedIn(appId?: string, profile = "default", orgId = "org_1"
 }
 
 async function pinnedAppId(profile = "default"): Promise<string | undefined> {
-  return (await readConfig()).profiles[profile]?.appId;
+  return (await readConfig()).profiles[profile]?.applicationId;
 }
 
 const twoApps = {

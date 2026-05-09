@@ -58,17 +58,17 @@ export function useAppSwitcher() {
   const { features } = useAppConfig();
 
   const switchApp = useCallback(
-    (appId: string) => {
+    (applicationId: string) => {
       const current = appStore.getState().id;
-      if (appId === current) return;
+      if (applicationId === current) return;
 
-      appStore.getState().setId(appId);
+      appStore.getState().setId(applicationId);
 
       // Assemble the invalidation set: core keys + enabled module contributions.
       const moduleKeys = getEnabledModuleQueryKeys(features);
       const appScopedKeys = new Set<string>([...CORE_APP_SCOPED_KEYS, ...moduleKeys]);
 
-      // Invalidate all app-scoped queries so they refetch with the new X-App-Id
+      // Invalidate all app-scoped queries so they refetch with the new X-Application-Id
       queryClient.removeQueries({
         predicate: (q) => {
           const key = q.queryKey[0];

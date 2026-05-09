@@ -16,9 +16,9 @@ const OAuthClientsTab = lazy(() =>
 export function OrgSettingsAppOauthPage() {
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
 
-  if (!isAdmin || !appId || !features.oidc) {
+  if (!isAdmin || !applicationId || !features.oidc) {
     return <Navigate to="/org-settings/app/general" replace />;
   }
 

@@ -699,7 +699,7 @@ describe("Runs API", () => {
       // AppB run should still exist
       const appBHeaders = {
         ...authHeaders(ctx),
-        "X-App-Id": appB.id,
+        "X-Application-Id": appB.id,
       };
       const listRes = await app.request("/api/agents/@runorg/iso-agent/runs", {
         headers: appBHeaders,
