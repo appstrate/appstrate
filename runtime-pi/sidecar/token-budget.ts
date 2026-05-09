@@ -245,9 +245,10 @@ export class TokenBudget {
    * Decide whether a response of `estimatedTokens` should be inlined.
    *
    * The caller still has the option of forcing `spill` (e.g. when no
-   * blob store is configured we have no spill path). This method only
-   * answers the budget question — see {@link decideForResponse} for
-   * the full integration helper.
+   * blob store is configured we have no spill path). This method
+   * only answers the budget question; the integration is in
+   * `responseToToolResult` (`mcp.ts`), which combines this decision
+   * with the blob-store presence check.
    */
   decide(estimatedTokens: number): BudgetDecision {
     if (estimatedTokens > this.inlineCapTokens) {
