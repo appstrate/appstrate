@@ -30,6 +30,7 @@
       "https://youtube.googleapis.com/**",
       "https://www.googleapis.com/upload/youtube/**"
     ],
+    "uploadProtocols": ["google-resumable"],
     "availableScopes": [
       {
         "value": "https://www.googleapis.com/auth/youtube.readonly",

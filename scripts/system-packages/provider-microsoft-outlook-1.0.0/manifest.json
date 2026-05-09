@@ -22,6 +22,7 @@
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
     "authorizedUris": ["https://graph.microsoft.com/**"],
+    "uploadProtocols": ["ms-resumable"],
     "availableScopes": [
       { "value": "Mail.Read", "label": "Read user mail" },
       { "value": "Mail.ReadWrite", "label": "Read and write user mail" },
