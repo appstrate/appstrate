@@ -16,12 +16,17 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readdir, stat, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   RECALL_MEMORY_INJECTED_TOOL,
   RUN_HISTORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
   type RuntimeInjectedTool,
-} from "../src/runtime-injected-tools.ts";
+} from "../src/runtime-tools/index.ts";
+
+const RUNTIME_TOOLS_DIR = fileURLToPath(new URL("../src/runtime-tools/", import.meta.url));
 
 describe("RUNTIME_INJECTED_TOOLS", () => {
   it("includes both run_history and recall_memory in canonical order", () => {
@@ -89,5 +94,50 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
       doc: "## x",
     };
     expect(_exhaustive.name).toBe("x");
+  });
+});
+
+describe("runtime-tools directory layout", () => {
+  // Each runtime-injected tool lives in its own directory under
+  // `runtime-tools/`, mirroring the bundle-tool layout
+  // (`scripts/system-packages/tool-<name>-<version>/`). These tests
+  // verify the directory contract so refactors keep the SOC promise.
+
+  it("each tool has its own directory with `tool.ts` + `TOOL.md`", async () => {
+    const entries = await readdir(RUNTIME_TOOLS_DIR, { withFileTypes: true });
+    const toolDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+    // One directory per registered tool. If a directory exists without
+    // a corresponding entry in `RUNTIME_INJECTED_TOOLS`, fail loudly —
+    // it's either a leftover from a deleted tool or a forgotten import.
+    expect(toolDirs.length).toBe(RUNTIME_INJECTED_TOOLS.length);
+
+    for (const dir of toolDirs) {
+      const toolFile = join(RUNTIME_TOOLS_DIR, dir, "tool.ts");
+      const docFile = join(RUNTIME_TOOLS_DIR, dir, "TOOL.md");
+      await expect(stat(toolFile)).resolves.toBeDefined();
+      await expect(stat(docFile)).resolves.toBeDefined();
+    }
+  });
+
+  it("each tool's `TOOL.md` is the descriptor's `doc` (locality contract)", async () => {
+    // Loading the doc from a co-located file is the contract that
+    // mirrors bundle tools. If a tool inlines its prose into `tool.ts`
+    // instead, this test catches the regression.
+    const slugByName = new Map<string, string>([
+      ["run_history", "run-history"],
+      ["recall_memory", "recall-memory"],
+    ]);
+
+    for (const tool of RUNTIME_INJECTED_TOOLS) {
+      const slug = slugByName.get(tool.name);
+      expect(slug).toBeDefined();
+      const docPath = join(RUNTIME_TOOLS_DIR, slug!, "TOOL.md");
+      const fileContent = await readFile(docPath, "utf8");
+      // Bun's `import doc from "./TOOL.md" with { type: "text" }`
+      // returns the file contents verbatim. The descriptor's `doc`
+      // must equal the file content (no inlining or re-templating).
+      expect(tool.doc).toBe(fileContent);
+    }
   });
 });
