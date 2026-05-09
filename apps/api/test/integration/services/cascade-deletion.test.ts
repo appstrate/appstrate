@@ -85,16 +85,16 @@ describe("Cascade Deletion", () => {
       // Verify override exists
       await assertDbHas(
         userAgentProviderProfiles,
-        eq(userAgentProviderProfiles.profileId, userProfile.id),
+        eq(userAgentProviderProfiles.connectionProfileId, userProfile.id),
       );
 
       // Delete the profile
       await db.delete(connectionProfiles).where(eq(connectionProfiles.id, userProfile.id));
 
-      // Override should be gone via FK CASCADE on profileId
+      // Override should be gone via FK CASCADE on connectionProfileId
       await assertDbMissing(
         userAgentProviderProfiles,
-        eq(userAgentProviderProfiles.profileId, userProfile.id),
+        eq(userAgentProviderProfiles.connectionProfileId, userProfile.id),
       );
     });
   });

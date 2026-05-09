@@ -71,7 +71,7 @@ export async function hasActiveConnection(
     .from(userProviderConnections)
     .where(
       and(
-        eq(userProviderConnections.profileId, connectionProfileId),
+        eq(userProviderConnections.connectionProfileId, connectionProfileId),
         eq(userProviderConnections.providerId, provider),
         eq(userProviderConnections.orgId, scope.orgId),
         eq(userProviderConnections.providerCredentialId, credentialId),
@@ -134,9 +134,9 @@ async function buildProfileInfoMap(
 }
 
 /**
- * Batch-fetch connection statuses for all (profileId, orgId) pairs in a single query.
+ * Batch-fetch connection statuses for all (connectionProfileId, orgId) pairs in a single query.
  * Filters by providerCredentialId when available to ensure per-app isolation.
- * Returns a Map keyed by "profileId:providerId" → connection row.
+ * Returns a Map keyed by "connectionProfileId:providerId" → connection row.
  */
 async function batchGetConnectionStatuses(
   profileIds: string[],
@@ -151,7 +151,7 @@ async function batchGetConnectionStatuses(
   if (profileIds.length === 0) return new Map();
 
   const conditions = [
-    inArray(userProviderConnections.profileId, profileIds),
+    inArray(userProviderConnections.connectionProfileId, profileIds),
     eq(userProviderConnections.orgId, orgId),
   ];
 
@@ -164,7 +164,7 @@ async function batchGetConnectionStatuses(
   const rows = await db
     .select({
       id: userProviderConnections.id,
-      profileId: userProviderConnections.profileId,
+      connectionProfileId: userProviderConnections.connectionProfileId,
       providerId: userProviderConnections.providerId,
       createdAt: userProviderConnections.createdAt,
       scopesGranted: userProviderConnections.scopesGranted,
@@ -178,7 +178,7 @@ async function batchGetConnectionStatuses(
     { id: string; createdAt: string; scopesGranted: string[] | null; needsReconnection: boolean }
   >();
   for (const row of rows) {
-    const key = `${row.profileId}:${row.providerId}`;
+    const key = `${row.connectionProfileId}:${row.providerId}`;
     map.set(key, {
       id: row.id,
       createdAt: toISORequired(row.createdAt) || toISORequired(new Date()),
@@ -203,7 +203,7 @@ export async function resolveProviderStatuses(
   const profileIds = [
     ...new Set(
       Object.values(providerProfiles)
-        .map((e) => e.profileId)
+        .map((e) => e.connectionProfileId)
         .filter(Boolean),
     ),
   ];
@@ -256,7 +256,7 @@ export async function resolveProviderStatuses(
     }
 
     // Look up connection from batch-fetched map
-    const connKey = `${entry.profileId}:${svc.id}`;
+    const connKey = `${entry.connectionProfileId}:${svc.id}`;
     const conn = connectionMap.get(connKey);
     const connStatus: ConnectionStatusValue = conn
       ? conn.needsReconnection
@@ -264,7 +264,7 @@ export async function resolveProviderStatuses(
         : "connected"
       : "not_connected";
 
-    const profileInfo = profileInfoMap.get(entry.profileId) ?? {
+    const profileInfo = profileInfoMap.get(entry.connectionProfileId) ?? {
       profileName: null,
       profileOwnerName: null,
     };

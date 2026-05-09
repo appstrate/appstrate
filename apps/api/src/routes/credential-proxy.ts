@@ -137,7 +137,7 @@ export async function resolveProfileId(args: {
   // to an explicit per-run override above.
   if (args.userId) {
     const stickyRows = await db
-      .select({ id: userApplicationProfiles.profileId })
+      .select({ id: userApplicationProfiles.connectionProfileId })
       .from(userApplicationProfiles)
       .where(
         and(
@@ -288,9 +288,9 @@ export function createCredentialProxyRouter() {
       //     only — API keys operate on apps, not users).
       const userFallback =
         authMethod === "oauth2-dashboard" || authMethod === "oauth2-instance" ? userId : undefined;
-      let profileId: string | null;
+      let connectionProfileId: string | null;
       try {
-        profileId = await resolveProfileId({
+        connectionProfileId = await resolveProfileId({
           applicationId,
           endUserId: endUser?.id,
           ...(userFallback ? { userId: userFallback } : {}),
@@ -304,7 +304,7 @@ export function createCredentialProxyRouter() {
         });
         throw internalError();
       }
-      if (!profileId) {
+      if (!connectionProfileId) {
         throw notFound(
           endUser
             ? `End-user ${endUser.id} has no connection profile in application ${applicationId}`
@@ -392,7 +392,7 @@ export function createCredentialProxyRouter() {
         const result = await proxyCall(db, {
           applicationId,
           orgId,
-          profileId,
+          connectionProfileId,
           providerId,
           method,
           target,

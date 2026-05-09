@@ -124,13 +124,13 @@ describe("GET /api/agents/:scope/:name/readiness", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ready: boolean;
-      missing: Array<{ providerId: string; reason: string; profileId: string | null }>;
+      missing: Array<{ providerId: string; reason: string; connectionProfileId: string | null }>;
     };
     expect(body.ready).toBe(false);
     expect(body.missing).toHaveLength(1);
     expect(body.missing[0]?.providerId).toBe(PROVIDER_ID);
     expect(body.missing[0]?.reason).toBe("no_connection");
-    expect(body.missing[0]?.profileId).toBe(profile.id);
+    expect(body.missing[0]?.connectionProfileId).toBe(profile.id);
   });
 
   it("flags needs_reconnection when the underlying connection is marked stale", async () => {
@@ -148,7 +148,7 @@ describe("GET /api/agents/:scope/:name/readiness", () => {
     await db
       .update(userProviderConnections)
       .set({ needsReconnection: true })
-      .where(eq(userProviderConnections.profileId, profile.id));
+      .where(eq(userProviderConnections.connectionProfileId, profile.id));
 
     const res = await app.request(
       `/api/agents/@readyorg/agent/readiness?connectionProfileId=${profile.id}`,

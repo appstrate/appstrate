@@ -54,7 +54,7 @@ export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
 export const setProviderProfileSchema = z.object({
   providerId: z.string().min(1),
-  profileId: z.uuid(),
+  connectionProfileId: z.uuid(),
 });
 export const removeProviderProfileSchema = z.object({ providerId: z.string().min(1) });
 
@@ -175,7 +175,7 @@ export function createAgentsRouter() {
       const data = parseBody(setProviderProfileSchema, body);
 
       // Validate ownership — user can only set overrides to their own profiles
-      const profile = await getAccessibleProfile(data.profileId, actor, {
+      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
         orgId: c.get("orgId"),
         applicationId: c.get("applicationId")!,
       });
@@ -183,12 +183,17 @@ export function createAgentsRouter() {
         throw forbidden("Cannot use a profile you do not own");
       }
 
-      await setUserAgentProviderOverride(actor, agent.id, data.providerId, data.profileId);
+      await setUserAgentProviderOverride(
+        actor,
+        agent.id,
+        data.providerId,
+        data.connectionProfileId,
+      );
       await recordAuditFromContext(c, {
         action: "agent.provider_profile_set",
         resourceType: "agent",
         resourceId: agent.id,
-        after: { providerId: data.providerId, profileId: data.profileId },
+        after: { providerId: data.providerId, connectionProfileId: data.connectionProfileId },
       });
       return c.json({ success: true });
     },

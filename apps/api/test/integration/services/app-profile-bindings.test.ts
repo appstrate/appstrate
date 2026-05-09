@@ -133,7 +133,7 @@ describe("app-profile-bindings", () => {
         .set({ needsReconnection: true, updatedAt: new Date() })
         .where(
           and(
-            eq(userProviderConnections.profileId, userProfileId),
+            eq(userProviderConnections.connectionProfileId, userProfileId),
             eq(userProviderConnections.providerId, "@test/gmail"),
             eq(userProviderConnections.providerCredentialId, credB!.id),
           ),

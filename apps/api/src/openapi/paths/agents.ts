@@ -690,10 +690,10 @@ export const agentsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "profileId"],
+              required: ["providerId", "connectionProfileId"],
               properties: {
                 providerId: { type: "string", minLength: 1 },
-                profileId: { type: "string", format: "uuid" },
+                connectionProfileId: { type: "string", format: "uuid" },
               },
             },
           },
@@ -851,10 +851,10 @@ export const agentsPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["providerId", "profileId", "reason", "message"],
+                      required: ["providerId", "connectionProfileId", "reason", "message"],
                       properties: {
                         providerId: { type: "string" },
-                        profileId: { type: ["string", "null"], format: "uuid" },
+                        connectionProfileId: { type: ["string", "null"], format: "uuid" },
                         reason: {
                           type: "string",
                           enum: [
@@ -875,7 +875,7 @@ export const agentsPaths = {
                 missing: [
                   {
                     providerId: "@afps/gmail",
-                    profileId: "550e8400-e29b-41d4-a716-446655440010",
+                    connectionProfileId: "550e8400-e29b-41d4-a716-446655440010",
                     reason: "no_connection",
                     message: "Provider '@afps/gmail' is not connected",
                   },

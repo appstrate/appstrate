@@ -32,8 +32,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "default-profile", source: "user_profile" },
-      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "default-profile", source: "user_profile" },
+      "@test/clickup": { connectionProfileId: "default-profile", source: "user_profile" },
     });
   });
 
@@ -51,8 +51,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "gmail-override-profile", source: "user_profile" },
-      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "gmail-override-profile", source: "user_profile" },
+      "@test/clickup": { connectionProfileId: "default-profile", source: "user_profile" },
     });
   });
 
@@ -71,8 +71,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "org-gmail-profile", source: "app_binding" },
-      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "org-gmail-profile", source: "app_binding" },
+      "@test/clickup": { connectionProfileId: "default-profile", source: "user_profile" },
     });
   });
 
@@ -92,7 +92,7 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "org-gmail-profile", source: "app_binding" },
+      "@test/gmail": { connectionProfileId: "org-gmail-profile", source: "app_binding" },
     });
   });
 
@@ -112,8 +112,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "org-gmail-profile", source: "app_binding" },
-      "@test/clickup": { profileId: "clickup-override-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "org-gmail-profile", source: "app_binding" },
+      "@test/clickup": { connectionProfileId: "clickup-override-profile", source: "user_profile" },
     });
   });
 
@@ -208,11 +208,11 @@ describe("resolveProviderProfiles", () => {
 
     expect(result).toEqual({
       // app binding wins over user override
-      "@test/gmail": { profileId: "org-gmail-profile", source: "app_binding" },
+      "@test/gmail": { connectionProfileId: "org-gmail-profile", source: "app_binding" },
       // user override wins over default (no org binding for clickup)
-      "@test/clickup": { profileId: "user-clickup-override", source: "user_profile" },
+      "@test/clickup": { connectionProfileId: "user-clickup-override", source: "user_profile" },
       // app binding (no user override needed)
-      "@test/stripe": { profileId: "org-stripe-profile", source: "app_binding" },
+      "@test/stripe": { connectionProfileId: "org-stripe-profile", source: "app_binding" },
     });
   });
 
@@ -234,8 +234,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "deleted-profile-id", source: "app_binding" },
-      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "deleted-profile-id", source: "app_binding" },
+      "@test/clickup": { connectionProfileId: "default-profile", source: "user_profile" },
     });
   });
 
@@ -268,8 +268,8 @@ describe("resolveProviderProfiles", () => {
     );
 
     expect(result).toEqual({
-      "@test/gmail": { profileId: "gmail-override", source: "user_profile" },
-      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+      "@test/gmail": { connectionProfileId: "gmail-override", source: "user_profile" },
+      "@test/clickup": { connectionProfileId: "default-profile", source: "user_profile" },
     });
   });
 });

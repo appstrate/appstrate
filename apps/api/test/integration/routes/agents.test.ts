@@ -428,7 +428,7 @@ describe("Agents API", () => {
       await app.request("/api/agents/@myorg/pp-agent-set/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: profile.id }),
+        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
       });
 
       const res = await app.request("/api/agents/@myorg/pp-agent-set/provider-profiles", {
@@ -453,14 +453,14 @@ describe("Agents API", () => {
       const res = await app.request("/api/agents/@myorg/pp-put/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: profile.id }),
+        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
     });
 
-    it("returns 400 with invalid profileId", async () => {
+    it("returns 400 with invalid connectionProfileId", async () => {
       await seedInstalledAgent({
         id: "@myorg/pp-put-bad",
         orgId: ctx.orgId,
@@ -471,7 +471,7 @@ describe("Agents API", () => {
       const res = await app.request("/api/agents/@myorg/pp-put-bad/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: "not-a-uuid" }),
+        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: "not-a-uuid" }),
       });
       expect(res.status).toBe(400);
     });
@@ -487,7 +487,7 @@ describe("Agents API", () => {
       const res = await app.request("/api/agents/@myorg/pp-put-noprov/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: "00000000-0000-0000-0000-000000000000" }),
+        body: JSON.stringify({ connectionProfileId: "00000000-0000-0000-0000-000000000000" }),
       });
       expect(res.status).toBe(400);
     });
@@ -507,7 +507,7 @@ describe("Agents API", () => {
       const res = await app.request("/api/agents/@myorg/pp-put-app/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: appProfile.id }),
+        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: appProfile.id }),
       });
       expect(res.status).toBe(200);
     });
@@ -527,7 +527,7 @@ describe("Agents API", () => {
       await app.request("/api/agents/@myorg/pp-del/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: profile.id }),
+        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
       });
 
       const res = await app.request("/api/agents/@myorg/pp-del/provider-profiles", {

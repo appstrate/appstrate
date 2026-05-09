@@ -79,7 +79,7 @@ export async function initiateOAuth1(
   store: OAuthStateStore,
   orgId: string,
   actor: Actor,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   callbackUrl: string,
   applicationId?: string,
@@ -154,7 +154,7 @@ export async function initiateOAuth1(
     userId: actor.type === "user" ? actor.id : null,
     endUserId: actor.type === "end_user" ? actor.id : null,
     applicationId,
-    profileId,
+    connectionProfileId,
     providerId,
     codeVerifier: "",
     oauthTokenSecret,
@@ -183,7 +183,7 @@ export interface OAuth1CallbackResult {
   orgId: string;
   userId: string | null;
   actor: Actor;
-  profileId: string;
+  connectionProfileId: string;
   applicationId: string;
   consumerKey: string;
   accessToken: string;
@@ -287,7 +287,7 @@ export async function handleOAuth1Callback(
     orgId: stateRow.orgId,
     userId: stateRow.userId ?? null,
     actor,
-    profileId: stateRow.profileId,
+    connectionProfileId: stateRow.connectionProfileId,
     applicationId: stateRow.applicationId,
     consumerKey: creds.consumerKey,
     accessToken,

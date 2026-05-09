@@ -173,9 +173,9 @@ describe("Run with provider profiles", () => {
         orgId,
       );
 
-      expect(map["@system/gmail"]!.profileId).toBe(altProfile.id);
+      expect(map["@system/gmail"]!.connectionProfileId).toBe(altProfile.id);
       expect(map["@system/gmail"]!.source).toBe("user_profile");
-      expect(map["@system/clickup"]!.profileId).toBe(defaultProfileId);
+      expect(map["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
       expect(map["@system/clickup"]!.source).toBe("user_profile");
     });
 
@@ -199,10 +199,10 @@ describe("Run with provider profiles", () => {
       );
 
       // gmail is bound in app profile -> uses app binding
-      expect(map["@system/gmail"]!.profileId).toBe(altProfile.id);
+      expect(map["@system/gmail"]!.connectionProfileId).toBe(altProfile.id);
       expect(map["@system/gmail"]!.source).toBe("app_binding");
       // clickup is not bound -> falls back to default
-      expect(map["@system/clickup"]!.profileId).toBe(defaultProfileId);
+      expect(map["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
       expect(map["@system/clickup"]!.source).toBe("user_profile");
     });
 
@@ -218,7 +218,7 @@ describe("Run with provider profiles", () => {
       );
 
       for (const pid of providerIds) {
-        expect(map[pid]!.profileId).toBe(defaultProfileId);
+        expect(map[pid]!.connectionProfileId).toBe(defaultProfileId);
         expect(map[pid]!.source).toBe("user_profile");
       }
     });
@@ -248,7 +248,7 @@ describe("Run with provider profiles", () => {
       );
 
       // App binding wins over user override
-      expect(map["@system/gmail"]!.profileId).toBe(appBoundProfile.id);
+      expect(map["@system/gmail"]!.connectionProfileId).toBe(appBoundProfile.id);
       expect(map["@system/gmail"]!.source).toBe("app_binding");
     });
 
@@ -276,13 +276,13 @@ describe("Run with provider profiles", () => {
       );
 
       // gmail: app binding
-      expect(map["@system/gmail"]!.profileId).toBe(gmailBound.id);
+      expect(map["@system/gmail"]!.connectionProfileId).toBe(gmailBound.id);
       expect(map["@system/gmail"]!.source).toBe("app_binding");
       // clickup: no app binding, no user override -> default
-      expect(map["@system/clickup"]!.profileId).toBe(defaultProfileId);
+      expect(map["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
       expect(map["@system/clickup"]!.source).toBe("user_profile");
       // notion: no app binding, but has user override
-      expect(map["@system/notion"]!.profileId).toBe(notionOverride.id);
+      expect(map["@system/notion"]!.connectionProfileId).toBe(notionOverride.id);
       expect(map["@system/notion"]!.source).toBe("user_profile");
     });
 
@@ -366,11 +366,11 @@ describe("Run with provider profiles", () => {
         appProfileId: appProfile.id,
       });
 
-      expect(providerProfiles["@system/gmail"]!.profileId).toBe(boundProfile.id);
+      expect(providerProfiles["@system/gmail"]!.connectionProfileId).toBe(boundProfile.id);
       expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
       // Other providers fall back to default
-      expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
-      expect(providerProfiles["@system/notion"]!.profileId).toBe(defaultProfileId);
+      expect(providerProfiles["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
+      expect(providerProfiles["@system/notion"]!.connectionProfileId).toBe(defaultProfileId);
     });
 
     it("falls back to user defaults when app profile has no bindings", async () => {
@@ -395,7 +395,7 @@ describe("Run with provider profiles", () => {
 
       // All providers fall back to user default
       for (const pid of providerIds) {
-        expect(providerProfiles[pid]!.profileId).toBe(defaultProfileId);
+        expect(providerProfiles[pid]!.connectionProfileId).toBe(defaultProfileId);
         expect(providerProfiles[pid]!.source).toBe("user_profile");
       }
     });

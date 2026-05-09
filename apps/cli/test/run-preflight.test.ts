@@ -76,7 +76,7 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        profileId: null,
+        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },
@@ -113,7 +113,7 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            profileId: null,
+            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -143,7 +143,7 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            profileId: null,
+            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -187,7 +187,7 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            profileId: null,
+            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -218,7 +218,7 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        profileId: null,
+        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },
@@ -281,7 +281,7 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        profileId: null,
+        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },

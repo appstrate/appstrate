@@ -18,10 +18,10 @@ import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 export async function listActorConnections(
   scope: AppScope,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<ConnectionStatus[]> {
   const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
-  const connections = await listConnectionsRaw(db, profileId, scope.orgId, credentialIds);
+  const connections = await listConnectionsRaw(db, connectionProfileId, scope.orgId, credentialIds);
   return connections.map((c) => ({
     provider: c.providerId,
     status: c.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
@@ -40,13 +40,13 @@ export async function listActorConnections(
 export async function disconnectProvider(
   scope: OrgScope,
   provider: string,
-  profileId: string,
+  connectionProfileId: string,
   providerCredentialId: string,
 ): Promise<void> {
-  await deleteConnectionRaw(db, profileId, provider, scope.orgId, providerCredentialId);
+  await deleteConnectionRaw(db, connectionProfileId, provider, scope.orgId, providerCredentialId);
   logger.info("Connection deleted", {
     provider,
-    profileId,
+    connectionProfileId,
     orgId: scope.orgId,
     providerCredentialId,
   });
@@ -66,7 +66,10 @@ export async function disconnectConnectionById(
   const rows = await db
     .select({ id: userProviderConnections.id })
     .from(userProviderConnections)
-    .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
+    .innerJoin(
+      connectionProfiles,
+      eq(userProviderConnections.connectionProfileId, connectionProfiles.id),
+    )
     .where(
       and(
         eq(userProviderConnections.id, connectionId),
@@ -112,7 +115,7 @@ export async function deleteAllActorConnections(scope: AppScope, actor: Actor): 
   await db.delete(userProviderConnections).where(
     and(
       inArray(
-        userProviderConnections.profileId,
+        userProviderConnections.connectionProfileId,
         profiles.map((p) => p.id),
       ),
       inArray(userProviderConnections.providerCredentialId, credentialIds),

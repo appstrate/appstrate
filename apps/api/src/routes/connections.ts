@@ -38,25 +38,25 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
-  profileId: z.uuid().optional(),
+  connectionProfileId: z.uuid().optional(),
 });
 
 export const connectApiKeySchema = z.object({
   apiKey: z.string().min(1, "API key is required"),
-  profileId: z.uuid().optional(),
+  connectionProfileId: z.uuid().optional(),
 });
 
 export const connectCredentialsSchema = z.object({
   credentials: z.record(z.string(), z.string()),
-  profileId: z.uuid().optional(),
+  connectionProfileId: z.uuid().optional(),
 });
 
 async function resolveProfileId(c: Context<AppEnv>, actor: Actor): Promise<string> {
-  const profileId = c.req.query("profileId");
-  if (profileId) {
-    const parsed = z.uuid().safeParse(profileId);
+  const connectionProfileId = c.req.query("connectionProfileId");
+  if (connectionProfileId) {
+    const parsed = z.uuid().safeParse(connectionProfileId);
     if (!parsed.success) {
-      throw invalidRequest("Invalid profileId format", "profileId");
+      throw invalidRequest("Invalid connectionProfileId format", "connectionProfileId");
     }
     return parsed.data;
   }
@@ -70,15 +70,15 @@ export function createConnectionsRouter() {
   router.get("/", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const profileId = await resolveProfileId(c, actor);
+    const connectionProfileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or app profiles
-    const profile = await getAccessibleProfile(profileId, actor, scope);
+    const profile = await getAccessibleProfile(connectionProfileId, actor, scope);
     if (!profile) {
       throw forbidden("Cannot view connections for a profile you do not own");
     }
 
-    const connections = await listActorConnections(scope, profileId);
+    const connections = await listActorConnections(scope, connectionProfileId);
     return c.json(listResponse(connections));
   });
 
@@ -97,9 +97,9 @@ export function createConnectionsRouter() {
 
       try {
         const body = parseBody(connectOAuthSchema, await c.req.json());
-        const { scopes, profileId } = body;
+        const { scopes, connectionProfileId } = body;
 
-        const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
+        const effectiveProfileId = connectionProfileId ?? (await resolveProfileId(c, actor));
 
         // Validate ownership — user can use their own profiles or app profiles
         const profile = await getAccessibleProfile(effectiveProfileId, actor, scope);
@@ -132,20 +132,20 @@ export function createConnectionsRouter() {
       try {
         const body = await c.req.json();
         const data = parseBody(connectApiKeySchema, body, "apiKey");
-        const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+        const connectionProfileId = data.connectionProfileId ?? (await getDefaultProfileId(actor));
 
         // Validate ownership — user can use their own profiles or app profiles
-        const ownedProfile = await getAccessibleProfile(profileId, actor, scope);
+        const ownedProfile = await getAccessibleProfile(connectionProfileId, actor, scope);
         if (!ownedProfile) {
           throw forbidden("Cannot connect on a profile you do not own");
         }
 
-        await saveApiKeyConnection(scope, provider, data.apiKey.trim(), profileId);
+        await saveApiKeyConnection(scope, provider, data.apiKey.trim(), connectionProfileId);
         await recordAuditFromContext(c, {
           action: "connection.created",
           resourceType: "connection",
           resourceId: provider,
-          after: { provider, profileId, mode: "api_key" },
+          after: { provider, connectionProfileId, mode: "api_key" },
         });
         return c.json({ success: true });
       } catch (err: unknown) {
@@ -176,20 +176,26 @@ export function createConnectionsRouter() {
         const authMode = await getProviderAuthMode(scope, provider);
         const mode = authMode === "basic" ? "basic" : "custom";
 
-        const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+        const connectionProfileId = data.connectionProfileId ?? (await getDefaultProfileId(actor));
 
         // Validate ownership — user can use their own profiles or app profiles
-        const ownedProfile = await getAccessibleProfile(profileId, actor, scope);
+        const ownedProfile = await getAccessibleProfile(connectionProfileId, actor, scope);
         if (!ownedProfile) {
           throw forbidden("Cannot connect on a profile you do not own");
         }
 
-        await saveCredentialsConnection(scope, provider, mode, data.credentials, profileId);
+        await saveCredentialsConnection(
+          scope,
+          provider,
+          mode,
+          data.credentials,
+          connectionProfileId,
+        );
         await recordAuditFromContext(c, {
           action: "connection.created",
           resourceType: "connection",
           resourceId: provider,
-          after: { provider, profileId, mode },
+          after: { provider, connectionProfileId, mode },
         });
         return c.json({ success: true });
       } catch (err: unknown) {
@@ -276,15 +282,15 @@ export function createConnectionsRouter() {
   router.get("/integrations", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const profileId = await resolveProfileId(c, actor);
+    const connectionProfileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or app profiles
-    const profile = await getAccessibleProfile(profileId, actor, scope);
+    const profile = await getAccessibleProfile(connectionProfileId, actor, scope);
     if (!profile) {
       throw forbidden("Cannot view integrations for a profile you do not own");
     }
 
-    const integrations = await getAvailableProvidersWithStatus(scope, profileId);
+    const integrations = await getAvailableProvidersWithStatus(scope, connectionProfileId);
     return c.json({ integrations });
   });
 
@@ -303,10 +309,10 @@ export function createConnectionsRouter() {
         if (connectionId) {
           await disconnectConnectionById(scope, connectionId, actor);
         } else {
-          const profileId = await resolveProfileId(c, actor);
+          const connectionProfileId = await resolveProfileId(c, actor);
 
           // Validate ownership — user can use their own profiles or app profiles
-          const profile = await getAccessibleProfile(profileId, actor, scope);
+          const profile = await getAccessibleProfile(connectionProfileId, actor, scope);
           if (!profile) {
             throw forbidden("Cannot disconnect from a profile you do not own");
           }
@@ -316,7 +322,7 @@ export function createConnectionsRouter() {
               `Provider '${provider}' is not configured in the current application`,
             );
           }
-          await disconnectProvider(scope, provider, profileId, credentialId);
+          await disconnectProvider(scope, provider, connectionProfileId, credentialId);
         }
         await recordAuditFromContext(c, {
           action: "connection.deleted",

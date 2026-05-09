@@ -559,7 +559,7 @@ export const appProfilesPaths = {
                       type: "object",
                       properties: {
                         id: { type: "string", format: "uuid" },
-                        profileId: { type: "string", format: "uuid" },
+                        connectionProfileId: { type: "string", format: "uuid" },
                         providerId: { type: "string" },
                         orgId: { type: "string", format: "uuid" },
                         scopesGranted: { type: "array", items: { type: "string" } },

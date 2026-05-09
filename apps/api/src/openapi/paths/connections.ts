@@ -11,7 +11,7 @@ export const connectionsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         {
-          name: "profileId",
+          name: "connectionProfileId",
           in: "query",
           required: false,
           description: "Connection profile ID (defaults to user's default profile)",
@@ -78,7 +78,7 @@ export const connectionsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         {
-          name: "profileId",
+          name: "connectionProfileId",
           in: "query",
           required: false,
           description: "Connection profile ID (defaults to user's default profile)",
@@ -116,7 +116,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Start OAuth connection flow",
       description:
-        "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -130,7 +130,7 @@ export const connectionsPaths = {
               type: "object",
               properties: {
                 scopes: { type: "array", items: { type: "string" } },
-                profileId: { type: "string", description: "Connection profile ID" },
+                connectionProfileId: { type: "string", description: "Connection profile ID" },
               },
             },
           },
@@ -166,7 +166,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Save API key credential",
       description:
-        "Save an API key credential for a provider that uses api_key auth mode. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "Save an API key credential for a provider that uses api_key auth mode. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -182,7 +182,7 @@ export const connectionsPaths = {
               required: ["apiKey"],
               properties: {
                 apiKey: { type: "string", minLength: 1, description: "API key value" },
-                profileId: {
+                connectionProfileId: {
                   type: "string",
                   format: "uuid",
                   description: "Connection profile ID (defaults to user's default profile)",
@@ -220,7 +220,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Save custom credentials",
       description:
-        "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -240,7 +240,7 @@ export const connectionsPaths = {
                   additionalProperties: { type: "string" },
                   description: "Credential fields matching the provider's credential schema",
                 },
-                profileId: {
+                connectionProfileId: {
                   type: "string",
                   format: "uuid",
                   description: "Connection profile ID (defaults to user's default profile)",
@@ -341,7 +341,7 @@ export const connectionsPaths = {
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
-          name: "profileId",
+          name: "connectionProfileId",
           in: "query",
           required: false,
           description: "Connection profile ID (defaults to user's default profile)",
@@ -352,7 +352,7 @@ export const connectionsPaths = {
           in: "query",
           required: false,
           description:
-            "Specific connection ID to delete. When provided, only this connection is removed (ignores profileId).",
+            "Specific connection ID to delete. When provided, only this connection is removed (ignores connectionProfileId).",
           schema: { type: "string", format: "uuid" },
         },
       ],

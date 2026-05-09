@@ -551,7 +551,7 @@ describe("Connection Profiles API", () => {
       const res = await app.request(`/api/connections/connect/${providerId}`, {
         method: "POST",
         headers: { ...authHeaders(user2Ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: user1Profile.id }),
+        body: JSON.stringify({ connectionProfileId: user1Profile.id }),
       });
 
       expect(res.status).toBe(403);
@@ -571,7 +571,7 @@ describe("Connection Profiles API", () => {
       const res = await app.request(`/api/connections/connect/${providerId}`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: appProfile.id }),
+        body: JSON.stringify({ connectionProfileId: appProfile.id }),
       });
 
       // Should not get 403 — ownership check passes for app profiles
@@ -593,7 +593,7 @@ describe("Connection Profiles API", () => {
       const res = await app.request(`/api/connections/connect/${providerId}`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: ownProfile.id }),
+        body: JSON.stringify({ connectionProfileId: ownProfile.id }),
       });
 
       // 403 with "profile you do not own" means the ownership check failed
@@ -624,7 +624,7 @@ describe("Connection Profiles API", () => {
       const res = await app.request(`/api/connections/connect/${providerId}/api-key`, {
         method: "POST",
         headers: { ...authHeaders(user2Ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "fake-key-123", profileId: user1Profile.id }),
+        body: JSON.stringify({ apiKey: "fake-key-123", connectionProfileId: user1Profile.id }),
       });
 
       expect(res.status).toBe(403);
@@ -644,7 +644,7 @@ describe("Connection Profiles API", () => {
       const res = await app.request(`/api/connections/connect/${providerId}/api-key`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-key-123", profileId: appProfile.id }),
+        body: JSON.stringify({ apiKey: "test-key-123", connectionProfileId: appProfile.id }),
       });
 
       expect(res.status).not.toBe(403);
@@ -676,7 +676,7 @@ describe("Connection Profiles API", () => {
         headers: { ...authHeaders(user2Ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           credentials: { username: "user", password: "pass" },
-          profileId: user1Profile.id,
+          connectionProfileId: user1Profile.id,
         }),
       });
 
@@ -699,7 +699,7 @@ describe("Connection Profiles API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           credentials: { username: "user", password: "pass" },
-          profileId: appProfile.id,
+          connectionProfileId: appProfile.id,
         }),
       });
 
@@ -724,7 +724,7 @@ describe("Connection Profiles API", () => {
         defaultAppId: ctx.defaultAppId,
       };
 
-      const res = await app.request(`/api/connections?profileId=${user1Profile.id}`, {
+      const res = await app.request(`/api/connections?connectionProfileId=${user1Profile.id}`, {
         headers: authHeaders(user2Ctx),
       });
 
@@ -739,7 +739,7 @@ describe("Connection Profiles API", () => {
         name: "My Profile",
       });
 
-      const res = await app.request(`/api/connections?profileId=${ownProfile.id}`, {
+      const res = await app.request(`/api/connections?connectionProfileId=${ownProfile.id}`, {
         headers: authHeaders(ctx),
       });
 
@@ -752,7 +752,7 @@ describe("Connection Profiles API", () => {
         name: "App Profile",
       });
 
-      const res = await app.request(`/api/connections?profileId=${appProfile.id}`, {
+      const res = await app.request(`/api/connections?connectionProfileId=${appProfile.id}`, {
         headers: authHeaders(ctx),
       });
 
@@ -777,7 +777,7 @@ describe("Connection Profiles API", () => {
         defaultAppId: ctx.defaultAppId,
       };
 
-      const res = await app.request(`/api/connections/integrations?profileId=${user1Profile.id}`, {
+      const res = await app.request(`/api/connections/integrations?connectionProfileId=${user1Profile.id}`, {
         headers: authHeaders(user2Ctx),
       });
 
@@ -792,7 +792,7 @@ describe("Connection Profiles API", () => {
         name: "My Profile",
       });
 
-      const res = await app.request(`/api/connections/integrations?profileId=${ownProfile.id}`, {
+      const res = await app.request(`/api/connections/integrations?connectionProfileId=${ownProfile.id}`, {
         headers: authHeaders(ctx),
       });
 
@@ -805,7 +805,7 @@ describe("Connection Profiles API", () => {
         name: "App Profile",
       });
 
-      const res = await app.request(`/api/connections/integrations?profileId=${appProfile.id}`, {
+      const res = await app.request(`/api/connections/integrations?connectionProfileId=${appProfile.id}`, {
         headers: authHeaders(ctx),
       });
 

@@ -116,7 +116,12 @@ export async function collectDependencyErrors(
   const statusIds = [...credentialById.keys()];
   const statuses = await Promise.all(
     statusIds.map((id) =>
-      deps.getConnectionStatus(id, providerProfiles[id]!.profileId, orgId, credentialById.get(id)!),
+      deps.getConnectionStatus(
+        id,
+        providerProfiles[id]!.connectionProfileId,
+        orgId,
+        credentialById.get(id)!,
+      ),
     ),
   );
   const statusById = new Map(statusIds.map((id, i) => [id, statuses[i]!] as const));

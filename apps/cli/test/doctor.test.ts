@@ -269,13 +269,13 @@ describe("connection-profile check", () => {
       execPath: "/usr/local/bin/appstrate",
       probeLocalInstall: async () => null,
       checkConnectionProfile: async () => ({
-        profileId: "abc",
+        connectionProfileId: "abc",
         status: "missing",
         hint: "Run `appstrate connections profile switch <name>`.",
       }),
     });
     expect(report.connectionProfile).toEqual({
-      profileId: "abc",
+      connectionProfileId: "abc",
       status: "missing",
       hint: "Run `appstrate connections profile switch <name>`.",
     });
@@ -315,7 +315,7 @@ describe("connection-profile check", () => {
         dualInstall: false,
         multiSource: false,
         connectionProfile: {
-          profileId: "abc",
+          connectionProfileId: "abc",
           status: "missing",
           hint: "Run `appstrate connections profile switch <name>`.",
         },
@@ -333,7 +333,7 @@ describe("connection-profile check", () => {
         runningIndex: 0,
         dualInstall: false,
         multiSource: false,
-        connectionProfile: { profileId: "abc", status: "unknown" },
+        connectionProfile: { connectionProfileId: "abc", status: "unknown" },
       },
       "/usr/local/bin/appstrate",
     );

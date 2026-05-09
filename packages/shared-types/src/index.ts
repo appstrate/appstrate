@@ -174,7 +174,7 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 /** Connection record as returned by the API (no encrypted credentials). */
 export interface ConnectionInfo {
   id: string;
-  profileId: string;
+  connectionProfileId: string;
   providerId: string;
   orgId: string;
   scopesGranted?: string[];
@@ -633,7 +633,7 @@ export type ReadinessReason = (typeof READINESS_REASONS)[number];
 
 export interface ReadinessProviderEntry {
   providerId: string;
-  profileId: string | null;
+  connectionProfileId: string | null;
   reason: ReadinessReason;
   message: string;
 }

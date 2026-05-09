@@ -62,7 +62,7 @@ export interface ProxyCallInput {
    * end-user's `connectionProfileId`; for application-scoped keys it's
    * the application's default profile.
    */
-  profileId: string;
+  connectionProfileId: string;
 
   /** Scoped provider package name (e.g. `@afps/gmail`). */
   providerId: string;
@@ -186,7 +186,7 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
   }
   const resolved = await resolveCredentialsForProxy(
     db,
-    input.profileId,
+    input.connectionProfileId,
     input.providerId,
     input.orgId,
     credentialId,
@@ -301,7 +301,7 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     try {
       const refreshed = await forceRefreshCredentials(
         db,
-        input.profileId,
+        input.connectionProfileId,
         input.providerId,
         input.orgId,
         credentialId,
@@ -344,7 +344,7 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     try {
       await forceRefreshCredentials(
         db,
-        input.profileId,
+        input.connectionProfileId,
         input.providerId,
         input.orgId,
         credentialId,

@@ -18,7 +18,7 @@ interface ProfileSelectorProps {
   /** Current value (null = "all" when showAllOption is true) */
   value: string | null;
   /** Callback when profile changes */
-  onChange: (profileId: string | null) => void;
+  onChange: (connectionProfileId: string | null) => void;
   label?: string;
 }
 

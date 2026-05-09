@@ -9,11 +9,11 @@ import {
 } from "../../src/services/dependency-validation.ts";
 import type { ProviderProfileMap } from "../../src/types/index.ts";
 
-/** Helper to build a ProviderProfileMap from simple id → profileId pairs. */
+/** Helper to build a ProviderProfileMap from simple id → connectionProfileId pairs. */
 function profileMap(entries: Record<string, string>): ProviderProfileMap {
   const map: ProviderProfileMap = {};
-  for (const [id, profileId] of Object.entries(entries)) {
-    map[id] = { profileId, source: "user_profile" };
+  for (const [id, connectionProfileId] of Object.entries(entries)) {
+    map[id] = { connectionProfileId, source: "user_profile" };
   }
   return map;
 }
@@ -202,8 +202,8 @@ describe("validateAgentDependencies", () => {
     const deps = createMockDeps();
     const providers = [{ id: "@test/gmail" }, { id: "@test/gdrive" }];
     const profiles: ProviderProfileMap = {
-      "@test/gmail": { profileId: "user-profile-1", source: "user_profile" },
-      "@test/gdrive": { profileId: "admin-profile-1", source: "app_binding" },
+      "@test/gmail": { connectionProfileId: "user-profile-1", source: "user_profile" },
+      "@test/gdrive": { connectionProfileId: "admin-profile-1", source: "app_binding" },
     };
 
     await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);

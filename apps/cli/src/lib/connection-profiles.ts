@@ -107,7 +107,7 @@ export function resolveConnectionProfileRef(
 export interface UserConnection {
   id: string;
   providerId: string;
-  profileId: string;
+  connectionProfileId: string;
   profileName: string;
   status: string;
   createdAt: string;
@@ -137,7 +137,7 @@ export async function listUserConnections(profileName: string): Promise<UserConn
         out.push({
           id: conn.id,
           providerId: provider.providerId,
-          profileId: conn.profile.id,
+          connectionProfileId: conn.profile.id,
           profileName: conn.profile.name,
           status: conn.status,
           createdAt: conn.createdAt,

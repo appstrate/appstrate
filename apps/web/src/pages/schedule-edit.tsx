@@ -33,13 +33,13 @@ export function ScheduleEditPage() {
   // Build foreign profile when the schedule's profile belongs to another user
   const foreignProfile = useMemo<ForeignProfile | undefined>(() => {
     if (!schedule) return undefined;
-    const profileId = schedule.connectionProfileId;
-    const inUser = userProfiles?.some((p) => p.id === profileId) ?? false;
-    const inApp = appProfiles?.some((p) => p.id === profileId) ?? false;
+    const connectionProfileId = schedule.connectionProfileId;
+    const inUser = userProfiles?.some((p) => p.id === connectionProfileId) ?? false;
+    const inApp = appProfiles?.some((p) => p.id === connectionProfileId) ?? false;
     if (inUser || inApp) return undefined;
     if (schedule.profileType !== "user" || !schedule.profileName) return undefined;
     return {
-      id: profileId,
+      id: connectionProfileId,
       name: schedule.profileName,
       ownerName: schedule.profileOwnerName ?? "",
     };

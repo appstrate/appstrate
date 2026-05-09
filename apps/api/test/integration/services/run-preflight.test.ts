@@ -157,9 +157,9 @@ describe("run preflight — provider profile resolution", () => {
       defaultUserProfileId: defaultProfileId,
     });
 
-    expect(providerProfiles["@system/gmail"]!.profileId).toBe(defaultProfileId);
+    expect(providerProfiles["@system/gmail"]!.connectionProfileId).toBe(defaultProfileId);
     expect(providerProfiles["@system/gmail"]!.source).toBe("user_profile");
-    expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
+    expect(providerProfiles["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
     expect(providerProfiles["@system/clickup"]!.source).toBe("user_profile");
   });
 
@@ -176,9 +176,9 @@ describe("run preflight — provider profile resolution", () => {
       userProviderOverrides: { "@system/gmail": altProfileId },
     });
 
-    expect(providerProfiles["@system/gmail"]!.profileId).toBe(altProfileId);
+    expect(providerProfiles["@system/gmail"]!.connectionProfileId).toBe(altProfileId);
     expect(providerProfiles["@system/gmail"]!.source).toBe("user_profile");
-    expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
+    expect(providerProfiles["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
   });
 
   it("org binding takes priority over per-provider override", async () => {
@@ -199,10 +199,10 @@ describe("run preflight — provider profile resolution", () => {
       appProfileId: appProfile.id,
     });
 
-    expect(providerProfiles["@system/gmail"]!.profileId).toBe(altProfileId);
+    expect(providerProfiles["@system/gmail"]!.connectionProfileId).toBe(altProfileId);
     expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
     // clickup not bound in app profile -> falls back to user override or default
-    expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
+    expect(providerProfiles["@system/clickup"]!.connectionProfileId).toBe(defaultProfileId);
     expect(providerProfiles["@system/clickup"]!.source).toBe("user_profile");
   });
 
@@ -230,7 +230,7 @@ describe("run preflight — provider profile resolution", () => {
     });
 
     expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
-    expect(providerProfiles["@system/clickup"]!.profileId).toBe(altProfileId);
+    expect(providerProfiles["@system/clickup"]!.connectionProfileId).toBe(altProfileId);
     expect(providerProfiles["@system/clickup"]!.source).toBe("user_profile");
   });
 });

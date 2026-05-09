@@ -88,7 +88,7 @@ describe("OAuth2 flows", () => {
   let userId: string;
   let orgId: string;
   let applicationId: string;
-  let profileId: string;
+  let connectionProfileId: string;
   let actor: Actor;
 
   const PROVIDER_ID = "@testorg/test-oauth-provider";
@@ -114,7 +114,7 @@ describe("OAuth2 flows", () => {
     actor = { type: "user", id: userId };
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
 
     await seedOAuth2Provider(orgId, PROVIDER_ID);
     await seedProviderCredentialsForApp(PROVIDER_ID, applicationId, {
@@ -131,7 +131,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       expect(result.authUrl).toBeString();
@@ -150,7 +150,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       const url = new URL(result.authUrl);
@@ -163,7 +163,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       const url = new URL(result.authUrl);
@@ -177,7 +177,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
         ["admin", "read"],
       );
 
@@ -193,14 +193,14 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       const row = await oauthStateStore.get(result.state);
       expect(row).not.toBeNull();
       expect(row!.orgId).toBe(orgId);
       expect(row!.userId).toBe(userId);
-      expect(row!.profileId).toBe(profileId);
+      expect(row!.connectionProfileId).toBe(connectionProfileId);
       expect(row!.providerId).toBe(PROVIDER_ID);
       expect(row!.codeVerifier).toBeString();
       expect(row!.codeVerifier.length).toBeGreaterThan(10);
@@ -213,13 +213,13 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       const r2 = await initiateConnection(
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       expect(r1.state).not.toBe(r2.state);
@@ -231,7 +231,7 @@ describe("OAuth2 flows", () => {
           { orgId: orgId, applicationId: applicationId },
           "@testorg/nonexistent",
           actor,
-          profileId,
+          connectionProfileId,
         ),
       ).rejects.toThrow("not found");
     });
@@ -245,7 +245,7 @@ describe("OAuth2 flows", () => {
           { orgId: orgId, applicationId: applicationId },
           "@testorg/no-creds-provider",
           actor,
-          profileId,
+          connectionProfileId,
         ),
       ).rejects.toThrow("No OAuth credentials configured");
     });
@@ -260,7 +260,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       // Step 2: Handle callback with a mock code
@@ -268,7 +268,7 @@ describe("OAuth2 flows", () => {
 
       expect(result.providerId).toBe(PROVIDER_ID);
       expect(result.orgId).toBe(orgId);
-      expect(result.profileId).toBe(profileId);
+      expect(result.connectionProfileId).toBe(connectionProfileId);
       expect(result.accessToken).toBe("mock_access_token_abc123");
       expect(result.refreshToken).toBe("mock_refresh_token_xyz789");
       expect(result.scopesGranted).toContain("read");
@@ -280,7 +280,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       mockServer.clearRequests(); // Clear the initiate-phase requests
 
@@ -306,14 +306,14 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       await handleCallback("mock-code", state);
 
       const rows = await db
         .select()
         .from(userProviderConnections)
-        .where(eq(userProviderConnections.profileId, profileId));
+        .where(eq(userProviderConnections.connectionProfileId, connectionProfileId));
 
       expect(rows).toHaveLength(1);
       const conn = rows[0]!;
@@ -334,7 +334,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       await handleCallback("mock-code", state);
 
@@ -353,7 +353,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       // Evict from the store to simulate TTL expiry
@@ -370,7 +370,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       await expect(handleCallback("bad-code", state)).rejects.toThrow("Token exchange failed");
@@ -391,7 +391,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       let caught: unknown;
@@ -416,7 +416,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       let caught: unknown;
@@ -449,7 +449,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       let caught: unknown;
@@ -486,7 +486,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       // State row exists pre-callback.
@@ -512,7 +512,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       try {
@@ -534,7 +534,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       await expect(handleCallback("mock-code", state)).rejects.toThrow("No access_token");
@@ -551,7 +551,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       const result = await handleCallback("mock-code", state);
 
@@ -572,7 +572,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       const result = await handleCallback("mock-code", state);
 
@@ -596,14 +596,14 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       await handleCallback("mock-code", state);
 
       const [conn] = await db
         .select()
         .from(userProviderConnections)
-        .where(eq(userProviderConnections.profileId, profileId));
+        .where(eq(userProviderConnections.connectionProfileId, connectionProfileId));
       expect(conn).toBeDefined();
       expect(conn!.needsReconnection).toBe(true);
       expect(conn!.scopesGranted).toEqual(["read"]);
@@ -622,7 +622,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
       const result = await handleCallback("mock-code", state);
       expect(result.scopeCreep).toEqual(["admin"]);
@@ -631,7 +631,7 @@ describe("OAuth2 flows", () => {
       const [conn] = await db
         .select()
         .from(userProviderConnections)
-        .where(eq(userProviderConnections.profileId, profileId));
+        .where(eq(userProviderConnections.connectionProfileId, connectionProfileId));
       expect(conn!.needsReconnection).toBe(false);
     });
   });
@@ -644,7 +644,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         PROVIDER_ID,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       const stateRow = await oauthStateStore.get(state);
@@ -670,7 +670,7 @@ describe("OAuth2 flows", () => {
         { orgId, applicationId: applicationId },
         noPkceProvider,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       // Auth URL should not have code_challenge
@@ -705,7 +705,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         basicProvider,
         actor,
-        profileId,
+        connectionProfileId,
       );
 
       mockServer.clearRequests();
@@ -745,7 +745,7 @@ describe("OAuth2 flows", () => {
         { orgId: orgId, applicationId: applicationId },
         systemProvider,
         actor,
-        profileId,
+        connectionProfileId,
       );
       expect(result.authUrl).toContain("/authorize");
       expect(result.state).toBeString();

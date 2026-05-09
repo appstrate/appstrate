@@ -11,13 +11,13 @@ const app = getTestApp();
 
 describe("Schedules API", () => {
   let ctx: TestContext;
-  let profileId: string;
+  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
     const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "Default" });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   function agentId(name: string) {
@@ -43,7 +43,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
         name: "Hourly",
       });
@@ -96,7 +96,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: profileId,
+          connectionProfileId: connectionProfileId,
           cronExpression: "0 9 * * 1-5",
           input: { note: "hello" },
         }),
@@ -115,7 +115,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: profileId,
+          connectionProfileId: connectionProfileId,
           cronExpression: "0 9 * * 1-5",
         }),
       });
@@ -131,7 +131,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: profileId,
+          connectionProfileId: connectionProfileId,
           cronExpression: "0 9 * * 1-5",
           input: { email: "" },
         }),
@@ -148,7 +148,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: profileId,
+          connectionProfileId: connectionProfileId,
           cronExpression: "0 9 * * 1-5",
           input: { email: "test@example.com" },
         }),
@@ -168,7 +168,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: profileId,
+          connectionProfileId: connectionProfileId,
           cronExpression: "0 9 * * 1-5",
           name: "Weekday 9am",
           timezone: "Europe/Paris",
@@ -190,7 +190,7 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: profileId, cronExpression: "not-valid-cron" }),
+        body: JSON.stringify({ connectionProfileId: connectionProfileId, cronExpression: "not-valid-cron" }),
       });
 
       expect(res.status).toBe(400);
@@ -205,7 +205,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
         name: "Old Name",
       });
@@ -231,7 +231,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
       });
 
@@ -252,7 +252,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
         name: "Hourly Run",
       });
@@ -307,7 +307,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
       });
 
@@ -340,7 +340,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
       });
 
@@ -392,7 +392,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profileId,
+        connectionProfileId: connectionProfileId,
         cronExpression: "0 * * * *",
       });
 

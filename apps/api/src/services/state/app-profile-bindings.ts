@@ -93,7 +93,7 @@ export async function getAppProfileBindingsEnriched(
     .leftJoin(
       userProviderConnections,
       and(
-        eq(userProviderConnections.profileId, appProfileProviderBindings.sourceProfileId),
+        eq(userProviderConnections.connectionProfileId, appProfileProviderBindings.sourceProfileId),
         eq(userProviderConnections.providerId, appProfileProviderBindings.providerId),
         eq(userProviderConnections.needsReconnection, false),
         credentialIds.length > 0
