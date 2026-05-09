@@ -80,7 +80,7 @@ describe("requireMutableAgent", () => {
   it("rejects system agent with 403", async () => {
     const app = createApp();
     app.use("/test", async (c, next) => {
-      c.set("agent", { id: "@system/agent", source: "system" } as unknown as LoadedPackage);
+      c.set("package", { id: "@system/agent", source: "system" } as unknown as LoadedPackage);
       return requireMutableAgent()(c, next);
     });
     app.get("/test", (c) => c.json({ ok: true }));

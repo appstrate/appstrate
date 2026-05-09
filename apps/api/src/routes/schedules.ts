@@ -69,7 +69,7 @@ export function createSchedulesRouter() {
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
   router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
     const scope = getAppScope(c);
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const schedules = await listPackageSchedules(scope, agent.id);
     return c.json(schedules);
   });
@@ -81,7 +81,7 @@ export function createSchedulesRouter() {
     requireAgent(),
     requirePermission("schedules", "write"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const actor = getActor(c);
 
       const body = await c.req.json();

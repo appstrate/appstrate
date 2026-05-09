@@ -125,7 +125,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
 
       const body = await c.req.json<Record<string, unknown>>();
       const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
@@ -156,7 +156,7 @@ export function createAgentsRouter() {
 
   // GET /api/agents/:scope/:name/provider-profiles — get per-provider profile overrides
   router.get("/:scope{@[^/]+}/:name/provider-profiles", requireAgent(), async (c) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const actor = getActor(c);
     const overrides = await getUserAgentProviderOverrides(actor, agent.id);
     return c.json({ overrides });
@@ -169,7 +169,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "run"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const actor = getActor(c);
       const body = await c.req.json();
       const data = parseBody(setProviderProfileSchema, body);
@@ -201,7 +201,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "run"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const actor = getActor(c);
       const body = await c.req.json();
       const data = parseBody(removeProviderProfileSchema, body);
@@ -218,7 +218,7 @@ export function createAgentsRouter() {
 
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
   router.get("/:scope{@[^/]+}/:name/proxy", requireAgent(), async (c) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const applicationId = c.get("applicationId");
     const { proxyId } = await getPackageConfig(applicationId, agent.id);
 
@@ -231,7 +231,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(proxyIdSchema, body);
@@ -251,7 +251,7 @@ export function createAgentsRouter() {
 
   // GET /api/agents/:scope/:name/model — get agent model configuration
   router.get("/:scope{@[^/]+}/:name/model", requireAgent(), async (c) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const applicationId = c.get("applicationId");
     const { modelId } = await getPackageConfig(applicationId, agent.id);
 
@@ -264,7 +264,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(modelIdSchema, body);
@@ -288,7 +288,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(appProfileIdSchema, body);
@@ -317,7 +317,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("persistence", "read"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actorType");
@@ -391,7 +391,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
@@ -417,7 +417,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
@@ -445,7 +445,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actorType");
@@ -493,7 +493,7 @@ export function createAgentsRouter() {
     requireAgent(),
     requirePermission("agents", "read"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId");
       const actor = getActor(c);

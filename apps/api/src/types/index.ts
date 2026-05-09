@@ -55,7 +55,7 @@ export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     endUser?: import("@appstrate/core/module").EndUserContext;
-    agent: LoadedPackage;
+    package: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
