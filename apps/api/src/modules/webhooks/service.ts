@@ -15,6 +15,7 @@ import type {
   WebhookCreateResponse,
   WebhookDelivery as WebhookDeliveryInfo,
 } from "./types.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Row types inferred directly from the module's Drizzle schema. Used as
@@ -667,7 +668,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
     if (err instanceof DOMException && err.name === "AbortError") {
       errorMessage = "Delivery timeout (15s)";
     } else {
-      errorMessage = err instanceof Error ? err.message : String(err);
+      errorMessage = getErrorMessage(err);
     }
   }
 
@@ -755,7 +756,7 @@ export function dispatchRunWebhook(
   }).catch((err) => {
     logger.warn("Webhook dispatch failed", {
       runId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   });
 }

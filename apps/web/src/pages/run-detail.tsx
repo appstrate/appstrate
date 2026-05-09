@@ -22,12 +22,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
-import {
-  ACTIVE_RUN_STATUSES,
-  type RunStatus,
-  type RunLog,
-  type EnrichedRun,
-} from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -49,19 +44,11 @@ export function RunDetailPage() {
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
-  const [liveStatus, setLiveStatus] = useState<RunStatus | null>(null);
-  const [trackedExecId, setTrackedExecId] = useState(runId);
 
-  // Reset live status when switching to a different run (e.g. re-run navigates
-  // to a new runId on the same route, so React reuses the component instance).
-  // Using the "state derived from props" pattern (setState during render) avoids
-  // the cascading-render lint warning from calling setState inside useEffect.
-  if (runId !== trackedExecId) {
-    setTrackedExecId(runId);
-    setLiveStatus(null);
-  }
-
-  const status = liveStatus || run?.status;
+  // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
+  // into the React Query cache from the LISTEN/NOTIFY stream, so reading
+  // `run?.status` is sufficient — no local mirror needed.
+  const status = run?.status;
   const isRunning = !!status && ACTIVE_RUN_STATUSES.has(status);
 
   const { data: logs } = useRunLogs(runId);
@@ -116,26 +103,12 @@ export function RunDetailPage() {
   const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
   const resultSubTab = userSubTab ?? autoSubTab;
 
-  // Single SSE connection: status changes drive `liveStatus`, log inserts
-  // patch the React Query cache, terminal status forces a refetch as a
-  // safety net so the final state can't drift.
+  // Per-run SSE for log inserts only. Status patches come from
+  // `useGlobalRunSync` (mounted in MainLayout), which writes directly into
+  // the same `["run", orgId, appId, runId]` cache key. Terminal-status
+  // refetch is also already triggered globally via
+  // `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
-    onStatusChange: useCallback(
-      (payload: Record<string, unknown>) => {
-        const newStatus = payload.status as RunStatus;
-        setLiveStatus(newStatus);
-        const terminal =
-          newStatus === "success" ||
-          newStatus === "failed" ||
-          newStatus === "timeout" ||
-          newStatus === "cancelled";
-        if (terminal) {
-          qc.invalidateQueries({ queryKey: ["run", orgId, appId, runId] });
-          qc.invalidateQueries({ queryKey: ["run-logs", orgId, appId, runId] });
-        }
-      },
-      [qc, orgId, appId, runId],
-    ),
     onNewLog: useCallback(
       (newLog: Record<string, unknown>) => {
         const log = newLog as unknown as RunLog;

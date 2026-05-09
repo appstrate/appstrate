@@ -25,9 +25,6 @@
  *      stored in `cli_refresh_tokens`.
  *   4. Deletes the `device_codes` row to preserve the one-shot contract.
  *
- * The old `/device/token` endpoint remains reachable for backward
- * compatibility but is no longer used by the CLI.
- *
  * ## Access token shape
  *
  * Matches the existing oauth-provider instance-level token format
@@ -75,6 +72,7 @@ import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** 15 minutes — the industry-standard short-lived access token window
  *  (gh, gcloud, aws sso all sit in the 15 min – 1 h band). Tight enough
@@ -856,7 +854,7 @@ export async function checkFamilyAndTouch(params: {
       logger.warn("oidc: cli last_used_at bump failed — auth still allowed", {
         module: "oidc",
         familyId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }
@@ -911,7 +909,7 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
     logger.warn("oidc: cli device-name lookup failed (runner attribution)", {
       module: "oidc",
       familyId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   }

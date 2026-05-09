@@ -16,6 +16,7 @@
 
 import { readFile } from "node:fs/promises";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface SnapshotFile {
   memories?: ExecutionContext["memories"];
@@ -44,7 +45,7 @@ export async function loadSnapshotFile(path: string): Promise<SnapshotFile> {
     raw = await readFile(path, "utf-8");
   } catch (err) {
     throw new SnapshotError(
-      `Cannot read --snapshot: ${err instanceof Error ? err.message : String(err)}`,
+      `Cannot read --snapshot: ${getErrorMessage(err)}`,
       `Check the path exists and is readable: ${path}`,
     );
   }
@@ -52,9 +53,7 @@ export async function loadSnapshotFile(path: string): Promise<SnapshotFile> {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new SnapshotError(
-      `--snapshot is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    throw new SnapshotError(`--snapshot is not valid JSON: ${getErrorMessage(err)}`);
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SnapshotError("--snapshot must be a JSON object");

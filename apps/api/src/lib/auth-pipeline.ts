@@ -33,6 +33,7 @@ import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import type { AppEnv } from "../types/index.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface AuthPipelineOptions {
   /**
@@ -224,13 +225,13 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       .from(userTable)
       .where(eq(userTable.id, session.user.id))
       .limit(1);
-    if (userRow?.realm) c.set("sessionRealm", userRow.realm);
+    if (userRow) c.set("sessionRealm", userRow.realm);
 
     // Ensure the user has a default connection profile (fire-and-forget)
     ensureDefaultProfile({ type: "user", id: session.user.id }).catch((err) => {
       logger.warn("Failed to ensure default profile", {
         userId: session.user.id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     });
 
@@ -307,23 +308,21 @@ const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize|\/
 /**
  * Device-flow + CLI-token content-type shim.
  *
- * RFC 8628 specifies `application/x-www-form-urlencoded` at `/device/code`
- * and `/device/token`; the 2.x CLI (issue #165) extends that convention
- * to the new `/cli/token` and `/cli/revoke` endpoints it polls instead.
- * Better Auth's `better-call` router only accepts JSON, so if the incoming
- * request targets any of those paths with a form-urlencoded body we parse
- * the body, rewrite it as JSON, and return a fresh Request with
- * `Content-Type: application/json`. All other requests (including the
- * existing JSON clients used by the integration test suite) pass through
- * unchanged.
+ * RFC 8628 specifies `application/x-www-form-urlencoded` at `/device/code`;
+ * the 2.x CLI (issue #165) extends that convention to the `/cli/token`
+ * and `/cli/revoke` endpoints it polls. Better Auth's `better-call` router
+ * only accepts JSON, so if the incoming request targets any of those paths
+ * with a form-urlencoded body we parse the body, rewrite it as JSON, and
+ * return a fresh Request with `Content-Type: application/json`. All other
+ * requests (including the existing JSON clients used by the integration
+ * test suite) pass through unchanged.
  *
  * Exported for unit testing — the transform has no side effects.
  */
 const FORM_TO_JSON_PATHS = new Set([
   "/api/auth/device/code",
-  "/api/auth/device/token",
   // Issue #165 — the 2.x CLI polls these endpoints with form-urlencoded
-  // bodies for protocol parity with the RFC 8628 endpoints above. Without
+  // bodies for protocol parity with the RFC 8628 endpoint above. Without
   // this shim entry, every real CLI login hits `/api/auth/cli/token` with
   // a form body that better-call refuses — the integration tests pass
   // only because they POST JSON directly via `app.request`.

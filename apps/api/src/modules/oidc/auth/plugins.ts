@@ -46,6 +46,7 @@ import {
   AppSignupClosedError,
   loadAppById,
 } from "../services/enduser-mapping.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OrgSignupClosedError,
   loadClientSignupPolicy,
@@ -59,7 +60,7 @@ import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes } from "./scopes.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
-export type OrgRoleClaim = "owner" | "admin" | "member" | "viewer";
+export type { OrgRole as OrgRoleClaim } from "@appstrate/core/permissions";
 
 export interface ClientMetadata {
   level?: "org" | "application" | "instance";
@@ -560,7 +561,7 @@ async function buildApplicationLevelClaims(
       module: "oidc",
       userId: user.id,
       applicationId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     throw err;
   }

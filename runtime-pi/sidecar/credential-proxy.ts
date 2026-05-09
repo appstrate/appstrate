@@ -14,7 +14,7 @@
  *   4. Inject the credential header server-side.
  *   5. Forward the request to the upstream API.
  *   6. Retry once on 401 with a refreshed token.
- *   7. Report persistent auth failures back to the platform.
+ *   7. Log persistent auth failures locally (once per provider per run).
  *
  * The MCP `provider_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
@@ -40,6 +40,8 @@ import {
   type CredentialsResponse,
   type SidecarConfig,
 } from "./helpers.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { logger } from "./logger.ts";
 
 /**
  * Body modes the proxy core accepts. The HTTP handler can produce
@@ -98,8 +100,9 @@ export interface ProviderCallDeps {
   refreshCredentials?: (providerId: string) => Promise<CredentialsResponse>;
   /**
    * Set tracking which providers already had a persistent auth
-   * failure reported in this run. Mutated by the function — shared
-   * across calls so a flapping provider only triggers one report.
+   * failure logged in this run. Mutated by the function — shared
+   * across calls so a flapping provider only logs once and so the
+   * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
 }
@@ -108,8 +111,8 @@ export interface ProviderCallDeps {
  * Execute a provider call end-to-end: fetch credentials, validate
  * the URL, substitute placeholders, inject the credential header
  * server-side, send the request, retry once on 401, capture cookies,
- * report auth failures. Returns the raw upstream `Response` (body
- * unread) on success, or a structured `{status, error}` failure
+ * log persistent auth failures. Returns the raw upstream `Response`
+ * (body unread) on success, or a structured `{status, error}` failure
  * before any outbound bytes were sent.
  */
 export async function executeProviderCall(
@@ -134,7 +137,7 @@ export async function executeProviderCall(
     return {
       ok: false,
       status: 502,
-      error: `Credential fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Credential fetch failed: ${getErrorMessage(err)}`,
     };
   }
 
@@ -297,23 +300,13 @@ export async function executeProviderCall(
     cookieJar.set(providerId, [...byName.values()]);
   }
 
-  // 9. Report persistent auth failures to the platform (once per
-  //    provider per run, only if the retry above did NOT fix it).
-  if (
-    upstream.status === 401 &&
-    config.platformApiUrl &&
-    config.runToken &&
-    !reportedAuthFailures.has(providerId)
-  ) {
+  // 9. Log persistent auth failures locally (once per provider per
+  //    run, only if the retry above did NOT fix it). The Set also
+  //    gates the 401-retry path above so a dead credential triggers
+  //    at most one refresh attempt per provider.
+  if (upstream.status === 401 && !reportedAuthFailures.has(providerId)) {
     reportedAuthFailures.add(providerId);
-    fetchFn(`${config.platformApiUrl}/internal/connections/report-auth-failure`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.runToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ providerId }),
-    }).catch(() => {});
+    logger.warn("Upstream returned 401 after retry", { providerId });
   }
 
   return { ok: true, response: upstream, authRefreshed };

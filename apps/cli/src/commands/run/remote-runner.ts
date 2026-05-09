@@ -40,10 +40,15 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  TERMINAL_RUN_STATUSES,
+  type RunStatus,
+  type TerminalRunStatus,
+} from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
 import type { Verbosity } from "./format.ts";
 
-const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_RECORD_POLL_EVERY_N_TICKS = 4;
@@ -59,8 +64,10 @@ const DEDUP_WINDOW_SIZE = 1024;
 /** Retry attempts for transient 5xx on the trigger POST + record poll. */
 const TRANSIENT_RETRY_DELAYS_MS = [500, 1_500];
 
-export type TerminalRunStatus = "success" | "failed" | "timeout" | "cancelled";
-export type RunStatus = "pending" | "running" | TerminalRunStatus;
+// `RunStatus` and `TerminalRunStatus` are imported from `@appstrate/shared-types`
+// (themselves derived from the Drizzle pgEnum in `packages/db`) — single source
+// of truth across server, CLI, and dashboard.
+export type { RunStatus, TerminalRunStatus };
 
 /** Subset of the `runs` row returned by `GET /api/runs/:id`. */
 export interface RemoteRunRecord {
@@ -273,7 +280,7 @@ export async function runRemote(
     if (!opts.json) writeStderr(`\nshutdown received, cancelling remote run...\n`);
     void cancelRun(opts, runId, { fetchImpl, requestTimeoutMs }).catch((err: unknown) => {
       if (!opts.json) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         writeStderr(`warn: cancel POST failed: ${msg}\n`);
       }
     });
@@ -325,10 +332,10 @@ export async function runRemote(
     if (tick % recordPollEveryNTicks === 0) {
       try {
         const record = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
-        if (TERMINAL_STATUSES.has(record.status)) break;
+        if (TERMINAL_RUN_STATUSES.has(record.status)) break;
       } catch (err) {
         if (!opts.json) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = getErrorMessage(err);
           writeStderr(`warn: run record refresh failed (will retry): ${msg}\n`);
         }
       }
@@ -363,7 +370,7 @@ export async function runRemote(
   }
 
   const status = (
-    TERMINAL_STATUSES.has(finalRecord.status) ? finalRecord.status : "failed"
+    TERMINAL_RUN_STATUSES.has(finalRecord.status) ? finalRecord.status : "failed"
   ) as TerminalRunStatus;
   const exitCode = status === "success" ? 0 : 1;
 

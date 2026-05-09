@@ -35,6 +35,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { apiFetchRaw, AuthError } from "./api.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Minimal OpenAPI 3.1 shape — only the fields we actually read. */
 export interface OpenApiDocument {
@@ -249,9 +250,7 @@ export async function fetchOpenApi(
   try {
     doc = (await res.json()) as OpenApiDocument;
   } catch (err) {
-    throw new Error(
-      `OpenAPI schema response was not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    throw new Error(`OpenAPI schema response was not valid JSON: ${getErrorMessage(err)}`);
   }
   if (!doc || typeof doc !== "object") {
     throw new Error("OpenAPI schema response was empty or not an object.");

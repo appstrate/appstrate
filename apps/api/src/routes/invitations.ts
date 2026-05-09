@@ -14,6 +14,7 @@ import {
   getOrgName,
   type AssignableRole,
 } from "../services/invitations.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { addMember } from "../services/organizations.ts";
 
 const router = new Hono();
@@ -139,7 +140,7 @@ router.post("/:token/accept", async (c) => {
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Invitation accept failed (new user)", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
         email: invitation.email,
       });
       throw internalError();

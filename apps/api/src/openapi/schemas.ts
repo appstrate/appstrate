@@ -519,19 +519,6 @@ export const schemas = {
           "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
-      modelOverridden: {
-        type: "boolean",
-        description:
-          "True when the run's effective model differs from the persisted default. Computed in the API mapper from `modelLabel` vs `config.defaults.model` — no longer stamped on the row.",
-      },
-      proxyOverridden: {
-        type: "boolean",
-        description: "Computed from `proxyLabel` vs `config.defaults.proxy`.",
-      },
-      versionOverridden: {
-        type: "boolean",
-        description: "Computed from `versionLabel` vs `config.defaults.version`.",
-      },
       userName: {
         type: ["string", "null"],
         description:

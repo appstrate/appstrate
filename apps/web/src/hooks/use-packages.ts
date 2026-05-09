@@ -23,10 +23,10 @@ import type {
 // --- Packages — config-driven factory ---
 
 const PACKAGE_CONFIG = {
-  agent: { path: "agents", detailKey: "agent" },
-  skill: { path: "skills", detailKey: "skill" },
-  tool: { path: "tools", detailKey: "tool" },
-  provider: { path: "providers", detailKey: "provider" },
+  agent: { path: "agents" },
+  skill: { path: "skills" },
+  tool: { path: "tools" },
+  provider: { path: "providers" },
 } as const;
 
 type PackageDetailMap = {
@@ -53,11 +53,8 @@ function usePackageDetail<T extends PackageType>(type: T, id: string | undefined
   const cfg = PACKAGE_CONFIG[type];
 
   return useQuery({
-    queryKey: ["packages", cfg.detailKey, orgId, appId, id],
-    queryFn: async () => {
-      const data = await api<Record<string, unknown>>(`/packages/${cfg.path}/${id}`);
-      return data[cfg.detailKey] as PackageDetailMap[T];
-    },
+    queryKey: ["packages", cfg.path, orgId, appId, id],
+    queryFn: () => api<PackageDetailMap[T]>(`/packages/${cfg.path}/${id}`),
     enabled: !!orgId && !!appId && !!id,
   });
 }

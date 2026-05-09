@@ -63,6 +63,53 @@ export interface CatalogVersion {
 }
 
 /**
+ * Generic 3-step semver resolution: exact match → dist-tag → semver range.
+ *
+ * Pure string-level helper. Callers are responsible for hydrating any
+ * associated metadata (id, integrity, …) from the returned version
+ * string, and for applying yank policy by pre-filtering the
+ * `rangeVersions` and `distTags` inputs accordingly.
+ *
+ * Conventional yank policy (matches npm/crates.io and the canonical
+ * {@link resolveVersionFromCatalog} below):
+ * - `exactVersions`: include yanked (exact pins always resolve).
+ * - `distTags`: exclude tags pointing at yanked versions.
+ * - `rangeVersions`: exclude yanked.
+ *
+ * Returns the matched version string (e.g. `"1.2.3"`) or `null`.
+ */
+export function resolveVersionString(
+  query: string,
+  exactVersions: readonly string[],
+  rangeVersions: readonly string[],
+  distTags: Readonly<Record<string, string>>,
+): string | null {
+  // 1. Exact match (caller decides whether yanked are included).
+  if (isValidVersion(query)) {
+    return exactVersions.includes(query) ? query : null;
+  }
+
+  // 2. Dist-tag (caller pre-filters out tags pointing at yanked).
+  const tagged = distTags[query];
+  if (tagged !== undefined) {
+    if (rangeVersions.includes(tagged) || exactVersions.includes(tagged)) {
+      return tagged;
+    }
+    // Tag found but the target was filtered out (e.g. yanked) — do
+    // not fall through to range resolution; tags are not ranges.
+    return null;
+  }
+
+  // 3. Semver range.
+  if (isValidRange(query)) {
+    const candidates = rangeVersions.filter(isValidVersion);
+    return matchVersion([...candidates], query);
+  }
+
+  return null;
+}
+
+/**
  * Resolve a version query against a catalog of versions and dist-tags.
  * 3-step resolution: exact match → dist-tag → semver range.
  *
@@ -71,35 +118,30 @@ export interface CatalogVersion {
  * - Semver range excludes yanked versions.
  *
  * Returns the version id, or null if no match.
+ *
+ * Internally delegates to {@link resolveVersionString} so the
+ * algorithm stays consistent across all platform call sites.
  */
 export function resolveVersionFromCatalog(
   query: string,
   versions: CatalogVersion[],
   distTags: DistTagEntry[],
 ): number | null {
-  // 1. Exact match — includes yanked
-  if (isValidVersion(query)) {
-    const exact = versions.find((v) => v.version === query);
-    if (exact) return exact.id;
-    return null;
+  if (versions.length === 0) return null;
+
+  const byVersion = new Map<string, CatalogVersion>();
+  for (const v of versions) byVersion.set(v.version, v);
+
+  const exactVersionStrings = versions.map((v) => v.version);
+  const rangeVersionStrings = versions.filter((v) => !v.yanked).map((v) => v.version);
+
+  const distTagMap: Record<string, string> = {};
+  for (const t of distTags) {
+    const target = versions.find((v) => v.id === t.versionId && !v.yanked);
+    if (target) distTagMap[t.tag] = target.version;
   }
 
-  // 2. Dist-tag — excludes yanked
-  const tagEntry = distTags.find((t) => t.tag === query);
-  if (tagEntry) {
-    const tagged = versions.find((v) => v.id === tagEntry.versionId && !v.yanked);
-    if (tagged) return tagged.id;
-  }
-
-  // 3. Semver range — excludes yanked
-  if (isValidRange(query)) {
-    const nonYanked = versions.filter((v) => !v.yanked);
-    const versionStrings = nonYanked.map((v) => v.version).filter(isValidVersion);
-    const best = matchVersion(versionStrings, query);
-    if (!best) return null;
-    const match = nonYanked.find((v) => v.version === best);
-    return match?.id ?? null;
-  }
-
-  return null;
+  const matched = resolveVersionString(query, exactVersionStrings, rangeVersionStrings, distTagMap);
+  if (matched === null) return null;
+  return byVersion.get(matched)?.id ?? null;
 }

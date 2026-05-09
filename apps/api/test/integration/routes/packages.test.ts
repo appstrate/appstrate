@@ -155,10 +155,10 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent).toBeDefined();
-      expect(body.agent.id).toBe("@pkgorg/detail-agent");
-      expect(body.agent.versionCount).toBe(0);
-      expect(body.agent.hasUnarchivedChanges).toBe(true);
+      expect(body).toBeDefined();
+      expect(body.id).toBe("@pkgorg/detail-agent");
+      expect(body.versionCount).toBe(0);
+      expect(body.hasUnarchivedChanges).toBe(true);
     });
 
     it("returns hasUnarchivedChanges false when no changes since last version", async () => {
@@ -185,8 +185,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.versionCount).toBe(1);
-      expect(body.agent.hasUnarchivedChanges).toBe(false);
+      expect(body.versionCount).toBe(1);
+      expect(body.hasUnarchivedChanges).toBe(false);
     });
 
     it("returns 404 for non-existent package", async () => {
@@ -248,8 +248,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.skill).toBeDefined();
-      expect(body.skill.id).toBe("@pkgorg/detail-skill");
+      expect(body).toBeDefined();
+      expect(body.id).toBe("@pkgorg/detail-skill");
     });
 
     it("returns 404 for non-existent skill", async () => {
@@ -319,7 +319,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.skill.id).toBe("@pkgorg/installed-skill");
+      expect(body.id).toBe("@pkgorg/installed-skill");
     });
   });
 

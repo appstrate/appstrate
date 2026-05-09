@@ -5,10 +5,8 @@
  *
  * Exposes the rotating-refresh-token surface that replaces BA's default
  * session-minting `/device/token`. Mounted alongside the existing
- * `deviceAuthorization()` plugin — the old `/device/token` stays
- * reachable for backward compatibility with legacy CLI binaries, but
- * the 2.x CLI polls `/cli/token` which returns a JWT + rotating
- * refresh-token pair.
+ * `deviceAuthorization()` plugin — the 2.x CLI polls `/cli/token` which
+ * returns a JWT + rotating refresh-token pair.
  *
  * Endpoints:
  *

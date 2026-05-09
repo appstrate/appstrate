@@ -23,6 +23,7 @@
 import { hasRedis } from "../../infra/index.ts";
 import { getRedisConnection } from "../../lib/redis.ts";
 import { logger } from "../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Abstract cookie jar store. Keyed by `(sessionId, providerKey)` since
@@ -127,7 +128,7 @@ export class RedisCookieJarStore implements CookieJarStore {
       return Array.isArray(parsed) ? (parsed as string[]) : [];
     } catch (err) {
       logger.warn("credential-proxy cookie jar GET failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       return [];
     }
@@ -148,7 +149,7 @@ export class RedisCookieJarStore implements CookieJarStore {
       );
     } catch (err) {
       logger.warn("credential-proxy cookie jar SET failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

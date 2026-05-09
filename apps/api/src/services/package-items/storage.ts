@@ -6,6 +6,7 @@ import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../../lib/logger.ts";
 import { PACKAGE_ITEMS_BUCKET } from "./config.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 // ─────────────────────────────────────────────
 // Package item Storage (full ZIP)
@@ -24,7 +25,7 @@ export async function uploadPackageFiles(
   try {
     await storage.uploadFile(PACKAGE_ITEMS_BUCKET, path, zip);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = getErrorMessage(err);
     logger.error("Failed to upload package files", { type, orgId, itemId, error: message });
     throw err;
   }

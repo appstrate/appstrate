@@ -473,7 +473,7 @@ export const schedules = pgTable(
     enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),
     timezone: text("timezone").default("UTC"),
-    input: jsonb("input"),
+    input: jsonb("input").$type<Record<string, unknown>>(),
     // Per-schedule override layer — frozen at schedule creation/edit and
     // deep-merged with the application's persisted config every time the
     // schedule fires. Mirrors the per-run override pipeline (POST /run

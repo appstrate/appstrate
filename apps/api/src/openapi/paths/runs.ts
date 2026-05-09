@@ -72,7 +72,6 @@ export const runsPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
-            Sunset: { $ref: "#/components/headers/Sunset" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },

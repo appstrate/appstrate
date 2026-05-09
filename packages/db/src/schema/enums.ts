@@ -52,12 +52,12 @@ export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(activeRunStat
 export type ActiveRunStatus = (typeof activeRunStatusValues)[number];
 
 /**
- * RunEvent types that mark a run as terminal — `run.completed`, `run.failed`,
+ * RunEvent types that mark a run as terminal — `run.success`, `run.failed`,
  * `run.timeout`, `run.cancelled`. Mirrors `terminalRunStatusValues` but for
  * the event-stream side of the boundary.
  */
 export const TERMINAL_RUN_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "run.completed",
+  "run.success",
   "run.failed",
   "run.timeout",
   "run.cancelled",

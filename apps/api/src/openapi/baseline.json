@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Deprecated API versions include a `Sunset` header (RFC 8594). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -403,6 +403,106 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/bootstrap/redeem": {
+      "post": {
+        "operationId": "redeemBootstrapToken",
+        "tags": ["Auth"],
+        "summary": "Claim ownership of an unattended install",
+        "description": "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default application, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token", "email", "password", "name"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "Bootstrap token from the install banner / .env."
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ownership claimed, session cookie set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "session": {
+                      "type": "object"
+                    },
+                    "bootstrap": {
+                      "type": "object",
+                      "properties": {
+                        "orgId": {
+                          "type": "string"
+                        },
+                        "orgSlug": {
+                          "type": "string"
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Optional advisory codes — e.g. `default_app_provisioning_failed` when the post-bootstrap default-app/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/applications."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Invalid bootstrap token"
+          },
+          "403": {
+            "description": "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies."
+          },
+          "409": {
+            "description": "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS)."
+          },
+          "410": {
+            "description": "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)"
+          },
+          "422": {
+            "description": "Signup rejected (weak password, duplicate email)"
+          },
+          "429": {
+            "description": "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens."
           }
         }
       }
@@ -1975,9 +2075,6 @@
               "Idempotent-Replayed": {
                 "$ref": "#/components/headers/IdempotentReplayed"
               },
-              "Sunset": {
-                "$ref": "#/components/headers/Sunset"
-              },
               "RateLimit": {
                 "$ref": "#/components/headers/RateLimit"
               },
@@ -2680,7 +2777,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run.",
+        "description": "Get persisted log entries for a run. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth. `id` is a monotonic BIGSERIAL; an invalid cursor falls back to the full list rather than 400.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2695,6 +2792,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll."
           }
         ],
         "responses": {
@@ -9683,57 +9791,6 @@
         }
       }
     },
-    "/internal/connections/report-auth-failure": {
-      "post": {
-        "operationId": "reportAuthFailure",
-        "tags": ["Internal"],
-        "summary": "Report upstream auth failure",
-        "description": "Called by sidecar when an upstream provider returns 401. Flags the connection as needs_reconnection. Container-to-host only. Auth via Bearer run token.",
-        "security": [
-          {
-            "bearerExecToken": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "providerId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Provider ID that returned 401"
-                  }
-                },
-                "required": ["providerId"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Acknowledgement",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "flagged": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
     "/api/welcome/setup": {
       "post": {
         "operationId": "welcomeSetup",
@@ -10217,12 +10274,17 @@
                     "type": {
                       "type": "string",
                       "description": "Package type (agent/skill/tool/provider)"
+                    },
+                    "version": {
+                      "type": "string",
+                      "description": "Imported manifest version (semver). Omitted when the manifest carries no version field."
                     }
                   }
                 },
                 "example": {
                   "packageId": "@acme/email-sorter",
-                  "type": "agent"
+                  "type": "agent",
+                  "version": "1.0.0"
                 }
               }
             }
@@ -10356,6 +10418,10 @@
                     "type": {
                       "type": "string",
                       "description": "Package type (agent/skill/tool/provider)"
+                    },
+                    "version": {
+                      "type": "string",
+                      "description": "Imported manifest version (semver). Omitted when the manifest carries no version field."
                     }
                   }
                 }
@@ -12271,12 +12337,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "agent": {
-                      "$ref": "#/components/schemas/AgentDetail"
-                    }
-                  }
+                  "$ref": "#/components/schemas/AgentDetail"
                 }
               }
             }
@@ -14189,12 +14250,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "agent": {
-                      "$ref": "#/components/schemas/AgentDetail"
-                    }
-                  }
+                  "$ref": "#/components/schemas/AgentDetail"
                 }
               }
             }
@@ -17390,13 +17446,6 @@
           "example": "2026-03-21"
         }
       },
-      "Sunset": {
-        "description": "RFC 8594 Sunset header. Present when the requested API version is deprecated, indicating when it will be removed.",
-        "schema": {
-          "type": "string",
-          "format": "date"
-        }
-      },
       "IdempotentReplayed": {
         "description": "Set to 'true' when the response is a cached replay of a previous idempotent request.",
         "schema": {
@@ -18079,21 +18128,14 @@
       },
       "Run": {
         "type": "object",
-        "required": [
-          "id",
-          "packageId",
-          "orgId",
-          "applicationId",
-          "status",
-          "versionDirty",
-          "startedAt"
-        ],
+        "required": ["id", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
         "properties": {
           "id": {
             "type": "string"
           },
           "packageId": {
-            "type": "string"
+            "type": ["string", "null"],
+            "description": "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible."
           },
           "userId": {
             "type": ["string", "null"],
@@ -18209,16 +18251,6 @@
             "type": ["object", "null"],
             "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
             "additionalProperties": true
-          },
-          "modelOverridden": {
-            "type": "boolean",
-            "description": "True when the caller's modelId differed from the persisted default."
-          },
-          "proxyOverridden": {
-            "type": "boolean"
-          },
-          "versionOverridden": {
-            "type": "boolean"
           },
           "userName": {
             "type": ["string", "null"],

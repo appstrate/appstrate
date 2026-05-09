@@ -1,6 +1,8 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
+import { timingSafeEqual } from "node:crypto";
+
 import { stripScope } from "./naming.ts";
 
 /**
@@ -27,13 +29,24 @@ export interface IntegrityCheckResult {
   computed: string;
 }
 
-/** Verify artifact integrity by computing SHA256 hash and comparing to expected value. */
+/**
+ * Verify artifact integrity by computing SHA256 hash and comparing to expected value.
+ *
+ * Comparison is constant-time when the lengths match — a short-circuit on
+ * mismatched lengths is safe because SRI strings of a given algorithm have a
+ * fixed length, and the length itself is not a secret.
+ */
 export function verifyArtifactIntegrity(
   data: Uint8Array,
   expectedIntegrity: string,
 ): IntegrityCheckResult {
   const computed = computeIntegrity(data);
-  return { valid: computed === expectedIntegrity, computed };
+  if (computed.length !== expectedIntegrity.length) {
+    return { valid: false, computed };
+  }
+  const a = Buffer.from(computed, "utf8");
+  const b = Buffer.from(expectedIntegrity, "utf8");
+  return { valid: timingSafeEqual(a, b), computed };
 }
 
 // ─────────────────────────────────────────────

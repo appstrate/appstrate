@@ -23,6 +23,11 @@
  *      and `-v` reveals more.
  */
 
+// Shared formatter — see `@appstrate/core/format`. The CLI used to inline a
+// slightly different variant (no GB tier, integer KB above 10) — visual
+// difference is negligible for the truncation blurb.
+import { formatBytes } from "@appstrate/core/format";
+
 export type Verbosity = "quiet" | "normal" | "verbose";
 
 /** Compact arg preview length (matches `apps/web/src/components/log-utils.ts`). */
@@ -115,13 +120,6 @@ export function isTruncationMarker(v: unknown): v is TruncationMarker {
   if (!v || typeof v !== "object") return false;
   const m = v as Record<string, unknown>;
   return m.__truncated === true && typeof m.bytes === "number" && typeof m.limit === "number";
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const kb = n / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
@@ -111,7 +112,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           onKeyCreated?.(result.key);
         },
         onError: (err) => {
-          setError("root", { message: err instanceof Error ? err.message : String(err) });
+          setError("root", { message: getErrorMessage(err) });
         },
       },
     );

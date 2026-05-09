@@ -41,6 +41,7 @@ import {
   emitRuntimeReady,
   startSinkHeartbeat,
 } from "@appstrate/runner-pi";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   BUNDLE_FORMAT_VERSION,
   bundleIntegrity,
@@ -128,9 +129,7 @@ try {
   if (err instanceof RuntimeEnvError) {
     process.stderr.write(`${err.message}\n`);
   } else {
-    process.stderr.write(
-      `runtime-pi: env validation failed — ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`runtime-pi: env validation failed — ${getErrorMessage(err)}\n`);
   }
   process.exit(1);
 }
@@ -279,12 +278,9 @@ if (bundle) {
   try {
     const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: WORKSPACE,
-      extensionWrapper: (factory, id) =>
-        wrapExtensionFactory(factory, id, appstrateCtxProvider),
+      extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id, appstrateCtxProvider),
       onError: (message, err) => {
-        void emitError(
-          err ? `${message}: ${err instanceof Error ? err.message : String(err)}` : message,
-        );
+        void emitError(err ? `${message}: ${getErrorMessage(err)}` : message);
       },
     });
     extensionFactories.push(...prepared.extensionFactories);
@@ -294,9 +290,7 @@ if (bundle) {
     void prepared.cleanup().catch(() => {});
     void fs.unlink(packagePath).catch(() => {});
   } catch (err) {
-    await emitError(
-      `Failed to prepare agent package: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
   }
 }
 
@@ -331,9 +325,7 @@ try {
     clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
   });
 } catch (err) {
-  await emitError(
-    `Failed to connect MCP client to sidecar: ${err instanceof Error ? err.message : String(err)}`,
-  );
+  await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
   process.exit(1);
 }
 
@@ -387,9 +379,7 @@ try {
     },
   };
 } catch (err) {
-  await emitError(
-    `Failed to wire MCP-backed tools: ${err instanceof Error ? err.message : String(err)}`,
-  );
+  await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
   process.exit(1);
 }
 
@@ -479,7 +469,7 @@ const heartbeat = startSinkHeartbeat({
     // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
     // container log forwarding captures it without polluting the event
     // stream.
-    process.stderr.write(`[heartbeat] ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[heartbeat] ${getErrorMessage(err)}\n`);
   },
 });
 
@@ -515,7 +505,7 @@ try {
 } catch (err) {
   heartbeat.stop();
   await mcpClient.close().catch(() => {});
-  const message = err instanceof Error ? err.message : String(err);
+  const message = getErrorMessage(err);
   await emitError(message);
   try {
     const failureResult = emptyRunResult();

@@ -29,14 +29,11 @@ import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { notFound } from "../lib/errors.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import {
-  PersistingEventSink,
-  hasRunnerLedgerRow,
-  writeRunnerLedgerRow,
-} from "./run-launcher/appstrate-event-sink.ts";
+import { PersistingEventSink, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -268,17 +265,13 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   //     before the fire-and-forget POST resolved). The metric handler
   //     and this fallback both target the same partial unique index
   //     (run_id WHERE source='runner'); whichever lands first owns the
-  //     row, the other is a no-op via ON CONFLICT DO NOTHING. The
-  //     pre-check avoids an insert attempt when we already know the
-  //     row is there.
+  //     row, the other is a no-op via ON CONFLICT DO NOTHING — no
+  //     pre-check needed.
   if (typeof result.cost === "number" && result.cost > 0) {
-    const alreadyWritten = await hasRunnerLedgerRow(run.id);
-    if (!alreadyWritten) {
-      await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-        cost: result.cost,
-        usage: result.usage ?? null,
-      });
-    }
+    await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
+      cost: result.cost,
+      usage: result.usage ?? null,
+    });
   }
 
   const cost = await computeRunCost(run.id);
@@ -315,7 +308,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   } catch (err) {
     logger.error("afterRun hook failed on remote run finalize", {
       runId: run.id,
-      err: err instanceof Error ? err.message : String(err),
+      err: getErrorMessage(err),
     });
   }
 

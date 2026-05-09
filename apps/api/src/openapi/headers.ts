@@ -13,11 +13,6 @@ export const headers = {
       "API version used for this request (format: YYYY-MM-DD). Always included on authenticated responses.",
     schema: { type: "string", example: "2026-03-21" },
   },
-  Sunset: {
-    description:
-      "RFC 8594 Sunset header. Present when the requested API version is deprecated, indicating when it will be removed.",
-    schema: { type: "string", format: "date" },
-  },
   IdempotentReplayed: {
     description:
       "Set to 'true' when the response is a cached replay of a previous idempotent request.",

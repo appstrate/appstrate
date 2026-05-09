@@ -13,6 +13,7 @@ import {
   createNetwork,
   removeNetwork,
 } from "./docker.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   SIDECAR_MEMORY_BYTES,
   SIDECAR_NANO_CPUS,
@@ -69,13 +70,13 @@ export async function initSidecarPool(): Promise<void> {
       await removeNetwork(standbyNetworkId).catch((err) =>
         logger.warn("Failed to remove network", {
           networkId: standbyNetworkId,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         }),
       );
       standbyNetworkId = undefined;
     }
     logger.warn("Sidecar pool disabled — falling back to on-demand creation", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     enabled = false;
   }
@@ -139,13 +140,13 @@ export async function acquireSidecar(
     return entry.containerId;
   } catch (err) {
     logger.warn("Failed to acquire sidecar from pool, will create fresh", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     // Clean up the failed container
     removeContainer(entry.containerId).catch((err) =>
       logger.warn("Failed to remove container", {
         containerId: entry.containerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       }),
     );
     scheduleReplenish();
@@ -161,7 +162,7 @@ export async function shutdownSidecarPool(): Promise<void> {
     await removeContainer(entry.containerId).catch((err) =>
       logger.warn("Failed to remove container", {
         containerId: entry.containerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       }),
     );
   }
@@ -169,7 +170,7 @@ export async function shutdownSidecarPool(): Promise<void> {
     await removeNetwork(standbyNetworkId).catch((err) =>
       logger.warn("Failed to remove network", {
         networkId: standbyNetworkId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       }),
     );
     standbyNetworkId = undefined;
@@ -186,7 +187,7 @@ function scheduleReplenish(): void {
     replenish()
       .catch((err) => {
         logger.warn("Sidecar pool replenish failed", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       })
       .finally(() => {
@@ -203,7 +204,7 @@ export async function startSidecarAndHealthCheck(containerId: string): Promise<n
     await removeContainer(containerId).catch((err) =>
       logger.warn("Failed to remove container", {
         containerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       }),
     );
     throw new Error("No host port mapped for sidecar");
@@ -258,7 +259,7 @@ async function replenish(): Promise<void> {
       pool.push(result.value);
     } else {
       logger.warn("Failed to create pooled sidecar", {
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        error: getErrorMessage(result.reason),
       });
     }
   }

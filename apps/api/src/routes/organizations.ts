@@ -21,6 +21,7 @@ import {
   updateOrgSettings,
   orgSettingsSchema,
 } from "../services/organizations.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -183,7 +184,7 @@ router.post("/", async (c) => {
   const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
     logger.warn("Failed to create default application for new org", {
       orgId: org.id,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   });

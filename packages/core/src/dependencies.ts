@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseScopedName } from "./naming.ts";
+import { getErrorMessage } from "./errors";
 
 // ─────────────────────────────────────────────
 // Dependencies shape (manifest format)
@@ -186,9 +187,7 @@ export async function detectCycle(
     try {
       transitiveDeps = await resolveDeps(scope, name);
     } catch (err) {
-      resolveErrors.push(
-        `Failed to resolve deps for ${current}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      resolveErrors.push(`Failed to resolve deps for ${current}: ${getErrorMessage(err)}`);
       continue;
     }
 

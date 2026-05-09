@@ -13,13 +13,7 @@ export type ProviderCallBody =
   | { kind: "inline"; data: string; encoding: "base64"; mimeType: string; size: number }
   | { kind: "file"; path: string; size: number; mimeType: string; sha256: string };
 
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+export { formatBytes } from "@appstrate/core/format";
 
 /**
  * Decode a base64 payload into a Uint8Array. Uses `atob` because the

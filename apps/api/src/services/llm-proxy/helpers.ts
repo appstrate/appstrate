@@ -24,6 +24,7 @@
  */
 
 import { logger } from "../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Rewrite `body.model` to `realModelId` without parsing-then-reserialising
@@ -38,7 +39,7 @@ export function substituteModelJson(rawBody: Uint8Array, realModelId: string): U
     parsed = JSON.parse(text);
   } catch (err) {
     logger.warn("llm-proxy: request body is not JSON — forwarding as-is", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return rawBody;
   }

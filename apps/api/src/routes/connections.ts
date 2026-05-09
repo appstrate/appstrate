@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getItemId } from "./packages.ts";
 import { logger } from "../lib/logger.ts";
-import { escapeHtml } from "../lib/html.ts";
+import { escapeHtml } from "@appstrate/core/html";
 import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";

@@ -37,6 +37,7 @@ import { applicationSmtpConfigs } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const ENCRYPTION_KEY_VERSION = "v1";
 
@@ -121,7 +122,7 @@ function buildTransport(row: SmtpRow): Transporter | null {
     logger.error("oidc smtp: decryption failed for per-app config, treating as unconfigured", {
       applicationId: row.applicationId,
       rowVersion: row.encryptionKeyVersion,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return null;
   }

@@ -15,6 +15,7 @@ import {
   testProviderKeyConnection,
   loadProviderKeyCredentials,
 } from "../services/org-provider-keys.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -74,7 +75,7 @@ export function createProviderKeysRouter() {
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Provider key create failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -103,7 +104,7 @@ export function createProviderKeysRouter() {
       return c.json(result);
     } catch (err) {
       logger.error("Provider key inline test failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -122,7 +123,7 @@ export function createProviderKeysRouter() {
     } catch (err) {
       logger.error("Provider key test failed", {
         id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -150,7 +151,7 @@ export function createProviderKeysRouter() {
     } catch (err) {
       logger.error("Provider key update failed", {
         id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -174,7 +175,7 @@ export function createProviderKeysRouter() {
     } catch (err) {
       logger.error("Provider key delete failed", {
         id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

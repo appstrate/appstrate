@@ -33,6 +33,7 @@ import {
   type UploadAdapter,
   type UploadResult,
 } from "./types.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const GRID_BYTES = 320 * 1024; // 320 KiB
 // 5 MiB = 5 242 880 B = 16 × 320 KiB → divisible by the Graph grid, so it
@@ -101,7 +102,7 @@ export const msResumableAdapter: UploadAdapter = {
       parsed = JSON.parse(res.body);
     } catch (err) {
       throw new UploadError(
-        `ms-resumable: createUploadSession returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
+        `ms-resumable: createUploadSession returned non-JSON body: ${getErrorMessage(err)}`,
         res.status,
         res.headers,
         res.body,

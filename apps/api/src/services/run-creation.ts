@@ -38,6 +38,7 @@ import { isInlineShadowPackageId } from "./inline-run.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { RunOrigin } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -179,7 +180,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       ok: false,
       error: {
         code: "agent_not_ready",
-        message: err instanceof Error ? err.message : String(err),
+        message: getErrorMessage(err),
         status: 400,
       },
     };

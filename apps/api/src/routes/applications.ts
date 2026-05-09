@@ -13,6 +13,7 @@ import {
   internalError,
   parseBody,
 } from "../lib/errors.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createApplication,
@@ -117,7 +118,7 @@ export function createApplicationsRouter() {
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Application creation failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -135,7 +136,7 @@ export function createApplicationsRouter() {
       if (err instanceof ApiError) throw err;
       logger.error("Failed to get application", {
         appId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -166,7 +167,7 @@ export function createApplicationsRouter() {
       if (err instanceof ApiError) throw err;
       logger.error("Application update failed", {
         appId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -189,7 +190,7 @@ export function createApplicationsRouter() {
       if (err instanceof ApiError) throw err;
       logger.error("Application deletion failed", {
         appId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

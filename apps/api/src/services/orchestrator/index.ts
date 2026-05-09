@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getExecutionMode } from "../../infra/mode.ts";
-import type { ContainerOrchestrator } from "./interface.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
+import type { ContainerOrchestrator } from "@appstrate/core/platform-types";
 
-export type { ContainerOrchestrator } from "./interface.ts";
-export type * from "./types.ts";
+export type {
+  ContainerOrchestrator,
+  WorkloadHandle,
+  WorkloadResources,
+  InjectableFile,
+  WorkloadSpec,
+  IsolationBoundary,
+  CleanupReport,
+  StopResult,
+  SidecarConfig,
+  LlmProxyConfig,
+} from "@appstrate/core/platform-types";
 
 let instance: ContainerOrchestrator | undefined;
 

@@ -14,6 +14,7 @@ import {
   listPackageRuns,
   listRunLogs,
 } from "../services/state/runs.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import type { AppstrateRunPlan, UploadedFile } from "../services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -142,7 +143,7 @@ export async function executeAgentInBackground(
       // the `finally` — we only synthesise a terminal failure here for
       // genuine infrastructure errors.
       if (signal.aborted) return;
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       logger.error("runPlatformContainer threw — synthesising failed terminal", {
         runId,
         error: message,

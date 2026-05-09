@@ -52,11 +52,7 @@ export function requirePlatformRealm() {
     if (c.get("authMethod") !== "session") return next();
 
     const realm = c.get("sessionRealm");
-    // Default / missing realm is treated as platform. Production sessions
-    // always carry a realm (set by the session.create.before hook); the
-    // undefined branch only fires for legacy sessions minted before the
-    // realm column existed, which we want to keep working.
-    if (!realm || realm === "platform") return next();
+    if (realm === "platform") return next();
 
     if (isRealmAgnosticPath(c.req.path)) return next();
 

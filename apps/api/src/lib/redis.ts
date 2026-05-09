@@ -3,6 +3,7 @@
 import Redis from "ioredis";
 import { getEnv } from "@appstrate/env";
 import { logger } from "./logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 let publisher: Redis | null = null;
 let subscriber: Redis | null = null;
@@ -50,7 +51,7 @@ export async function closeRedis(): Promise<void> {
     await subscriber?.quit();
   } catch (err) {
     logger.warn("Error closing Redis connections", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
   publisher = null;

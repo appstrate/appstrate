@@ -33,6 +33,7 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 // Streaming cap — mirrored from runtime-pi/sidecar constants.
 // The streaming/buffered decision is header-driven (X-Stream-Request),
@@ -299,7 +300,7 @@ export function createCredentialProxyRouter() {
         logger.error("credential-proxy: profile resolution failed", {
           applicationId,
           endUserId: endUser?.id,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
         throw internalError();
       }
@@ -519,7 +520,7 @@ export function createCredentialProxyRouter() {
           userId,
           applicationId,
           providerId,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
         throw internalError();
       }

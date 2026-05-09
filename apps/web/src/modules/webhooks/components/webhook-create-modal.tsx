@@ -12,6 +12,7 @@ import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface Props {
   open: boolean;
@@ -66,7 +67,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
           setCreatedSecret(result.secret);
         },
         onError: (err) => {
-          setError("root", { message: err instanceof Error ? err.message : String(err) });
+          setError("root", { message: getErrorMessage(err) });
         },
       },
     );

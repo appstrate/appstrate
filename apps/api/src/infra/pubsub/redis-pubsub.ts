@@ -3,6 +3,7 @@
 import { getRedisConnection, getRedisSubscriber } from "../../lib/redis.ts";
 import { logger } from "../../lib/logger.ts";
 import type { PubSub } from "./interface.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export class RedisPubSub implements PubSub {
   private handlers = new Map<string, (message: string) => void>();
@@ -45,7 +46,7 @@ export class RedisPubSub implements PubSub {
     } catch (err) {
       logger.warn("Error unsubscribing from channel", {
         channel,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

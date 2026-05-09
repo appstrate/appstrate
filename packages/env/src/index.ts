@@ -205,7 +205,7 @@ const envSchema = z
     REMOTE_RUN_REPLAY_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),
     // Out-of-order event buffer flush window. Events with non-contiguous
     // sequence numbers wait up to this long for the gap to fill; terminal
-    // events (run.completed/failed/timeout/cancelled) flush immediately
+    // events (run.success/failed/timeout/cancelled) flush immediately
     // regardless of gaps.
     REMOTE_RUN_BUFFER_FLUSH_MS: z.coerce.number().int().positive().default(5000),
 

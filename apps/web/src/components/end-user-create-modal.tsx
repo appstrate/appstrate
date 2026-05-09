@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "./spinner";
 import { useCreateEndUser } from "../hooks/use-end-users";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface Props {
   open: boolean;
@@ -49,7 +50,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     createMutation.mutate(payload, {
       onSuccess: () => handleClose(),
       onError: (err) => {
-        setError("root", { message: err instanceof Error ? err.message : String(err) });
+        setError("root", { message: getErrorMessage(err) });
       },
     });
   };

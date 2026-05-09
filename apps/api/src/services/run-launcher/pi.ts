@@ -33,6 +33,7 @@ import {
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
@@ -180,7 +181,7 @@ export async function runPlatformContainer(
       await orch.removeWorkload(sidecarHandle).catch((err) => {
         logger.error("Failed to remove sidecar", {
           runId,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       });
     }
@@ -188,7 +189,7 @@ export async function runPlatformContainer(
       await orch.removeWorkload(agentHandle).catch((err) => {
         logger.error("Failed to remove agent workload", {
           runId,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       });
     }
@@ -196,7 +197,7 @@ export async function runPlatformContainer(
       await orch.removeIsolationBoundary(boundary).catch((err) => {
         logger.error("Failed to remove isolation boundary", {
           runId,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       });
     }

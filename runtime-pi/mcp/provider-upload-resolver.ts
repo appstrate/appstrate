@@ -41,6 +41,7 @@ import {
   MAX_STREAMED_BODY_SIZE,
   type ProviderCallContext,
 } from "@appstrate/afps-runtime/resolvers";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
   ADAPTERS,
@@ -158,7 +159,7 @@ export class McpProviderUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: `provider_upload: cannot read ${JSON.stringify(req.fromFile)}: ${err instanceof Error ? err.message : String(err)}`,
+        error: `provider_upload: cannot read ${JSON.stringify(req.fromFile)}: ${getErrorMessage(err)}`,
         bytesSent: 0,
       };
     }
@@ -197,7 +198,7 @@ export class McpProviderUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
         bytesSent: 0,
       };
     }
@@ -556,7 +557,7 @@ function failure(adapter: UploadAdapter, err: unknown, bytesSent: number): Provi
   };
   const status = typeof e.status === "number" ? e.status : 0;
   const headers = e.headers && typeof e.headers === "object" ? e.headers : {};
-  const message = e.message ?? (err instanceof Error ? err.message : String(err));
+  const message = e.message ?? getErrorMessage(err);
   return {
     ok: false,
     protocol: adapter.protocol,

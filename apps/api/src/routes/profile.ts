@@ -10,6 +10,7 @@ import type { AppEnv } from "../types/index.ts";
 import { forbidden, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
@@ -90,7 +91,7 @@ profileRouter.patch("/profile", async (c) => {
   } catch (err) {
     logger.error("Failed to update profile", {
       userId: user.id,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     throw internalError();
   }

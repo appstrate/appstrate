@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Simple semver comparison: returns true if a > b (major.minor.patch only). */
 function semverGt(a: string, b: string): boolean {
@@ -95,7 +96,7 @@ export function CreateVersionModal({
         onClose();
       },
       onError: (err) => {
-        setError("root", { message: err instanceof Error ? err.message : String(err) });
+        setError("root", { message: getErrorMessage(err) });
       },
     });
   };

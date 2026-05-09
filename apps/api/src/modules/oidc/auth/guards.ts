@@ -47,25 +47,21 @@ import {
   expectedRealmForClient,
   type ClientAudienceMetadata,
 } from "./realm-check.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
-// CLI device flow — per-IP limits on the BA-mounted endpoints. A single
-// CLI session polls `/device/token` roughly once per `interval` (5s) up to
-// `expiresIn` (10 min = ~120 polls). 30/min/IP comfortably accommodates
-// one CLI per IP while capping poll-storms or brute-force probing of
-// active device codes. `/device/code` is a write (inserts a row) and
-// rarely called more than once per login; 10/min/IP is a loose ceiling.
+// CLI device flow — per-IP limit on `/device/code`. The endpoint is a
+// write (inserts a row) and rarely called more than once per login;
+// 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
-const DEVICE_TOKEN_RL_POINTS = 30;
-// CLI token endpoints (issue #165). `/cli/token` serves the SAME poll
-// cadence `/device/token` does during device flow (once per interval →
-// ~120 polls over 10 min) AND the silent-refresh path (once per ~15 min
-// per active CLI). 30/min/IP is symmetric with DEVICE_TOKEN and covers
-// both patterns. `/cli/revoke` is only called on `appstrate logout` and
-// is idempotent, but we cap it too to close any DoS vector on the
+// CLI token endpoints (issue #165). `/cli/token` serves both the device-
+// code → tokens exchange (once per interval ≈ 5s, ~120 polls over 10 min)
+// AND the silent-refresh path (once per ~15 min per active CLI). 30/min/IP
+// covers both patterns. `/cli/revoke` is only called on `appstrate logout`
+// and is idempotent, but we cap it too to close any DoS vector on the
 // family-revocation UPDATE.
 const CLI_TOKEN_RL_POINTS = 30;
 const CLI_REVOKE_RL_POINTS = 30;
@@ -88,7 +84,7 @@ const CLI_REVOKE_RL_POINTS = 30;
 //   - The web SPA (`apps/web/src/`) does NOT call `/device`; there is
 //     no `fetch("/device")` in the client bundle.
 //   - The CLI client does NOT poll `/device` either — it polls
-//     `/device/token`, covered by `DEVICE_TOKEN_RL_POINTS = 30`.
+//     `/cli/token`, covered by `CLI_TOKEN_RL_POINTS = 30`.
 // Net: legit flows cost 1 hit/session, so 10/min/IP is intentionally
 // generous for legit traffic and tight against probe enumeration.
 const DEVICE_VERIFY_RL_POINTS = 10;
@@ -405,7 +401,7 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   } catch (err) {
     redirectToSafeDefault("oidc.magic_link.error_callback.unparseable", {
       rawErrorCallback: rawErrorCallback.slice(0, 200),
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 
@@ -605,7 +601,7 @@ async function enforceDeviceApproveRealm(ctx: {
       logger.warn("oidc: oauth_clients.metadata JSON is corrupt — falling back to column level", {
         module: "oidc",
         clientId: record.clientId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }
@@ -648,17 +644,10 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           }),
         },
         {
-          matcher: (ctx: { path?: string }) => ctx.path === "/device/token",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("device-token", DEVICE_TOKEN_RL_POINTS, ctx.request);
-          }),
-        },
-        {
           // Issue #165 — rate-limit the CLI's JWT + rotating-refresh
-          // endpoints the same way we limit the legacy `/device/token`.
-          // `/cli/token` handles both the initial device-code → tokens
-          // exchange AND refresh-token rotation (discriminated by
-          // `grant_type` in the body); one ceiling covers both because
+          // endpoints. `/cli/token` handles both the initial device-code
+          // → tokens exchange AND refresh-token rotation (discriminated
+          // by `grant_type` in the body); one ceiling covers both because
           // legit traffic for either pattern is far under 30/min/IP.
           matcher: (ctx: { path?: string }) => ctx.path === "/cli/token",
           handler: createAuthMiddleware(async (ctx) => {

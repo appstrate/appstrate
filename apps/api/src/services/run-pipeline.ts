@@ -23,6 +23,7 @@ import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Extract the denormalized @scope and display-name snapshot for a loaded
@@ -319,7 +320,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }).catch((err) => {
     logger.error("Unhandled error in background run", {
       runId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   });
 

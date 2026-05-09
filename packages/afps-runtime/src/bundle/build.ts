@@ -18,6 +18,7 @@
 
 import { unzipSync } from "fflate";
 import { BundleError } from "./errors.ts";
+import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, stripWrapperPrefix, sumSizes } from "./archive-utils.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
 import {
@@ -218,19 +219,7 @@ export function extractRootFromAfps(
     throw new BundleError("BUNDLE_JSON_INVALID", ".afps archive missing manifest.json at root");
   }
 
-  let manifest: AfpsManifest;
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(manifestBytes));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("manifest.json must be a JSON object");
-    }
-    manifest = parsed as AfpsManifest;
-  } catch (err) {
-    throw new BundleError(
-      "BUNDLE_JSON_INVALID",
-      `manifest.json is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
   const name = typeof manifest.name === "string" ? manifest.name : null;
   const version = typeof manifest.version === "string" ? manifest.version : null;

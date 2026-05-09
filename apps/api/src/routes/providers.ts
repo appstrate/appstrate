@@ -20,6 +20,7 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   authModeEnum,
   getDefaultAdminCredentialSchema,
@@ -287,7 +288,7 @@ export function createProvidersRouter() {
       );
     } catch (err) {
       logger.error("Provider create failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -336,7 +337,7 @@ export function createProvidersRouter() {
     } catch (err) {
       logger.error("Provider update failed", {
         providerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }
@@ -434,7 +435,7 @@ export function createProvidersRouter() {
       if (err instanceof ApiError) throw err;
       logger.error("Provider delete failed", {
         providerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       throw internalError();
     }

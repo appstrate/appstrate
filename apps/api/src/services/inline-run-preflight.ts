@@ -47,16 +47,9 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import { resolveManifestCatalogDeps } from "./package-catalog.ts";
 import { resolveActorProfileContext, resolveProviderProfiles } from "./connection-profiles.ts";
+import type { InlineRunBody } from "@appstrate/core/platform-types";
 
-export interface InlineRunBody {
-  manifest?: unknown;
-  prompt?: unknown;
-  input?: Record<string, unknown>;
-  config?: Record<string, unknown>;
-  providerProfiles?: Record<string, string>;
-  modelId?: string | null;
-  proxyId?: string | null;
-}
+export type { InlineRunBody };
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;

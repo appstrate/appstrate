@@ -40,6 +40,7 @@ import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Stable 64-bit identifier for the advisory lock so concurrent replicas
@@ -121,7 +122,7 @@ export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number
     candidateIds = await collectCandidates(config);
   } catch (err) {
     logger.error("run watchdog sweep failed", {
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
     return 0;
   }
@@ -136,7 +137,7 @@ export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number
     } catch (err) {
       logger.error("run watchdog failed to finalize stalled run", {
         runId: id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

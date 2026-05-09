@@ -15,6 +15,8 @@
  * fits a small validator without losing safety.
  */
 
+import { getErrorMessage } from "@appstrate/core/errors";
+
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
   runId: string;
@@ -111,7 +113,7 @@ function parseJsonRecord(name: string, raw: string, issues: string[]): Record<st
     }
     return parsed as Record<string, unknown>;
   } catch (err) {
-    issues.push(`${name}: malformed JSON — ${err instanceof Error ? err.message : String(err)}`);
+    issues.push(`${name}: malformed JSON — ${getErrorMessage(err)}`);
     return {};
   }
 }
@@ -125,9 +127,7 @@ function parseModelInput(
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    issues.push(
-      `MODEL_INPUT: malformed JSON — ${err instanceof Error ? err.message : String(err)}`,
-    );
+    issues.push(`MODEL_INPUT: malformed JSON — ${getErrorMessage(err)}`);
     return ["text"];
   }
   if (!Array.isArray(parsed)) {
@@ -152,7 +152,7 @@ function parseModelCost(
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    issues.push(`MODEL_COST: malformed JSON — ${err instanceof Error ? err.message : String(err)}`);
+    issues.push(`MODEL_COST: malformed JSON — ${getErrorMessage(err)}`);
     return fallback;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

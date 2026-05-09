@@ -9,6 +9,7 @@ import {
   organizations,
   organizationMembers,
 } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
@@ -105,7 +106,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     .catch((err) => {
       logger.warn("Failed to update lastUsedAt for API key", {
         keyId: row.id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     });
 

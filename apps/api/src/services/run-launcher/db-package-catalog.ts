@@ -18,8 +18,9 @@
  */
 
 import { and, desc, eq, isNull, or } from "drizzle-orm";
-import semver from "semver";
 import { db } from "@appstrate/db/client";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { resolveVersionString } from "@appstrate/core/semver";
 import { logger } from "../../lib/logger.ts";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import {
@@ -177,7 +178,7 @@ export class DbPackageCatalog implements PackageCatalog {
       if (err instanceof BundleError) throw err;
       throw new BundleError(
         "ARCHIVE_INVALID",
-        `DbPackageCatalog: failed to extract ${identity}: ${err instanceof Error ? err.message : String(err)}`,
+        `DbPackageCatalog: failed to extract ${identity}: ${getErrorMessage(err)}`,
         { identity },
       );
     }
@@ -198,29 +199,27 @@ export function pickVersion(
 ): { version: string; integrity: string } | null {
   if (versions.length === 0) return null;
 
-  // 1. Exact match (includes yanked).
-  if (semver.valid(versionSpec)) {
-    const exact = versions.find((v) => v.version === versionSpec);
-    if (exact) return { version: exact.version, integrity: exact.integrity };
-    return null;
+  // Build inputs for the canonical 3-step resolver.
+  // Yanked versions are visible only to exact pins → only `exactVersions`
+  // includes yanked rows; `rangeVersions` and `distTagMap` exclude them.
+  const nonYanked = versions.filter((v) => !v.yanked);
+  const exactVersions = versions.map((v) => v.version);
+  const rangeVersions = nonYanked.map((v) => v.version);
+  const nonYankedSet = new Set(rangeVersions);
+  const distTagMap: Record<string, string> = {};
+  for (const t of tags) {
+    if (nonYankedSet.has(t.version)) distTagMap[t.tag] = t.version;
   }
 
-  // 2. Dist-tag (excludes yanked).
-  const tag = tags.find((t) => t.tag === versionSpec);
-  if (tag) {
-    const tagged = versions.find((v) => v.version === tag.version && !v.yanked);
-    if (tagged) return { version: tagged.version, integrity: tagged.integrity };
-  }
+  const resolvedVersion = resolveVersionString(
+    versionSpec,
+    exactVersions,
+    rangeVersions,
+    distTagMap,
+  );
+  if (resolvedVersion === null) return null;
 
-  // 3. Semver range (excludes yanked).
-  if (semver.validRange(versionSpec)) {
-    const candidates = versions.filter((v) => !v.yanked).map((v) => v.version);
-    const best = semver.maxSatisfying(candidates, versionSpec);
-    if (best) {
-      const row = versions.find((v) => v.version === best);
-      if (row) return { version: row.version, integrity: row.integrity };
-    }
-  }
-
-  return null;
+  const row = versions.find((v) => v.version === resolvedVersion);
+  if (!row) return null;
+  return { version: row.version, integrity: row.integrity };
 }

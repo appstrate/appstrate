@@ -383,7 +383,7 @@ async function buildRefreshContext(
 
 /** Render `{{var}}` placeholders using the given credential fields. Unknown refs become empty. */
 function substituteTemplate(template: string, credentials: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? "");
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key) => credentials[key] ?? "");
 }
 
 /** Apply a whitelisted post-substitution transform. Throws on unknown encodings. */

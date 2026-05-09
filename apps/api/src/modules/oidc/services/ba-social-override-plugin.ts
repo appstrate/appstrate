@@ -44,6 +44,7 @@ import { logger } from "../../../lib/logger.ts";
 import { getClientCached } from "./oauth-admin.ts";
 import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
 import { resolveSocialProviderForClient } from "./social.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 async function applyOverride(ctx: { request?: Request }): Promise<void> {
   const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
@@ -76,7 +77,7 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
       module: "oidc",
       clientId: pendingClientId,
       applicationId: client.referencedApplicationId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

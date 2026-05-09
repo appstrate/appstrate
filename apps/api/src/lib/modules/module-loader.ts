@@ -10,6 +10,7 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   CORE_RESOURCE_NAMES,
   setModulePermissionsProvider,
@@ -103,10 +104,9 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
       }
       resolved.push(mod);
     } catch (err) {
-      throw new Error(
-        `Module "${specifier}" could not be loaded: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
+      throw new Error(`Module "${specifier}" could not be loaded: ${getErrorMessage(err)}`, {
+        cause: err,
+      });
     }
   }
 
@@ -161,10 +161,9 @@ async function initSortedModules(
     try {
       await mod.init(ctx);
     } catch (err) {
-      throw new Error(
-        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
+      throw new Error(`Module "${mod.manifest.id}" failed to initialize: ${getErrorMessage(err)}`, {
+        cause: err,
+      });
     }
     if (_modules.has(mod.manifest.id)) {
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
@@ -633,7 +632,7 @@ export async function emitEvent<K extends keyof ModuleEvents>(
         logger.warn("Module event handler error", {
           module: mod.manifest.id,
           event: name,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }
     }
@@ -653,7 +652,7 @@ export async function shutdownModules(): Promise<void> {
     } catch (err) {
       logger.warn("Module shutdown error", {
         id: mod.manifest.id,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
   }

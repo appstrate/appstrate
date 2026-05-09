@@ -45,6 +45,7 @@ import {
   SIGNUP_ROLE_ALLOWED,
   type OAuthClientRecord,
 } from "./services/oauth-admin.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OrgSignupClosedError,
   resolveOrCreateOrgMembership,
@@ -677,7 +678,7 @@ export function createOidcRouter() {
         const result = await sendTestEmail(applicationId, data.to);
         return c.json({ ok: true, messageId: result.messageId });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = getErrorMessage(err);
         // Surface the SMTP server's response verbatim — DKIM/SPF/auth
         // misconfigurations are the admin's to fix, so we must not swallow
         // the underlying error.
@@ -912,7 +913,7 @@ export function createOidcRouter() {
         asResponse: true,
       })) as Response;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       // Distinguish infrastructure failures from bad credentials. Connection
       // errors, DB timeouts, and unhandled 5xx should not masquerade as
       // "wrong password" — the user would retry endlessly.
@@ -1204,7 +1205,7 @@ export function createOidcRouter() {
         }),
       )) as Response;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       logger.error("oidc: signUpEmail failed", { error: msg, email });
       if (msg.includes("already exists") || msg.includes("duplicate")) {
         return renderRegError(
@@ -1272,7 +1273,7 @@ export function createOidcRouter() {
         }
       } catch (err) {
         logger.warn("oidc: auto-verify re-signin failed", {
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
           email,
         });
       }
@@ -1435,7 +1436,7 @@ export function createOidcRouter() {
       // plugin's sendMagicLink handler is fire-and-forget). A throw here
       // is an infra error — log and render generic guidance. We still
       // show the "sent" screen to preserve anti-enumeration.
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       logger.warn("oidc: signInMagicLink threw", { error: msg, email });
     }
 
@@ -1653,7 +1654,7 @@ export function createOidcRouter() {
         }),
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       logger.warn("oidc: requestPasswordReset threw", { error: msg, email });
       // Still render "sent" to preserve anti-enumeration.
     }
@@ -1789,7 +1790,7 @@ export function createOidcRouter() {
         asResponse: true,
       })) as Response;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       logger.warn("oidc: resetPassword threw", { error: msg });
       return c.html(
         renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
@@ -2142,7 +2143,7 @@ export function createOidcRouter() {
     } catch (err) {
       logger.warn("oidc: device approve failed", {
         module: "oidc",
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       return c.html(
         renderActivateResultPage({
@@ -2200,7 +2201,7 @@ export function createOidcRouter() {
       // refused either way. Log for ops visibility.
       logger.warn("oidc: device deny call failed", {
         module: "oidc",
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
 
@@ -2261,7 +2262,7 @@ export function createOidcRouter() {
       // Already-expired sessions throw — proceed with the redirect anyway.
       logger.warn("oidc: signOut threw, continuing logout redirect", {
         module: "oidc",
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
     }
 

@@ -29,6 +29,7 @@ import { applicationSocialProviders } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 const ENCRYPTION_KEY_VERSION = "v1";
 
@@ -111,7 +112,7 @@ async function resolvePerApp(
         applicationId,
         provider,
         rowVersion: row.encryptionKeyVersion,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       return null;
     }
