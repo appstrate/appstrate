@@ -225,4 +225,34 @@ describe("run-metric-broadcaster (integration)", () => {
     expect(() => scheduleRunMetricBroadcast("non-existent-run")).not.toThrow();
     await wait(50);
   });
+
+  it("a vanished run drops its throttle entry to bound the in-memory map", async () => {
+    // Simulates the edge case where the run row was deleted (or its
+    // `package_id` SET NULL by cascade) between the metric event
+    // landing and `loadRunMetricPayload` running. The broadcaster
+    // must not accumulate a permanent throttle entry — the run will
+    // never finalize, so `clearRunMetricBroadcastState` will never
+    // be called from the ingestion path either.
+    const send = mock((_e: RealtimeEvent) => {});
+    const subId = "sub-vanished";
+    trackSubscriber(subId);
+    addSubscriber({
+      id: subId,
+      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, isAdmin: true },
+      send,
+    });
+
+    scheduleRunMetricBroadcast("non-existent-run");
+    // Schedule again immediately — if the throttle entry from the
+    // first call leaked, this second call would coalesce as a
+    // trailing tick. After self-cleanup, the second call should
+    // create a fresh entry that ALSO sees no run row and self-
+    // cleans, never producing a NOTIFY.
+    scheduleRunMetricBroadcast("non-existent-run");
+
+    await wait(80);
+    // No SSE delivery — the broadcaster's null-payload guard fires
+    // every time, never reaching pg_notify.
+    expect(send).not.toHaveBeenCalled();
+  });
 });

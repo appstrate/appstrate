@@ -125,7 +125,15 @@ export function _resetRunMetricBroadcasterForTests(): void {
 async function fireBroadcast(runId: string): Promise<void> {
   try {
     const payload = await loadRunMetricPayload(runId);
-    if (!payload) return;
+    if (!payload) {
+      // Run vanished (deleted, or `package_id` set to NULL by cascade).
+      // Drop the throttle entry so a long-lived API process doesn't
+      // accumulate a leak entry per orphaned run id — the run will
+      // never finalize and `clearRunMetricBroadcastState` would
+      // otherwise never be called for it.
+      clearRunMetricBroadcastState(runId);
+      return;
+    }
     await notifyRunMetric(db, payload);
   } catch (err) {
     logger.warn("run_metric broadcast failed", {

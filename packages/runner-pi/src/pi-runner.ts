@@ -478,21 +478,25 @@ export function installSessionBridge(
           // server upserts on the partial unique index with monotonic
           // semantics (latest cost wins), so a later `agent_end` emit
           // with the same totals is a no-op rather than a duplicate.
-          // Only fire when we actually accumulated tokens this turn —
-          // a no-op turn (e.g. tool-only step with no LLM round-trip)
-          // would emit an identical payload and waste a NOTIFY.
-          fire({
-            type: "appstrate.metric",
-            timestamp: Date.now(),
-            runId,
-            usage: {
-              input_tokens: totalUsage.input,
-              output_tokens: totalUsage.output,
-              cache_creation_input_tokens: totalUsage.cacheWrite,
-              cache_read_input_tokens: totalUsage.cacheRead,
-            },
-            cost: totalUsage.cost,
-          });
+          // Skip the snapshot when the turn produced zero new tokens
+          // (e.g. an empty-usage object or a tool-only step) — the
+          // payload would be identical to the previous one and waste
+          // a NOTIFY round-trip.
+          const hadTokens = (u.input ?? 0) > 0 || (u.output ?? 0) > 0;
+          if (hadTokens) {
+            fire({
+              type: "appstrate.metric",
+              timestamp: Date.now(),
+              runId,
+              usage: {
+                input_tokens: totalUsage.input,
+                output_tokens: totalUsage.output,
+                cache_creation_input_tokens: totalUsage.cacheWrite,
+                cache_read_input_tokens: totalUsage.cacheRead,
+              },
+              cost: totalUsage.cost,
+            });
+          }
         }
 
         // SDK error (e.g. LLM API unreachable, auth failures)
