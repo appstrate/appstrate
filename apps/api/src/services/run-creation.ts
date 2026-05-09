@@ -29,14 +29,14 @@ import { getEnv } from "@appstrate/env";
 import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-credentials.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { FileReference, UploadedFile } from "./adapters/types.ts";
+import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
-import type { RunPipelineResult } from "./run-pipeline.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { createRun as createRunRow } from "./state/index.ts";
+import { createRun as createRunRow } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
+import { ApiError } from "../lib/errors.ts";
 import type { RunOrigin } from "@appstrate/db/schema";
 
 // ---------------------------------------------------------------------------
@@ -109,28 +109,37 @@ export type CreateRunResult =
  */
 export async function createRun(input: CreateRunInput): Promise<CreateRunResult> {
   if (input.origin === "platform") {
-    const result: RunPipelineResult = await prepareAndExecuteRun({
-      runId: input.runId,
-      agent: input.agent,
-      providerProfiles: input.providerProfiles,
-      orgId: input.orgId,
-      actor: input.actor,
-      input: input.input ?? null,
-      files: input.files,
-      config: input.config,
-      modelId: input.modelId,
-      proxyId: input.proxyId,
-      applicationId: input.applicationId,
-      apiKeyId: input.apiKeyId,
-      scheduleId: input.scheduleId,
-      connectionProfileId: input.connectionProfileId,
-      overrideVersionLabel: input.overrideVersionLabel,
-      uploadedFiles: input.uploadedFiles,
-      runnerName: input.runnerName ?? null,
-      runnerKind: input.runnerKind ?? null,
-    });
-    if (!result.ok) return { ok: false, error: result.error };
-    return { ok: true, runId: result.runId };
+    try {
+      const result = await prepareAndExecuteRun({
+        runId: input.runId,
+        agent: input.agent,
+        providerProfiles: input.providerProfiles,
+        orgId: input.orgId,
+        actor: input.actor,
+        input: input.input ?? null,
+        files: input.files,
+        config: input.config,
+        modelId: input.modelId,
+        proxyId: input.proxyId,
+        applicationId: input.applicationId,
+        apiKeyId: input.apiKeyId,
+        scheduleId: input.scheduleId,
+        connectionProfileId: input.connectionProfileId,
+        overrideVersionLabel: input.overrideVersionLabel,
+        uploadedFiles: input.uploadedFiles,
+        runnerName: input.runnerName ?? null,
+        runnerKind: input.runnerKind ?? null,
+      });
+      return { ok: true, runId: result.runId };
+    } catch (err) {
+      if (err instanceof ApiError) {
+        return {
+          ok: false,
+          error: { code: err.code, message: err.message, status: err.status },
+        };
+      }
+      throw err;
+    }
   }
 
   return createRemoteRun(input);

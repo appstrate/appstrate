@@ -127,7 +127,7 @@ describe("listOrgs", () => {
     expect(orgs).toEqual([]);
   });
 
-  it("returns an empty array when response shape is degenerate", async () => {
+  it("throws when the response envelope is degenerate (missing data)", async () => {
     await seedAuth();
     installFetch(
       async () =>
@@ -136,8 +136,10 @@ describe("listOrgs", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const orgs = await listOrgs("default");
-    expect(orgs).toEqual([]);
+    // Strict envelope: a 200 with no `data: [...]` is a server bug, not
+    // a "no rows" signal — we surface it loudly via apiList rather than
+    // silently returning [] (which used to mask broken servers).
+    await expect(listOrgs("default")).rejects.toThrow(/Malformed list response/);
   });
 });
 

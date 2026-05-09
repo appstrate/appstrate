@@ -83,9 +83,39 @@ export function unzipArtifact(artifact: Uint8Array): Record<string, Uint8Array> 
  * like `files["manifest.json"]` work regardless of how the ZIP was created.
  *
  * Only strips when ALL entries share a single first-level prefix and none
- * are at the root level. Returns the original record unchanged otherwise.
+ * are at the root level. Returns the original collection unchanged otherwise.
+ *
+ * Accepts either a `Record<string, Uint8Array>` (default ZIP shape) or a
+ * `Map<string, Uint8Array>` (sanitized bundle shape) and returns the same
+ * type as the input.
+ *
+ * NOTE: `@appstrate/afps-runtime` keeps a local Map-only copy of this
+ * algorithm to remain a zero-`@appstrate/core`-dependency package. Keep the
+ * two implementations in sync. See
+ * `packages/afps-runtime/src/bundle/archive-utils.ts`.
  */
-export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<string, Uint8Array> {
+export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<string, Uint8Array>;
+export function stripWrapperPrefix(files: Map<string, Uint8Array>): Map<string, Uint8Array>;
+export function stripWrapperPrefix(
+  files: Record<string, Uint8Array> | Map<string, Uint8Array>,
+): Record<string, Uint8Array> | Map<string, Uint8Array> {
+  if (files instanceof Map) {
+    if (files.size === 0) return files;
+    const prefixes = new Set<string>();
+    for (const key of files.keys()) {
+      const slashIdx = key.indexOf("/");
+      if (slashIdx === -1) return files; // root-level file → no stripping
+      prefixes.add(key.slice(0, slashIdx));
+    }
+    if (prefixes.size !== 1) return files; // multiple top-level folders → ambiguous
+    const prefix = `${[...prefixes][0]}/`;
+    const stripped = new Map<string, Uint8Array>();
+    for (const [key, value] of files) {
+      stripped.set(key.slice(prefix.length), value);
+    }
+    return stripped;
+  }
+
   const keys = Object.keys(files);
   if (keys.length === 0) return files;
 

@@ -45,7 +45,7 @@ export function AppProfileDetailPage() {
   const profile = appProfiles?.find((p) => p.id === id);
   if (!profile) return <ErrorState message={t("appProfiles.notFound")} />;
 
-  const enabledProviders = (providers?.providers ?? []).filter((p) => p.enabled);
+  const enabledProviders = (providers ?? []).filter((p) => p.enabled);
 
   // Schedules using this profile
   const relatedSchedules = (allSchedules ?? []).filter((s) => s.connectionProfileId === id);

@@ -54,7 +54,7 @@ export interface CreateUploadResponse {
   expiresAt: string;
 }
 
-/** Shape consumed by the run pipeline — mirrors UploadedFile from adapters/types. */
+/** Shape consumed by the run pipeline — mirrors UploadedFile from run-launcher/types. */
 export interface ConsumedUpload {
   id: string;
   name: string;

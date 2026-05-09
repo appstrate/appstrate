@@ -10,11 +10,7 @@ import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import {
-  getRecentRuns,
-  RUN_HISTORY_FIELDS,
-  type RunHistoryField,
-} from "../services/state/index.ts";
+import { getRecentRuns, RUN_HISTORY_FIELDS, type RunHistoryField } from "../services/state/runs.ts";
 import {
   recallMemories,
   RECALL_LIMIT_DEFAULT,
@@ -22,7 +18,7 @@ import {
   scopeFromActor,
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
-import { getPackage } from "../services/agent-service.ts";
+import { getPackage } from "../services/package-catalog.ts";
 import {
   resolveCredentialsForProxy,
   forceRefreshCredentials,
@@ -69,7 +65,7 @@ async function verifyRunToken(c: Context): Promise<{
   runId: string;
   run: {
     packageId: string;
-    dashboardUserId: string | null;
+    userId: string | null;
     endUserId: string | null;
     orgId: string;
     applicationId: string;
@@ -97,7 +93,7 @@ async function verifyRunToken(c: Context): Promise<{
   const rows = await db
     .select({
       packageId: runs.packageId,
-      dashboardUserId: runs.dashboardUserId,
+      userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       applicationId: runs.applicationId,
@@ -122,7 +118,7 @@ async function verifyRunToken(c: Context): Promise<{
     runId,
     run: {
       packageId: run.packageId!,
-      dashboardUserId: run.dashboardUserId,
+      userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
       applicationId: run.applicationId,
@@ -179,10 +175,10 @@ export function createInternalRouter() {
 
     try {
       // Actor isolation is mandatory: `getRecentRuns` filters runs by
-      // dashboardUserId / endUserId so an end-user run never sees
-      // another actor's checkpoint, and a scheduled run (actor === null)
-      // sees only the shared / no-actor bucket.
-      const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
+      // userId / endUserId so an end-user run never sees another actor's
+      // checkpoint, and a scheduled run (actor === null) sees only the
+      // shared / no-actor bucket.
+      const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
       const recentRuns = await getRecentRuns(
         { orgId: run.orgId, applicationId: run.applicationId },
         run.packageId,
@@ -227,7 +223,7 @@ export function createInternalRouter() {
       .parse(limitParam ?? RECALL_LIMIT_DEFAULT);
 
     try {
-      const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
+      const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
       const memories = await recallMemories(
         run.packageId,
         run.applicationId,

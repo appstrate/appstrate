@@ -108,7 +108,7 @@ export async function initiateOAuth(
   const record: OAuthStateRecord = {
     state,
     orgId,
-    userId: actor.type === "member" ? actor.id : null,
+    userId: actor.type === "user" ? actor.id : null,
     endUserId: actor.type === "end_user" ? actor.id : null,
     applicationId,
     profileId,
@@ -188,7 +188,7 @@ export async function handleOAuthCallback(
 
   const actor: Actor = stateRow.endUserId
     ? { type: "end_user", id: stateRow.endUserId }
-    : { type: "member", id: stateRow.userId! };
+    : { type: "user", id: stateRow.userId! };
 
   // Resolve the provider
   const provider = await getProviderOrThrow(db, stateRow.orgId, stateRow.providerId);

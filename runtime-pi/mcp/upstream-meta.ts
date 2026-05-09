@@ -2,118 +2,71 @@
 // Copyright 2026 Appstrate
 
 /**
- * Wire format for `provider_call` upstream-response metadata —
- * runtime-pi (agent-side) parser. The companion serializer lives at
- * `runtime-pi/sidecar/upstream-meta.ts`; both files MUST agree on the
- * `_meta` key and the allowlisted header set.
+ * Runtime-side parser for `provider_call` upstream-response metadata.
+ * The wire format (key + allowlist + `UpstreamMeta` type) lives in
+ * `@appstrate/mcp-transport/upstream-meta`; both the sidecar
+ * serializer and this parser import from there so they cannot drift.
  *
- * Why duplicate: sidecar runs in its own container with only
- * `runtime-pi/sidecar/` copied; runtime-pi runs in the agent
- * container with `runtime-pi/mcp/` and `runtime-pi/extensions/`
- * copied. Neither can import the other's tree at runtime. A unit
- * test (`runtime-pi/test/upstream-meta-parity.test.ts`) asserts the
- * key + allowlist agree across the two files so drift is caught at
- * `bun test` time, not at `provider_upload` runtime.
+ * Contract:
+ *
+ * - Every `provider_call` `CallToolResult` MUST carry `_meta` under
+ *   {@link UPSTREAM_META_KEY}. The sidecar attaches it on every return
+ *   path — including pre-flight failures (credential fetch, URL
+ *   allowlist, body too large) which surface as `status: 0`,
+ *   `headers: {}`. The runtime no longer accepts a missing `_meta` —
+ *   that pre-`_meta` shape was a backwards-compat shim for sidecars
+ *   older than the runtime in the same release; sidecar and runtime
+ *   are now built from the same source tree per release, so the shim
+ *   is dead code.
+ *
+ * Defence-in-depth: the runtime re-applies the allowlist on parse so
+ * a compromised / misbehaving sidecar can't slip a header through —
+ * this is the second layer behind the sidecar's own filter.
  */
 
+import {
+  UPSTREAM_HEADER_ALLOWLIST,
+  UPSTREAM_META_KEY,
+  type UpstreamMeta,
+} from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 
-/**
- * MCP `_meta` key under which the sidecar packages upstream HTTP
- * status + response headers. Must match
- * `runtime-pi/sidecar/upstream-meta.ts:UPSTREAM_META_KEY`.
- */
-export const UPSTREAM_META_KEY = "appstrate/upstream";
-
-/**
- * Headers the agent is willing to consume. Must match
- * `runtime-pi/sidecar/upstream-meta.ts:UPSTREAM_HEADER_ALLOWLIST`.
- *
- * Defence-in-depth: even though the sidecar already filters, the
- * resolver re-applies the allowlist on parse so a compromised /
- * misbehaving sidecar can't slip a header through.
- */
-export const UPSTREAM_HEADER_ALLOWLIST = new Set<string>([
-  // HTTP infrastructure
-  "content-type",
-  "content-length",
-  "content-encoding",
-  "content-language",
-  "content-disposition",
-  "content-range",
-  "accept-ranges",
-  "cache-control",
-  "etag",
-  "last-modified",
-  "expires",
-  "vary",
-  "retry-after",
-  "link",
-  // Redirects + session URLs (Google resumable, Microsoft Graph)
-  "location",
-  // tus protocol headers
-  "upload-offset",
-  "upload-length",
-  "upload-expires",
-  "upload-metadata",
-  "tus-resumable",
-  "tus-extension",
-  "tus-version",
-  "tus-max-size",
-  "tus-checksum-algorithm",
-  // S3 / GCS multipart
-  "x-amz-version-id",
-  "x-amz-request-id",
-  "x-amz-id-2",
-  "x-amz-server-side-encryption",
-  "x-goog-generation",
-  "x-goog-metageneration",
-  "x-goog-stored-content-length",
-  // Range / partial-content
-  "range",
-  // Throttling / rate limits
-  "x-ratelimit-limit",
-  "x-ratelimit-remaining",
-  "x-ratelimit-reset",
-]);
-
-export interface UpstreamMeta {
-  status: number;
-  headers: Record<string, string>;
-}
+// Re-export shared symbols so in-tree consumers (provider-resolver,
+// provider-upload-resolver, parity tests if any survive) can keep
+// importing from `./upstream-meta` without churn.
+export {
+  UPSTREAM_HEADER_ALLOWLIST,
+  UPSTREAM_META_KEY,
+  type UpstreamMeta,
+} from "@appstrate/mcp-transport";
 
 /**
  * Read upstream `{ status, headers }` from a CallToolResult's `_meta`
- * field, applying the allowlist defensively.
- *
- * Returns `undefined` when the sidecar is older than this propagation
- * change (no `_meta`) — callers must fall back to the legacy synthesised
- * `200` / `{}` behaviour for backwards compatibility with deployments
- * that haven't rolled the sidecar yet.
- *
- * Returns `undefined` (not throws) on malformed payloads — a poisoned
- * `_meta` should not crash the agent run; the legacy fallback is
- * the safer behaviour. The malformation is logged via
- * `console.warn` so deployment drift is at least visible.
+ * field, applying the allowlist defensively. Throws on malformed or
+ * missing payloads — the sidecar must always ship `_meta`, so anything
+ * else is a protocol violation.
  */
-export function readUpstreamMeta(result: CallToolResult): UpstreamMeta | undefined {
+export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   const meta = result._meta as Record<string, unknown> | undefined;
-  if (!meta) return undefined;
+  if (!meta) {
+    throw new Error(`provider_call: missing _meta on CallToolResult — sidecar protocol violation`);
+  }
   const raw = meta[UPSTREAM_META_KEY];
-  if (raw === undefined) return undefined;
+  if (raw === undefined) {
+    throw new Error(`provider_call: missing _meta['${UPSTREAM_META_KEY}'] on CallToolResult`);
+  }
   if (typeof raw !== "object" || raw === null) {
-    console.warn(`[upstream-meta] expected object at '${UPSTREAM_META_KEY}', got ${typeof raw}`);
-    return undefined;
+    throw new Error(
+      `provider_call: _meta['${UPSTREAM_META_KEY}'] must be an object, got ${typeof raw}`,
+    );
   }
   const obj = raw as { status?: unknown; headers?: unknown };
   if (typeof obj.status !== "number" || !Number.isInteger(obj.status)) {
-    console.warn(`[upstream-meta] missing/invalid status field`);
-    return undefined;
+    throw new Error(`provider_call: _meta['${UPSTREAM_META_KEY}'].status must be an integer`);
   }
   const headersRaw = obj.headers;
   if (typeof headersRaw !== "object" || headersRaw === null) {
-    console.warn(`[upstream-meta] missing/invalid headers field`);
-    return undefined;
+    throw new Error(`provider_call: _meta['${UPSTREAM_META_KEY}'].headers must be an object`);
   }
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(headersRaw as Record<string, unknown>)) {
@@ -142,15 +95,13 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta | undefin
  */
 export function synthesiseUpstreamResponse(
   body: BodyInit,
-  meta: UpstreamMeta | undefined,
+  meta: UpstreamMeta,
   fallbackContentType: string,
 ): Response {
-  const status = meta?.status ?? 200;
+  const status = meta.status;
   const headers = new Headers();
-  if (meta?.headers) {
-    for (const [name, value] of Object.entries(meta.headers)) {
-      headers.set(name, value);
-    }
+  for (const [name, value] of Object.entries(meta.headers)) {
+    headers.set(name, value);
   }
   if (!headers.has("content-type")) {
     headers.set("content-type", fallbackContentType);

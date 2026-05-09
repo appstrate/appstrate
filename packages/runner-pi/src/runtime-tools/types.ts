@@ -18,7 +18,7 @@
  *     to extend `availableTools` and `toolDocs`.
  *   - The runtime container uses `name`/`description`/`parameters` to
  *     register a generic MCP-forwarding Pi tool via
- *     `runtime-pi/mcp/direct.ts:makeMcpForwardExtension`.
+ *     `runtime-tools/mcp-forward.ts:buildRuntimeToolFactories`.
  *
  * Adding a new runtime-injected tool means creating a new directory
  * with `tool.ts` + `TOOL.md` and importing it from `runtime-tools/

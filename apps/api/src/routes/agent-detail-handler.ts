@@ -5,21 +5,22 @@ import type { AppEnv } from "../types/index.ts";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, applicationProviderCredentials } from "@appstrate/db/schema";
-import { getPackageWithAccess } from "../services/agent-service.ts";
-import { getOrgItem, CONFIG_BY_TYPE } from "../services/package-items/index.ts";
+import { getPackageWithAccess } from "../services/package-catalog.ts";
+import { getOrgItem } from "../services/package-items/crud.ts";
+import { CONFIG_BY_TYPE } from "../services/package-items/config.ts";
 import {
   getVersionCount,
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
-import { getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
+import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
 import {
   resolveProviderProfiles,
   resolveActorProfileContext,
   getAgentAppProfile,
 } from "../services/connection-profiles.ts";
-import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
+import { resolveProviderStatuses } from "../services/connection-manager/status.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";

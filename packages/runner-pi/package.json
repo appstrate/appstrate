@@ -44,7 +44,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@appstrate/afps-runtime": "workspace:*"
+    "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/mcp-transport": "workspace:*"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.6",

@@ -69,6 +69,11 @@ export function sanitizeEntries(
 /**
  * If every entry shares a single top-level directory, strip it. Used for
  * user-authored AFPS ZIPs whose tools add a wrapper folder.
+ *
+ * Mirror of `stripWrapperPrefix` in `@appstrate/core/zip` (Record + Map
+ * generic). This package intentionally avoids an `@appstrate/core` runtime
+ * dependency to stay portable + standalone, so we maintain a local Map-only
+ * copy. Keep the two algorithms in sync.
  */
 export function stripWrapperPrefix(files: Map<string, Uint8Array>): Map<string, Uint8Array> {
   if (files.size === 0) return files;

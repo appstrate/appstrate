@@ -14,7 +14,7 @@ import { resolveProviderProfiles } from "../../../src/services/connection-profil
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
 import { getPackageConfig } from "../../../src/services/application-packages.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
-import { getPackage } from "../../../src/services/agent-service.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
 import { getDefaultProfileId } from "../../../src/services/connection-profiles.ts";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
@@ -37,7 +37,7 @@ describe("run preflight — provider profile resolution", () => {
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
     appId = defaultAppId;
-    actor = { type: "member", id: userId };
+    actor = { type: "user", id: userId };
 
     // Seed provider packages + enable them
     for (const pid of providerIds) {

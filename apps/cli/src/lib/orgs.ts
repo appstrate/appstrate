@@ -3,7 +3,7 @@
 /**
  * Org helpers for the CLI — list, create, and resolve org references.
  *
- * These are thin `apiFetch` wrappers. Kept in their own module so both
+ * These are thin `apiFetch` / `apiList` wrappers. Kept in their own module so both
  * `login` (pin-on-first-use) and the new `org` subcommands share the
  * same parsing / validation + test surface.
  *
@@ -15,7 +15,7 @@
  *     + hello-world agent, so the user lands on a fully-working setup.
  */
 
-import { apiFetch } from "./api.ts";
+import { apiFetch, apiList } from "./api.ts";
 
 export interface Org {
   id: string;
@@ -25,15 +25,8 @@ export interface Org {
   createdAt: string;
 }
 
-interface ListResponse {
-  object: "list";
-  data: Org[];
-  hasMore: boolean;
-}
-
 export async function listOrgs(profileName: string): Promise<Org[]> {
-  const res = await apiFetch<ListResponse>(profileName, "/api/orgs");
-  return Array.isArray(res.data) ? res.data : [];
+  return apiList<Org>(profileName, "/api/orgs");
 }
 
 export interface CreateOrgInput {

@@ -167,8 +167,11 @@ export class McpProviderResolver implements ProviderResolver {
    * inline cap, MIME sniffing, and SHA-256 hashing all behave
    * identically across resolver paths.
    *
-   * Tool-level errors (`isError: true`) surface as a synthetic `502` so
-   * the agent's view of "something went wrong upstream" is consistent
+   * Tool-level errors (`isError: true`) surface the upstream status the
+   * sidecar reported via `_meta`. Sidecar pre-flight failures (no
+   * upstream contact: cred fetch, allowlist) ship `_meta` with
+   * `status: 0` — we map those to `502` so the agent's view of
+   * "something went wrong before reaching upstream" is consistent
    * with the HTTP-backed `RemoteAppstrateProviderResolver`.
    */
   private async callToolResultToResponse(
@@ -177,10 +180,10 @@ export class McpProviderResolver implements ProviderResolver {
     ctx: ProviderCallContext,
   ): Promise<ProviderCallResponse> {
     // Pull upstream `{ status, headers }` from the sidecar's `_meta`
-    // payload. Returns `undefined` against legacy sidecars that don't
-    // ship the meta — we then fall back to the historical synthesised
-    // 200 / `{}` so an old sidecar still works (read-only deploy
-    // ordering: roll the runtime first, sidecars later).
+    // payload. The sidecar attaches `_meta` on every CallToolResult —
+    // pre-`_meta` sidecars are gone (sidecar + runtime ship from the
+    // same source tree per release), so a missing `_meta` is now a
+    // protocol violation that throws.
     const upstream = readUpstreamMeta(result);
 
     if (result.isError) {
@@ -190,18 +193,16 @@ export class McpProviderResolver implements ProviderResolver {
         .map((c) => (c.type === "text" ? c.text : ""))
         .filter(Boolean)
         .join("\n");
-      // When the sidecar shipped upstream metadata, surface the real
-      // 4xx/5xx status (and any allowlisted headers — `Retry-After`,
-      // `WWW-Authenticate` is not on the allowlist by design) so the
-      // agent's reasoning sees the upstream code instead of a flat
-      // `502`. Pre-flight failures originating in the sidecar (cred
-      // fetch, URL allowlist) have no upstream status — keep `502` for
-      // those (the meta payload is absent).
-      const status = upstream?.status ?? 502;
-      const headers = upstream?.headers ?? {};
+      // `status: 0` from `_meta` is the sidecar's "no upstream contact"
+      // signal (pre-flight failure: cred fetch, URL allowlist, body too
+      // large). Surface as 502 so the agent and any downstream HTTP
+      // consumers see a normal 5xx-shaped response. Real upstream 4xx
+      // / 5xx surface verbatim with their allowlisted headers
+      // (`Retry-After`, …).
+      const status = upstream.status === 0 ? 502 : upstream.status;
       return {
         status,
-        headers,
+        headers: upstream.headers,
         body: { kind: "text", text: text || "provider_call: upstream error" },
       };
     }
@@ -210,7 +211,7 @@ export class McpProviderResolver implements ProviderResolver {
     if (!block) {
       return {
         status: 502,
-        headers: {},
+        headers: upstream.headers,
         body: { kind: "text", text: "provider_call: empty MCP result" },
       };
     }

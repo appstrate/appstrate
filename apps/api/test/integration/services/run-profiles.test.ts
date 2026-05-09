@@ -25,7 +25,7 @@ import {
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
 import { getPackageConfig } from "../../../src/services/application-packages.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
-import { getPackage } from "../../../src/services/agent-service.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type {
   AgentProviderRequirement,
@@ -49,7 +49,7 @@ describe("Run with provider profiles", () => {
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
     appId = defaultAppId;
-    actor = { type: "member", id: userId };
+    actor = { type: "user", id: userId };
 
     // Seed provider packages + enable them for the org
     for (const pid of providerIds) {

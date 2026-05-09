@@ -4,6 +4,94 @@ import { orgRoleEnum } from "@appstrate/db/schema";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
+// ─── Shared building blocks for ProviderConfig{,Input,Update} ───────────────
+//
+// The three provider-config schemas (read response, create input, update input)
+// share most of their property bag verbatim. We expose the common pieces as
+// JS-level constants and spread them into each schema, so the rendered OpenAPI
+// stays flat (no `allOf`) — `verify-openapi.ts` reads `properties`/`required`
+// directly off the resolved schema and does not chase `allOf` composition.
+
+const providerAuthModeEnum = {
+  type: "string",
+  enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
+} as const;
+
+const providerTokenContentTypeProperty = {
+  type: "string",
+  enum: ["application/x-www-form-urlencoded", "application/json"],
+  description:
+    "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+} as const;
+
+const providerCredentialTransformProperty = {
+  type: "object",
+  required: ["template", "encoding"],
+  properties: {
+    template: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+    },
+    encoding: {
+      type: "string",
+      enum: ["base64"],
+      description:
+        "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+    },
+  },
+  description:
+    "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+} as const;
+
+const providerAvailableScopesProperty = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      value: { type: "string" },
+      label: { type: "string" },
+    },
+  },
+} as const;
+
+/**
+ * Properties shared by ProviderConfigInput AND ProviderConfigUpdate.
+ * Excludes `id` (Input-only, required) and `displayName` (different shape per schema).
+ */
+const providerInputSharedProperties = {
+  version: { type: "string" },
+  description: { type: "string" },
+  author: { type: "string" },
+  authMode: providerAuthModeEnum,
+  clientId: { type: "string" },
+  clientSecret: { type: "string" },
+  authorizationUrl: { type: "string" },
+  tokenUrl: { type: "string" },
+  refreshUrl: { type: "string" },
+  requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
+  accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
+  defaultScopes: { type: "array", items: { type: "string" } },
+  scopeSeparator: { type: "string" },
+  pkceEnabled: { type: "boolean" },
+  tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+  tokenContentType: providerTokenContentTypeProperty,
+  authorizationParams: { type: "object" },
+  tokenParams: { type: "object" },
+  credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
+  credentialFieldName: { type: "string" },
+  credentialHeaderName: { type: "string" },
+  credentialHeaderPrefix: { type: "string" },
+  credentialTransform: providerCredentialTransformProperty,
+  availableScopes: providerAvailableScopesProperty,
+  iconUrl: { type: "string" },
+  categories: { type: "array", items: { type: "string" } },
+  docsUrl: { type: "string" },
+  authorizedUris: { type: "array", items: { type: "string" } },
+  allowAllUris: { type: "boolean" },
+} as const;
+
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -358,7 +446,7 @@ export const schemas = {
         description:
           "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible.",
       },
-      dashboardUserId: {
+      userId: {
         type: ["string", "null"],
         description: "Dashboard user ID that triggered the run (null for end-user/schedule runs)",
       },
@@ -433,11 +521,18 @@ export const schemas = {
       },
       modelOverridden: {
         type: "boolean",
-        description: "True when the caller's modelId differed from the persisted default.",
+        description:
+          "True when the run's effective model differs from the persisted default. Computed in the API mapper from `modelLabel` vs `config.defaults.model` — no longer stamped on the row.",
       },
-      proxyOverridden: { type: "boolean" },
-      versionOverridden: { type: "boolean" },
-      dashboardUserName: {
+      proxyOverridden: {
+        type: "boolean",
+        description: "Computed from `proxyLabel` vs `config.defaults.proxy`.",
+      },
+      versionOverridden: {
+        type: "boolean",
+        description: "Computed from `versionLabel` vs `config.defaults.version`.",
+      },
+      userName: {
         type: ["string", "null"],
         description:
           "Display name of the dashboard user who triggered the run (from profiles table)",
@@ -585,10 +680,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
-      authMode: {
-        type: "string",
-        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
-      },
+      authMode: providerAuthModeEnum,
       source: { type: "string", enum: ["built-in", "custom"] },
       hasCredentials: {
         type: "boolean",
@@ -612,48 +704,15 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-      tokenContentType: {
-        type: "string",
-        enum: ["application/x-www-form-urlencoded", "application/json"],
-        description:
-          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
-      },
+      tokenContentType: providerTokenContentTypeProperty,
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
-      credentialTransform: {
-        type: "object",
-        required: ["template", "encoding"],
-        properties: {
-          template: {
-            type: "string",
-            minLength: 1,
-            description:
-              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
-          },
-          encoding: {
-            type: "string",
-            enum: ["base64"],
-            description:
-              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
-          },
-        },
-        description:
-          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
-      },
-      availableScopes: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            value: { type: "string" },
-            label: { type: "string" },
-          },
-        },
-      },
+      credentialTransform: providerCredentialTransformProperty,
+      availableScopes: providerAvailableScopesProperty,
       authorizedUris: { type: "array", items: { type: "string" } },
       allowAllUris: { type: "boolean" },
       iconUrl: { type: "string" },
@@ -668,71 +727,7 @@ export const schemas = {
     properties: {
       id: { type: "string", minLength: 1 },
       displayName: { type: "string", minLength: 1 },
-      version: { type: "string" },
-      description: { type: "string" },
-      author: { type: "string" },
-      authMode: {
-        type: "string",
-        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
-      },
-      clientId: { type: "string" },
-      clientSecret: { type: "string" },
-      authorizationUrl: { type: "string" },
-      tokenUrl: { type: "string" },
-      refreshUrl: { type: "string" },
-      requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-      accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-      defaultScopes: { type: "array", items: { type: "string" } },
-      scopeSeparator: { type: "string" },
-      pkceEnabled: { type: "boolean" },
-      tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-      tokenContentType: {
-        type: "string",
-        enum: ["application/x-www-form-urlencoded", "application/json"],
-        description:
-          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
-      },
-      authorizationParams: { type: "object" },
-      tokenParams: { type: "object" },
-      credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
-      credentialFieldName: { type: "string" },
-      credentialHeaderName: { type: "string" },
-      credentialHeaderPrefix: { type: "string" },
-      credentialTransform: {
-        type: "object",
-        required: ["template", "encoding"],
-        properties: {
-          template: {
-            type: "string",
-            minLength: 1,
-            description:
-              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
-          },
-          encoding: {
-            type: "string",
-            enum: ["base64"],
-            description:
-              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
-          },
-        },
-        description:
-          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
-      },
-      availableScopes: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            value: { type: "string" },
-            label: { type: "string" },
-          },
-        },
-      },
-      iconUrl: { type: "string" },
-      categories: { type: "array", items: { type: "string" } },
-      docsUrl: { type: "string" },
-      authorizedUris: { type: "array", items: { type: "string" } },
-      allowAllUris: { type: "boolean" },
+      ...providerInputSharedProperties,
     },
   },
   ProviderConfigUpdate: {
@@ -740,71 +735,7 @@ export const schemas = {
     required: ["displayName", "authMode"],
     properties: {
       displayName: { type: "string", minLength: 1 },
-      version: { type: "string" },
-      description: { type: "string" },
-      author: { type: "string" },
-      authMode: {
-        type: "string",
-        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
-      },
-      clientId: { type: "string" },
-      clientSecret: { type: "string" },
-      authorizationUrl: { type: "string" },
-      tokenUrl: { type: "string" },
-      refreshUrl: { type: "string" },
-      requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-      accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-      defaultScopes: { type: "array", items: { type: "string" } },
-      scopeSeparator: { type: "string" },
-      pkceEnabled: { type: "boolean" },
-      tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-      tokenContentType: {
-        type: "string",
-        enum: ["application/x-www-form-urlencoded", "application/json"],
-        description:
-          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
-      },
-      authorizationParams: { type: "object" },
-      tokenParams: { type: "object" },
-      credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
-      credentialFieldName: { type: "string" },
-      credentialHeaderName: { type: "string" },
-      credentialHeaderPrefix: { type: "string" },
-      credentialTransform: {
-        type: "object",
-        required: ["template", "encoding"],
-        properties: {
-          template: {
-            type: "string",
-            minLength: 1,
-            description:
-              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
-          },
-          encoding: {
-            type: "string",
-            enum: ["base64"],
-            description:
-              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
-          },
-        },
-        description:
-          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
-      },
-      availableScopes: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            value: { type: "string" },
-            label: { type: "string" },
-          },
-        },
-      },
-      iconUrl: { type: "string" },
-      categories: { type: "array", items: { type: "string" } },
-      docsUrl: { type: "string" },
-      authorizedUris: { type: "array", items: { type: "string" } },
-      allowAllUris: { type: "boolean" },
+      ...providerInputSharedProperties,
     },
   },
   ApiKeyInfo: {

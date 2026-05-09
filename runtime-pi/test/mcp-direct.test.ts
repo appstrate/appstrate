@@ -95,7 +95,18 @@ async function makeMockServer(): Promise<MockServer> {
     descriptor: { name, description: "mock", inputSchema: { type: "object" } },
     handler: async (args) => {
       calls.push({ name, arguments: args });
-      return { content: [{ type: "text" as const, text: JSON.stringify(response) }] };
+      // `provider_call` MUST ship `_meta` per the runtime parser
+      // contract — the live sidecar attaches it on every result.
+      // `run_history` / `recall_memory` are forwarded verbatim by the
+      // runtime extension factory and have no upstream-meta consumer.
+      const meta =
+        name === "provider_call"
+          ? { _meta: { "appstrate/upstream": { status: 200, headers: {} } } }
+          : {};
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(response) }],
+        ...meta,
+      };
     },
   });
   const pair = await createInProcessPair([

@@ -13,12 +13,12 @@ import {
   deletePackageRuns,
   listPackageRuns,
   listRunLogs,
-} from "../services/state/index.ts";
+} from "../services/state/runs.ts";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
-import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.ts";
+import type { AppstrateRunPlan, UploadedFile } from "../services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import { runPlatformContainer } from "../services/adapters/pi.ts";
-import type { PlatformContainerResult } from "../services/adapters/pi.ts";
+import { runPlatformContainer } from "../services/run-launcher/pi.ts";
+import type { PlatformContainerResult } from "../services/run-launcher/pi.ts";
 import type { ContainerOrchestrator } from "../services/orchestrator/index.ts";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getVersionDetail } from "../services/package-versions.ts";
@@ -28,7 +28,7 @@ import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { ApiError, notFound, conflict } from "../lib/errors.ts";
+import { notFound, conflict } from "../lib/errors.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -330,7 +330,7 @@ export function createRunsRouter() {
       }));
 
       const runner = await resolveRunnerContext(c);
-      const result = await prepareAndExecuteRun({
+      await prepareAndExecuteRun({
         runId,
         agent: effectiveAgent,
         providerProfiles,
@@ -341,11 +341,8 @@ export function createRunsRouter() {
         config: mergedConfig,
         configOverride: configOverride ?? null,
         modelId: modelIdOverride ?? preflightModelId,
-        modelOverridden: modelIdOverride != null,
         proxyId: proxyIdOverride ?? preflightProxyId,
-        proxyOverridden: proxyIdOverride != null,
         overrideVersionLabel,
-        versionOverridden: overrideVersionLabel != null,
         connectionProfileId: defaultUserProfileId ?? undefined,
         applicationId: c.get("applicationId"),
         uploadedFiles,
@@ -354,28 +351,6 @@ export function createRunsRouter() {
         runnerName: runner.name,
         runnerKind: runner.kind,
       });
-
-      if (!result.ok) {
-        const { error } = result;
-        if (error.code === "model_not_configured") {
-          throw new ApiError({
-            status: 400,
-            code: "model_not_configured",
-            title: "Bad Request",
-            detail: error.message,
-          });
-        }
-        // Module rejections (beforeRun hook) carry a status hint
-        if ("status" in error && typeof error.status === "number") {
-          throw new ApiError({
-            status: error.status,
-            code: error.code,
-            title: error.message,
-            detail: error.message,
-          });
-        }
-        throw new Error(error.message);
-      }
 
       return c.json({ runId });
     },

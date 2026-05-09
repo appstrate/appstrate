@@ -45,7 +45,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
-import { resolveManifestCatalogDeps } from "./agent-service.ts";
+import { resolveManifestCatalogDeps } from "./package-catalog.ts";
 import { resolveActorProfileContext, resolveProviderProfiles } from "./connection-profiles.ts";
 
 export interface InlineRunBody {

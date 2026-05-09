@@ -11,13 +11,13 @@ import type { AppScope } from "../../lib/scope.ts";
 
 /**
  * Build the actor ownership filter.
- * For members: filter by dashboardUserId.
+ * For dashboard users: filter by userId.
  * For end-users: filter by endUserId.
- * The actorId may be a member userId or an endUserId depending on caller context.
+ * The actorId may be a userId or an endUserId depending on caller context.
  * We use OR to match either column, since the caller passes the correct actor ID.
  */
 function actorOwnershipFilter(actorId: string): SQL {
-  return or(eq(runs.dashboardUserId, actorId), eq(runs.endUserId, actorId))!;
+  return or(eq(runs.userId, actorId), eq(runs.endUserId, actorId))!;
 }
 
 export async function markNotificationRead(
@@ -42,13 +42,13 @@ export async function markNotificationRead(
 /**
  * Filter: actor-owned OR org-visible runs (no dashboard user).
  * This covers:
- * - Runs triggered by the actor themselves (dashboardUserId or endUserId match)
- * - Schedule-triggered runs (no dashboardUserId, no endUserId, has scheduleId)
- * - End-user runs (no dashboardUserId, has endUserId) — visible to all org
+ * - Runs triggered by the actor themselves (userId or endUserId match)
+ * - Schedule-triggered runs (no userId, no endUserId, has scheduleId)
+ * - End-user runs (no userId, has endUserId) — visible to all org
  *   members since they are API-triggered on behalf of end-users
  */
 function actorOrOrgFilter(actorId: string): SQL {
-  return or(actorOwnershipFilter(actorId), isNull(runs.dashboardUserId))!;
+  return or(actorOwnershipFilter(actorId), isNull(runs.userId))!;
 }
 
 export async function markAllNotificationsRead(scope: AppScope, actorId: string): Promise<number> {

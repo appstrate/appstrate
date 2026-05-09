@@ -11,16 +11,22 @@ import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listActorConnections,
+  disconnectProvider,
+  disconnectConnectionById,
+} from "../services/connection-manager/operations.ts";
+import {
   initiateConnection,
   handleCallback,
   handleOAuth1CallbackAndSave,
+} from "../services/connection-manager/oauth.ts";
+import {
   saveApiKeyConnection,
   saveCredentialsConnection,
+} from "../services/connection-manager/credentials.ts";
+import {
   getAvailableProvidersWithStatus,
-  disconnectProvider,
-  disconnectConnectionById,
   getProviderAuthMode,
-} from "../services/connection-manager/index.ts";
+} from "../services/connection-manager/providers.ts";
 import { getDefaultProfileId, getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import type { Actor } from "../lib/actor.ts";

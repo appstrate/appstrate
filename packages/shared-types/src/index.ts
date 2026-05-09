@@ -18,7 +18,7 @@ import type { Run } from "@appstrate/db/schema";
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
 export type EnrichedRun = Run & {
-  dashboardUserName: string | null;
+  userName: string | null;
   endUserName: string | null;
   apiKeyName: string | null;
   scheduleName: string | null;
@@ -344,6 +344,19 @@ export const modelCostSchema = z.object({
   cacheWrite: z.number().nonnegative(),
 });
 export type ModelCost = z.infer<typeof modelCostSchema>;
+
+/**
+ * Token usage as reported by an LLM provider for a single completion call.
+ * Wire shape consumed by the runner-event ingestion route and any
+ * cost-accounting consumer.
+ */
+export const tokenUsageSchema = z.object({
+  input_tokens: z.number().nonnegative(),
+  output_tokens: z.number().nonnegative(),
+  cache_creation_input_tokens: z.number().nonnegative().optional(),
+  cache_read_input_tokens: z.number().nonnegative().optional(),
+});
+export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
 // --- Package Version Types ---
 

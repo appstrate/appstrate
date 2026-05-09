@@ -51,3 +51,9 @@ export {
   RUNTIME_INJECTED_TOOLS,
   type RuntimeInjectedTool,
 } from "./runtime-tools/index.ts";
+
+export {
+  buildRuntimeToolFactories,
+  type BuildRuntimeToolFactoriesOptions,
+  type RuntimeToolEventEmitter,
+} from "./runtime-tools/mcp-forward.ts";

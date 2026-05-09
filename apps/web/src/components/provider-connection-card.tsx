@@ -78,8 +78,8 @@ export function ProviderConnectionCard({
   });
 
   // Provider metadata
-  const { data: providersData } = useProviders();
-  const provider = providersData?.providers?.find((p) => p.id === providerId);
+  const { data: providers } = useProviders();
+  const provider = providers?.find((p) => p.id === providerId);
 
   // Modal state
   const [apiKeyOpen, setApiKeyOpen] = useState(false);

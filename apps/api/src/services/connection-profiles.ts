@@ -17,7 +17,7 @@ import {
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
-import { getAppProfileBindings } from "./state/index.ts";
+import { getAppProfileBindings } from "./state/app-profile-bindings.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
@@ -465,7 +465,7 @@ export async function resolveActorProfileContext(
     };
   }
   const stickyPromise: Promise<string | null> =
-    actor.type === "member" && applicationId
+    actor.type === "user" && applicationId
       ? getMemberApplicationProfileId(actor.id, applicationId)
       : Promise.resolve(null);
   const [sticky, fallback, userProviderOverrides] = await Promise.all([

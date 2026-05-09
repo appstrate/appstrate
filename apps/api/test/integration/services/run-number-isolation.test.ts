@@ -33,7 +33,7 @@ describe("nextRunNumber isolation per application", () => {
   });
 
   it("assigns run number 1 to the first run in each application independently", async () => {
-    const actor = { type: "member" as const, id: ctx.user.id };
+    const actor = { type: "user" as const, id: ctx.user.id };
 
     await createRun(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
@@ -69,7 +69,7 @@ describe("nextRunNumber isolation per application", () => {
   });
 
   it("increments run numbers independently per application", async () => {
-    const actor = { type: "member" as const, id: ctx.user.id };
+    const actor = { type: "user" as const, id: ctx.user.id };
 
     const appAScope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const appBScope = { orgId: ctx.orgId, applicationId: appBId };

@@ -28,7 +28,7 @@ export function ConnectionSummaryModal({
   isPending,
 }: ConnectionSummaryModalProps) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const { data: providersData } = useProviders();
+  const { data: providerConfigs } = useProviders();
 
   const allReady = providers.every((p) => p.status === "connected" && p.scopesSufficient !== false);
 
@@ -55,7 +55,7 @@ export function ConnectionSummaryModal({
     >
       <div className="space-y-1.5">
         {providers.map((svc) => {
-          const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
+          const providerMeta = providerConfigs?.find((p) => p.id === svc.id);
           return (
             <ProviderStatusRow
               key={svc.id}

@@ -358,7 +358,7 @@ describe("connection-manager", () => {
       const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      const actor: Actor = { type: "member", id: userId };
+      const actor: Actor = { type: "user", id: userId };
       await disconnectConnectionById({ orgId, applicationId: applicationId }, connectionId, actor);
 
       const connections = await listActorConnections(
@@ -373,7 +373,7 @@ describe("connection-manager", () => {
       const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
 
       const otherUser = await createTestUser({ email: "hacker@test.com" });
-      const actor: Actor = { type: "member", id: otherUser.id };
+      const actor: Actor = { type: "user", id: otherUser.id };
 
       await expect(
         disconnectConnectionById({ orgId, applicationId: applicationId }, connectionId, actor),
@@ -381,7 +381,7 @@ describe("connection-manager", () => {
     });
 
     it("throws when connection ID does not exist", async () => {
-      const actor: Actor = { type: "member", id: userId };
+      const actor: Actor = { type: "user", id: userId };
       const fakeId = "00000000-0000-0000-0000-000000000000";
 
       await expect(
@@ -401,7 +401,7 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "clickup", orgId, applicationId);
       await seedConnection(profile2.id, "slack", orgId, applicationId);
 
-      const actor: Actor = { type: "member", id: userId };
+      const actor: Actor = { type: "user", id: userId };
       await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);
 
       const conn1 = await listActorConnections(
@@ -427,7 +427,7 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(otherProfile.id, "clickup", otherOrg.id, otherAppId);
 
-      const actor: Actor = { type: "member", id: userId };
+      const actor: Actor = { type: "user", id: userId };
       await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);
 
       // Actor's connections are gone
@@ -448,7 +448,7 @@ describe("connection-manager", () => {
 
     it("is a no-op when actor has no profiles", async () => {
       const otherUser = await createTestUser({ email: "noprofile@test.com" });
-      const actor: Actor = { type: "member", id: otherUser.id };
+      const actor: Actor = { type: "user", id: otherUser.id };
 
       // Should not throw
       await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);

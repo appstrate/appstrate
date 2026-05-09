@@ -23,7 +23,7 @@ describe("agent provider overrides", () => {
     const { id: userId } = await createTestUser();
     const { org } = await createTestOrg(userId);
     orgId = org.id;
-    actor = { type: "member", id: userId };
+    actor = { type: "user", id: userId };
 
     const agent = await seedAgent({ id: "@testorg/my-agent", orgId });
     agentId = agent.id;
@@ -92,7 +92,7 @@ describe("agent provider overrides", () => {
   describe("actor isolation", () => {
     it("does not return overrides from another user", async () => {
       const { id: otherUserId } = await createTestUser({ email: "other@test.com" });
-      const otherActor: Actor = { type: "member", id: otherUserId };
+      const otherActor: Actor = { type: "user", id: otherUserId };
 
       await setUserAgentProviderOverride(actor, agentId, "@test/gmail", profileId1);
 

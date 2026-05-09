@@ -47,7 +47,7 @@ describe("Cascade Deletion", () => {
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
     appId = defaultAppId;
-    actor = { type: "member", id: userId };
+    actor = { type: "user", id: userId };
   });
 
   describe("when source profile (user profile) is deleted", () => {

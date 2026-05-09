@@ -987,18 +987,20 @@ describe("McpProviderUploadResolver — cross-cutting", () => {
   });
 
   it("surfaces sidecar pre-flight errors with status 0 (not synthetic 502)", async () => {
-    // Simulate a sidecar that returns isError without _meta — the
-    // historical pre-`_meta` shape, plus the modern shape on
-    // pre-flight failures (cred fetch, allowlist denied). The body
-    // is a sidecar message, not an upstream payload. The resolver
-    // must surface status=0 so adapters and the agent distinguish
-    // "no upstream contact" from "upstream returned 5xx".
+    // Sidecar pre-flight failures (cred fetch, allowlist denied, body
+    // too large) carry no upstream contact. The sidecar still attaches
+    // `_meta` with `status: 0` / `headers: {}` so the runtime parser
+    // can rely on `_meta` always being present, and the resolver
+    // surfaces `status: 0` to distinguish "no upstream contact" from
+    // "upstream returned 5xx".
     const tool: AppstrateToolDefinition = {
       descriptor: { name: "provider_call", description: "mock", inputSchema: { type: "object" } },
       handler: (async () => ({
         content: [{ type: "text", text: "credential fetch failed: 401 from upstream auth" }],
         isError: true,
-        // Deliberately no `_meta` — this is the legacy/pre-flight shape.
+        _meta: {
+          "appstrate/upstream": { status: 0, headers: {} },
+        },
       })) as never,
     };
     const pair = await createInProcessPair([tool]);

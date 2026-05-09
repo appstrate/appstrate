@@ -15,9 +15,9 @@ describe("scopeFromActor", () => {
     expect(scopeFromActor(null)).toEqual({ type: "shared" });
   });
 
-  it("member actor passes through", () => {
-    expect(scopeFromActor({ type: "member", id: "user-9" })).toEqual({
-      type: "member",
+  it("user actor passes through", () => {
+    expect(scopeFromActor({ type: "user", id: "user-9" })).toEqual({
+      type: "user",
       id: "user-9",
     });
   });

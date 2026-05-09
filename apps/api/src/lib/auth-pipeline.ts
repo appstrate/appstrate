@@ -227,7 +227,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (userRow?.realm) c.set("sessionRealm", userRow.realm);
 
     // Ensure the user has a default connection profile (fire-and-forget)
-    ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
+    ensureDefaultProfile({ type: "user", id: session.user.id }).catch((err) => {
       logger.warn("Failed to ensure default profile", {
         userId: session.user.id,
         error: err instanceof Error ? err.message : String(err),

@@ -22,7 +22,7 @@
  *     always fine.
  */
 
-import { apiFetch } from "./api.ts";
+import { apiFetch, apiList } from "./api.ts";
 
 export interface Application {
   id: string;
@@ -32,13 +32,8 @@ export interface Application {
   createdAt: string;
 }
 
-interface ListResponse {
-  data?: Application[];
-}
-
 export async function listApplications(profileName: string): Promise<Application[]> {
-  const res = await apiFetch<ListResponse>(profileName, "/api/applications");
-  return Array.isArray(res.data) ? res.data : [];
+  return apiList<Application>(profileName, "/api/applications");
 }
 
 export async function createApplication(profileName: string, name: string): Promise<Application> {

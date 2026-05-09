@@ -1,22 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
-import { modelCostSchema } from "@appstrate/shared-types";
-import type { ModelCost } from "@appstrate/shared-types";
+import { modelCostSchema, tokenUsageSchema } from "@appstrate/shared-types";
+import type { ModelCost, TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 
-export type { ModelCost, ToolMeta };
-export { modelCostSchema };
-
-export const tokenUsageSchema = z.object({
-  input_tokens: z.number().nonnegative(),
-  output_tokens: z.number().nonnegative(),
-  cache_creation_input_tokens: z.number().nonnegative().optional(),
-  cache_read_input_tokens: z.number().nonnegative().optional(),
-});
-export type TokenUsage = z.infer<typeof tokenUsageSchema>;
+export type { ModelCost, ToolMeta, TokenUsage };
+export { modelCostSchema, tokenUsageSchema };
 
 export interface UploadedFile {
   fieldName: string;

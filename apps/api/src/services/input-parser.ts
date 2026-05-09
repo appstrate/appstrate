@@ -10,7 +10,7 @@
  */
 
 import type { Context } from "hono";
-import type { UploadedFile } from "./adapters/types.ts";
+import type { UploadedFile } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
@@ -34,7 +34,7 @@ export interface ParsedInput {
    *
    * Internal output names use the `*Override` suffix to match the schedule
    * wire (`configOverride / modelIdOverride / proxyIdOverride / versionOverride`)
-   * and the run-record columns (`runs.config_override`, `model_overridden`, …).
+   * and the run-record column (`runs.config_override`).
    */
   configOverride?: Record<string, unknown>;
 }

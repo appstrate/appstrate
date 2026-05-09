@@ -10,7 +10,7 @@
  * the real upstream credentials.
  */
 
-import { apiFetch } from "./api.ts";
+import { apiList } from "./api.ts";
 
 export interface ModelPreset {
   id: string;
@@ -50,15 +50,8 @@ export interface ModelPreset {
   keyKind?: "oauth" | "api-key" | null;
 }
 
-interface ListResponse {
-  object?: "list";
-  data?: ModelPreset[];
-  hasMore?: boolean;
-}
-
 export async function listModelPresets(profileName: string): Promise<ModelPreset[]> {
-  const res = await apiFetch<ListResponse>(profileName, "/api/models");
-  return Array.isArray(res.data) ? res.data : [];
+  return apiList<ModelPreset>(profileName, "/api/models");
 }
 
 /**

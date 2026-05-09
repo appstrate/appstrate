@@ -1,80 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Parity test for the wire format shared by `runtime-pi/sidecar/upstream-meta.ts`
- * (serializer, runs in the sidecar container) and
- * `runtime-pi/mcp/upstream-meta.ts` (parser, runs in the agent container).
+ * End-to-end defence-in-depth test for the upstream-meta wire format.
  *
- * The two modules cannot import each other at runtime because they
- * live in different Docker images (sidecar copies only `sidecar/`,
- * runtime copies only `mcp/` + `extensions/`). Test-time parity is
- * the cheapest way to guarantee they agree.
+ * The constants + types are now shared via `@appstrate/mcp-transport`,
+ * so structural parity between the sidecar serializer
+ * (`runtime-pi/sidecar/upstream-meta.ts`) and the runtime parser
+ * (`runtime-pi/mcp/upstream-meta.ts`) is guaranteed at compile time.
+ *
+ * What this file still asserts is the END-TO-END filter:
+ *   buildUpstreamMeta() → CallToolResult._meta → readUpstreamMeta()
+ *
+ * Even if the serializer's filter were bypassed (compromised sidecar,
+ * future bug), the runtime parser re-applies the allowlist on parse so
+ * `set-cookie` / `authorization` etc. cannot leak to the agent.
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  UPSTREAM_META_KEY as SIDECAR_KEY,
-  UPSTREAM_HEADER_ALLOWLIST as SIDECAR_ALLOWLIST,
-  buildUpstreamMeta,
-} from "../sidecar/upstream-meta.ts";
-import {
-  UPSTREAM_META_KEY as RUNTIME_KEY,
-  UPSTREAM_HEADER_ALLOWLIST as RUNTIME_ALLOWLIST,
-  readUpstreamMeta,
-} from "../mcp/upstream-meta.ts";
+import { UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@appstrate/mcp-transport";
-
-describe("upstream-meta wire format parity", () => {
-  it("uses the same `_meta` key on both sides", () => {
-    expect(SIDECAR_KEY).toBe(RUNTIME_KEY);
-  });
-
-  it("uses the same header allowlist on both sides", () => {
-    expect([...SIDECAR_ALLOWLIST].sort()).toEqual([...RUNTIME_ALLOWLIST].sort());
-  });
-
-  it("allowlist contains every header required by the four upload protocols", () => {
-    const required = [
-      // Google resumable + Microsoft resumable
-      "location",
-      "content-range",
-      // S3 multipart
-      "etag",
-      // tus
-      "upload-offset",
-      "upload-length",
-      "tus-resumable",
-    ];
-    for (const h of required) {
-      expect(SIDECAR_ALLOWLIST.has(h)).toBe(true);
-      expect(RUNTIME_ALLOWLIST.has(h)).toBe(true);
-    }
-  });
-
-  it("allowlist excludes credential-bearing headers", () => {
-    const excluded = [
-      "set-cookie",
-      "authorization",
-      "www-authenticate",
-      "cookie",
-      "proxy-authorization",
-    ];
-    for (const h of excluded) {
-      expect(SIDECAR_ALLOWLIST.has(h)).toBe(false);
-      expect(RUNTIME_ALLOWLIST.has(h)).toBe(false);
-    }
-  });
-});
+import { buildUpstreamMeta } from "../sidecar/upstream-meta.ts";
+import { readUpstreamMeta } from "../mcp/upstream-meta.ts";
 
 describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
-  // The static allowlist tests above prove the *constants* match.
-  // These tests prove that an actual upstream `Response` carrying
-  // sensitive headers is stripped END-TO-END through the chain:
-  //   buildUpstreamMeta() → CallToolResult._meta → readUpstreamMeta()
-  // Defence-in-depth: the runtime side re-applies the allowlist on
-  // parse, so even a compromised sidecar that bypassed the
-  // serializer's filter cannot leak `set-cookie` to the agent.
-
   it("strips set-cookie / authorization at both serializer and parser", () => {
     const upstream = new Response("body", {
       status: 200,
@@ -102,19 +50,18 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
     // Now ship through the wire (CallToolResult shape) and parse.
     const onWire: CallToolResult = {
       content: [{ type: "text", text: "body" }],
-      _meta: { [SIDECAR_KEY]: meta },
+      _meta: { [UPSTREAM_META_KEY]: meta },
     } as never;
     const parsed = readUpstreamMeta(onWire);
-    expect(parsed).toBeDefined();
-    expect(parsed!.status).toBe(200);
-    expect(parsed!.headers.location).toBe("https://api.example.com/upload/abc");
-    expect(parsed!.headers.etag).toBe('"v1"');
-    expect(parsed!.headers["content-type"]).toBe("application/json");
-    expect(parsed!.headers).not.toHaveProperty("set-cookie");
-    expect(parsed!.headers).not.toHaveProperty("authorization");
-    expect(parsed!.headers).not.toHaveProperty("www-authenticate");
-    expect(parsed!.headers).not.toHaveProperty("cookie");
-    expect(parsed!.headers).not.toHaveProperty("proxy-authorization");
+    expect(parsed.status).toBe(200);
+    expect(parsed.headers.location).toBe("https://api.example.com/upload/abc");
+    expect(parsed.headers.etag).toBe('"v1"');
+    expect(parsed.headers["content-type"]).toBe("application/json");
+    expect(parsed.headers).not.toHaveProperty("set-cookie");
+    expect(parsed.headers).not.toHaveProperty("authorization");
+    expect(parsed.headers).not.toHaveProperty("www-authenticate");
+    expect(parsed.headers).not.toHaveProperty("cookie");
+    expect(parsed.headers).not.toHaveProperty("proxy-authorization");
   });
 
   it("runtime-side parser re-strips sensitive headers a malicious sidecar tried to inject", () => {
@@ -124,7 +71,7 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
     const onWire: CallToolResult = {
       content: [{ type: "text", text: "" }],
       _meta: {
-        [SIDECAR_KEY]: {
+        [UPSTREAM_META_KEY]: {
           status: 200,
           headers: {
             location: "https://api.example.com/x",
@@ -139,20 +86,19 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
       },
     } as never;
     const parsed = readUpstreamMeta(onWire);
-    expect(parsed).toBeDefined();
-    expect(Object.keys(parsed!.headers).sort()).toEqual(["etag", "location"]);
-    expect(parsed!.headers).not.toHaveProperty("set-cookie");
-    expect(parsed!.headers).not.toHaveProperty("authorization");
-    expect(parsed!.headers).not.toHaveProperty("www-authenticate");
-    expect(parsed!.headers).not.toHaveProperty("cookie");
-    expect(parsed!.headers).not.toHaveProperty("proxy-authorization");
+    expect(Object.keys(parsed.headers).sort()).toEqual(["etag", "location"]);
+    expect(parsed.headers).not.toHaveProperty("set-cookie");
+    expect(parsed.headers).not.toHaveProperty("authorization");
+    expect(parsed.headers).not.toHaveProperty("www-authenticate");
+    expect(parsed.headers).not.toHaveProperty("cookie");
+    expect(parsed.headers).not.toHaveProperty("proxy-authorization");
   });
 
   it("filter is case-insensitive on the wire (Set-Cookie, SET-COOKIE, etc)", () => {
     const onWire: CallToolResult = {
       content: [{ type: "text", text: "" }],
       _meta: {
-        [SIDECAR_KEY]: {
+        [UPSTREAM_META_KEY]: {
           status: 200,
           headers: {
             // Mixed-case keys from a non-conforming serializer must
@@ -165,8 +111,7 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
       },
     } as never;
     const parsed = readUpstreamMeta(onWire);
-    expect(parsed).toBeDefined();
     // Only `location` survives; case is normalised to lowercase.
-    expect(Object.keys(parsed!.headers)).toEqual(["location"]);
+    expect(Object.keys(parsed.headers)).toEqual(["location"]);
   });
 });

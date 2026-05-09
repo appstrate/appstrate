@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { listPackages, getPackage } from "../../../src/services/agent-service.ts";
+import { listPackages, getPackage } from "../../../src/services/package-catalog.ts";
 
-describe("agent-service", () => {
+describe("package-catalog", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;

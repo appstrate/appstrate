@@ -11,7 +11,7 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { useApplicationResolver } from "../../hooks/use-current-application";
-import { useProviders } from "../../hooks/use-providers";
+import { useProviders, useProviderCallbackUrl } from "../../hooks/use-providers";
 import { useAvailableProviders } from "../../hooks/use-available-providers";
 import { useConnect, useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";
 import { ApiKeyModal } from "../../components/api-key-modal";
@@ -31,7 +31,8 @@ export function OnboardingProvidersStep() {
   useApplicationResolver();
   const { nextRoute, prevRoute } = useOnboardingNav("providers");
 
-  const { data: providersData, isLoading: providersLoading } = useProviders();
+  const { data: providersList, isLoading: providersLoading } = useProviders();
+  const { data: callbackUrl } = useProviderCallbackUrl();
   const { data: availableProviders } = useAvailableProviders();
 
   const connectMutation = useConnect();
@@ -49,7 +50,7 @@ export function OnboardingProvidersStep() {
   } | null>(null);
   const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
 
-  const providers = providersData?.providers ?? [];
+  const providers = providersList ?? [];
 
   const getAvailableProviderStatus = (providerId: string) => {
     return availableProviders?.find((s) => s.provider === providerId);
@@ -134,10 +135,7 @@ export function OnboardingProvidersStep() {
                         {isConnecting ? <Spinner /> : t("btn.connect")}
                       </Button>
                     ) : null}
-                    <ProviderConfigureButton
-                      provider={provider}
-                      callbackUrl={providersData?.callbackUrl}
-                    />
+                    <ProviderConfigureButton provider={provider} callbackUrl={callbackUrl} />
                   </div>
                 </div>
               </div>

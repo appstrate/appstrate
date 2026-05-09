@@ -3,9 +3,9 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { getPackage, getPackageWithAccess } from "../services/agent-service.ts";
+import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
-import { getRunningRunsForPackage } from "../services/state/index.ts";
+import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Middleware: load an agent by route param and set it on context, or 404.

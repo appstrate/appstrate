@@ -19,7 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { AggregatingEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
+import { AggregatingEventSink } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
@@ -40,7 +40,7 @@ describe("Parity E2E — full adapter stack", () => {
       packageId: agentId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "running",
     });
     runId = run.id;

@@ -21,7 +21,7 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import {
   AggregatingEventSink,
   PersistingEventSink,
-} from "../../../src/services/adapters/appstrate-event-sink.ts";
+} from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents, emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
@@ -46,7 +46,7 @@ describe("AggregatingEventSink", () => {
       packageId: agentId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "running",
     });
     runId = run.id;
@@ -238,7 +238,7 @@ describe("PersistingEventSink", () => {
       packageId: agentId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "running",
     });
     runId = run.id;

@@ -12,8 +12,8 @@ import {
   type Bundle,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
-import { DraftPackageCatalog } from "./adapters/draft-package-catalog.ts";
-import { loadAndVerifyBundle } from "./adapters/bundle-signature-policy.ts";
+import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
+import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 
 const BUCKET = "agent-packages";
 const ZIP_COMPRESSION_LEVEL = 6;

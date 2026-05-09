@@ -8,15 +8,9 @@
  * HTML MUST go through `escapeHtml()` or the tagged `html` helper.
  */
 
-/** Escape a user-controlled string for safe HTML interpolation. */
-export function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "@appstrate/core/html";
+
+export { escapeHtml };
 
 /**
  * Tagged template that auto-escapes every interpolated value. Use it for

@@ -4,8 +4,8 @@ import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/valid
 
 export type { AuthMode };
 
-/** Actor identity — member (dashboard) or end-user (headless). */
-export type Actor = { type: "member"; id: string } | { type: "end_user"; id: string };
+/** Actor identity — dashboard user or end-user (headless). */
+export type Actor = { type: "user"; id: string } | { type: "end_user"; id: string };
 
 /** Provider definition used by the connect package. */
 export type ProviderDefinition = ResolvedProviderDefinition;

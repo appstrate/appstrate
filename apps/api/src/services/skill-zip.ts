@@ -3,7 +3,7 @@
 import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
-import { getPackageById } from "./package-items/index.ts";
+import { getPackageById } from "./package-items/crud.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 
 export type SkillOnlyResult =

@@ -3,8 +3,8 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
-import { modelCostSchema } from "./adapters/types.ts";
-import type { ModelCost } from "./adapters/types.ts";
+import { modelCostSchema } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/shared-types";
 
 // --- Types ---
 

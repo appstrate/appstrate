@@ -5,8 +5,8 @@
  * Shared by runs.ts and scheduler.ts.
  */
 
-import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
-import type { ConnectionStatus } from "./connection-manager/index.ts";
+import { getConnectionStatus, type ConnectionStatus } from "./connection-manager/status.ts";
+import { validateScopes } from "./connection-manager/operations.ts";
 import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";

@@ -67,7 +67,7 @@ describe("scheduler app-profile readiness", () => {
 
     // Use ensureDefaultProfile to avoid racing with the fire-and-forget
     // triggered by auth middleware during createTestUser sign-up
-    const userProfile = await ensureDefaultProfile({ type: "member", id: userId });
+    const userProfile = await ensureDefaultProfile({ type: "user", id: userId });
     userProfileId = userProfile.id;
   });
 

@@ -9,7 +9,7 @@ import { applications } from "./applications.ts";
  * without changing its failure modes.
  *
  * `actor_type` is open-ended on purpose: today's vocabulary is
- * `member` / `end_user` / `api_key` / `system`, but module-owned mutations
+ * `user` / `end_user` / `api_key` / `system`, but module-owned mutations
  * (oidc client provisioning, …) may add their own kinds without a schema
  * migration.
  */

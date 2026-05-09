@@ -4,14 +4,9 @@ import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 import type { PackageType } from "@appstrate/core/validation";
 
 import { zipArtifact } from "@appstrate/core/zip";
-import {
-  getOrgItem,
-  getPackageById,
-  createOrgItem,
-  uploadPackageFiles,
-  type PackageTypeConfig,
-  CONFIG_BY_TYPE,
-} from "./package-items/index.ts";
+import { getOrgItem, getPackageById, createOrgItem } from "./package-items/crud.ts";
+import { uploadPackageFiles } from "./package-items/storage.ts";
+import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
