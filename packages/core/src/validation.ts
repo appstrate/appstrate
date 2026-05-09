@@ -14,6 +14,7 @@ import {
   oauthTokenContentTypeEnum as afpsOAuthTokenContentTypeEnum,
   credentialTransform as afpsCredentialTransform,
   credentialTransformEncodingEnum as afpsCredentialTransformEncodingEnum,
+  uploadProtocolEnum as afpsUploadProtocolEnum,
 } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
@@ -127,6 +128,20 @@ export const AUTH_MODES = authModeEnum.options;
 
 /** Auth mode union type derived from the AFPS Zod enum. */
 export type AuthMode = z.infer<typeof authModeEnum>;
+
+/**
+ * Provider upload-protocol Zod enum, re-exported from `@afps-spec/schema`
+ * so the runtime can advertise the `provider_upload` tool only for protocols
+ * declared in the canonical AFPS enum. AFPS v1 (§7.7): `google-resumable |
+ * s3-multipart | tus | ms-resumable`.
+ */
+export const uploadProtocolEnum = afpsUploadProtocolEnum;
+
+/** Closed list of valid upload-protocol strings — derived from {@link uploadProtocolEnum}. */
+export const UPLOAD_PROTOCOLS = uploadProtocolEnum.options;
+
+/** Upload protocol union type derived from the AFPS Zod enum. */
+export type UploadProtocol = z.infer<typeof uploadProtocolEnum>;
 
 const _setupGuideSchema = afpsSetupGuide;
 

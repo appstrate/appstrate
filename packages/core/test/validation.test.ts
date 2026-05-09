@@ -358,6 +358,110 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
+  // ─── uploadProtocols (AFPS spec.md §7.7) ───
+
+  it("provider — uploadProtocols with single known protocol accepted", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: ["google-resumable"],
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("provider — uploadProtocols with multiple known protocols accepted", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: ["s3-multipart", "tus", "ms-resumable"],
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("provider — uploadProtocols omitted is valid (backwards compatible)", () => {
+    const result = validateManifest(validProviderManifest());
+    expect(result.valid).toBe(true);
+  });
+
+  it("provider — uploadProtocols rejects unknown protocol", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: ["fake-protocol"],
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes("uploadprotocols"))).toBe(true);
+  });
+
+  it("provider — uploadProtocols rejects mix of known and unknown", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: ["tus", "fake-protocol"],
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("provider — uploadProtocols rejects duplicate values", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: ["tus", "tus"],
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("provider — uploadProtocols rejects non-array values", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "oauth2",
+          oauth2: {
+            authorizationUrl: "https://example.com/authorize",
+            tokenUrl: "https://example.com/token",
+          },
+          uploadProtocols: "google-resumable",
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
   it("provider with setupGuide", () => {
     const result = validateManifest(
       validProviderManifest({

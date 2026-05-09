@@ -192,6 +192,18 @@
         "availableScopes": {
           "type": "array",
           "items": {}
+        },
+        "uploadProtocols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "google-resumable",
+              "s3-multipart",
+              "tus",
+              "ms-resumable"
+            ]
+          }
         }
       },
       "required": [
