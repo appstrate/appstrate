@@ -57,9 +57,13 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             by proxy-primitives
 #   - @appstrate/mcp-transport                MCP adapter on the official SDK,
 #                                             used by mcp.ts to expose `tools/*`
+#   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
+#                                             imported by credential-proxy.ts /
+#                                             mcp.ts / ssrf.ts
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
+COPY packages/core/src           packages/core/src
 
 # Sidecar sources.
 COPY runtime-pi/sidecar/server.ts           \
@@ -73,6 +77,7 @@ COPY runtime-pi/sidecar/server.ts           \
      runtime-pi/sidecar/credential-proxy.ts \
      runtime-pi/sidecar/roots.ts            \
      runtime-pi/sidecar/logger.ts           \
+     runtime-pi/sidecar/upstream-meta.ts    \
      runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
