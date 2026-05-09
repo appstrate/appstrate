@@ -211,16 +211,40 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Documents");
   });
 
-  it("renders the Checkpoint section when context.checkpoint is set", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx({ checkpoint: { cursor: "abc", count: 12 } }),
+  describe("Checkpoint section", () => {
+    it("renders the data block when context.checkpoint is set", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ checkpoint: { cursor: "abc", count: 12 } }),
+      });
+      expect(out).toContain("## Checkpoint");
+      expect(out).not.toContain("## Previous State");
+      expect(out).toContain('"cursor": "abc"');
+      expect(out).toContain('"count": 12');
+      // Data-shell prose: present (resume guidance is generic).
+      expect(out).toContain("resume work");
     });
-    expect(out).toContain("## Checkpoint");
-    expect(out).not.toContain("## Previous State");
-    expect(out).toContain('"cursor": "abc"');
-    expect(out).toContain('"count": 12');
-    expect(out).toContain('pin({ key: "checkpoint"');
+
+    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+      // Post-#368 contract: the platform owns the data shell, tools own
+      // their usage prose. The Checkpoint section must not name any
+      // tool — instructions for updating the checkpoint flow in via
+      // `@appstrate/pin`'s TOOL.md when that tool is loaded.
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ checkpoint: { cursor: "abc" } }),
+      });
+      const sectionStart = out.indexOf("## Checkpoint");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("pin(");
+      expect(slice).not.toContain("read-only carry-over");
+    });
+
+    it("omits the section entirely when context.checkpoint is null/undefined", () => {
+      const out = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(out).not.toContain("## Checkpoint");
+    });
   });
 
   describe("Pinned Slots section", () => {
@@ -286,15 +310,19 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain('"secondary"');
     });
 
-    it("includes a footer telling the agent how to update slots and where checkpoint goes", () => {
+    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+      // Post-#368 contract: data block only. The `pin` instructions
+      // for updating slots come from `@appstrate/pin`'s TOOL.md when
+      // that package is in the bundle's dependency tree.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ pinnedSlots: { persona: "anything" } }),
       });
-      expect(out).toContain('pin({ key: "<your-key>"');
-      // Must redirect agents to the dedicated checkpoint key for carry-over,
-      // so the two surfaces don't get conflated.
-      expect(out).toContain('key: "checkpoint"');
+      const sectionStart = out.indexOf("## Pinned Slots");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("pin(");
+      expect(slice).not.toContain("read-only in this build");
     });
 
     it("renders after the Checkpoint section when both are present", () => {
@@ -312,36 +340,86 @@ describe("renderPlatformPrompt", () => {
     });
   });
 
-  it("renders the Memory section with pinned memories listed", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx({
-        memories: [
-          { content: "fact one", createdAt: 1_700_000_000_000 },
-          { content: "fact two", createdAt: 1_700_000_100_000 },
-        ],
-      }),
+  describe("Memory section (#368)", () => {
+    it("renders the data block with pinned memories listed", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          memories: [
+            { content: "fact one", createdAt: 1_700_000_000_000 },
+            { content: "fact two", createdAt: 1_700_000_100_000 },
+          ],
+        }),
+      });
+      expect(out).toContain("## Memory");
+      expect(out).toContain("Pinned memories");
+      expect(out).toContain("- fact one");
+      expect(out).toContain("- fact two");
     });
-    expect(out).toContain("## Memory");
-    expect(out).toContain("Pinned memories");
-    expect(out).toContain("- fact one");
-    expect(out).toContain("- fact two");
-    expect(out).toContain("note({ content })");
-    expect(out).toContain("recall_memory");
-    expect(out).toContain("pin({ key, content })");
-    // Memory section should mention scope-default behaviour.
-    expect(out).toMatch(/scope.*"shared"/);
+
+    it("omits the section entirely when there are no memories", () => {
+      // Post-#368: the platform prompt is data-driven. With no memories
+      // and no fallback prose, the `## Memory` header is suppressed —
+      // the LLM still discovers the archive via the runtime-injected
+      // `recall_memory` tool docs (surfaced in `### Tools` + toolDocs).
+      const out = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(out).not.toContain("## Memory");
+      expect(out).not.toContain("No memories are currently pinned");
+    });
+
+    it("does NOT mention specific tool names — archive APIs belong to TOOL.md", () => {
+      // Post-#368 contract: data block only. Instructions for `note`,
+      // `recall_memory`, `pin` come from each tool's TOOL.md / runtime-
+      // injected doc when the tool is wired.
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          memories: [{ content: "fact", createdAt: 1_700_000_000_000 }],
+        }),
+      });
+      const sectionStart = out.indexOf("## Memory");
+      const sectionEnd = out.indexOf("\n## ", sectionStart + 1);
+      const slice = out.slice(sectionStart, sectionEnd > -1 ? sectionEnd : undefined);
+      expect(slice).not.toContain("note({ content })");
+      expect(slice).not.toContain("recall_memory({");
+      expect(slice).not.toContain("pin({ key");
+    });
+
+    it("renders memories regardless of which tools are wired — data is data", () => {
+      // The v1→v2 dep-removal scenario: agent v1 shipped `@appstrate/note`
+      // and accumulated memories; v2 dropped the dep. The platform
+      // still surfaces the carry-over memory list (it's informative
+      // context); the absence of a `note` TOOL.md in the prompt is
+      // what tells the LLM it cannot write new ones.
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({
+          memories: [{ content: "carry-over fact", createdAt: 1_700_000_000_000 }],
+        }),
+        availableTools: [],
+      });
+      expect(out).toContain("## Memory");
+      expect(out).toContain("- carry-over fact");
+    });
+
+    it("forwards toolDocs verbatim — the LLM learns archive APIs from TOOL.md", () => {
+      // Confirms the TOOL.md flow that replaces the old hardcoded
+      // footer: a runtime-injected `recall_memory` doc (or any bundle
+      // TOOL.md) flows in via `toolDocs` and reaches the LLM.
+      const recallDoc =
+        "## recall_memory\n\nUse `recall_memory({ q?, limit? })` to search the archive.";
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ memories: [{ content: "x", createdAt: 1 }] }),
+        availableTools: [
+          { id: "recall_memory", name: "recall_memory", description: "Search archive." },
+        ],
+        toolDocs: [{ id: "recall_memory", content: recallDoc }],
+      });
+      expect(out).toContain(recallDoc);
+    });
   });
 
-  it("always emits the Memory section (with archive hint) even when nothing is pinned", () => {
-    // Per ADR-012 the agent always needs to know `recall_memory` exists,
-    // including when no memory is pinned to the prompt yet — otherwise
-    // the LLM has no way to discover it should search the archive.
-    const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).toContain("## Memory");
-    expect(out).toContain("No memories are currently pinned");
-    expect(out).toContain("recall_memory");
-  });
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
     // Before the run_history tool migration, a `## Run History` section

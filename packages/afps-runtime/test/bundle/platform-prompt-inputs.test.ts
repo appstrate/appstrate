@@ -104,6 +104,39 @@ describe("buildPlatformPromptInputs", () => {
     ]);
   });
 
+  it("prefers manifest.tool.name over manifest.name as the LLM-facing tool identifier", () => {
+    // AFPS 1.5+ tool packages declare the LLM-facing tool name under
+    // `manifest.tool.name` (e.g. @appstrate/pin → "pin"). The package's
+    // `name` is the display identifier. The runtime gating in
+    // `renderPlatformPrompt` (#368) keys off `availableTools[i].name`,
+    // so the LLM-facing name MUST win when both are present — otherwise
+    // gates like `t.name === "pin"` would never match real bundles.
+    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
+    const pinTool = pkg("@appstrate/pin@1.0.0", {
+      name: "@appstrate/pin",
+      type: "tool",
+      description: "Upsert a pinned slot",
+      tool: { name: "pin" },
+    });
+    const inputs = buildPlatformPromptInputs(bundleOf(root, pinTool), ctx());
+    expect(inputs.availableTools).toEqual([
+      { id: "@appstrate/pin", name: "pin", description: "Upsert a pinned slot" },
+    ]);
+  });
+
+  it("falls back to manifest.name when manifest.tool.name is absent (legacy/non-tool-block packages)", () => {
+    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
+    const legacy = pkg("@acme/legacy@1.0.0", {
+      name: "legacy-tool",
+      type: "tool",
+      description: "Legacy",
+    });
+    const inputs = buildPlatformPromptInputs(bundleOf(root, legacy), ctx());
+    expect(inputs.availableTools).toEqual([
+      { id: "@acme/legacy", name: "legacy-tool", description: "Legacy" },
+    ]);
+  });
+
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent", timeout: 120 }, { "prompt.md": "T" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx(), {

@@ -30,6 +30,7 @@ import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
 import type { PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
+import { RUNTIME_INJECTED_TOOLS } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
 export function buildPlatformSystemPrompt(
@@ -65,6 +66,31 @@ export function buildPlatformSystemPrompt(
     providersReplace: true,
     ...(uploads ? { uploads } : {}),
   });
+
+  // Inject runtime-wired tools (run_history, recall_memory) that are
+  // not bundle packages. Both `availableTools` and `toolDocs` are
+  // appended AFTER bundle-derived entries so user-shipped tools come
+  // first in the `### Tools` listing and have their TOOL.md rendered
+  // ahead of the runtime docs — same order they're discoverable via
+  // MCP `tools/list`.
+  //
+  // The `doc` field carries the equivalent of a TOOL.md file: usage
+  // prose the LLM reads to learn how to call the tool. Without this,
+  // a stripped-down platform prompt (post-#368 refactor) would surface
+  // the runtime tool in `### Tools` but never teach the LLM the
+  // calling convention.
+  inputs.availableTools = [
+    ...(inputs.availableTools ?? []),
+    ...RUNTIME_INJECTED_TOOLS.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+    })),
+  ];
+  inputs.toolDocs = [
+    ...(inputs.toolDocs ?? []),
+    ...RUNTIME_INJECTED_TOOLS.map((t) => ({ id: t.id, content: t.doc })),
+  ];
 
   return renderPlatformPrompt(inputs);
 }
