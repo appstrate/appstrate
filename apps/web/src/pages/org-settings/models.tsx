@@ -17,16 +17,16 @@ import {
   useModelFormHandler,
 } from "../../hooks/use-models";
 import {
-  useProviderKeys,
-  useCreateProviderKey,
-  useUpdateProviderKey,
-  useDeleteProviderKey,
-  useTestProviderKey,
+  useModelProviderKeys,
+  useCreateModelProviderKey,
+  useUpdateModelProviderKey,
+  useDeleteModelProviderKey,
+  useTestModelProviderKey,
   deduplicateLabel,
-} from "../../hooks/use-provider-keys";
+} from "../../hooks/use-model-provider-keys";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { ProviderKeyFormModal } from "../../components/provider-key-form-modal";
+import { ModelProviderKeyFormModal } from "../../components/model-provider-key-form-modal";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
@@ -34,7 +34,7 @@ import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { OrgModelInfo, OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import type { OrgModelInfo, OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 
 function TestResultSpan({
   result,
@@ -225,16 +225,16 @@ function ProviderKeysSection({
   onDelete,
   onRename,
 }: {
-  providerKeys: OrgProviderKeyInfo[] | undefined;
+  providerKeys: OrgModelProviderKeyInfo[] | undefined;
   isLoading: boolean;
   error: Error | null;
   onCreate: () => void;
-  onEdit: (pk: OrgProviderKeyInfo) => void;
-  onDelete: (pk: OrgProviderKeyInfo) => void;
-  onRename: (pk: OrgProviderKeyInfo, newLabel: string) => void;
+  onEdit: (pk: OrgModelProviderKeyInfo) => void;
+  onDelete: (pk: OrgModelProviderKeyInfo) => void;
+  onRename: (pk: OrgModelProviderKeyInfo, newLabel: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestProviderKey();
+  const testMutation = useTestModelProviderKey();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
@@ -340,11 +340,11 @@ export function OrgSettingsModelsPage() {
   });
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
-  const [editPk, setEditPk] = useState<OrgProviderKeyInfo | null>(null);
-  const { data: providerKeys, isLoading: pkLoading, error: pkError } = useProviderKeys();
-  const createPkMutation = useCreateProviderKey();
-  const updatePkMutation = useUpdateProviderKey();
-  const deletePkMutation = useDeleteProviderKey();
+  const [editPk, setEditPk] = useState<OrgModelProviderKeyInfo | null>(null);
+  const { data: providerKeys, isLoading: pkLoading, error: pkError } = useModelProviderKeys();
+  const createPkMutation = useCreateModelProviderKey();
+  const updatePkMutation = useUpdateModelProviderKey();
+  const deletePkMutation = useDeleteModelProviderKey();
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
@@ -406,7 +406,7 @@ export function OrgSettingsModelsPage() {
         onSubmit={modelForm.onSubmit}
       />
 
-      <ProviderKeyFormModal
+      <ModelProviderKeyFormModal
         open={pkModalOpen}
         onClose={() => setPkModalOpen(false)}
         providerKey={editPk}

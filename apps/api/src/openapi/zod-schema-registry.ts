@@ -77,12 +77,12 @@ import {
   removeProviderProfileSchema,
 } from "../routes/agents.ts";
 
-// --- Provider Key schemas (routes/provider-keys.ts) ---
+// --- Model Provider Key schemas (routes/model-provider-keys.ts) ---
 import {
-  createSchema as createProviderKeySchema,
-  updateSchema as updateProviderKeySchema,
-  testInlineSchema as providerKeysTestInlineSchema,
-} from "../routes/provider-keys.ts";
+  createSchema as createModelProviderKeySchema,
+  updateSchema as updateModelProviderKeySchema,
+  testInlineSchema as modelProviderKeysTestInlineSchema,
+} from "../routes/model-provider-keys.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
@@ -322,24 +322,24 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set agent app profile",
   },
 
-  // ─── Provider Keys ─────────────────────────────────────────────────────
+  // ─── Model Provider Keys ───────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/provider-keys",
-    jsonSchema: toJsonSchema(createProviderKeySchema),
-    description: "Create provider key",
+    path: "/api/model-provider-keys",
+    jsonSchema: toJsonSchema(createModelProviderKeySchema),
+    description: "Create model provider key",
   },
   {
     method: "PUT",
-    path: "/api/provider-keys/{id}",
-    jsonSchema: toJsonSchema(updateProviderKeySchema),
-    description: "Update provider key",
+    path: "/api/model-provider-keys/{id}",
+    jsonSchema: toJsonSchema(updateModelProviderKeySchema),
+    description: "Update model provider key",
   },
   {
     method: "POST",
-    path: "/api/provider-keys/test",
-    jsonSchema: toJsonSchema(providerKeysTestInlineSchema),
-    description: "Test provider key inline",
+    path: "/api/model-provider-keys/test",
+    jsonSchema: toJsonSchema(modelProviderKeysTestInlineSchema),
+    description: "Test model provider key inline",
   },
 
   // ─── Profile ────────────────────────────────────────────────────────────

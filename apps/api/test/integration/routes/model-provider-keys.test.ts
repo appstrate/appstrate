@@ -7,7 +7,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 
 const app = getTestApp();
 
-describe("Provider Keys API", () => {
+describe("Model Provider Keys API", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -15,27 +15,27 @@ describe("Provider Keys API", () => {
     ctx = await createTestContext();
   });
 
-  describe("GET /api/provider-keys", () => {
-    it("returns list of provider keys", async () => {
-      const res = await app.request("/api/provider-keys", {
+  describe("GET /api/model-provider-keys", () => {
+    it("returns list of model provider keys", async () => {
+      const res = await app.request("/api/model-provider-keys", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toBeArray();
-      // May include system provider keys loaded at boot — just verify shape
+      // May include system model provider keys loaded at boot — just verify shape
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/provider-keys");
+      const res = await app.request("/api/model-provider-keys");
       expect(res.status).toBe(401);
     });
   });
 
-  describe("POST /api/provider-keys", () => {
-    it("creates a provider key", async () => {
-      const res = await app.request("/api/provider-keys", {
+  describe("POST /api/model-provider-keys", () => {
+    it("creates a model provider key", async () => {
+      const res = await app.request("/api/model-provider-keys", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -53,10 +53,10 @@ describe("Provider Keys API", () => {
     });
   });
 
-  describe("PUT /api/provider-keys/:id", () => {
-    it("updates provider key label", async () => {
-      // Create a provider key first
-      const createRes = await app.request("/api/provider-keys", {
+  describe("PUT /api/model-provider-keys/:id", () => {
+    it("updates model provider key label", async () => {
+      // Create a model provider key first
+      const createRes = await app.request("/api/model-provider-keys", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -70,7 +70,7 @@ describe("Provider Keys API", () => {
       const { id } = (await createRes.json()) as any;
 
       // Update the label
-      const res = await app.request(`/api/provider-keys/${id}`, {
+      const res = await app.request(`/api/model-provider-keys/${id}`, {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "Updated Label" }),
@@ -82,10 +82,10 @@ describe("Provider Keys API", () => {
     });
   });
 
-  describe("DELETE /api/provider-keys/:id", () => {
-    it("deletes a provider key and returns 204", async () => {
-      // Create a provider key first
-      const createRes = await app.request("/api/provider-keys", {
+  describe("DELETE /api/model-provider-keys/:id", () => {
+    it("deletes a model provider key and returns 204", async () => {
+      // Create a model provider key first
+      const createRes = await app.request("/api/model-provider-keys", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -99,7 +99,7 @@ describe("Provider Keys API", () => {
       const { id } = (await createRes.json()) as any;
 
       // Delete it
-      const res = await app.request(`/api/provider-keys/${id}`, {
+      const res = await app.request(`/api/model-provider-keys/${id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -107,7 +107,7 @@ describe("Provider Keys API", () => {
       expect(res.status).toBe(204);
 
       // Verify it is gone
-      const listRes = await app.request("/api/provider-keys", {
+      const listRes = await app.request("/api/model-provider-keys", {
         headers: authHeaders(ctx),
       });
       const body = (await listRes.json()) as any;

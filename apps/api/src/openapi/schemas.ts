@@ -806,7 +806,7 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgProviderKey: {
+  OrgModelProviderKey: {
     type: "object",
     required: ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
     properties: {

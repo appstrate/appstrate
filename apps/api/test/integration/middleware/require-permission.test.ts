@@ -135,18 +135,18 @@ describe("RBAC — Permission enforcement", () => {
     });
   });
 
-  // ─── Provider keys (admin-only read) ───────────────────────
+  // ─── Model provider keys (admin-only read) ─────────────────
 
-  describe("provider-keys:read (admin-only)", () => {
-    it("admin can list provider keys", async () => {
-      const res = await app.request("/api/provider-keys", {
+  describe("model-provider-keys:read (admin-only)", () => {
+    it("admin can list model provider keys", async () => {
+      const res = await app.request("/api/model-provider-keys", {
         headers: authHeaders(admin),
       });
       expect(res.status).toBe(200);
     });
 
-    it("member gets 403 on list provider keys", async () => {
-      const res = await app.request("/api/provider-keys", {
+    it("member gets 403 on list model provider keys", async () => {
+      const res = await app.request("/api/model-provider-keys", {
         headers: authHeaders(member),
       });
       expect(res.status).toBe(403);

@@ -8,7 +8,7 @@ import type { ModelCost } from "@appstrate/shared-types";
 
 // --- Types ---
 
-export interface SystemProviderKeyDefinition {
+export interface SystemModelProviderKeyDefinition {
   id: string;
   label: string;
   api: string;
@@ -35,7 +35,7 @@ export interface ModelDefinition {
 
 // --- State ---
 
-let systemProviderKeys: Map<string, SystemProviderKeyDefinition> | null = null;
+let systemModelProviderKeys: Map<string, SystemModelProviderKeyDefinition> | null = null;
 let systemModels: Map<string, ModelDefinition> | null = null;
 
 // --- Parsing ---
@@ -53,7 +53,7 @@ const rawModelSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const rawProviderKeySchema = z.object({
+const rawModelProviderKeySchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   api: z.string().min(1),
@@ -62,11 +62,15 @@ const rawProviderKeySchema = z.object({
   models: z.array(rawModelSchema).optional(),
 });
 
-type RawProviderKey = z.infer<typeof rawProviderKeySchema>;
+type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
 
 /**
- * Initialize system provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
+ * Initialize system model provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
  * Call once at boot before any model lookups.
+ *
+ * NOTE: The env var name is preserved for backward compatibility with self-hosted
+ * deployments. The TypeScript identifiers are renamed to disambiguate from OAuth
+ * providers (Gmail, ClickUp, etc.).
  *
  * Format:
  * ```json
@@ -82,18 +86,18 @@ type RawProviderKey = z.infer<typeof rawProviderKeySchema>;
  * }]
  * ```
  */
-export function initSystemProviderKeys(): void {
-  const pkMap = new Map<string, SystemProviderKeyDefinition>();
+export function initSystemModelProviderKeys(): void {
+  const pkMap = new Map<string, SystemModelProviderKeyDefinition>();
   const mdlMap = new Map<string, ModelDefinition>();
 
-  const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawProviderKey[];
+  const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawModelProviderKey[];
 
   for (const pk of raw) {
-    const pkResult = rawProviderKeySchema.safeParse(pk);
+    const pkResult = rawModelProviderKeySchema.safeParse(pk);
     if (!pkResult.success) {
       logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry", {
         error: pkResult.error.issues[0]?.message,
-        providerKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined },
+        modelProviderKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined },
       });
       continue;
     }
@@ -107,13 +111,13 @@ export function initSystemProviderKeys(): void {
       apiKey: validPk.apiKey,
     });
 
-    // Parse models under this provider key
+    // Parse models under this model provider key
     if (Array.isArray(validPk.models)) {
       for (const m of validPk.models) {
         const mResult = rawModelSchema.safeParse(m);
         if (!mResult.success) {
           logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
-            providerKeyId: validPk.id,
+            modelProviderKeyId: validPk.id,
             error: mResult.error.issues[0]?.message,
             model: m,
           });
@@ -142,25 +146,28 @@ export function initSystemProviderKeys(): void {
     }
   }
 
-  systemProviderKeys = pkMap;
+  systemModelProviderKeys = pkMap;
   systemModels = mdlMap;
 }
 
 // --- Accessors ---
 
-export function getSystemProviderKeys(): ReadonlyMap<string, SystemProviderKeyDefinition> {
-  if (!systemProviderKeys) {
+export function getSystemModelProviderKeys(): ReadonlyMap<
+  string,
+  SystemModelProviderKeyDefinition
+> {
+  if (!systemModelProviderKeys) {
     throw new Error(
-      "[model-registry] System provider keys not initialized. Call initSystemProviderKeys() at boot.",
+      "[model-registry] System model provider keys not initialized. Call initSystemModelProviderKeys() at boot.",
     );
   }
-  return systemProviderKeys;
+  return systemModelProviderKeys;
 }
 
 export function getSystemModels(): ReadonlyMap<string, ModelDefinition> {
   if (!systemModels) {
     throw new Error(
-      "[model-registry] System models not initialized. Call initSystemProviderKeys() at boot.",
+      "[model-registry] System models not initialized. Call initSystemModelProviderKeys() at boot.",
     );
   }
   return systemModels;
@@ -170,6 +177,6 @@ export function isSystemModel(modelId: string): boolean {
   return systemModels?.has(modelId) ?? false;
 }
 
-export function isSystemProviderKey(keyId: string): boolean {
-  return systemProviderKeys?.has(keyId) ?? false;
+export function isSystemModelProviderKey(keyId: string): boolean {
+  return systemModelProviderKeys?.has(keyId) ?? false;
 }

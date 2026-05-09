@@ -28,7 +28,7 @@ import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
-import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
+import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
@@ -49,7 +49,7 @@ import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
-import { createProviderKeysRouter } from "../../src/routes/provider-keys.ts";
+import { createModelProviderKeysRouter } from "../../src/routes/model-provider-keys.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
@@ -88,7 +88,7 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
-initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
+initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
@@ -233,7 +233,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
-  app.route("/api/provider-keys", createProviderKeysRouter());
+  app.route("/api/model-provider-keys", createModelProviderKeysRouter());
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api/app-profiles", createAppProfilesRouter());

@@ -132,9 +132,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "models:read",
   "models:write",
   "models:delete",
-  "provider-keys:read",
-  "provider-keys:write",
-  "provider-keys:delete",
+  "model-provider-keys:read",
+  "model-provider-keys:write",
+  "model-provider-keys:delete",
   "proxies:read",
   "proxies:write",
   "proxies:delete",
@@ -191,7 +191,7 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Org profiles (read + bind own connections)
   "app-profiles:read",
   "app-profiles:bind",
-  // Infrastructure (read only, except provider-keys which is admin-only)
+  // Infrastructure (read only, except model-provider-keys which is admin-only)
   "models:read",
   "proxies:read",
   // Developer tools

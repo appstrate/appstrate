@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
 import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
-import { useProviderKeys } from "../hooks/use-provider-keys";
+import { useModelProviderKeys } from "../hooks/use-model-provider-keys";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -258,7 +258,7 @@ function ModelFormBody({
       ],
     });
 
-  const providerKeysQuery = useProviderKeys();
+  const providerKeysQuery = useModelProviderKeys();
 
   const availableProviderKeys = useMemo(() => {
     if (!providerKeysQuery.data || !api || !baseUrl) return [];

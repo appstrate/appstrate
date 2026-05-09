@@ -5767,12 +5767,12 @@
         }
       }
     },
-    "/api/provider-keys": {
+    "/api/model-provider-keys": {
       "get": {
-        "operationId": "listProviderKeys",
-        "tags": ["Provider Keys"],
-        "summary": "List organization provider keys",
-        "description": "Returns all provider keys for the current organization. API keys are never exposed.",
+        "operationId": "listModelProviderKeys",
+        "tags": ["Model Provider Keys"],
+        "summary": "List organization model provider keys",
+        "description": "Returns all LLM model provider keys (Anthropic, OpenAI, etc.) for the current organization. API keys are never exposed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5780,7 +5780,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Provider key list",
+            "description": "Model provider key list",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5802,7 +5802,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/OrgProviderKey"
+                        "$ref": "#/components/schemas/OrgModelProviderKey"
                       }
                     },
                     "hasMore": {
@@ -5837,10 +5837,10 @@
         }
       },
       "post": {
-        "operationId": "createProviderKey",
-        "tags": ["Provider Keys"],
-        "summary": "Create a provider key",
-        "description": "Create a new provider key for the organization. The API key is encrypted at rest.",
+        "operationId": "createModelProviderKey",
+        "tags": ["Model Provider Keys"],
+        "summary": "Create a model provider key",
+        "description": "Create a new LLM model provider key for the organization. The API key is encrypted at rest.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5857,7 +5857,7 @@
                   "label": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Display name for the provider key"
+                    "description": "Display name for the model provider key"
                   },
                   "api": {
                     "type": "string",
@@ -5867,7 +5867,7 @@
                   "baseUrl": {
                     "type": "string",
                     "format": "uri",
-                    "description": "Provider API base URL"
+                    "description": "Model provider API base URL"
                   },
                   "apiKey": {
                     "type": "string",
@@ -5881,7 +5881,7 @@
         },
         "responses": {
           "201": {
-            "description": "Provider key created",
+            "description": "Model provider key created",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5915,12 +5915,12 @@
         }
       }
     },
-    "/api/provider-keys/test": {
+    "/api/model-provider-keys/test": {
       "post": {
-        "operationId": "testProviderKeyInline",
-        "tags": ["Provider Keys"],
-        "summary": "Test provider key configuration inline",
-        "description": "Test a provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "operationId": "testModelProviderKeyInline",
+        "tags": ["Model Provider Keys"],
+        "summary": "Test model provider key configuration inline",
+        "description": "Test a model provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5942,7 +5942,7 @@
                   "baseUrl": {
                     "type": "string",
                     "format": "uri",
-                    "description": "Provider API base URL"
+                    "description": "Model provider API base URL"
                   },
                   "apiKey": {
                     "type": "string",
@@ -5950,7 +5950,7 @@
                   },
                   "existingKeyId": {
                     "type": "string",
-                    "description": "Existing provider key ID to fall back to for stored API key"
+                    "description": "Existing model provider key ID to fall back to for stored API key"
                   }
                 }
               }
@@ -5991,12 +5991,12 @@
         }
       }
     },
-    "/api/provider-keys/{id}": {
+    "/api/model-provider-keys/{id}": {
       "put": {
-        "operationId": "updateProviderKey",
-        "tags": ["Provider Keys"],
-        "summary": "Update a provider key",
-        "description": "Update a provider key configuration.",
+        "operationId": "updateModelProviderKey",
+        "tags": ["Model Provider Keys"],
+        "summary": "Update a model provider key",
+        "description": "Update a model provider key configuration.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6040,7 +6040,7 @@
         },
         "responses": {
           "200": {
-            "description": "Provider key updated",
+            "description": "Model provider key updated",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6074,10 +6074,10 @@
         }
       },
       "delete": {
-        "operationId": "deleteProviderKey",
-        "tags": ["Provider Keys"],
-        "summary": "Delete a provider key",
-        "description": "Delete a provider key. Models using this key will have their providerKeyId set to null.",
+        "operationId": "deleteModelProviderKey",
+        "tags": ["Model Provider Keys"],
+        "summary": "Delete a model provider key",
+        "description": "Delete a model provider key. Models using this key will have their providerKeyId set to null.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6093,7 +6093,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Provider key deleted",
+            "description": "Model provider key deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6109,12 +6109,12 @@
         }
       }
     },
-    "/api/provider-keys/{id}/test": {
+    "/api/model-provider-keys/{id}/test": {
       "post": {
-        "operationId": "testProviderKey",
-        "tags": ["Provider Keys"],
-        "summary": "Test provider key connection",
-        "description": "Test that the provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "operationId": "testModelProviderKey",
+        "tags": ["Model Provider Keys"],
+        "summary": "Test model provider key connection",
+        "description": "Test that the model provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6154,7 +6154,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Provider key not found",
+            "description": "Model provider key not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -19098,7 +19098,7 @@
           }
         }
       },
-      "OrgProviderKey": {
+      "OrgModelProviderKey": {
         "type": "object",
         "required": ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
         "properties": {

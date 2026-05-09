@@ -5,7 +5,7 @@ import { encrypt } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import { seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -17,13 +17,13 @@ describe("Models API", () => {
     ctx = await createTestContext();
   });
 
-  /** Helper: create a provider key and return its ID (required for model creation). */
+  /** Helper: create a model provider key and return its ID (required for model creation). */
   async function createProviderKey(): Promise<string> {
-    const res = await app.request("/api/provider-keys", {
+    const res = await app.request("/api/model-provider-keys", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
-        label: "Test Provider Key",
+        label: "Test Model Provider Key",
         api: "openai",
         baseUrl: "https://api.openai.com",
         apiKey: "sk-test-key-123",
@@ -57,7 +57,7 @@ describe("Models API", () => {
       // locally before the request reaches the proxy. Mis-flagging here
       // breaks `appstrate run` against any OAuth-keyed preset with an
       // opaque 429 from Anthropic.
-      const providerKey = await seedOrgProviderKey({
+      const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
@@ -83,7 +83,7 @@ describe("Models API", () => {
     });
 
     it("flags Anthropic API-key credentials with keyKind='api-key'", async () => {
-      const providerKey = await seedOrgProviderKey({
+      const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
@@ -107,7 +107,7 @@ describe("Models API", () => {
     });
 
     it("returns keyKind=null for non-Anthropic protocols", async () => {
-      const providerKey = await seedOrgProviderKey({
+      const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         api: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
