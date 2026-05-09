@@ -11,7 +11,7 @@ import { authModeLabel } from "../../../src/services/connection-manager/helpers.
 import {
   saveApiKeyConnection,
   saveCredentialsConnection,
-} from "../../../src/services/connection-manager/credentials.ts";
+} from "../../../src/services/connection-manager/connections.ts";
 import {
   listActorConnections,
   disconnectProvider,
