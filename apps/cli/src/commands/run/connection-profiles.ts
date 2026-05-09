@@ -84,7 +84,7 @@ export interface ConnectionProfileSelectionInputs {
 export interface ConnectionProfileSelection {
   /** Resolved default profile id (for `X-Connection-Profile-Id`), or undefined. */
   connectionProfileId: string | undefined;
-  /** `{ providerId: profileId }` map applied per-call by the resolver. */
+  /** `{ providerId: connectionProfileId }` map applied per-call by the resolver. */
   providerProfileOverrides: Record<string, string>;
 }
 

@@ -43,8 +43,11 @@ export const bindAppProfileSchema = z.object({
   sourceProfileId: z.uuid(),
 });
 
-async function requireAppProfile(scope: import("../lib/scope.ts").AppScope, profileId: string) {
-  const profile = await getAppProfile(scope, profileId);
+async function requireAppProfile(
+  scope: import("../lib/scope.ts").AppScope,
+  connectionProfileId: string,
+) {
+  const profile = await getAppProfile(scope, connectionProfileId);
   if (!profile) throw notFound("Profile not found");
   return profile;
 }
@@ -105,22 +108,22 @@ export function createAppProfilesRouter() {
   // PUT /api/app-profiles/:id — rename an app profile
   router.put("/:id", requirePermission("app-profiles", "write"), async (c) => {
     const scope = getAppScope(c);
-    const profileId = c.req.param("id")!;
+    const connectionProfileId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     try {
-      await renameAppProfile(scope, profileId, data.name.trim());
+      await renameAppProfile(scope, connectionProfileId, data.name.trim());
       await recordAuditFromContext(c, {
         action: "app_profile.renamed",
         resourceType: "app_profile",
-        resourceId: profileId,
+        resourceId: connectionProfileId,
         after: { name: data.name.trim() },
       });
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
       logger.warn("Failed to rename app profile", {
-        profileId,
+        connectionProfileId,
         applicationId: scope.applicationId,
         error: message,
       });
@@ -131,19 +134,19 @@ export function createAppProfilesRouter() {
   // DELETE /api/app-profiles/:id — delete an app profile
   router.delete("/:id", requirePermission("app-profiles", "delete"), async (c) => {
     const scope = getAppScope(c);
-    const profileId = c.req.param("id")!;
+    const connectionProfileId = c.req.param("id")!;
     try {
-      await deleteAppProfile(scope, profileId);
+      await deleteAppProfile(scope, connectionProfileId);
       await recordAuditFromContext(c, {
         action: "app_profile.deleted",
         resourceType: "app_profile",
-        resourceId: profileId,
+        resourceId: connectionProfileId,
       });
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
       logger.warn("Failed to delete app profile", {
-        profileId,
+        connectionProfileId,
         applicationId: scope.applicationId,
         error: message,
       });
@@ -154,8 +157,8 @@ export function createAppProfilesRouter() {
   // GET /api/app-profiles/:id/agents — list agents using this app profile
   router.get("/:id/agents", async (c) => {
     const scope = getAppScope(c);
-    const profileId = c.req.param("id")!;
-    await requireAppProfile(scope, profileId);
+    const connectionProfileId = c.req.param("id")!;
+    await requireAppProfile(scope, connectionProfileId);
 
     const rows = await db
       .select({
@@ -164,7 +167,7 @@ export function createAppProfilesRouter() {
       })
       .from(applicationPackages)
       .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
-      .where(eq(applicationPackages.appProfileId, profileId));
+      .where(eq(applicationPackages.appProfileId, connectionProfileId));
 
     return c.json(listResponse(rows));
   });
@@ -172,9 +175,9 @@ export function createAppProfilesRouter() {
   // GET /api/app-profiles/:id/bindings — list provider bindings for an app profile
   router.get("/:id/bindings", async (c) => {
     const scope = getAppScope(c);
-    const profileId = c.req.param("id")!;
-    await requireAppProfile(scope, profileId);
-    const bindings = await getAppProfileBindingsEnriched(profileId, scope.applicationId);
+    const connectionProfileId = c.req.param("id")!;
+    await requireAppProfile(scope, connectionProfileId);
+    const bindings = await getAppProfileBindingsEnriched(connectionProfileId, scope.applicationId);
     return c.json({ bindings });
   });
 
@@ -182,8 +185,8 @@ export function createAppProfilesRouter() {
   router.post("/:id/bind", rateLimit(10), requirePermission("app-profiles", "bind"), async (c) => {
     const scope = getAppScope(c);
     const userId = c.get("user").id;
-    const profileId = c.req.param("id")!;
-    await requireAppProfile(scope, profileId);
+    const connectionProfileId = c.req.param("id")!;
+    await requireAppProfile(scope, connectionProfileId);
 
     const body = await c.req.json();
     const data = parseBody(bindAppProfileSchema, body);
@@ -196,7 +199,7 @@ export function createAppProfilesRouter() {
     }
 
     // Ownership check: can't overwrite another user's binding without app-profiles:write
-    const existingOwner = await getBindingOwner(profileId, data.providerId);
+    const existingOwner = await getBindingOwner(connectionProfileId, data.providerId);
     if (existingOwner && existingOwner !== userId) {
       const perms = c.get("permissions");
       if (!perms?.has("app-profiles:write")) {
@@ -212,11 +215,16 @@ export function createAppProfilesRouter() {
       );
     }
 
-    await bindAppProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
+    await bindAppProfileProvider(
+      connectionProfileId,
+      data.providerId,
+      data.sourceProfileId,
+      userId,
+    );
     await recordAuditFromContext(c, {
       action: "app_profile.bound",
       resourceType: "app_profile",
-      resourceId: profileId,
+      resourceId: connectionProfileId,
       after: { providerId: data.providerId, sourceProfileId: data.sourceProfileId },
     });
     return c.json({ bound: true });
@@ -229,12 +237,12 @@ export function createAppProfilesRouter() {
     async (c) => {
       const scope = getAppScope(c);
       const userId = c.get("user").id;
-      const profileId = c.req.param("id")!;
+      const connectionProfileId = c.req.param("id")!;
       const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-      await requireAppProfile(scope, profileId);
+      await requireAppProfile(scope, connectionProfileId);
 
       // Ownership check: can't unbind another user's binding without app-profiles:write
-      const existingOwner = await getBindingOwner(profileId, providerId);
+      const existingOwner = await getBindingOwner(connectionProfileId, providerId);
       if (existingOwner && existingOwner !== userId) {
         const perms = c.get("permissions");
         if (!perms?.has("app-profiles:write")) {
@@ -242,11 +250,11 @@ export function createAppProfilesRouter() {
         }
       }
 
-      await unbindAppProfileProvider(profileId, providerId);
+      await unbindAppProfileProvider(connectionProfileId, providerId);
       await recordAuditFromContext(c, {
         action: "app_profile.unbound",
         resourceType: "app_profile",
-        resourceId: profileId,
+        resourceId: connectionProfileId,
         after: { providerId },
       });
       return c.json({ unbound: true });
@@ -257,18 +265,23 @@ export function createAppProfilesRouter() {
   router.get("/:id/connections", async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
-    const profileId = c.req.param("id")!;
+    const connectionProfileId = c.req.param("id")!;
     // Allow access if: own profile, app profile, or profile of another org member (read-only view)
     const profile =
-      (await getProfileForActor(profileId, actor)) ??
-      (await getAppProfile(scope, profileId)) ??
-      (await getOrgMemberProfile(profileId, scope.orgId));
+      (await getProfileForActor(connectionProfileId, actor)) ??
+      (await getAppProfile(scope, connectionProfileId)) ??
+      (await getOrgMemberProfile(connectionProfileId, scope.orgId));
     if (!profile) {
       throw notFound("Profile not found");
     }
     // Scope connections to the application's credentials
     const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
-    const rawConnections = await listConnections(db, profileId, scope.orgId, credentialIds);
+    const rawConnections = await listConnections(
+      db,
+      connectionProfileId,
+      scope.orgId,
+      credentialIds,
+    );
     // Strip sensitive fields — never expose encrypted credentials to the client
     const connections = rawConnections.map(
       ({ credentialsEncrypted: _ce, providerCredentialId: _pc, expiresAt: _ex, ...c }) => c,

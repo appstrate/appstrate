@@ -63,15 +63,16 @@ export function useConnect() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (
-      params: string | { provider: string; scopes?: string[]; profileId?: string },
+      params: string | { provider: string; scopes?: string[]; connectionProfileId?: string },
     ) => {
       const provider = typeof params === "string" ? params : params.provider;
       const scopes = typeof params === "string" ? undefined : params.scopes;
-      const profileId = typeof params === "string" ? undefined : params.profileId;
+      const connectionProfileId =
+        typeof params === "string" ? undefined : params.connectionProfileId;
 
       const body: Record<string, unknown> = {};
       if (scopes) body.scopes = scopes;
-      if (profileId) body.profileId = profileId;
+      if (connectionProfileId) body.connectionProfileId = connectionProfileId;
 
       const session = await apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
         method: "POST",
@@ -109,15 +110,15 @@ export function useConnectApiKey() {
     mutationFn: async ({
       provider,
       apiKey,
-      profileId,
+      connectionProfileId,
     }: {
       provider: string;
       apiKey: string;
-      profileId?: string;
+      connectionProfileId?: string;
     }) => {
       return apiFetch(`/api/connections/connect/${provider}/api-key`, {
         method: "POST",
-        body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
+        body: JSON.stringify({ apiKey, ...(connectionProfileId ? { connectionProfileId } : {}) }),
       });
     },
     onSuccess: () => {
@@ -132,14 +133,15 @@ export function useDisconnect() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (
-      params: string | { provider: string; profileId?: string; connectionId?: string },
+      params: string | { provider: string; connectionProfileId?: string; connectionId?: string },
     ) => {
       const provider = typeof params === "string" ? params : params.provider;
-      const profileId = typeof params === "string" ? undefined : params.profileId;
+      const connectionProfileId =
+        typeof params === "string" ? undefined : params.connectionProfileId;
       const connectionId = typeof params === "string" ? undefined : params.connectionId;
       const qs = buildQs({
         connectionId,
-        ...(!connectionId ? { profileId } : {}),
+        ...(!connectionId ? { connectionProfileId } : {}),
       });
       return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
     },
@@ -230,15 +232,18 @@ export function useConnectCredentials() {
     mutationFn: async ({
       provider,
       credentials,
-      profileId,
+      connectionProfileId,
     }: {
       provider: string;
       credentials: Record<string, string>;
-      profileId?: string;
+      connectionProfileId?: string;
     }) => {
       return apiFetch(`/api/connections/connect/${provider}/credentials`, {
         method: "POST",
-        body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
+        body: JSON.stringify({
+          credentials,
+          ...(connectionProfileId ? { connectionProfileId } : {}),
+        }),
       });
     },
     onSuccess: () => {

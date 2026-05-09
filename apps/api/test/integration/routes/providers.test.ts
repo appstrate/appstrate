@@ -402,7 +402,7 @@ describe("Providers API", () => {
       });
 
       await seedUserConnection({
-        profileId: profile.id,
+        connectionProfileId: profile.id,
         providerId,
         orgId: ctx.orgId,
         providerCredentialId: cred.id,

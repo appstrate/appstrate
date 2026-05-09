@@ -85,7 +85,10 @@ export async function listProfiles(
       connectionCount: count(userProviderConnections.id),
     })
     .from(connectionProfiles)
-    .leftJoin(userProviderConnections, eq(userProviderConnections.profileId, connectionProfiles.id))
+    .leftJoin(
+      userProviderConnections,
+      eq(userProviderConnections.connectionProfileId, connectionProfiles.id),
+    )
     .where(actorFilter(actor, PROFILE_ACTOR_COLUMNS))
     .groupBy(connectionProfiles.id);
 
@@ -96,13 +99,18 @@ export async function listProfiles(
  * Get a single profile by ID, scoped to the actor. Returns null if not found.
  */
 export async function getProfileForActor(
-  profileId: string,
+  connectionProfileId: string,
   actor: Actor,
 ): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
+    .where(
+      and(
+        eq(connectionProfiles.id, connectionProfileId),
+        actorFilter(actor, PROFILE_ACTOR_COLUMNS),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -112,11 +120,14 @@ export async function getProfileForActor(
  * or an app profile belonging to the actor's current application.
  */
 export async function getAccessibleProfile(
-  profileId: string,
+  connectionProfileId: string,
   actor: Actor,
   scope: AppScope,
 ): Promise<ConnectionProfile | null> {
-  return (await getProfileForActor(profileId, actor)) ?? (await getAppProfile(scope, profileId));
+  return (
+    (await getProfileForActor(connectionProfileId, actor)) ??
+    (await getAppProfile(scope, connectionProfileId))
+  );
 }
 
 /**
@@ -124,7 +135,7 @@ export async function getAccessibleProfile(
  * Used for read-only access (e.g. viewing schedule provider status).
  */
 export async function getOrgMemberProfile(
-  profileId: string,
+  connectionProfileId: string,
   orgId: string,
 ): Promise<ConnectionProfile | null> {
   const [row] = await db
@@ -137,7 +148,7 @@ export async function getOrgMemberProfile(
         eq(organizationMembers.orgId, orgId),
       ),
     )
-    .where(eq(connectionProfiles.id, profileId))
+    .where(eq(connectionProfiles.id, connectionProfileId))
     .limit(1);
   return row?.profile ?? null;
 }
@@ -150,22 +161,36 @@ export async function createProfile(actor: Actor, name: string): Promise<Connect
   return created!;
 }
 
-export async function renameProfile(profileId: string, actor: Actor, name: string): Promise<void> {
+export async function renameProfile(
+  connectionProfileId: string,
+  actor: Actor,
+  name: string,
+): Promise<void> {
   const [updated] = await db
     .update(connectionProfiles)
     .set({ name, updatedAt: new Date() })
-    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
+    .where(
+      and(
+        eq(connectionProfiles.id, connectionProfileId),
+        actorFilter(actor, PROFILE_ACTOR_COLUMNS),
+      ),
+    )
     .returning({ id: connectionProfiles.id });
 
   if (!updated) throw notFound("Profile not found");
 }
 
-export async function deleteProfile(profileId: string, actor: Actor): Promise<void> {
+export async function deleteProfile(connectionProfileId: string, actor: Actor): Promise<void> {
   // Check it's not the default
   const [profile] = await db
     .select()
     .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
+    .where(
+      and(
+        eq(connectionProfiles.id, connectionProfileId),
+        actorFilter(actor, PROFILE_ACTOR_COLUMNS),
+      ),
+    )
     .limit(1);
 
   if (!profile) throw notFound("Profile not found");
@@ -173,7 +198,12 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
 
   await db
     .delete(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)));
+    .where(
+      and(
+        eq(connectionProfiles.id, connectionProfileId),
+        actorFilter(actor, PROFILE_ACTOR_COLUMNS),
+      ),
+    );
 }
 
 // ─── App Profile CRUD ───────────────────────────────────────
@@ -223,14 +253,14 @@ export async function createAppProfile(scope: AppScope, name: string): Promise<C
 
 export async function getAppProfile(
   scope: AppScope,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)
     .where(
       and(
-        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.id, connectionProfileId),
         eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
@@ -254,7 +284,7 @@ export async function getAgentAppProfile(
 
 export async function renameAppProfile(
   scope: AppScope,
-  profileId: string,
+  connectionProfileId: string,
   name: string,
 ): Promise<void> {
   const [updated] = await db
@@ -262,7 +292,7 @@ export async function renameAppProfile(
     .set({ name, updatedAt: new Date() })
     .where(
       and(
-        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.id, connectionProfileId),
         eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
@@ -271,13 +301,16 @@ export async function renameAppProfile(
   if (!updated) throw notFound("Profile not found");
 }
 
-export async function deleteAppProfile(scope: AppScope, profileId: string): Promise<void> {
+export async function deleteAppProfile(
+  scope: AppScope,
+  connectionProfileId: string,
+): Promise<void> {
   const [profile] = await db
     .select()
     .from(connectionProfiles)
     .where(
       and(
-        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.id, connectionProfileId),
         eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
@@ -290,13 +323,13 @@ export async function deleteAppProfile(scope: AppScope, profileId: string): Prom
   await db
     .update(applicationPackages)
     .set({ appProfileId: null, updatedAt: new Date() })
-    .where(eq(applicationPackages.appProfileId, profileId));
+    .where(eq(applicationPackages.appProfileId, connectionProfileId));
 
   await db
     .delete(connectionProfiles)
     .where(
       and(
-        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.id, connectionProfileId),
         eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     );
@@ -345,9 +378,9 @@ export async function listAppProfilesWithUserBindings(
     grouped.set(row.appProfileId, entry);
   }
 
-  return Array.from(grouped.entries()).map(([profileId, data]) => ({
+  return Array.from(grouped.entries()).map(([connectionProfileId, data]) => ({
     profile: {
-      id: profileId,
+      id: connectionProfileId,
       userId: null,
       endUserId: null,
       applicationId: scope.applicationId,
@@ -370,7 +403,7 @@ export async function getUserAgentProviderOverrides(
   const rows = await db
     .select({
       providerId: userAgentProviderProfiles.providerId,
-      profileId: userAgentProviderProfiles.profileId,
+      connectionProfileId: userAgentProviderProfiles.connectionProfileId,
     })
     .from(userAgentProviderProfiles)
     .where(
@@ -385,7 +418,7 @@ export async function getUserAgentProviderOverrides(
 
   const map: Record<string, string> = {};
   for (const row of rows) {
-    map[row.providerId] = row.profileId;
+    map[row.providerId] = row.connectionProfileId;
   }
   return map;
 }
@@ -395,7 +428,7 @@ export async function setUserAgentProviderOverride(
   actor: Actor,
   packageId: string,
   providerId: string,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<void> {
   const actorValues = actorInsert(actor);
   const userId = actorValues.userId ?? null;
@@ -409,7 +442,7 @@ export async function setUserAgentProviderOverride(
   // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
   await db.execute(sql`
     INSERT INTO user_agent_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
-    VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${profileId}, NOW())
+    VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${connectionProfileId}, NOW())
     ON CONFLICT (${userId !== null ? sql`user_id` : sql`end_user_id`}, package_id, provider_id)
       WHERE ${userId !== null ? sql`user_id IS NOT NULL` : sql`end_user_id IS NOT NULL`}
     DO UPDATE SET profile_id = EXCLUDED.profile_id, updated_at = NOW()
@@ -484,11 +517,13 @@ export async function resolveActorProfileContext(
  * by orgId would miss them. The caller (scheduler) already validates the schedule
  * belongs to the requesting org.
  */
-export async function getProfileByIdUnsafe(profileId: string): Promise<ConnectionProfile | null> {
+export async function getProfileByIdUnsafe(
+  connectionProfileId: string,
+): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)
-    .where(eq(connectionProfiles.id, profileId))
+    .where(eq(connectionProfiles.id, connectionProfileId))
     .limit(1);
   return row ?? null;
 }
@@ -505,7 +540,7 @@ export async function getMemberApplicationProfileId(
   applicationId: string,
 ): Promise<string | null> {
   const [row] = await db
-    .select({ profileId: userApplicationProfiles.profileId })
+    .select({ connectionProfileId: userApplicationProfiles.connectionProfileId })
     .from(userApplicationProfiles)
     .where(
       and(
@@ -514,7 +549,7 @@ export async function getMemberApplicationProfileId(
       ),
     )
     .limit(1);
-  return row?.profileId ?? null;
+  return row?.connectionProfileId ?? null;
 }
 
 /**
@@ -529,7 +564,7 @@ export async function getMemberApplicationProfileId(
 export async function setMemberApplicationProfileId(
   userId: string,
   applicationId: string,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<void> {
   const [row] = await db
     .select({
@@ -537,7 +572,7 @@ export async function setMemberApplicationProfileId(
       applicationId: connectionProfiles.applicationId,
     })
     .from(connectionProfiles)
-    .where(eq(connectionProfiles.id, profileId))
+    .where(eq(connectionProfiles.id, connectionProfileId))
     .limit(1);
   if (!row) {
     throw notFound("profile");
@@ -549,10 +584,10 @@ export async function setMemberApplicationProfileId(
   }
   await db
     .insert(userApplicationProfiles)
-    .values({ userId, applicationId, profileId })
+    .values({ userId, applicationId, connectionProfileId })
     .onConflictDoUpdate({
       target: [userApplicationProfiles.userId, userApplicationProfiles.applicationId],
-      set: { profileId, updatedAt: new Date() },
+      set: { connectionProfileId, updatedAt: new Date() },
     });
 }
 
@@ -639,11 +674,11 @@ export async function resolveProviderProfiles(
   for (const svc of providers) {
     const appBinding = appProfileId ? bindings[svc.id] : undefined;
     if (appBinding) {
-      map[svc.id] = { profileId: appBinding, source: "app_binding" };
+      map[svc.id] = { connectionProfileId: appBinding, source: "app_binding" };
     } else {
       const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
       if (fallbackId) {
-        map[svc.id] = { profileId: fallbackId, source: "user_profile" };
+        map[svc.id] = { connectionProfileId: fallbackId, source: "user_profile" };
       }
       // If no fallback (app-only mode), provider simply not in map — dependency validation will catch it
     }

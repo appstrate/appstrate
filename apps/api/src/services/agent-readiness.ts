@@ -232,7 +232,7 @@ export async function resolveAgentReadiness(query: ReadinessQuery): Promise<Read
     seen.add(providerId);
     missing.push({
       providerId,
-      profileId: providerProfiles[providerId]?.profileId ?? null,
+      connectionProfileId: providerProfiles[providerId]?.connectionProfileId ?? null,
       reason: mapReason(err.code),
       message: err.message,
     });

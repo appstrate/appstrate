@@ -19,16 +19,16 @@ import type { AvailableScope } from "@appstrate/core/validation";
 
 function filterProviders(
   providers: UserConnectionProviderGroup[] | undefined,
-  profileId: string | null,
+  connectionProfileId: string | null,
 ): UserConnectionProviderGroup[] {
   if (!providers) return [];
-  if (!profileId) return providers;
+  if (!connectionProfileId) return providers;
   return providers
     .map((pg) => {
       const orgs = pg.orgs
         .map((og) => ({
           ...og,
-          connections: og.connections.filter((c) => c.profile.id === profileId),
+          connections: og.connections.filter((c) => c.profile.id === connectionProfileId),
         }))
         .filter((og) => og.connections.length > 0);
       const totalConnections = orgs.reduce((sum, og) => sum + og.connections.length, 0);

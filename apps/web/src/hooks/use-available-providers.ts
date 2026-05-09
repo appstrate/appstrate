@@ -6,12 +6,12 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { AvailableProvider } from "@appstrate/shared-types";
 
-export function useAvailableProviders(profileId?: string | null) {
+export function useAvailableProviders(connectionProfileId?: string | null) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
-  const qs = profileId ? `?profileId=${profileId}` : "";
+  const qs = connectionProfileId ? `?connectionProfileId=${connectionProfileId}` : "";
   return useQuery({
-    queryKey: ["available-providers", orgId, applicationId, profileId ?? null],
+    queryKey: ["available-providers", orgId, applicationId, connectionProfileId ?? null],
     queryFn: async () => {
       const data = await apiFetch<{ integrations: AvailableProvider[] }>(
         `/api/connections/integrations${qs}`,

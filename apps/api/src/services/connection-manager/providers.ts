@@ -36,14 +36,14 @@ export async function getProviderAuthMode(
 
 export async function getAvailableProvidersWithStatus(
   scope: AppScope,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<AvailableProvider[]> {
   const [providers, credentialIds, configuredProviderIds] = await Promise.all([
     listProviders(db, scope.orgId),
     listProviderCredentialIds(db, scope.applicationId),
     listConfiguredProviderIds(db, scope.applicationId),
   ]);
-  const connections = await listConnectionsRaw(db, profileId, scope.orgId, credentialIds);
+  const connections = await listConnectionsRaw(db, connectionProfileId, scope.orgId, credentialIds);
   const configuredSet = new Set(configuredProviderIds);
 
   return providers
@@ -87,14 +87,17 @@ export async function listAllActorConnections(
       orgId: userProviderConnections.orgId,
       scopesGranted: userProviderConnections.scopesGranted,
       connectedAt: userProviderConnections.createdAt,
-      profileId: connectionProfiles.id,
+      connectionProfileId: connectionProfiles.id,
       profileName: connectionProfiles.name,
       isDefault: connectionProfiles.isDefault,
       applicationId: applicationProviderCredentials.applicationId,
       applicationName: applications.name,
     })
     .from(userProviderConnections)
-    .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
+    .innerJoin(
+      connectionProfiles,
+      eq(userProviderConnections.connectionProfileId, connectionProfiles.id),
+    )
     .innerJoin(
       applicationProviderCredentials,
       eq(userProviderConnections.providerCredentialId, applicationProviderCredentials.id),
@@ -182,7 +185,7 @@ export async function listAllActorConnections(
           ? r.scopesGranted
           : []) as string[],
         connectedAt: toISORequired(r.connectedAt),
-        profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
+        profile: { id: r.connectionProfileId, name: r.profileName, isDefault: r.isDefault },
         application: { id: r.applicationId, name: r.applicationName },
       })),
     }));

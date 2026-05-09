@@ -521,7 +521,7 @@ async function computeScheduleReadiness(
 
 /**
  * Enrich schedules with profile info and readiness status.
- * Batches lookups by unique profileId and packageId for efficiency.
+ * Batches lookups by unique connectionProfileId and packageId for efficiency.
  */
 async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];

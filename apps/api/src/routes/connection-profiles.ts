@@ -40,15 +40,19 @@ export function createConnectionProfilesRouter() {
   // PUT /api/connection-profiles/:id — rename a profile
   router.put("/:id", async (c) => {
     const actor = getActor(c);
-    const profileId = c.req.param("id")!;
+    const connectionProfileId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     try {
-      await renameProfile(profileId, actor, data.name.trim());
+      await renameProfile(connectionProfileId, actor, data.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
-      logger.warn("Failed to rename profile", { profileId, actorId: actor.id, error: message });
+      logger.warn("Failed to rename profile", {
+        connectionProfileId,
+        actorId: actor.id,
+        error: message,
+      });
       throw invalidRequest(message);
     }
   });
@@ -56,13 +60,17 @@ export function createConnectionProfilesRouter() {
   // DELETE /api/connection-profiles/:id — delete a profile
   router.delete("/:id", async (c) => {
     const actor = getActor(c);
-    const profileId = c.req.param("id")!;
+    const connectionProfileId = c.req.param("id")!;
     try {
-      await deleteProfile(profileId, actor);
+      await deleteProfile(connectionProfileId, actor);
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
-      logger.warn("Failed to delete profile", { profileId, actorId: actor.id, error: message });
+      logger.warn("Failed to delete profile", {
+        connectionProfileId,
+        actorId: actor.id,
+        error: message,
+      });
       throw invalidRequest(message);
     }
   });

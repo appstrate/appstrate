@@ -26,7 +26,7 @@ export async function initiateConnection(
   scope: AppScope,
   provider: string,
   actor: Actor,
-  profileId: string,
+  connectionProfileId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
   const redirectUri = getOAuthCallbackUrl();
@@ -39,7 +39,7 @@ export async function initiateConnection(
       oauthStateStore,
       scope.orgId,
       actor,
-      profileId,
+      connectionProfileId,
       provider,
       redirectUri,
       scope.applicationId,
@@ -51,7 +51,7 @@ export async function initiateConnection(
     oauthStateStore,
     scope.orgId,
     actor,
-    profileId,
+    connectionProfileId,
     provider,
     redirectUri,
     requestedScopes,
@@ -75,14 +75,14 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
   if (needsReconnection) {
     logger.warn("OAuth scope shortfall — flagging connection as needsReconnection", {
       providerId: result.providerId,
-      profileId: result.profileId,
+      connectionProfileId: result.connectionProfileId,
       shortfall: result.scopeShortfall,
     });
   }
 
   await saveConnection(
     db,
-    result.profileId,
+    result.connectionProfileId,
     result.providerId,
     result.orgId,
     {
@@ -102,14 +102,14 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
   if (result.scopeCreep.length > 0) {
     logger.warn("OAuth scope creep — provider granted unrequested scopes", {
       providerId: result.providerId,
-      profileId: result.profileId,
+      connectionProfileId: result.connectionProfileId,
       creep: result.scopeCreep,
     });
   }
 
   logger.info("OAuth connection established", {
     providerId: result.providerId,
-    profileId: result.profileId,
+    connectionProfileId: result.connectionProfileId,
     scopes: result.scopesGranted,
     shortfall: result.scopeShortfall.length > 0 ? result.scopeShortfall : undefined,
   });
@@ -130,7 +130,7 @@ export async function handleOAuth1CallbackAndSave(
 
   await saveConnection(
     db,
-    result.profileId,
+    result.connectionProfileId,
     result.providerId,
     result.orgId,
     {
@@ -145,7 +145,7 @@ export async function handleOAuth1CallbackAndSave(
 
   logger.info("OAuth1 connection established", {
     providerId: result.providerId,
-    profileId: result.profileId,
+    connectionProfileId: result.connectionProfileId,
   });
 
   return result;

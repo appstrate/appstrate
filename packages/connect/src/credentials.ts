@@ -23,13 +23,13 @@ import type {
  */
 export async function getConnection(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   providerCredentialId: string,
 ): Promise<ConnectionRecord | null> {
   const conditions = [
-    eq(userProviderConnections.profileId, profileId),
+    eq(userProviderConnections.connectionProfileId, connectionProfileId),
     eq(userProviderConnections.providerId, providerId),
     eq(userProviderConnections.orgId, orgId),
     eq(userProviderConnections.providerCredentialId, providerCredentialId),
@@ -51,7 +51,7 @@ export async function getConnection(
  */
 export async function listConnections(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   orgId: string,
   providerCredentialIds: string[],
 ): Promise<ConnectionRecord[]> {
@@ -62,7 +62,7 @@ export async function listConnections(
     .from(userProviderConnections)
     .where(
       and(
-        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.connectionProfileId, connectionProfileId),
         eq(userProviderConnections.orgId, orgId),
         inArray(userProviderConnections.providerCredentialId, providerCredentialIds),
       ),
@@ -90,7 +90,7 @@ async function getProviderDefinition(db: Db, providerId: string): Promise<Record
  */
 export async function getCredentials(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   providerCredentialId: string,
@@ -99,7 +99,13 @@ export async function getCredentials(
   connection: ConnectionRecord;
   definition: Record<string, unknown>;
 } | null> {
-  const connection = await getConnection(db, profileId, providerId, orgId, providerCredentialId);
+  const connection = await getConnection(
+    db,
+    connectionProfileId,
+    providerId,
+    orgId,
+    providerCredentialId,
+  );
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
@@ -130,12 +136,18 @@ import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
  */
 export async function resolveCredentialsForProxy(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   providerCredentialId: string,
 ): Promise<ProxyCredentialsPayload | null> {
-  const result = await getCredentials(db, profileId, providerId, orgId, providerCredentialId);
+  const result = await getCredentials(
+    db,
+    connectionProfileId,
+    providerId,
+    orgId,
+    providerCredentialId,
+  );
   if (!result) return null;
 
   const def = result.definition;
@@ -155,12 +167,18 @@ export async function resolveCredentialsForProxy(
  */
 export async function forceRefreshCredentials(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   providerCredentialId: string,
 ): Promise<ProxyCredentialsPayload | null> {
-  const connection = await getConnection(db, profileId, providerId, orgId, providerCredentialId);
+  const connection = await getConnection(
+    db,
+    connectionProfileId,
+    providerId,
+    orgId,
+    providerCredentialId,
+  );
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
@@ -196,11 +214,11 @@ export async function forceRefreshCredentials(
 }
 
 /**
- * Save a connection (upsert on profileId + providerId + orgId + providerCredentialId).
+ * Save a connection (upsert on connectionProfileId + providerId + orgId + providerCredentialId).
  */
 export async function saveConnection(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   credentials: Record<string, unknown>,
@@ -233,7 +251,7 @@ export async function saveConnection(
   await db
     .insert(userProviderConnections)
     .values({
-      profileId,
+      connectionProfileId,
       providerId,
       orgId,
       ...connectionData,
@@ -241,7 +259,7 @@ export async function saveConnection(
     })
     .onConflictDoUpdate({
       target: [
-        userProviderConnections.profileId,
+        userProviderConnections.connectionProfileId,
         userProviderConnections.providerId,
         userProviderConnections.orgId,
         userProviderConnections.providerCredentialId,
@@ -258,7 +276,7 @@ export async function saveConnection(
  */
 export async function deleteConnection(
   db: Db,
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   providerCredentialId: string,
@@ -267,7 +285,7 @@ export async function deleteConnection(
     .delete(userProviderConnections)
     .where(
       and(
-        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.connectionProfileId, connectionProfileId),
         eq(userProviderConnections.providerId, providerId),
         eq(userProviderConnections.orgId, orgId),
         eq(userProviderConnections.providerCredentialId, providerCredentialId),
@@ -287,7 +305,7 @@ export async function deleteConnectionById(db: Db, connectionId: string): Promis
 function rowToConnection(row: typeof userProviderConnections.$inferSelect): ConnectionRecord {
   return {
     id: row.id,
-    profileId: row.profileId,
+    connectionProfileId: row.connectionProfileId,
     providerId: row.providerId,
     orgId: row.orgId,
     providerCredentialId: row.providerCredentialId,

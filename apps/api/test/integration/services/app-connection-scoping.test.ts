@@ -26,7 +26,7 @@ const app = getTestApp();
 
 describe("Application-scoped connection isolation", () => {
   let ctx: TestContext;
-  let profileId: string;
+  let connectionProfileId: string;
   let appAId: string;
   let appBId: string;
   const providerId = "@system/gmail";
@@ -46,7 +46,7 @@ describe("Application-scoped connection isolation", () => {
       name: "Default",
       isDefault: true,
     });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
 
     // Ensure provider package exists
     await seedPackage({ orgId: null, id: providerId, type: "provider", source: "system" }).catch(
@@ -59,23 +59,23 @@ describe("Application-scoped connection isolation", () => {
   describe("multi-app isolation", () => {
     it("connections created in app A are not visible from app B credentials", async () => {
       // Create connection in app A
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
 
       // Get app B's credential IDs — should not include app A's
       const credB = await seedProviderCredentials({ applicationId: appBId, providerId });
-      const result = await listConnections(db, profileId, ctx.orgId, [credB.id]);
+      const result = await listConnections(db, connectionProfileId, ctx.orgId, [credB.id]);
       expect(result).toHaveLength(0);
     });
 
     it("same provider can have separate connections per app", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
 
       const credIdsA = await listProviderCredentialIds(db, appAId);
       const credIdsB = await listProviderCredentialIds(db, appBId);
 
-      const connA = await listConnections(db, profileId, ctx.orgId, credIdsA);
-      const connB = await listConnections(db, profileId, ctx.orgId, credIdsB);
+      const connA = await listConnections(db, connectionProfileId, ctx.orgId, credIdsA);
+      const connB = await listConnections(db, connectionProfileId, ctx.orgId, credIdsB);
 
       expect(connA).toHaveLength(1);
       expect(connB).toHaveLength(1);
@@ -87,9 +87,9 @@ describe("Application-scoped connection isolation", () => {
 
   describe("credential leak prevention", () => {
     it("GET /connections does NOT expose credentialsEncrypted", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "secret" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "secret" });
 
-      const res = await app.request(`/api/connections?profileId=${profileId}`, {
+      const res = await app.request(`/api/connections?connectionProfileId=${connectionProfileId}`, {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
@@ -106,13 +106,13 @@ describe("Application-scoped connection isolation", () => {
     });
 
     it("GET /connection-profiles/:id/connections does NOT expose credentialsEncrypted", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "secret" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "secret" });
 
       // This endpoint is not app-scoped (no X-Application-Id middleware), so returns empty.
       // When app-scoped, it should strip sensitive fields.
       // Test that the raw listConnections result never leaks credentials.
       const credentialIds = await listProviderCredentialIds(db, appAId);
-      const rawConns = await listConnections(db, profileId, ctx.orgId, credentialIds);
+      const rawConns = await listConnections(db, connectionProfileId, ctx.orgId, credentialIds);
       expect(rawConns).toHaveLength(1);
       // The raw ConnectionRecord HAS credentialsEncrypted — that's expected at the data layer
       expect(rawConns[0]!.credentialsEncrypted).toBeDefined();
@@ -124,9 +124,9 @@ describe("Application-scoped connection isolation", () => {
   describe("disconnect scoping", () => {
     it("disconnectConnectionById rejects connections from other apps", async () => {
       // Create connection in app A
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
       const credIdsA = await listProviderCredentialIds(db, appAId);
-      const connA = await listConnections(db, profileId, ctx.orgId, credIdsA);
+      const connA = await listConnections(db, connectionProfileId, ctx.orgId, credIdsA);
       const connId = connA[0]!.id;
 
       // Try to delete from app B context — should fail (connection not found in app B's scope)
@@ -139,9 +139,9 @@ describe("Application-scoped connection isolation", () => {
     });
 
     it("disconnectConnectionById succeeds for connections in the correct app", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
       const credIdsA = await listProviderCredentialIds(db, appAId);
-      const connA = await listConnections(db, profileId, ctx.orgId, credIdsA);
+      const connA = await listConnections(db, connectionProfileId, ctx.orgId, credIdsA);
       const connId = connA[0]!.id;
 
       const res = await app.request(`/api/connections/${providerId}?connectionId=${connId}`, {
@@ -151,7 +151,7 @@ describe("Application-scoped connection isolation", () => {
       expect(res.status).toBe(200);
 
       // Verify connection is gone
-      const remaining = await listConnections(db, profileId, ctx.orgId, credIdsA);
+      const remaining = await listConnections(db, connectionProfileId, ctx.orgId, credIdsA);
       expect(remaining).toHaveLength(0);
     });
   });
@@ -160,12 +160,12 @@ describe("Application-scoped connection isolation", () => {
 
   describe("cascade delete", () => {
     it("deleting applicationProviderCredentials cascades to connections", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
 
       // Verify connection exists
       const credIdsA = await listProviderCredentialIds(db, appAId);
       expect(credIdsA).toHaveLength(1);
-      const before = await listConnections(db, profileId, ctx.orgId, credIdsA);
+      const before = await listConnections(db, connectionProfileId, ctx.orgId, credIdsA);
       expect(before).toHaveLength(1);
 
       // Delete the application provider credentials
@@ -184,7 +184,7 @@ describe("Application-scoped connection isolation", () => {
         .from(userProviderConnections)
         .where(
           and(
-            eq(userProviderConnections.profileId, profileId),
+            eq(userProviderConnections.connectionProfileId, connectionProfileId),
             eq(userProviderConnections.providerId, providerId),
           ),
         );
@@ -192,8 +192,8 @@ describe("Application-scoped connection isolation", () => {
     });
 
     it("deleting app A credentials does not affect app B connections", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
 
       // Delete app A credentials only
       await db
@@ -207,7 +207,7 @@ describe("Application-scoped connection isolation", () => {
 
       // App B connections should still exist
       const credIdsB = await listProviderCredentialIds(db, appBId);
-      const connB = await listConnections(db, profileId, ctx.orgId, credIdsB);
+      const connB = await listConnections(db, connectionProfileId, ctx.orgId, credIdsB);
       expect(connB).toHaveLength(1);
     });
   });
@@ -216,15 +216,15 @@ describe("Application-scoped connection isolation", () => {
 
   describe("token refresh per-app isolation", () => {
     it("updating connection credentials in app A does not affect app B", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
 
       const credIdsA = await listProviderCredentialIds(db, appAId);
       const credIdsB = await listProviderCredentialIds(db, appBId);
 
       // Get both connections
-      const connA = await getConnection(db, profileId, providerId, ctx.orgId, credIdsA[0]!);
-      const connB = await getConnection(db, profileId, providerId, ctx.orgId, credIdsB[0]!);
+      const connA = await getConnection(db, connectionProfileId, providerId, ctx.orgId, credIdsA[0]!);
+      const connB = await getConnection(db, connectionProfileId, providerId, ctx.orgId, credIdsB[0]!);
       expect(connA).not.toBeNull();
       expect(connB).not.toBeNull();
 
@@ -235,7 +235,7 @@ describe("Application-scoped connection isolation", () => {
         .where(eq(userProviderConnections.id, connA!.id));
 
       // Verify App B's connection is untouched
-      const connBAfter = await getConnection(db, profileId, providerId, ctx.orgId, credIdsB[0]!);
+      const connBAfter = await getConnection(db, connectionProfileId, providerId, ctx.orgId, credIdsB[0]!);
       expect(connBAfter!.credentialsEncrypted).not.toBe("refreshed-token-app-a");
       expect(connBAfter!.credentialsEncrypted).toBe(connB!.credentialsEncrypted);
     });
@@ -245,8 +245,8 @@ describe("Application-scoped connection isolation", () => {
 
   describe("needsReconnection per-providerCredentialId", () => {
     it("flagging reconnection in app A does not affect app B", async () => {
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
-      await seedConnectionForApp(profileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
 
       const credIdsA = await listProviderCredentialIds(db, appAId);
       const credIdsB = await listProviderCredentialIds(db, appBId);
@@ -257,18 +257,18 @@ describe("Application-scoped connection isolation", () => {
         .set({ needsReconnection: true, updatedAt: new Date() })
         .where(
           and(
-            eq(userProviderConnections.profileId, profileId),
+            eq(userProviderConnections.connectionProfileId, connectionProfileId),
             eq(userProviderConnections.providerId, providerId),
             eq(userProviderConnections.providerCredentialId, credIdsA[0]!),
           ),
         );
 
       // App A connection should need reconnection
-      const connA = await getConnection(db, profileId, providerId, ctx.orgId, credIdsA[0]!);
+      const connA = await getConnection(db, connectionProfileId, providerId, ctx.orgId, credIdsA[0]!);
       expect(connA!.needsReconnection).toBe(true);
 
       // App B connection should NOT need reconnection
-      const connB = await getConnection(db, profileId, providerId, ctx.orgId, credIdsB[0]!);
+      const connB = await getConnection(db, connectionProfileId, providerId, ctx.orgId, credIdsB[0]!);
       expect(connB!.needsReconnection).toBe(false);
     });
   });

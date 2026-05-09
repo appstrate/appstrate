@@ -40,7 +40,7 @@ export interface InstallationInfo {
 
 export interface ConnectionProfileCheck {
   /** Profile UUID pinned in the active CLI profile (`connectionProfileId` in config.toml). */
-  profileId: string;
+  connectionProfileId: string;
   /** Result status: ok = exists, missing = 404 (warn), unknown = the check could not run (no token / offline / 5xx). */
   status: "ok" | "missing" | "unknown";
   /** Free-form remediation hint surfaced in the rendered report. */
@@ -300,14 +300,14 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
     lines.push(``);
     const cp = report.connectionProfile;
     if (cp.status === "missing") {
-      lines.push(`⚠ Connection profile ${cp.profileId} is pinned but no longer exists.`);
+      lines.push(`⚠ Connection profile ${cp.connectionProfileId} is pinned but no longer exists.`);
       if (cp.hint) lines.push(`  ${cp.hint}`);
     } else if (cp.status === "unknown") {
       lines.push(
-        `Connection profile ${cp.profileId} could not be verified (offline or not logged in).`,
+        `Connection profile ${cp.connectionProfileId} could not be verified (offline or not logged in).`,
       );
     } else {
-      lines.push(`Connection profile ${cp.profileId} is healthy.`);
+      lines.push(`Connection profile ${cp.connectionProfileId} is healthy.`);
     }
   }
 
@@ -362,20 +362,20 @@ export const defaultCheckConnectionProfile: CheckConnectionProfile = async () =>
   const profileName = resolveProfileName(undefined, config);
   const profile = await getProfile(profileName);
   if (!profile?.connectionProfileId) return null;
-  const profileId = profile.connectionProfileId;
+  const connectionProfileId = profile.connectionProfileId;
 
   try {
     const { listConnectionProfiles } = await import("./connection-profiles.ts");
     const profiles = await listConnectionProfiles(profileName);
-    const found = profiles.some((p) => p.id === profileId);
-    if (found) return { profileId, status: "ok" };
+    const found = profiles.some((p) => p.id === connectionProfileId);
+    if (found) return { connectionProfileId, status: "ok" };
     return {
-      profileId,
+      connectionProfileId,
       status: "missing",
       hint: "Run `appstrate connections profile switch <name>` to repin a valid profile.",
     };
   } catch {
-    return { profileId, status: "unknown" };
+    return { connectionProfileId, status: "unknown" };
   }
 };
 

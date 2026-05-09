@@ -190,8 +190,8 @@ describe("Me API (/api/me)", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { profileId: string | null };
-      expect(body.profileId).toBeNull();
+      const body = (await res.json()) as { connectionProfileId: string | null };
+      expect(body.connectionProfileId).toBeNull();
     });
 
     it("PUT pins a profile owned by the caller and round-trips on GET", async () => {
@@ -205,15 +205,15 @@ describe("Me API (/api/me)", () => {
       const putRes = await app.request("/api/me/application-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: profile.id }),
+        body: JSON.stringify({ connectionProfileId: profile.id }),
       });
       expect(putRes.status).toBe(200);
 
       const getRes = await app.request("/api/me/application-profile", {
         headers: authHeaders(ctx),
       });
-      const body = (await getRes.json()) as { profileId: string | null };
-      expect(body.profileId).toBe(profile.id);
+      const body = (await getRes.json()) as { connectionProfileId: string | null };
+      expect(body.connectionProfileId).toBe(profile.id);
     });
 
     it("PUT accepts an app profile of the same application", async () => {
@@ -226,7 +226,7 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/application-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: appProfile.id }),
+        body: JSON.stringify({ connectionProfileId: appProfile.id }),
       });
       expect(res.status).toBe(200);
     });
@@ -242,7 +242,7 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/application-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: otherProfile.id }),
+        body: JSON.stringify({ connectionProfileId: otherProfile.id }),
       });
       expect(res.status).toBe(400);
     });
@@ -257,7 +257,7 @@ describe("Me API (/api/me)", () => {
       await app.request("/api/me/application-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: profile.id }),
+        body: JSON.stringify({ connectionProfileId: profile.id }),
       });
       const del1 = await app.request("/api/me/application-profile", {
         method: "DELETE",
@@ -273,8 +273,8 @@ describe("Me API (/api/me)", () => {
       const getRes = await app.request("/api/me/application-profile", {
         headers: authHeaders(ctx),
       });
-      const body = (await getRes.json()) as { profileId: string | null };
-      expect(body.profileId).toBeNull();
+      const body = (await getRes.json()) as { connectionProfileId: string | null };
+      expect(body.connectionProfileId).toBeNull();
     });
   });
 });

@@ -12,7 +12,7 @@ export type ProviderDefinition = ResolvedProviderDefinition;
 
 export interface ConnectionRecord {
   id: string;
-  profileId: string;
+  connectionProfileId: string;
   providerId: string;
   orgId: string;
   providerCredentialId: string;
@@ -39,7 +39,7 @@ export interface OAuthStateRecord {
   userId: string | null;
   endUserId?: string | null;
   applicationId: string;
-  profileId: string;
+  connectionProfileId: string;
   providerId: string;
   codeVerifier: string;
   scopesRequested: string[];

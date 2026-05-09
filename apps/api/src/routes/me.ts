@@ -134,17 +134,17 @@ router.get("/models", requirePermission("models", "read"), async (c) => {
  * callers. The application id comes from `requireAppContext()` (header
  * `X-Application-Id` for cookie sessions, embedded for API keys).
  */
-const setProfileSchema = z.object({ profileId: z.uuid() });
+const setProfileSchema = z.object({ connectionProfileId: z.uuid() });
 
 router.get("/application-profile", requireAppContext(), async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
   if (c.get("endUser")) {
-    return c.json({ profileId: null });
+    return c.json({ connectionProfileId: null });
   }
   const applicationId = c.get("applicationId")!;
-  const profileId = await getMemberApplicationProfileId(user.id, applicationId);
-  return c.json({ profileId });
+  const connectionProfileId = await getMemberApplicationProfileId(user.id, applicationId);
+  return c.json({ connectionProfileId });
 });
 
 router.put("/application-profile", requireAppContext(), async (c) => {
@@ -155,9 +155,9 @@ router.put("/application-profile", requireAppContext(), async (c) => {
   }
   const applicationId = c.get("applicationId")!;
   const body = await c.req.json().catch(() => ({}));
-  const { profileId } = parseBody(setProfileSchema, body);
-  await setMemberApplicationProfileId(user.id, applicationId, profileId);
-  return c.json({ profileId });
+  const { connectionProfileId } = parseBody(setProfileSchema, body);
+  await setMemberApplicationProfileId(user.id, applicationId, connectionProfileId);
+  return c.json({ connectionProfileId });
 });
 
 router.delete("/application-profile", requireAppContext(), async (c) => {

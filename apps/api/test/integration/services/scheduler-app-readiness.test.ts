@@ -211,7 +211,7 @@ describe("scheduler app-profile readiness", () => {
     // Provider should be resolved via app binding
     expect(providerProfiles[providerId]).toBeDefined();
     expect(providerProfiles[providerId]!.source).toBe("app_binding");
-    expect(providerProfiles[providerId]!.profileId).toBe(userProfileId);
+    expect(providerProfiles[providerId]!.connectionProfileId).toBe(userProfileId);
   });
 
   it("omits provider when app profile has no binding and no user fallback (run path)", async () => {

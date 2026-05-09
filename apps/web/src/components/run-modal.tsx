@@ -89,9 +89,9 @@ function RunModalForm({
   const { data: sticky } = useMyApplicationProfile();
   const { data: userProfiles } = useConnectionProfiles();
   const { data: appProfiles } = useAppProfiles();
-  const stickyProfile = sticky?.profileId
-    ? (userProfiles?.find((p) => p.id === sticky.profileId) ??
-      appProfiles?.find((p) => p.id === sticky.profileId) ??
+  const stickyProfile = sticky?.connectionProfileId
+    ? (userProfiles?.find((p) => p.id === sticky.connectionProfileId) ??
+      appProfiles?.find((p) => p.id === sticky.connectionProfileId) ??
       null)
     : null;
 

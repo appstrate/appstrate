@@ -74,18 +74,18 @@ export function useProviderConnection({
     bindMutation.isPending ||
     unbindMutation.isPending;
 
-  const profileParam = effectiveProfileId ? { profileId: effectiveProfileId } : {};
+  const profileParam = effectiveProfileId ? { connectionProfileId: effectiveProfileId } : {};
 
-  const handleProfileChange = (profileId: string) => {
+  const handleProfileChange = (connectionProfileId: string) => {
     if (packageId) {
-      setProviderProfile.mutate({ providerId, profileId });
+      setProviderProfile.mutate({ providerId, connectionProfileId });
     }
   };
 
   const doBind = () => {
     if (!appProfileId || !effectiveProfileId) return;
     bindMutation.mutate({
-      profileId: appProfileId,
+      connectionProfileId: appProfileId,
       providerId,
       sourceProfileId: effectiveProfileId,
     });
@@ -93,7 +93,7 @@ export function useProviderConnection({
 
   const handleUnbind = () => {
     if (!appProfileId) return;
-    unbindMutation.mutate({ profileId: appProfileId, providerId });
+    unbindMutation.mutate({ connectionProfileId: appProfileId, providerId });
   };
 
   return {

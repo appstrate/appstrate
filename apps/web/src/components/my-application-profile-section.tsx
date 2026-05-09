@@ -47,7 +47,7 @@ export function MyApplicationProfileSection() {
 
   if (!applicationId || !currentApp) return null;
 
-  const stickyId = sticky?.profileId ?? null;
+  const stickyId = sticky?.connectionProfileId ?? null;
 
   const hasOptions = (userProfiles?.length ?? 0) + (appProfiles?.length ?? 0) > 0;
 

@@ -252,7 +252,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 2: Extract profile ID map ---
   const profileIdMap = Object.fromEntries(
-    Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+    Object.entries(providerProfiles).map(([k, v]) => [k, v.connectionProfileId]),
   );
 
   // --- Step 5: Mint sink credentials ---

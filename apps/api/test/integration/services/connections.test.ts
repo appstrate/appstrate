@@ -19,7 +19,7 @@ describe("listConnections filtering", () => {
   let userId: string;
   let orgId: string;
   let applicationId: string;
-  let profileId: string;
+  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -30,15 +30,15 @@ describe("listConnections filtering", () => {
     applicationId = defaultAppId;
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   it("returns empty array when providerCredentialIds is empty", async () => {
     // Even if connections exist, passing [] should return nothing
     const providerId = "@system/gmail";
-    await seedConnectionForApp(profileId, providerId, orgId, applicationId, { api_key: "k1" });
+    await seedConnectionForApp(connectionProfileId, providerId, orgId, applicationId, { api_key: "k1" });
 
-    const result = await listConnections(db, profileId, orgId, []);
+    const result = await listConnections(db, connectionProfileId, orgId, []);
     expect(result).toEqual([]);
   });
 
@@ -47,13 +47,13 @@ describe("listConnections filtering", () => {
     const providerA = "@system/gmail";
     const providerB = "@system/clickup";
 
-    await seedConnectionForApp(profileId, providerA, orgId, applicationId, { api_key: "ka" });
-    await seedConnectionForApp(profileId, providerB, orgId, applicationId, { api_key: "kb" });
+    await seedConnectionForApp(connectionProfileId, providerA, orgId, applicationId, { api_key: "ka" });
+    await seedConnectionForApp(connectionProfileId, providerB, orgId, applicationId, { api_key: "kb" });
 
     // Get credential ID for provider A only
     const credA = await seedProviderCredentials({ applicationId: applicationId, providerId: providerA });
 
-    const result = await listConnections(db, profileId, orgId, [credA.id]);
+    const result = await listConnections(db, connectionProfileId, orgId, [credA.id]);
     expect(result).toHaveLength(1);
     expect(result[0]!.providerId).toBe(providerA);
   });
@@ -62,14 +62,14 @@ describe("listConnections filtering", () => {
     const providerId = "@system/gmail";
 
     // Create connection in app A
-    await seedConnectionForApp(profileId, providerId, orgId, applicationId, { api_key: "ka" });
+    await seedConnectionForApp(connectionProfileId, providerId, orgId, applicationId, { api_key: "ka" });
 
     // Create a second application and seed credentials there
     const appB = await seedApplication({ orgId, name: "AppB" });
     const credB = await seedProviderCredentials({ applicationId: appB.id, providerId });
 
     // Query using only appB's credential ID — should not see appA's connection
-    const result = await listConnections(db, profileId, orgId, [credB.id]);
+    const result = await listConnections(db, connectionProfileId, orgId, [credB.id]);
     expect(result).toHaveLength(0);
   });
 });

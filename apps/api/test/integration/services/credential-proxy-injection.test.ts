@@ -28,7 +28,7 @@ import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 
 describe("proxyCall — server-side credential injection", () => {
   let ctx: TestContext;
-  let profileId: string;
+  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -38,7 +38,7 @@ describe("proxyCall — server-side credential injection", () => {
       name: "Default",
       isDefault: true,
     });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   it("injects Authorization: Bearer <token> for an OAuth2 provider", async () => {
@@ -60,7 +60,7 @@ describe("proxyCall — server-side credential injection", () => {
         },
       },
     });
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       access_token: "ya29.live-oauth-token",
     });
 
@@ -82,7 +82,7 @@ describe("proxyCall — server-side credential injection", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -114,7 +114,7 @@ describe("proxyCall — server-side credential injection", () => {
         },
       },
     });
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       api_key: "sk_live_abc",
     });
 
@@ -130,7 +130,7 @@ describe("proxyCall — server-side credential injection", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://api.example.com/resource",
@@ -165,7 +165,7 @@ describe("proxyCall — server-side credential injection", () => {
         },
       },
     });
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       username: "admin",
       password: "s3cret",
     });
@@ -182,7 +182,7 @@ describe("proxyCall — server-side credential injection", () => {
     await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://api.example.com/thing",
@@ -217,7 +217,7 @@ describe("proxyCall — server-side credential injection", () => {
         },
       },
     });
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       api_key: "platform-pinned-key",
     });
 
@@ -233,7 +233,7 @@ describe("proxyCall — server-side credential injection", () => {
     await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://api.example.com/thing",

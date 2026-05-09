@@ -748,7 +748,7 @@ describe("Internal API", () => {
 
     async function seedRunWithProfile(expiresAt: string | null): Promise<{
       runToken: string;
-      profileId: string;
+      connectionProfileId: string;
     }> {
       const profile = await seedConnectionProfile({
         userId: ctx.user.id,
@@ -771,7 +771,7 @@ describe("Internal API", () => {
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
-      return { runToken: signRunToken(run.id), profileId: profile.id };
+      return { runToken: signRunToken(run.id), connectionProfileId: profile.id };
     }
 
     it("returns 401 without token", async () => {
@@ -784,7 +784,7 @@ describe("Internal API", () => {
     it("skips the refresh when the stored token is still fresh", async () => {
       // 30 minutes of lifetime left — well above the 60s safety margin
       const freshExpiry = new Date(Date.now() + 30 * 60_000).toISOString();
-      const { runToken, profileId } = await seedRunWithProfile(freshExpiry);
+      const { runToken, connectionProfileId } = await seedRunWithProfile(freshExpiry);
 
       const rowBefore = (
         await db
@@ -792,7 +792,7 @@ describe("Internal API", () => {
           .from(userProviderConnections)
           .where(
             and(
-              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.connectionProfileId, connectionProfileId),
               eq(userProviderConnections.providerId, providerId),
             ),
           )
@@ -815,7 +815,7 @@ describe("Internal API", () => {
           .from(userProviderConnections)
           .where(
             and(
-              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.connectionProfileId, connectionProfileId),
               eq(userProviderConnections.providerId, providerId),
             ),
           )

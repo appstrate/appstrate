@@ -9,7 +9,7 @@ import { stripScope } from "@appstrate/core/naming";
 import { api, apiList, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-// Profile resolution is now per-provider (server-side), no global profileId needed
+// Profile resolution is now per-provider (server-side), no global connectionProfileId needed
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,

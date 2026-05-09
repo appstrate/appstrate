@@ -66,7 +66,7 @@ export const userAgentProviderProfiles = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
-    profileId: uuid("profile_id")
+    connectionProfileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -79,7 +79,7 @@ export const userAgentProviderProfiles = pgTable(
       .on(table.endUserId, table.packageId, table.providerId)
       .where(sql`${table.endUserId} IS NOT NULL`),
     index("idx_ufpp_package_id").on(table.packageId),
-    index("idx_ufpp_profile_id").on(table.profileId),
+    index("idx_ufpp_profile_id").on(table.connectionProfileId),
     check(
       "ufpp_exactly_one_actor",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
@@ -102,7 +102,7 @@ export const userApplicationProfiles = pgTable(
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
-    profileId: uuid("profile_id")
+    connectionProfileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -110,7 +110,7 @@ export const userApplicationProfiles = pgTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.applicationId] }),
     index("idx_uap_application_id").on(table.applicationId),
-    index("idx_uap_profile_id").on(table.profileId),
+    index("idx_uap_profile_id").on(table.connectionProfileId),
   ],
 );
 
@@ -165,13 +165,13 @@ export const applicationProviderCredentials = pgTable(
 // Connection profiles (user and org) are independent of applications.
 // Connections from different apps accumulate on the same profile — each connection
 // is tagged with a providerCredentialId linking it to one application's credentials.
-// The unique index on (profileId, providerId, orgId, providerCredentialId) allows
+// The unique index on (connectionProfileId, providerId, orgId, providerCredentialId) allows
 // one connection per provider per app per profile.
 export const userProviderConnections = pgTable(
   "user_provider_connections",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    profileId: uuid("profile_id")
+    connectionProfileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
@@ -193,13 +193,16 @@ export const userProviderConnections = pgTable(
   },
   (table) => [
     uniqueIndex("idx_user_provider_connections_unique").on(
-      table.profileId,
+      table.connectionProfileId,
       table.providerId,
       table.orgId,
       table.providerCredentialId,
     ),
-    index("idx_user_provider_connections_profile").on(table.profileId),
-    index("idx_user_provider_connections_profile_provider").on(table.profileId, table.providerId),
+    index("idx_user_provider_connections_profile").on(table.connectionProfileId),
+    index("idx_user_provider_connections_profile_provider").on(
+      table.connectionProfileId,
+      table.providerId,
+    ),
     index("idx_user_provider_connections_org_id").on(table.orgId),
     index("idx_user_provider_connections_cred_id").on(table.providerCredentialId),
     index("idx_user_provider_connections_org_provider").on(table.orgId, table.providerId),

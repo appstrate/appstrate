@@ -24,7 +24,7 @@ describe("getAvailableProvidersWithStatus", () => {
   let orgId: string;
   let app1Id: string;
   let app2Id: string;
-  let profileId: string;
+  let connectionProfileId: string;
 
   /** Seed a system provider package with api_key auth mode. */
   async function seedSystemProvider(id: string) {
@@ -55,7 +55,7 @@ describe("getAvailableProvidersWithStatus", () => {
     app2Id = app2.id;
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   it("includes provider when app has enabled credentials configured", async () => {
@@ -65,7 +65,7 @@ describe("getAvailableProvidersWithStatus", () => {
 
     const result = await getAvailableProvidersWithStatus(
       { orgId: orgId, applicationId: app1Id },
-      profileId,
+      connectionProfileId,
     );
     const providerIds = result.map((p) => p.provider);
     expect(providerIds).toContain(providerId);
@@ -81,7 +81,7 @@ describe("getAvailableProvidersWithStatus", () => {
     // App2 has no credentials — provider should not appear
     const result = await getAvailableProvidersWithStatus(
       { orgId: orgId, applicationId: app2Id },
-      profileId,
+      connectionProfileId,
     );
     const providerIds = result.map((p) => p.provider);
     expect(providerIds).not.toContain(providerId);
@@ -90,11 +90,11 @@ describe("getAvailableProvidersWithStatus", () => {
   it("shows connected status when user has a connection for the app", async () => {
     const providerId = "@system/clickup";
     await seedSystemProvider(providerId);
-    await seedConnectionForApp(profileId, providerId, orgId, app1Id, { api_key: "ck1" });
+    await seedConnectionForApp(connectionProfileId, providerId, orgId, app1Id, { api_key: "ck1" });
 
     const result = await getAvailableProvidersWithStatus(
       { orgId: orgId, applicationId: app1Id },
-      profileId,
+      connectionProfileId,
     );
     const provider = result.find((p) => p.provider === providerId);
     expect(provider).toBeDefined();
@@ -108,7 +108,7 @@ describe("getAvailableProvidersWithStatus", () => {
 
     const result = await getAvailableProvidersWithStatus(
       { orgId: orgId, applicationId: app1Id },
-      profileId,
+      connectionProfileId,
     );
     const provider = result.find((p) => p.provider === providerId);
     expect(provider).toBeDefined();

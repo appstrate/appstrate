@@ -38,7 +38,7 @@ export async function buildProviderTokens(
       .map(async (svc) => {
         const entry = providerProfiles[svc.id];
         if (!entry) return [svc.id, null] as const;
-        const connectionProfileId = entry.profileId;
+        const connectionProfileId = entry.connectionProfileId;
 
         const credentialId = await getProviderCredentialId(db, applicationId, svc.id);
         if (!credentialId) {

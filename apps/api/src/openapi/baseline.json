@@ -1585,13 +1585,13 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["providerId", "profileId"],
+                "required": ["providerId", "connectionProfileId"],
                 "properties": {
                   "providerId": {
                     "type": "string",
                     "minLength": 1
                   },
-                  "profileId": {
+                  "connectionProfileId": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -1835,12 +1835,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["providerId", "profileId", "reason", "message"],
+                        "required": ["providerId", "connectionProfileId", "reason", "message"],
                         "properties": {
                           "providerId": {
                             "type": "string"
                           },
-                          "profileId": {
+                          "connectionProfileId": {
                             "type": ["string", "null"],
                             "format": "uuid"
                           },
@@ -1866,7 +1866,7 @@
                   "missing": [
                     {
                       "providerId": "@afps/gmail",
-                      "profileId": "550e8400-e29b-41d4-a716-446655440010",
+                      "connectionProfileId": "550e8400-e29b-41d4-a716-446655440010",
                       "reason": "no_connection",
                       "message": "Provider '@afps/gmail' is not connected"
                     }
@@ -4185,7 +4185,7 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "profileId",
+            "name": "connectionProfileId",
             "in": "query",
             "required": false,
             "description": "Connection profile ID (defaults to user's default profile)",
@@ -4270,7 +4270,7 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "profileId",
+            "name": "connectionProfileId",
             "in": "query",
             "required": false,
             "description": "Connection profile ID (defaults to user's default profile)",
@@ -4317,7 +4317,7 @@
         "operationId": "connectOAuth",
         "tags": ["Connections"],
         "summary": "Start OAuth connection flow",
-        "description": "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "description": "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4344,7 +4344,7 @@
                       "type": "string"
                     }
                   },
-                  "profileId": {
+                  "connectionProfileId": {
                     "type": "string",
                     "description": "Connection profile ID"
                   }
@@ -4394,7 +4394,7 @@
         "operationId": "connectApiKey",
         "tags": ["Connections"],
         "summary": "Save API key credential",
-        "description": "Save an API key credential for a provider that uses api_key auth mode. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "description": "Save an API key credential for a provider that uses api_key auth mode. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4422,7 +4422,7 @@
                     "minLength": 1,
                     "description": "API key value"
                   },
-                  "profileId": {
+                  "connectionProfileId": {
                     "type": "string",
                     "format": "uuid",
                     "description": "Connection profile ID (defaults to user's default profile)"
@@ -4473,7 +4473,7 @@
         "operationId": "connectCredentials",
         "tags": ["Connections"],
         "summary": "Save custom credentials",
-        "description": "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
+        "description": "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `connectionProfileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4503,7 +4503,7 @@
                     },
                     "description": "Credential fields matching the provider's credential schema"
                   },
-                  "profileId": {
+                  "connectionProfileId": {
                     "type": "string",
                     "format": "uuid",
                     "description": "Connection profile ID (defaults to user's default profile)"
@@ -4638,7 +4638,7 @@
             "$ref": "#/components/parameters/PackageName"
           },
           {
-            "name": "profileId",
+            "name": "connectionProfileId",
             "in": "query",
             "required": false,
             "description": "Connection profile ID (defaults to user's default profile)",
@@ -4650,7 +4650,7 @@
             "name": "connectionId",
             "in": "query",
             "required": false,
-            "description": "Specific connection ID to delete. When provided, only this connection is removed (ignores profileId).",
+            "description": "Specific connection ID to delete. When provided, only this connection is removed (ignores connectionProfileId).",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -7649,7 +7649,7 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "profileId": {
+                          "connectionProfileId": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -9061,7 +9061,7 @@
         "operationId": "getMyApplicationProfile",
         "tags": ["Profile"],
         "summary": "Get the caller's pinned default profile for the active app",
-        "description": "Returns the connection profile id the caller has pinned as their personal default for the active application, or `null` if no sticky is set. The credential proxy's `resolveProfileId` cascade consults this between the explicit per-run override (`X-Connection-Profile-Id`) and the application default. Member-only — end-user callers always receive `{ profileId: null }`.",
+        "description": "Returns the connection profile id the caller has pinned as their personal default for the active application, or `null` if no sticky is set. The credential proxy's `resolveProfileId` cascade consults this between the explicit per-run override (`X-Connection-Profile-Id`) and the application default. Member-only — end-user callers always receive `{ connectionProfileId: null }`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9085,9 +9085,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["profileId"],
+                  "required": ["connectionProfileId"],
                   "properties": {
-                    "profileId": {
+                    "connectionProfileId": {
                       "oneOf": [
                         {
                           "type": "string",
@@ -9127,9 +9127,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["profileId"],
+                "required": ["connectionProfileId"],
                 "properties": {
-                  "profileId": {
+                  "connectionProfileId": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -9145,9 +9145,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["profileId"],
+                  "required": ["connectionProfileId"],
                   "properties": {
-                    "profileId": {
+                    "connectionProfileId": {
                       "type": "string",
                       "format": "uuid"
                     }

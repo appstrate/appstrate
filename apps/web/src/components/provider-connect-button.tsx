@@ -17,13 +17,13 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export function ProviderConnectButton({
   provider,
-  profileId,
+  connectionProfileId,
 }: {
   provider: ProviderConfig;
-  profileId?: string | null;
+  connectionProfileId?: string | null;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const { data: availableProviders } = useAvailableProviders(profileId);
+  const { data: availableProviders } = useAvailableProviders(connectionProfileId);
 
   const connectMutation = useConnect();
   const connectApiKeyMutation = useConnectApiKey();
@@ -60,12 +60,18 @@ export function ProviderConnectButton({
         schema: provider.credentialSchema as unknown as JSONSchemaObject,
       });
     } else {
-      connectMutation.mutate({ provider: provider.id, profileId: profileId ?? undefined });
+      connectMutation.mutate({
+        provider: provider.id,
+        connectionProfileId: connectionProfileId ?? undefined,
+      });
     }
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate({ provider: provider.id, profileId: profileId ?? undefined });
+    disconnectMutation.mutate({
+      provider: provider.id,
+      connectionProfileId: connectionProfileId ?? undefined,
+    });
   };
 
   return (
@@ -103,7 +109,11 @@ export function ProviderConnectButton({
         onSubmit={(apiKey) => {
           if (!apiKeyProvider) return;
           connectApiKeyMutation.mutate(
-            { provider: apiKeyProvider.id, apiKey, profileId: profileId ?? undefined },
+            {
+              provider: apiKeyProvider.id,
+              apiKey,
+              connectionProfileId: connectionProfileId ?? undefined,
+            },
             { onSuccess: () => setApiKeyProvider(null) },
           );
         }}
@@ -118,7 +128,11 @@ export function ProviderConnectButton({
           isPending={connectCredentialsMutation.isPending}
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(
-              { provider: customCredProvider.id, credentials, profileId: profileId ?? undefined },
+              {
+                provider: customCredProvider.id,
+                credentials,
+                connectionProfileId: connectionProfileId ?? undefined,
+              },
               { onSuccess: () => setCustomCredProvider(null) },
             );
           }}

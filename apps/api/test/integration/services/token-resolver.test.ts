@@ -8,11 +8,11 @@ import { saveConnection } from "@appstrate/connect";
 import { buildProviderTokens } from "../../../src/services/token-resolver.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
 
-/** Helper to build a ProviderProfileMap from simple id → profileId pairs. */
+/** Helper to build a ProviderProfileMap from simple id → connectionProfileId pairs. */
 function pm(entries: Record<string, string>): ProviderProfileMap {
   const map: ProviderProfileMap = {};
   for (const [id, pid] of Object.entries(entries)) {
-    map[id] = { profileId: pid, source: "user_profile" };
+    map[id] = { connectionProfileId: pid, source: "user_profile" };
   }
   return map;
 }
@@ -21,7 +21,7 @@ describe("token-resolver", () => {
   let userId: string;
   let orgId: string;
   let defaultAppId: string;
-  let profileId: string;
+  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -33,7 +33,7 @@ describe("token-resolver", () => {
 
     // Create a default connection profile for this user
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   // ── Helper: seed a provider package with a definition ──────
@@ -96,7 +96,7 @@ describe("token-resolver", () => {
       });
 
       // Save a connection with an access_token
-      await seedConnection(profileId, providerId, orgId, {
+      await seedConnection(connectionProfileId, providerId, orgId, {
         access_token: "oauth-token-abc123",
         refresh_token: "refresh-xyz",
       });
@@ -104,7 +104,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -118,14 +118,14 @@ describe("token-resolver", () => {
         authMode: "api_key",
       });
 
-      await seedConnection(profileId, providerId, orgId, {
+      await seedConnection(connectionProfileId, providerId, orgId, {
         api_key: "key-secret-456",
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -139,7 +139,7 @@ describe("token-resolver", () => {
         authMode: "api_key",
       });
 
-      await seedConnection(profileId, providerId, orgId, {
+      await seedConnection(connectionProfileId, providerId, orgId, {
         access_token: "preferred-token",
         api_key: "fallback-key",
       });
@@ -147,7 +147,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -168,7 +168,7 @@ describe("token-resolver", () => {
         },
       });
 
-      await seedConnection(profileId, providerId, orgId, {
+      await seedConnection(connectionProfileId, providerId, orgId, {
         username: "admin",
         password: "secret",
       });
@@ -176,7 +176,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -190,7 +190,7 @@ describe("token-resolver", () => {
         authMode: "basic",
       });
 
-      await seedConnection(profileId, providerId, orgId, {
+      await seedConnection(connectionProfileId, providerId, orgId, {
         username: "user",
         password: "pass",
       });
@@ -198,7 +198,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -218,7 +218,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -235,7 +235,7 @@ describe("token-resolver", () => {
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       expect(
-        buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId, defaultAppId),
+        buildProviderTokens(providers, pm({ [providerId]: connectionProfileId }), orgId, defaultAppId),
       ).rejects.toThrow("credential missing for application");
     });
 
@@ -248,13 +248,13 @@ describe("token-resolver", () => {
       await seedProvider(providerB, { authMode: "api_key" });
       await seedProvider(providerC, { authMode: "custom" });
 
-      await seedConnection(profileId, providerA, orgId, {
+      await seedConnection(connectionProfileId, providerA, orgId, {
         access_token: "token-a",
       });
-      await seedConnection(profileId, providerB, orgId, {
+      await seedConnection(connectionProfileId, providerB, orgId, {
         api_key: "key-b",
       });
-      await seedConnection(profileId, providerC, orgId, {
+      await seedConnection(connectionProfileId, providerC, orgId, {
         host: "example.com",
         token: "custom-c",
       });
@@ -266,7 +266,7 @@ describe("token-resolver", () => {
       ];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerA]: profileId, [providerB]: profileId, [providerC]: profileId }),
+        pm({ [providerA]: connectionProfileId, [providerB]: connectionProfileId, [providerC]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -284,10 +284,10 @@ describe("token-resolver", () => {
       await seedProvider(providerMapped, { authMode: "api_key" });
       await seedProvider(providerUnmapped, { authMode: "api_key" });
 
-      await seedConnection(profileId, providerMapped, orgId, {
+      await seedConnection(connectionProfileId, providerMapped, orgId, {
         api_key: "mapped-key",
       });
-      await seedConnection(profileId, providerUnmapped, orgId, {
+      await seedConnection(connectionProfileId, providerUnmapped, orgId, {
         api_key: "unmapped-key",
       });
 
@@ -298,7 +298,7 @@ describe("token-resolver", () => {
       // Only providerMapped has a profile mapping
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerMapped]: profileId }),
+        pm({ [providerMapped]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -315,12 +315,12 @@ describe("token-resolver", () => {
       });
 
       // Save a connection with empty credentials
-      await seedConnection(profileId, providerId, orgId, {});
+      await seedConnection(connectionProfileId, providerId, orgId, {});
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerId]: profileId }),
+        pm({ [providerId]: connectionProfileId }),
         orgId,
         defaultAppId,
       );
@@ -340,7 +340,7 @@ describe("token-resolver", () => {
       await seedProvider(providerA, { authMode: "api_key" });
       await seedProvider(providerB, { authMode: "api_key" });
 
-      await seedConnection(profileId, providerA, orgId, {
+      await seedConnection(connectionProfileId, providerA, orgId, {
         api_key: "key-from-profile-1",
       });
       await seedConnection(profileId2, providerB, orgId, {
@@ -350,7 +350,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: providerA }, { id: providerB }];
       const tokens = await buildProviderTokens(
         providers,
-        pm({ [providerA]: profileId, [providerB]: profileId2 }),
+        pm({ [providerA]: connectionProfileId, [providerB]: profileId2 }),
         orgId,
         defaultAppId,
       );

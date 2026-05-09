@@ -89,7 +89,7 @@ export const mePaths = {
         "for the active application, or `null` if no sticky is set. The credential proxy's " +
         "`resolveProfileId` cascade consults this between the explicit per-run override " +
         "(`X-Connection-Profile-Id`) and the application default. Member-only — end-user " +
-        "callers always receive `{ profileId: null }`.",
+        "callers always receive `{ connectionProfileId: null }`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -105,9 +105,9 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["profileId"],
+                required: ["connectionProfileId"],
                 properties: {
-                  profileId: {
+                  connectionProfileId: {
                     oneOf: [{ type: "string", format: "uuid" }, { type: "null" }],
                   },
                 },
@@ -136,9 +136,9 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["profileId"],
+              required: ["connectionProfileId"],
               properties: {
-                profileId: { type: "string", format: "uuid" },
+                connectionProfileId: { type: "string", format: "uuid" },
               },
             },
           },
@@ -151,8 +151,8 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["profileId"],
-                properties: { profileId: { type: "string", format: "uuid" } },
+                required: ["connectionProfileId"],
+                properties: { connectionProfileId: { type: "string", format: "uuid" } },
               },
             },
           },

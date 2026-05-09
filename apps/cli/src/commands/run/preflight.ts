@@ -218,8 +218,10 @@ function buildReadinessUrl(instance: string, inputs: PreflightInputs): string {
   if (inputs.connectionProfileId) {
     params.set("connectionProfileId", inputs.connectionProfileId);
   }
-  for (const [providerId, profileId] of Object.entries(inputs.perProviderOverrides ?? {})) {
-    params.set(`providerProfile.${providerId}`, profileId);
+  for (const [providerId, connectionProfileId] of Object.entries(
+    inputs.perProviderOverrides ?? {},
+  )) {
+    params.set(`providerProfile.${providerId}`, connectionProfileId);
   }
   const qs = params.toString();
   // See bundle-fetch.ts:buildBundleUrl — `@` in scope must NOT be percent-encoded

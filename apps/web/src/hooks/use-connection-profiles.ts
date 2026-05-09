@@ -26,13 +26,13 @@ interface ProfileWithConnections extends ConnectionProfile {
  * from different apps accumulate on the same profile, but this hook only
  * returns the current app's connections.
  */
-export function useProfileConnections(profileId: string | null | undefined) {
+export function useProfileConnections(connectionProfileId: string | null | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["profile-connections", orgId, applicationId, profileId],
-    queryFn: () => apiList<ConnectionInfo>(`/app-profiles/${profileId}/connections`),
-    enabled: !!profileId && !!applicationId,
+    queryKey: ["profile-connections", orgId, applicationId, connectionProfileId],
+    queryFn: () => apiList<ConnectionInfo>(`/app-profiles/${connectionProfileId}/connections`),
+    enabled: !!connectionProfileId && !!applicationId,
     staleTime: 30_000,
   });
 }
@@ -129,16 +129,16 @@ export const useCreateAppProfile = appProfileMutations.useCreate;
 export const useRenameAppProfile = appProfileMutations.useRename;
 export const useDeleteAppProfile = appProfileMutations.useDelete;
 
-export function useAppProfileBindings(profileId: string | undefined) {
+export function useAppProfileBindings(connectionProfileId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["app-profile-bindings", orgId, applicationId, profileId],
+    queryKey: ["app-profile-bindings", orgId, applicationId, connectionProfileId],
     queryFn: () =>
-      api<{ bindings: EnrichedBinding[] }>(`/app-profiles/${profileId}/bindings`).then(
+      api<{ bindings: EnrichedBinding[] }>(`/app-profiles/${connectionProfileId}/bindings`).then(
         (r) => r.bindings,
       ),
-    enabled: !!profileId,
+    enabled: !!connectionProfileId,
     staleTime: 30_000,
   });
 }
@@ -147,15 +147,15 @@ export function useBindAppProvider() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
-      profileId,
+      connectionProfileId,
       providerId,
       sourceProfileId,
     }: {
-      profileId: string;
+      connectionProfileId: string;
       providerId: string;
       sourceProfileId: string;
     }) =>
-      api(`/app-profiles/${profileId}/bind`, {
+      api(`/app-profiles/${connectionProfileId}/bind`, {
         method: "POST",
         body: JSON.stringify({ providerId, sourceProfileId }),
       }),
@@ -167,8 +167,14 @@ export function useBindAppProvider() {
 export function useUnbindAppProvider() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ profileId, providerId }: { profileId: string; providerId: string }) =>
-      api(`/app-profiles/${profileId}/bind/${providerId}`, {
+    mutationFn: ({
+      connectionProfileId,
+      providerId,
+    }: {
+      connectionProfileId: string;
+      providerId: string;
+    }) =>
+      api(`/app-profiles/${connectionProfileId}/bind/${providerId}`, {
         method: "DELETE",
       }),
     onSuccess: () => invalidateConnectionRelated(qc),
@@ -192,7 +198,7 @@ export function useMyApplicationProfile() {
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["my-application-profile", orgId, applicationId],
-    queryFn: () => api<{ profileId: string | null }>("/me/application-profile"),
+    queryFn: () => api<{ connectionProfileId: string | null }>("/me/application-profile"),
     enabled: !!applicationId,
   });
 }
@@ -202,13 +208,13 @@ export function useSetMyApplicationProfile() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: async (profileId: string | null) => {
-      if (profileId === null) {
+    mutationFn: async (connectionProfileId: string | null) => {
+      if (connectionProfileId === null) {
         return api("/me/application-profile", { method: "DELETE" });
       }
       return api("/me/application-profile", {
         method: "PUT",
-        body: JSON.stringify({ profileId }),
+        body: JSON.stringify({ connectionProfileId }),
       });
     },
     onSuccess: () => {
@@ -239,14 +245,14 @@ export function useSetAgentAppProfile(packageId: string) {
 
 // ─── App Profile Linked Agents ────────────────────────────
 
-export function useAppProfileAgents(profileId: string | undefined) {
+export function useAppProfileAgents(connectionProfileId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["app-profile-agents", orgId, applicationId, profileId],
+    queryKey: ["app-profile-agents", orgId, applicationId, connectionProfileId],
     queryFn: () =>
-      apiList<{ id: string; displayName: string }>(`/app-profiles/${profileId}/agents`),
-    enabled: !!profileId,
+      apiList<{ id: string; displayName: string }>(`/app-profiles/${connectionProfileId}/agents`),
+    enabled: !!connectionProfileId,
     staleTime: 30_000,
   });
 }
@@ -270,10 +276,16 @@ export function useAgentProviderProfiles(packageId: string | undefined) {
 export function useSetAgentProviderProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ providerId, profileId }: { providerId: string; profileId: string }) => {
+    mutationFn: async ({
+      providerId,
+      connectionProfileId,
+    }: {
+      providerId: string;
+      connectionProfileId: string;
+    }) => {
       return api(`/agents/${packageId}/provider-profiles`, {
         method: "PUT",
-        body: JSON.stringify({ providerId, profileId }),
+        body: JSON.stringify({ providerId, connectionProfileId }),
       });
     },
     onSuccess: () => {

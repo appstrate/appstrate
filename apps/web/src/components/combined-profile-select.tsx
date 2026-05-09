@@ -24,7 +24,7 @@ interface CombinedProfileSelectProps {
   /** Current value */
   value: string | null;
   /** Change callback (null = "all" selected) */
-  onChange: (profileId: string | null) => void;
+  onChange: (connectionProfileId: string | null) => void;
   /** Show "All" as first option */
   showAllOption?: boolean;
   /** Trigger className override */

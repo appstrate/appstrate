@@ -215,7 +215,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
   const profileIdMap = Object.fromEntries(
-    Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+    Object.entries(providerProfiles).map(([k, v]) => [k, v.connectionProfileId]),
   );
 
   await createRunRow(

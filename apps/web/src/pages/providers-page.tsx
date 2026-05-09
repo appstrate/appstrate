@@ -28,7 +28,7 @@ export function ProvidersPage() {
   const { data: callbackUrl } = useProviderCallbackUrl();
 
   // Resolve effective profile: user selection → default profile → first profile
-  const profileId = useMemo(() => {
+  const connectionProfileId = useMemo(() => {
     if (selectedProfileId) return selectedProfileId;
     if (!profiles?.length) return null;
     return (profiles.find((p) => p.isDefault) ?? profiles[0])?.id ?? null;
@@ -53,14 +53,14 @@ export function ProvidersPage() {
         actions.set(
           p.id,
           <div className="ml-auto flex items-center gap-2">
-            <ProviderConnectButton provider={p} profileId={profileId} />
+            <ProviderConnectButton provider={p} connectionProfileId={connectionProfileId} />
             {configButton}
           </div>,
         );
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providers, callbackUrl, profileId]);
+  }, [providers, callbackUrl, connectionProfileId]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();
@@ -80,7 +80,7 @@ export function ProvidersPage() {
         </TabsList>
       </Tabs>
       <div className="flex-1" />
-      <ProfileSelector value={profileId} onChange={setSelectedProfileId} />
+      <ProfileSelector value={connectionProfileId} onChange={setSelectedProfileId} />
     </div>
   );
 

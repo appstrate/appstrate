@@ -10,7 +10,7 @@ export async function saveApiKeyConnection(
   scope: AppScope,
   provider: string,
   apiKey: string,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<void> {
   // Fire both lookups concurrently — they hit independent tables
   // (applicationProviderCredentials vs packages) and neither depends on the
@@ -28,7 +28,7 @@ export async function saveApiKeyConnection(
 
   await saveConnection(
     db,
-    profileId,
+    connectionProfileId,
     provider,
     scope.orgId,
     { [fieldName]: apiKey },
@@ -37,7 +37,7 @@ export async function saveApiKeyConnection(
 
   logger.info("API key connection saved", {
     provider,
-    profileId,
+    connectionProfileId,
     orgId: scope.orgId,
     fieldName,
   });
@@ -48,18 +48,18 @@ export async function saveCredentialsConnection(
   provider: string,
   authMode: "basic" | "custom",
   credentials: Record<string, string>,
-  profileId: string,
+  connectionProfileId: string,
 ): Promise<void> {
   const providerCredentialId = await resolveProviderCredentialId(scope.applicationId, provider);
 
-  await saveConnection(db, profileId, provider, scope.orgId, credentials, {
+  await saveConnection(db, connectionProfileId, provider, scope.orgId, credentials, {
     providerCredentialId,
   });
 
   logger.info("Credentials connection saved", {
     provider,
     authMode,
-    profileId,
+    connectionProfileId,
     orgId: scope.orgId,
   });
 }

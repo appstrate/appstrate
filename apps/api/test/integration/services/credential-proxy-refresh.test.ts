@@ -54,7 +54,7 @@ afterAll(() => {
 
 describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
   let ctx: TestContext;
-  let profileId: string;
+  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -66,7 +66,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
       name: "Default",
       isDefault: true,
     });
-    profileId = profile.id;
+    connectionProfileId = profile.id;
   });
 
   it("refreshes the OAuth2 token and retries the call when upstream returns 401", async () => {
@@ -98,7 +98,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
     // creates the admin credentials row with a dummy ciphertext — replace
     // it with real clientId/clientSecret so the OAuth2 refresh path can
     // build its RefreshContext.
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       access_token: "stale_token",
       refresh_token: "rt_valid",
     });
@@ -136,7 +136,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -182,7 +182,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
       },
     });
 
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       access_token: "stale_token",
       refresh_token: "rt_revoked",
     });
@@ -206,7 +206,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -244,7 +244,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
       },
     });
 
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       access_token: "valid_token",
       refresh_token: "rt_valid",
     });
@@ -264,7 +264,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -303,7 +303,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
       },
     });
 
-    await seedConnectionForApp(profileId, providerId, ctx.orgId, ctx.defaultAppId, {
+    await seedConnectionForApp(connectionProfileId, providerId, ctx.orgId, ctx.defaultAppId, {
       access_token: "stale_token",
       refresh_token: "rt_valid",
     });
@@ -336,7 +336,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies", () => {
     const res = await proxyCall(db, {
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
-      profileId,
+      connectionProfileId,
       providerId,
       method: "POST",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",

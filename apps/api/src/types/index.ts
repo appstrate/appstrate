@@ -31,7 +31,7 @@ export interface AgentProviderRequirement {
  * 3. Default user profile (`source: "user_profile"`) — actor's default connection profile
  */
 export interface ProviderProfileEntry {
-  profileId: string;
+  connectionProfileId: string;
   source: ProviderProfileSource;
 }
 

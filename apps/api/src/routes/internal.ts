@@ -274,9 +274,9 @@ export function createInternalRouter() {
       throw notFound(`Provider '${providerId}' is not required by this agent`);
     }
 
-    // Look up the stored profileId from the run record
-    const profileId = run.providerProfileIds?.[providerId];
-    if (!profileId) {
+    // Look up the stored connectionProfileId from the run record
+    const connectionProfileId = run.providerProfileIds?.[providerId];
+    if (!connectionProfileId) {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
@@ -286,7 +286,7 @@ export function createInternalRouter() {
     }
     const result = await resolveCredentialsForProxy(
       db,
-      profileId,
+      connectionProfileId,
       provider.id,
       run.orgId,
       credentialId,
@@ -300,7 +300,7 @@ export function createInternalRouter() {
       runId,
       providerId,
       packageId: run.packageId,
-      profileId,
+      connectionProfileId,
     });
 
     return c.json(result);
@@ -311,8 +311,8 @@ export function createInternalRouter() {
     const { runId, run } = await verifyRunToken(c);
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
-    const profileId = run.providerProfileIds?.[providerId];
-    if (!profileId) {
+    const connectionProfileId = run.providerProfileIds?.[providerId];
+    if (!connectionProfileId) {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
@@ -327,11 +327,17 @@ export function createInternalRouter() {
     // (wrong header, wrong endpoint, missing scope). Refreshing here would
     // burn provider rate limits, add latency, and churn rotating
     // refresh_tokens for no benefit.
-    const connection = await getConnection(db, profileId, providerId, run.orgId, credentialId);
+    const connection = await getConnection(
+      db,
+      connectionProfileId,
+      providerId,
+      run.orgId,
+      credentialId,
+    );
     if (connection && isTokenFresh(connection.expiresAt)) {
       const passthrough = await resolveCredentialsForProxy(
         db,
-        profileId,
+        connectionProfileId,
         providerId,
         run.orgId,
         credentialId,
@@ -343,7 +349,7 @@ export function createInternalRouter() {
       logger.info("Skipping refresh — stored token still fresh", {
         runId,
         providerId,
-        profileId,
+        connectionProfileId,
         expiresInMs: Date.parse(connection.expiresAt!) - Date.now(),
       });
 
@@ -353,7 +359,7 @@ export function createInternalRouter() {
     try {
       const result = await forceRefreshCredentials(
         db,
-        profileId,
+        connectionProfileId,
         providerId,
         run.orgId,
         credentialId,
@@ -362,7 +368,7 @@ export function createInternalRouter() {
         throw notFound(`No credentials for provider '${providerId}'`);
       }
 
-      logger.info("Forced credential refresh", { runId, providerId, profileId });
+      logger.info("Forced credential refresh", { runId, providerId, connectionProfileId });
       return c.json(result);
     } catch (err) {
       // Only a definitive "refresh_token is dead" signal (RFC 6749 §5.2:
@@ -377,7 +383,7 @@ export function createInternalRouter() {
           .set({ needsReconnection: true, updatedAt: new Date() })
           .where(
             and(
-              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.connectionProfileId, connectionProfileId),
               eq(userProviderConnections.providerId, providerId),
               eq(userProviderConnections.orgId, run.orgId),
               eq(userProviderConnections.providerCredentialId, credentialId),
@@ -387,7 +393,7 @@ export function createInternalRouter() {
         logger.warn("Refresh token revoked, connection flagged for reconnection", {
           runId,
           providerId,
-          profileId,
+          connectionProfileId,
           status: err.status,
         });
 
@@ -397,7 +403,7 @@ export function createInternalRouter() {
       logger.warn("Transient refresh failure, connection left unchanged", {
         runId,
         providerId,
-        profileId,
+        connectionProfileId,
         kind: err instanceof RefreshError ? err.kind : "unknown",
         status: err instanceof RefreshError ? err.status : undefined,
         error: getErrorMessage(err),

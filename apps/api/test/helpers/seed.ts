@@ -303,7 +303,7 @@ export async function seedConnectionProfile(
 // ─── User Provider Connections ────────────────────────────
 
 type UserConnectionInsert = Partial<InferInsertModel<typeof userProviderConnections>> & {
-  profileId: string;
+  connectionProfileId: string;
   providerId: string;
   orgId: string;
   providerCredentialId: string;
@@ -362,7 +362,7 @@ import { saveConnection } from "@appstrate/connect";
  * Simplifies tests by handling the providerCredentialId requirement.
  */
 export async function seedConnectionForApp(
-  profileId: string,
+  connectionProfileId: string,
   providerId: string,
   orgId: string,
   applicationId: string,
@@ -374,7 +374,7 @@ export async function seedConnectionForApp(
     () => {},
   );
   const cred = await seedProviderCredentials({ applicationId, providerId });
-  await saveConnection(db, profileId, providerId, orgId, credentials, {
+  await saveConnection(db, connectionProfileId, providerId, orgId, credentials, {
     providerCredentialId: cred.id,
     ...options,
   });
