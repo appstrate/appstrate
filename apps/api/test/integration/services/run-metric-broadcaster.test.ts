@@ -30,7 +30,8 @@ import {
   initRealtime,
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
-import { llmUsage } from "@appstrate/db/schema";
+import { llmUsage, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -224,6 +225,72 @@ describe("run-metric-broadcaster (integration)", () => {
     // sees null, and silently no-ops without firing NOTIFY.
     expect(() => scheduleRunMetricBroadcast("non-existent-run")).not.toThrow();
     await wait(50);
+  });
+
+  // ── runs.cost persistence (refresh-mid-run hardening) ──────
+
+  it("persists cost_so_far on the run row so a refresh sees the latest value", async () => {
+    // Seed a ledger row so the broadcaster has a non-zero SUM.
+    await db.insert(llmUsage).values({
+      source: "runner",
+      orgId: ctx.orgId,
+      runId,
+      inputTokens: 200,
+      outputTokens: 50,
+      costUsd: 0.0123,
+    });
+
+    scheduleRunMetricBroadcast(runId);
+    await wait(50);
+
+    const [row] = await db
+      .select({ cost: runs.cost })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    expect(row?.cost).toBeCloseTo(0.0123, 5);
+  });
+
+  it("monotonic guard — a regressed cost_so_far does not overwrite a higher persisted value", async () => {
+    // Pre-seed runs.cost with a higher value than the next computed SUM
+    // (simulates finalize landing before the throttled trailing emit).
+    await db.update(runs).set({ cost: 0.05 }).where(eq(runs.id, runId));
+
+    // Ledger has a smaller cumulative cost.
+    await db.insert(llmUsage).values({
+      source: "runner",
+      orgId: ctx.orgId,
+      runId,
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.001,
+    });
+
+    scheduleRunMetricBroadcast(runId);
+    await wait(50);
+
+    const [row] = await db
+      .select({ cost: runs.cost })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    // The higher pre-existing value must survive — broadcaster never regresses.
+    expect(row?.cost).toBeCloseTo(0.05, 5);
+  });
+
+  it("zero cost_so_far is a no-op — runs.cost stays null", async () => {
+    // No ledger rows → cost_so_far = 0. The guarded UPDATE skips the
+    // write so the column stays null until the first non-zero metric
+    // (mirrors the existing finalize semantics where cost=0 → null).
+    scheduleRunMetricBroadcast(runId);
+    await wait(50);
+
+    const [row] = await db
+      .select({ cost: runs.cost })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    expect(row?.cost).toBeNull();
   });
 
   it("a vanished run drops its throttle entry to bound the in-memory map", async () => {

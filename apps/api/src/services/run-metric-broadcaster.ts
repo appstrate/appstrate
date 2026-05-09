@@ -38,7 +38,7 @@
 
 import { db } from "@appstrate/db/client";
 import { runs, llmUsage } from "@appstrate/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -133,6 +133,19 @@ async function fireBroadcast(runId: string): Promise<void> {
       // otherwise never be called for it.
       clearRunMetricBroadcastState(runId);
       return;
+    }
+    // Persist the running cost on the run row so a hard refresh during
+    // a streaming run sees the latest value, not stale `null`. The SSE
+    // payload was previously the only path delivering `cost_so_far`, so
+    // a refresh refetched `runs.cost` (null until finalize) and the UI
+    // jumped back to $0. Bounded by the throttle (one UPDATE per 250 ms
+    // window per run). Monotonic-max via WHERE keeps a late finalize
+    // race or out-of-order tick from regressing the persisted aggregate.
+    if (payload.cost_so_far > 0) {
+      await db
+        .update(runs)
+        .set({ cost: payload.cost_so_far })
+        .where(and(eq(runs.id, runId), or(isNull(runs.cost), lt(runs.cost, payload.cost_so_far))));
     }
     await notifyRunMetric(db, payload);
   } catch (err) {
