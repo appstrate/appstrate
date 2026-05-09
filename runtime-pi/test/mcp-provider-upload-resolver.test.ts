@@ -103,6 +103,54 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Test helper: a counter the simulator can `tick()` from inside the
+ * MCP handler whenever it observes a specific event (a DELETE call,
+ * for instance). The test code can then `await wait(n)` to block
+ * until the counter has reached `n`, with a tight timeout so a
+ * regression that *never* fires the event surfaces fast.
+ *
+ * Used for the cancellation tests, which need to verify the
+ * fire-and-forget abort DELETE arrived at the simulator after
+ * `executeUpload` returned.
+ */
+function deferredCounter() {
+  let count = 0;
+  const waiters: Array<{ target: number; resolve: () => void }> = [];
+  return {
+    tick() {
+      count += 1;
+      for (let i = waiters.length - 1; i >= 0; i--) {
+        const w = waiters[i]!;
+        if (count >= w.target) {
+          w.resolve();
+          waiters.splice(i, 1);
+        }
+      }
+    },
+    async wait(target: number, timeoutMs = 2000): Promise<void> {
+      if (count >= target) return;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const idx = waiters.findIndex((w) => w.resolve === wrappedResolve);
+          if (idx >= 0) waiters.splice(idx, 1);
+          reject(
+            new Error(`deferredCounter: only saw ${count}/${target} ticks within ${timeoutMs}ms`),
+          );
+        }, timeoutMs);
+        const wrappedResolve = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        waiters.push({ target, resolve: wrappedResolve });
+      });
+    },
+    get count() {
+      return count;
+    },
+  };
+}
+
 // ─── Google resumable ─────────────────────────────────────────────
 
 class GoogleStubServer {
@@ -246,23 +294,27 @@ describe("McpProviderUploadResolver — google-resumable", () => {
     }
   });
 
-  it("aborts gracefully when ctx.signal fires mid-upload", async () => {
+  it("aborts gracefully when ctx.signal fires mid-upload AND cleans up upstream", async () => {
+    // Two things to verify on cancel:
+    //   1. We stop dispatching further chunks (reasserted from the
+    //      original test).
+    //   2. The adapter's `abort()` cleanup DELETE actually reaches the
+    //      simulator. This catches the "abort signal aliasing" bug
+    //      where the cleanup providerCall would inherit the user's
+    //      already-aborted signal and short-circuit before the DELETE
+    //      went on the wire — leaving the upstream session orphaned.
     const stub = new GoogleStubServer();
     let chunkCount = 0;
     const ac = new AbortController();
+    const deletes = deferredCounter();
     const { pair, mcp } = await makePair(async (args) => {
       const r = stub.handle(args);
       if ((args.method as string) === "PUT") {
         chunkCount += 1;
-        // Simulate network latency so the abort can land between
-        // chunks. Without the delay, the in-process pair completes
-        // the entire upload in <1 ms and the abort never fires
-        // mid-flight.
         await new Promise((resolve) => setTimeout(resolve, 30));
-        // Fire the abort during the second chunk so we exercise the
-        // mid-upload cancel path deterministically.
         if (chunkCount === 2) ac.abort(new Error("user cancelled"));
       }
+      if ((args.method as string) === "DELETE") deletes.tick();
       return r;
     });
     try {
@@ -281,8 +333,12 @@ describe("McpProviderUploadResolver — google-resumable", () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
       expect(result.error).toMatch(/cancelled|aborted|abort/i);
-      // The third chunk must NOT have been dispatched.
       expect(chunkCount).toBeLessThan(3);
+      // Wait for the fire-and-forget abort DELETE to reach the
+      // simulator. If the cleanup signal is aliased to the aborted
+      // user signal this never happens.
+      await deletes.wait(1);
+      expect(stub.uploadedBytes("session-1")).toBeUndefined();
     } finally {
       await pair.close();
     }
@@ -628,6 +684,70 @@ describe("McpProviderUploadResolver — tus", () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
       expect(result.error).toMatch(/server advanced to offset/);
+      // Failure on chunk #1: no chunks were acked, bytesSent must be 0.
+      // (Old hash-based counter would have reported 4 MiB here — the
+      // bytes were hashed before the call, but the call's response
+      // failed validation.)
+      expect(result.bytesSent).toBe(0);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("reports bytesSent as ACKed bytes when chunk #N fails (not attempted bytes)", async () => {
+    // Drive the simulator to ack two chunks then fail chunk #3 with
+    // a 500. The resolver must report bytesSent = 2 × partSize, NOT
+    // 3 × partSize (the failing chunk's bytes were hashed but never
+    // confirmed by upstream — counting them would mislead the agent
+    // about how many bytes actually landed).
+    let chunkCount = 0;
+    const { pair, mcp } = await makePair(async (args) => {
+      const method = args.method as string;
+      if (method === "POST") {
+        return {
+          status: 201,
+          headers: { location: "https://tus.test/files/tus-Z", "tus-resumable": "1.0.0" },
+          body: "",
+        };
+      }
+      if (method === "PATCH") {
+        chunkCount += 1;
+        if (chunkCount === 3) {
+          return {
+            status: 500,
+            headers: {},
+            body: "upstream blew up",
+            isError: true,
+          };
+        }
+        return {
+          status: 204,
+          headers: {
+            "upload-offset": String(chunkCount * 4 * 1024 * 1024),
+            "tus-resumable": "1.0.0",
+          },
+          body: "",
+        };
+      }
+      return { status: 400, headers: {}, body: "x", isError: true };
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/cf-stream",
+          target: "https://tus.test/files",
+          fromFile: "big.bin",
+          uploadProtocol: "tus",
+          partSizeBytes: 4 * 1024 * 1024,
+        },
+        ctxBase(workspace),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.status).toBe(500);
+      expect(result.bytesSent).toBe(2 * 4 * 1024 * 1024);
     } finally {
       await pair.close();
     }
@@ -913,18 +1033,21 @@ describe("McpProviderUploadResolver — cross-cutting", () => {
 // ─── Cancellation parity across adapters ──────────────────────────
 
 describe("McpProviderUploadResolver — cancellation parity", () => {
-  it("s3-multipart aborts gracefully when ctx.signal fires mid-upload", async () => {
+  it("s3-multipart aborts gracefully when ctx.signal fires mid-upload AND issues AbortMultipartUpload", async () => {
     const stub = new S3StubServer();
     let chunkCount = 0;
     const ac = new AbortController();
+    const deletes = deferredCounter();
     const { pair, mcp } = await makePair(async (args) => {
       const r = stub.handle(args);
       const target = args.target as string;
-      if ((args.method as string) === "PUT" && new URL(target).searchParams.has("partNumber")) {
+      const method = args.method as string;
+      if (method === "PUT" && new URL(target).searchParams.has("partNumber")) {
         chunkCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 30));
         if (chunkCount === 2) ac.abort(new Error("user cancelled"));
       }
+      if (method === "DELETE" && new URL(target).searchParams.has("uploadId")) deletes.tick();
       return r;
     });
     try {
@@ -944,22 +1067,33 @@ describe("McpProviderUploadResolver — cancellation parity", () => {
       if (result.ok) throw new Error("expected failure");
       expect(result.error).toMatch(/cancelled|aborted|abort/i);
       expect(chunkCount).toBeLessThan(3);
+      // bytesSent reports ACKed bytes — chunks confirmed by upstream,
+      // not chunks attempted. At most 10 MiB (2 chunks) — never the
+      // full 12 MiB, since the third was blocked by the abort.
+      expect(result.bytesSent).toBeGreaterThanOrEqual(5 * 1024 * 1024);
+      expect(result.bytesSent).toBeLessThan(12 * 1024 * 1024);
+      // AbortMultipartUpload reaches the simulator via the cleanup
+      // signal, NOT the user's already-aborted ctx.signal.
+      await deletes.wait(1);
     } finally {
       await pair.close();
     }
   });
 
-  it("tus aborts gracefully when ctx.signal fires mid-upload", async () => {
+  it("tus aborts gracefully when ctx.signal fires mid-upload AND issues Termination DELETE", async () => {
     const stub = new TusStubServer();
     let chunkCount = 0;
     const ac = new AbortController();
+    const deletes = deferredCounter();
     const { pair, mcp } = await makePair(async (args) => {
       const r = stub.handle(args);
-      if ((args.method as string) === "PATCH") {
+      const method = args.method as string;
+      if (method === "PATCH") {
         chunkCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 30));
         if (chunkCount === 2) ac.abort(new Error("user cancelled"));
       }
+      if (method === "DELETE") deletes.tick();
       return r;
     });
     try {
@@ -979,23 +1113,30 @@ describe("McpProviderUploadResolver — cancellation parity", () => {
       if (result.ok) throw new Error("expected failure");
       expect(result.error).toMatch(/cancelled|aborted|abort/i);
       expect(chunkCount).toBeLessThan(3);
+      expect(result.bytesSent).toBeGreaterThanOrEqual(4 * 1024 * 1024);
+      expect(result.bytesSent).toBeLessThan(12 * 1024 * 1024);
+      await deletes.wait(1);
+      expect(stub.data("tus-1")).toBeUndefined();
     } finally {
       await pair.close();
     }
   });
 
-  it("ms-resumable aborts gracefully when ctx.signal fires mid-upload", async () => {
+  it("ms-resumable aborts gracefully when ctx.signal fires mid-upload AND issues session DELETE", async () => {
     const stub = new MsStubServer();
     let chunkCount = 0;
     const ac = new AbortController();
+    const deletes = deferredCounter();
     const { pair, mcp } = await makePair(async (args) => {
       const r = stub.handle(args);
       const target = args.target as string;
-      if ((args.method as string) === "PUT" && /upload\/ms-/.test(target)) {
+      const method = args.method as string;
+      if (method === "PUT" && /upload\/ms-/.test(target)) {
         chunkCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 30));
         if (chunkCount === 2) ac.abort(new Error("user cancelled"));
       }
+      if (method === "DELETE" && /upload\/ms-/.test(target)) deletes.tick();
       return r;
     });
     try {
@@ -1015,6 +1156,70 @@ describe("McpProviderUploadResolver — cancellation parity", () => {
       if (result.ok) throw new Error("expected failure");
       expect(result.error).toMatch(/cancelled|aborted|abort/i);
       expect(chunkCount).toBeLessThan(3);
+      expect(result.bytesSent).toBeGreaterThanOrEqual(5 * 1024 * 1024);
+      expect(result.bytesSent).toBeLessThan(12 * 1024 * 1024);
+      await deletes.wait(1);
+      expect(stub.data("ms-1")).toBeUndefined();
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("cleanup uses a fresh signal — abort succeeds even after user signal aborted", async () => {
+    // Direct regression test for the abort-signal aliasing bug. We
+    // verify that the resolver's `fireAbort` builds a cleanup
+    // providerCall on a fresh signal, NOT the user's aborted one.
+    //
+    // The simulator records every `signalAborted` value observed at
+    // the time each request is dispatched. When the cleanup DELETE
+    // arrives, the recorded `signalAborted` for THAT call must be
+    // false — otherwise the resolver is still inheriting the user's
+    // signal and the upstream session would have leaked in production
+    // (where mcp.callTool over the wire would have rejected).
+    const stub = new GoogleStubServer();
+    const ac = new AbortController();
+    const deletes = deferredCounter();
+    let chunkCount = 0;
+    let deleteSawAbortedSignal: boolean | null = null;
+    const { pair, mcp } = await makePair(async (args) => {
+      const r = stub.handle(args);
+      const method = args.method as string;
+      if (method === "PUT") {
+        chunkCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (chunkCount === 2) ac.abort(new Error("user cancelled"));
+      }
+      if (method === "DELETE") {
+        // The user signal was aborted in PUT #2 above. If the
+        // resolver were aliasing that signal into the cleanup call,
+        // the request would never have reached us at all (mcp.callTool
+        // would have synchronously rejected). The fact that we
+        // observe the call AND the user signal is aborted by now
+        // proves the resolver decoupled the cleanup signal.
+        deleteSawAbortedSignal = ac.signal.aborted;
+        deletes.tick();
+      }
+      return r;
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 12 * 1024 * 1024);
+      const resolver = new McpProviderUploadResolver(mcp);
+      const result = await resolver.executeUpload(
+        {
+          providerId: "@test/drive",
+          target: "https://example.test/upload?uploadType=resumable",
+          fromFile: "big.bin",
+          uploadProtocol: "google-resumable",
+          partSizeBytes: 4 * 1024 * 1024,
+        },
+        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+      );
+      expect(result.ok).toBe(false);
+      await deletes.wait(1);
+      // The user signal was aborted, but the DELETE still landed —
+      // proving the resolver used a SEPARATE signal for cleanup.
+      expect(deleteSawAbortedSignal).toBe(true);
+      expect(deletes.count).toBe(1);
     } finally {
       await pair.close();
     }

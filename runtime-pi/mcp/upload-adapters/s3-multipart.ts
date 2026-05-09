@@ -111,6 +111,11 @@ export const s3MultipartAdapter: UploadAdapter = {
   ): Promise<SessionState> {
     const s = state as S3SessionState;
     const partNumber = chunk.index + 1; // S3 part numbers are 1-indexed
+    // The 10000-part ceiling is unreachable today: the runtime caps
+    // file size at MAX_STREAMED_BODY_SIZE (default 100 MB), and the
+    // 5 MiB minimum part size puts a hard 20-part upper bound on any
+    // multi-part upload. Kept as defence-in-depth in case
+    // MAX_STREAMED_BODY_SIZE is raised without revisiting this guard.
     if (partNumber > 10000) {
       throw new Error(
         `s3-multipart: exceeded 10000-part limit at part ${partNumber}. Reduce partSizeBytes or split the upload.`,

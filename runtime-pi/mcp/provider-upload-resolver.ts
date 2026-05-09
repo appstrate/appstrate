@@ -57,6 +57,18 @@ import { readUpstreamMeta } from "./upstream-meta.ts";
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 
 /**
+ * Time budget for best-effort `adapter.abort()` cleanup calls. The
+ * abort fires AFTER the user's `ctx.signal` has been aborted (or after
+ * a thrown error tears down the run), so it cannot reuse `ctx.signal`
+ * — that would alias an already-aborted signal and the underlying
+ * `mcp.callTool` would reject the cleanup request synchronously,
+ * leaving the upstream session pending. We give the cleanup its own
+ * fresh signal with a bounded timeout so it actually gets a chance to
+ * reach upstream without ever hanging the run teardown.
+ */
+const ABORT_CLEANUP_TIMEOUT_MS = 5_000;
+
+/**
  * Agent-supplied request shape — mirrors the Pi tool input schema.
  * The resolver validates these inside `executeUpload` so the surface
  * is a single function, easy to unit-test.
@@ -191,7 +203,14 @@ export class McpProviderUploadResolver {
     }
 
     const hasher = await createSha256Hasher();
-    let bytesSent = 0;
+    // Bytes acknowledged by upstream — incremented only after a chunk
+    // call returns successfully. The hash is updated on the same chunk
+    // bytes via `hashUpdate`, so on success `bytesAcked === totalBytes`
+    // and the digest reflects exactly those bytes. On a mid-flight
+    // failure, `bytesAcked` reports what upstream confirmed receiving,
+    // not what we attempted to send (which would be one chunk too high
+    // — the failing chunk hashed before its provider_call rejected).
+    let bytesAcked = 0;
 
     const adapterCtx: AdapterContext = {
       providerId: req.providerId,
@@ -199,11 +218,10 @@ export class McpProviderUploadResolver {
       totalBytes,
       metadata: req.metadata ?? {},
       partSizeBytes,
-      providerCall: this.makeProviderCall(ctx),
+      providerCall: this.makeProviderCall(ctx.signal),
       signal: ctx.signal,
       hashUpdate: (bytes) => {
         hasher.update(bytes);
-        bytesSent += bytes.byteLength;
       },
     };
 
@@ -229,6 +247,7 @@ export class McpProviderUploadResolver {
           throwIfAborted(ctx.signal);
           state = await adapter.uploadChunk(state, chunk, adapterCtx);
           chunkIndex = chunk.index + 1;
+          bytesAcked += chunk.bytes.byteLength;
         }
       } finally {
         // `cancel()` closes the underlying source AND releases the
@@ -243,9 +262,12 @@ export class McpProviderUploadResolver {
         }
       }
     } catch (err) {
-      // Best-effort cleanup before reporting.
-      void adapter.abort(state, adapterCtx).catch(() => {});
-      return failure(adapter, err, bytesSent);
+      // Best-effort cleanup before reporting. MUST use a fresh signal:
+      // ctx.signal is typically already aborted on this path, so
+      // aliasing it would short-circuit the DELETE inside mcp.callTool
+      // and leak the upstream session.
+      this.fireAbort(adapter, state, adapterCtx);
+      return failure(adapter, err, bytesAcked);
     }
 
     // Phase 3: finalise.
@@ -254,8 +276,8 @@ export class McpProviderUploadResolver {
       throwIfAborted(ctx.signal);
       finalResult = await adapter.finalize(state, adapterCtx);
     } catch (err) {
-      void adapter.abort(state, adapterCtx).catch(() => {});
-      return failure(adapter, err, bytesSent);
+      this.fireAbort(adapter, state, adapterCtx);
+      return failure(adapter, err, bytesAcked);
     }
 
     if (!finalResult.ok) {
@@ -266,7 +288,7 @@ export class McpProviderUploadResolver {
         headers: finalResult.headers,
         error: finalResult.message,
         ...(finalResult.body !== undefined ? { body: finalResult.body } : {}),
-        bytesSent,
+        bytesSent: bytesAcked,
       };
     }
 
@@ -277,9 +299,36 @@ export class McpProviderUploadResolver {
       headers: finalResult.headers,
       body: finalResult.body,
       sha256: hasher.digestHex(),
-      size: bytesSent,
+      size: bytesAcked,
       chunks: chunkIndex,
     };
+  }
+
+  /**
+   * Fire `adapter.abort` against a fresh, time-bounded signal so the
+   * cleanup DELETE actually has a chance to reach upstream.
+   *
+   * Why a separate signal: `adapterCtx.providerCall` was built with
+   * the user's `ctx.signal`. By the time we get here that signal is
+   * usually aborted (cancellation path) — reusing it would make
+   * `mcp.callTool` throw before issuing the cleanup request, leaving
+   * the upstream session pending until its server-side TTL kicks in
+   * (Drive: 7d, S3: lifecycle policy, MS: ~1d, tus: server-defined).
+   *
+   * The cleanup is fire-and-forget by design — blocking the failure
+   * path on a network round-trip would tax every error case. The
+   * timeout caps the worst-case orphaned-promise lifetime so a slow
+   * upstream cannot hold a reference to the run forever.
+   */
+  private fireAbort(adapter: UploadAdapter, state: unknown, ctx: AdapterContext): void {
+    if (state === undefined) return;
+    const cleanupSignal = AbortSignal.timeout(ABORT_CLEANUP_TIMEOUT_MS);
+    const cleanupCtx: AdapterContext = {
+      ...ctx,
+      providerCall: this.makeProviderCall(cleanupSignal),
+      signal: cleanupSignal,
+    };
+    void adapter.abort(state, cleanupCtx).catch(() => {});
   }
 
   /**
@@ -292,8 +341,13 @@ export class McpProviderUploadResolver {
    * decides for itself whether to fail the upload. Some protocols
    * deliberately use 4xx status as control flow (S3's
    * `<Error>`-in-200 quirk is the converse — adapter decides).
+   *
+   * Signal is taken explicitly (not from a captured ctx) so the
+   * resolver can swap signals between normal flow and cleanup —
+   * `adapter.abort` runs on a fresh, time-bounded signal so it doesn't
+   * inherit the user's already-aborted cancellation signal.
    */
-  private makeProviderCall(callerCtx: ProviderCallContext) {
+  private makeProviderCall(signal: AbortSignal) {
     return async (req: AdapterProviderCallRequest): Promise<AdapterProviderResponse> => {
       const args: Record<string, unknown> = {
         providerId: req.providerId,
@@ -313,7 +367,7 @@ export class McpProviderUploadResolver {
       }
       const result = await this.mcp.callTool(
         { name: PROVIDER_CALL_TOOL_NAME, arguments: args },
-        { signal: callerCtx.signal },
+        { signal },
       );
       const meta = readUpstreamMeta(result);
       // Upload-protocol responses are small (Drive: ~1KB JSON; S3:
