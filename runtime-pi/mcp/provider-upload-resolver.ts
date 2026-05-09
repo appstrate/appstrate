@@ -231,8 +231,13 @@ export class McpProviderUploadResolver {
           chunkIndex = chunk.index + 1;
         }
       } finally {
+        // `cancel()` closes the underlying source AND releases the
+        // reader's lock — strictly better than `releaseLock()` on the
+        // error path, which would leave the file descriptor held until
+        // GC. On the success path the stream has already returned
+        // `done: true` and `cancel()` is a no-op.
         try {
-          reader.releaseLock();
+          await reader.cancel();
         } catch {
           /* ignore */
         }

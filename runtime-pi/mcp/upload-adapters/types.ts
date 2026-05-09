@@ -29,8 +29,9 @@
  * `definition.uploadProtocols[]`.
  *
  * Add a new entry here ONLY together with a registered adapter in
- * `./index.ts` — the resolver `getAdapter()` lookup throws on any
- * value not present in the registry.
+ * `./index.ts` — the resolver's `ADAPTERS[protocol]` lookup yields
+ * `undefined` for any value not present in the registry, which the
+ * resolver surfaces to the agent as a structured failure.
  */
 export type UploadProtocol = "google-resumable" | "s3-multipart" | "tus" | "ms-resumable";
 
