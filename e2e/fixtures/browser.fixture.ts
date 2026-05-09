@@ -30,7 +30,7 @@ export async function createAuthedContext(
   browser: import("@playwright/test").Browser,
   auth: AuthResult,
   orgId: string,
-  appId: string,
+  applicationId: string,
 ): Promise<import("@playwright/test").BrowserContext> {
   const context = await browser.newContext();
   const cookieMatch = auth.cookie.match(/better-auth\.session_token=([^;]+)/);
@@ -45,11 +45,11 @@ export async function createAuthedContext(
     ]);
   }
   await context.addInitScript(
-    ({ orgId, appId }) => {
+    ({ orgId, applicationId }) => {
       localStorage.setItem("appstrate_current_org", orgId);
-      localStorage.setItem("appstrate_current_app", appId);
+      localStorage.setItem("appstrate_current_app", applicationId);
     },
-    { orgId, appId },
+    { orgId, applicationId },
   );
   return context;
 }
@@ -78,7 +78,7 @@ export const test = base.extend<BrowserFixtures>({
       createApiClient(request, {
         cookie: browserCtx.auth.cookie,
         orgId: browserCtx.org.orgId,
-        appId: browserCtx.org.defaultAppId,
+        applicationId: browserCtx.org.defaultAppId,
       }),
     );
   },

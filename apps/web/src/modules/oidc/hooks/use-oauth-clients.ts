@@ -19,15 +19,15 @@ export type { OAuthClient, OAuthClientWithSecret, SignupRole };
 
 export function useOAuthClients(level?: "org" | "application") {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const isOrg = level === "org";
   return useQuery({
-    queryKey: ["oauth-clients", orgId, isOrg ? "org" : appId],
+    queryKey: ["oauth-clients", orgId, isOrg ? "org" : applicationId],
     queryFn: () =>
       apiList<OAuthClient>("/oauth/clients").then((rows) =>
         level ? rows.filter((c) => c.level === level) : rows,
       ),
-    enabled: isOrg ? !!orgId : !!orgId && !!appId,
+    enabled: isOrg ? !!orgId : !!orgId && !!applicationId,
   });
 }
 
@@ -38,18 +38,18 @@ export function useOAuthClients(level?: "org" | "application") {
  */
 export function useOAuthScopes() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["oauth-scopes", orgId, appId],
+    queryKey: ["oauth-scopes", orgId, applicationId],
     queryFn: () => apiList<string>("/oauth/scopes"),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
     staleTime: Infinity, // scope list is static within a deploy
   });
 }
 
 export function useCreateOAuthClient(level?: "org" | "application") {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
   return useMutation({
@@ -69,7 +69,7 @@ export function useCreateOAuthClient(level?: "org" | "application") {
         body: JSON.stringify(
           isOrg
             ? { level: "org", referencedOrgId: orgId, ...data }
-            : { level: "application", referencedApplicationId: appId, ...data },
+            : { level: "application", referencedApplicationId: applicationId, ...data },
         ),
       }),
     onSuccess: () => {

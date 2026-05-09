@@ -69,7 +69,7 @@ function EndUserAvatar({ user }: { user: EndUserInfo }) {
 export function EndUsersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -97,7 +97,7 @@ export function EndUsersPage() {
   }, [endUsers, search]);
 
   if (!isAdmin) return null;
-  if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
+  if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
   if (error) return <ErrorState message={error.message} />;
 
   return (

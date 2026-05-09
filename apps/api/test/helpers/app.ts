@@ -162,7 +162,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     authStrategies: () => moduleAuthStrategies,
   });
 
-  // App context middleware: resolve X-App-Id for app-scoped routes.
+  // App context middleware: resolve X-Application-Id for app-scoped routes.
   // Core prefixes listed statically; any module-owned prefixes come from the
   // modules passed via options.modules so tests mirror the production aggregation.
   const APP_SCOPED_PREFIXES = [

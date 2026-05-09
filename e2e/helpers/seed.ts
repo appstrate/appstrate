@@ -299,10 +299,10 @@ export async function createConnectionProfile(
 
 export async function installPackageInApp(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
-  appId: string,
+  applicationId: string,
   packageId: string,
 ): Promise<void> {
-  const res = await client.post(`/applications/${appId}/packages`, { packageId });
+  const res = await client.post(`/applications/${applicationId}/packages`, { packageId });
   if (res.status() !== 201 && res.status() !== 200) {
     throw new Error(`Install package failed (${res.status()}): ${await res.text()}`);
   }
@@ -310,11 +310,11 @@ export async function installPackageInApp(
 
 export async function uninstallPackageFromApp(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
-  appId: string,
+  applicationId: string,
   scope: string,
   name: string,
 ): Promise<void> {
-  const res = await client.delete(`/applications/${appId}/packages/${scope}/${name}`);
+  const res = await client.delete(`/applications/${applicationId}/packages/${scope}/${name}`);
   if (res.status() !== 204 && res.status() !== 200) {
     throw new Error(`Uninstall package failed (${res.status()}): ${await res.text()}`);
   }

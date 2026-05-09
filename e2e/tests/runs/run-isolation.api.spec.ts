@@ -70,7 +70,7 @@ appTest.describe("Cross-app run isolation", () => {
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: customApp.id,
+        applicationId: customApp.id,
       });
 
       // Custom app should have 0 runs
@@ -93,7 +93,7 @@ appTest.describe("Cross-app run isolation", () => {
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: customApp.id,
+        applicationId: customApp.id,
       });
 
       // Should 404 — requireAgent() blocks access
@@ -118,7 +118,7 @@ appTest.describe("Cross-app run isolation", () => {
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: customApp.id,
+        applicationId: customApp.id,
       });
 
       // List runs for the agent from custom app — should be empty

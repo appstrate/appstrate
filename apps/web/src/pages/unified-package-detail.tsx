@@ -643,7 +643,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           } else if (confirmAction.type === "uninstallPackage") {
             if (!currentAppId) return;
             uninstallMutation.mutate(
-              { appId: currentAppId, packageId, installed: true },
+              { applicationId: currentAppId, packageId, installed: true },
               {
                 onSuccess: close,
                 onError: (err) =>

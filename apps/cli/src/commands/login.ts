@@ -19,7 +19,7 @@
  *      many, offer inline creation on zero. Non-interactive escapes:
  *      `--org <id-or-slug>`, `--create-org <name>`, `--no-org`.
  *   8. Cascade: pin an application on the profile so subsequent
- *      `X-App-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
+ *      `X-Application-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
  *      work out of the box. Issue #217. Auto-pins the default app
  *      (the server provisions one per org). Non-interactive escapes:
  *      `--app <id>`, `--create-app <name>`, `--no-app`.
@@ -226,7 +226,7 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
 
-  // Preserve the previous `orgId` / `appId` when re-logging-in as the
+  // Preserve the previous `orgId` / `applicationId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call
   // happens to flake (network, server blip) would silently drop the pins
   // the user had carefully set — surprising regression. Only carry them
@@ -235,14 +235,15 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   const existingProfile = (await readConfig()).profiles[profileName];
   const sameUser = existingProfile?.userId === identity.userId;
   const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
-  const preservedAppId = sameUser && existingProfile?.appId ? existingProfile.appId : undefined;
+  const preservedAppId =
+    sameUser && existingProfile?.applicationId ? existingProfile.applicationId : undefined;
 
   await setProfile(profileName, {
     instance,
     userId: identity.userId,
     email: identity.email,
     ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
-    ...(preservedAppId ? { appId: preservedAppId } : {}),
+    ...(preservedAppId ? { applicationId: preservedAppId } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
@@ -266,7 +267,7 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     );
   } else if (!pinnedApp && !opts.noApp) {
     process.stdout.write(
-      `No app pinned — pass -H "X-App-Id: …" on each call, or run \`appstrate app switch\` later.\n`,
+      `No app pinned — pass -H "X-Application-Id: …" on each call, or run \`appstrate app switch\` later.\n`,
     );
   }
 }
@@ -354,7 +355,7 @@ async function pinAppOnProfile(
 
   if (opts.createApp !== undefined) {
     const created = await createApplication(profileName, opts.createApp);
-    await updateProfile(profileName, { appId: created.id });
+    await updateProfile(profileName, { applicationId: created.id });
     return created;
   }
 
@@ -369,7 +370,7 @@ async function pinAppOnProfile(
   // `--app <id>` — explicit non-interactive selection.
   if (opts.app !== undefined) {
     const match = resolveApplicationRef(apps, opts.app);
-    await updateProfile(profileName, { appId: match.id });
+    await updateProfile(profileName, { applicationId: match.id });
     return match;
   }
 
@@ -384,7 +385,7 @@ async function pinAppOnProfile(
 
   if (apps.length === 1) {
     const only = apps[0]!;
-    await updateProfile(profileName, { appId: only.id });
+    await updateProfile(profileName, { applicationId: only.id });
     return only;
   }
 
@@ -392,7 +393,7 @@ async function pinAppOnProfile(
   // surface a hint; pinning silently to apps[0] would be too guessy.
   const def = findDefaultApplication(apps);
   if (def) {
-    await updateProfile(profileName, { appId: def.id });
+    await updateProfile(profileName, { applicationId: def.id });
     return def;
   }
   process.stderr.write(

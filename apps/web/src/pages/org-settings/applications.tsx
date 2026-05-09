@@ -23,8 +23,8 @@ export function OrgSettingsApplicationsPage() {
 
   if (!isAdmin) return null;
 
-  const handleAppClick = (appId: string) => {
-    switchApp(appId);
+  const handleAppClick = (applicationId: string) => {
+    switchApp(applicationId);
     navigate("/org-settings/app/general");
   };
 

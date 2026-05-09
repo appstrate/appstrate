@@ -60,10 +60,10 @@ describe("scheduler app-profile readiness", () => {
     await flushRedis();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: applicationId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     orgSlug = org.slug;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
 
     // Use ensureDefaultProfile to avoid racing with the fire-and-forget
     // triggered by auth middleware during createTestUser sign-up

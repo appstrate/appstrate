@@ -15,12 +15,12 @@ export function useApplications() {
   });
 }
 
-export function useApplication(appId: string) {
+export function useApplication(applicationId: string) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["applications", orgId, appId],
-    queryFn: () => api<ApplicationInfo>(`/applications/${appId}`),
-    enabled: !!orgId && !!appId,
+    queryKey: ["applications", orgId, applicationId],
+    queryFn: () => api<ApplicationInfo>(`/applications/${applicationId}`),
+    enabled: !!orgId && !!applicationId,
   });
 }
 

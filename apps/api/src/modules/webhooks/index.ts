@@ -48,7 +48,7 @@ const webhooksModule: AppstrateModule = {
 
   // Webhooks are org-scoped routes. The request body (level: "org" |
   // "application") determines the scope of the individual webhook resource;
-  // the surrounding route no longer requires X-App-Id.
+  // the surrounding route no longer requires X-Application-Id.
 
   openApiPaths() {
     return webhooksPaths;

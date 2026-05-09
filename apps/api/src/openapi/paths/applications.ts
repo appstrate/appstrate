@@ -242,7 +242,7 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{appId}/packages": {
+  "/api/applications/{applicationId}/packages": {
     get: {
       operationId: "listInstalledPackages",
       tags: ["Application Packages"],
@@ -251,7 +251,7 @@ export const applicationsPaths = {
         "List all packages installed in this application, with their config and version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "type",
           in: "query",
@@ -292,7 +292,7 @@ export const applicationsPaths = {
       description: "Install a package from the organization catalog into this application.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -339,7 +339,7 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{appId}/packages/{scope}/{name}": {
+  "/api/applications/{applicationId}/packages/{scope}/{name}": {
     get: {
       operationId: "getInstalledPackage",
       tags: ["Application Packages"],
@@ -347,7 +347,7 @@ export const applicationsPaths = {
       description: "Get an installed package detail with its config.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -373,7 +373,7 @@ export const applicationsPaths = {
         "Update configuration, model/proxy overrides, or version pinning for an installed package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -415,7 +415,7 @@ export const applicationsPaths = {
       description: "Remove a package from this application.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -426,7 +426,7 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{appId}/packages/{scope}/{name}/run-config": {
+  "/api/applications/{applicationId}/packages/{scope}/{name}/run-config": {
     get: {
       operationId: "getApplicationPackageRunConfig",
       tags: ["Application Packages"],
@@ -435,7 +435,7 @@ export const applicationsPaths = {
         "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, pinned version label, and the list of providers required by the package's manifest. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -474,7 +474,7 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{appId}/providers": {
+  "/api/applications/{applicationId}/providers": {
     get: {
       operationId: "listAppProviderOverrides",
       tags: ["Application Providers"],
@@ -483,7 +483,7 @@ export const applicationsPaths = {
         "List all application-level provider credential overrides and enablement status.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -516,7 +516,7 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{appId}/providers/{scope}/{name}/credentials": {
+  "/api/applications/{applicationId}/providers/{scope}/{name}/credentials": {
     put: {
       operationId: "setAppProviderCredentials",
       tags: ["Application Providers"],
@@ -525,7 +525,7 @@ export const applicationsPaths = {
         "Set or update application-level provider admin credentials (e.g. OAuth clientId/clientSecret). These override org-level credentials for this application. The provider must be enabled at org level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -578,7 +578,7 @@ export const applicationsPaths = {
         "Remove the application-level override for a provider, reverting to org-level credentials.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "appId", in: "path", required: true, schema: { type: "string" } },
+        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],

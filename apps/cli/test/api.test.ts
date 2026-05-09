@@ -370,14 +370,14 @@ describe("apiFetchRaw — X-Org-Id header injection", () => {
   });
 });
 
-describe("apiFetchRaw — X-App-Id header injection", () => {
-  it("forwards profile.appId as X-App-Id when set", async () => {
+describe("apiFetchRaw — X-Application-Id header injection", () => {
+  it("forwards profile.applicationId as X-Application-Id when set", async () => {
     await setProfile("default", {
       instance: "https://app.example.com",
       userId: "u_1",
       email: "a@example.com",
       orgId: "org_42",
-      appId: "app_7",
+      applicationId: "app_7",
     });
     await saveTokens("default", {
       accessToken: "tok",
@@ -389,7 +389,7 @@ describe("apiFetchRaw — X-App-Id header injection", () => {
     let capturedOrg: string | undefined;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      capturedApp = h["X-App-Id"];
+      capturedApp = h["X-Application-Id"];
       capturedOrg = h["X-Org-Id"];
       return jsonResponse(200, {});
     });
@@ -399,7 +399,7 @@ describe("apiFetchRaw — X-App-Id header injection", () => {
     expect(capturedOrg).toBe("org_42");
   });
 
-  it("does NOT send X-App-Id when profile.appId is unset", async () => {
+  it("does NOT send X-Application-Id when profile.applicationId is unset", async () => {
     await setProfile("default", {
       instance: "https://app.example.com",
       userId: "u_1",
@@ -415,7 +415,7 @@ describe("apiFetchRaw — X-App-Id header injection", () => {
     let sawAppHeader = true;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      sawAppHeader = "X-App-Id" in h;
+      sawAppHeader = "X-Application-Id" in h;
       return jsonResponse(200, {});
     });
     await apiFetchRaw("default", "/api/data");

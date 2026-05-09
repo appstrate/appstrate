@@ -28,8 +28,8 @@ export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
-  const appId = useCurrentApplicationId();
-  const { data: application } = useApplication(appId ?? "");
+  const applicationId = useCurrentApplicationId();
+  const { data: application } = useApplication(applicationId ?? "");
   const location = useLocation();
 
   const oidcEnabled = !!features.oidc;

@@ -9,7 +9,7 @@ const API_BASE = "/api";
 /**
  * Authed uploader for `<SchemaForm upload={...} />`. The UI package's default
  * uploader uses raw fetch (no org context); this variant goes through `api()`
- * so `/api/uploads` gets the same `X-Org-Id` / `X-App-Id` headers as every
+ * so `/api/uploads` gets the same `X-Org-Id` / `X-Application-Id` headers as every
  * other call.
  */
 export const uploadClient: UploadFn = async (file, signal) => {
@@ -67,8 +67,8 @@ function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const orgId = getCurrentOrgId();
   if (orgId) headers["X-Org-Id"] = orgId;
-  const appId = getCurrentApplicationId();
-  if (appId) headers["X-App-Id"] = appId;
+  const applicationId = getCurrentApplicationId();
+  if (applicationId) headers["X-Application-Id"] = applicationId;
   return headers;
 }
 

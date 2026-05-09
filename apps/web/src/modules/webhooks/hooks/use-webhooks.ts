@@ -24,25 +24,25 @@ export const WEBHOOK_EVENTS = [
 
 /**
  * List webhooks for the current application.
- * All webhooks are now application-scoped (X-App-Id sent automatically by api.ts).
+ * All webhooks are now application-scoped (X-Application-Id sent automatically by api.ts).
  */
 export function useWebhooks() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["webhooks", orgId, appId],
+    queryKey: ["webhooks", orgId, applicationId],
     queryFn: () => apiList<WebhookInfo>("/webhooks"),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 export function useWebhook(webhookId: string) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["webhooks", orgId, appId, webhookId],
+    queryKey: ["webhooks", orgId, applicationId, webhookId],
     queryFn: () => api<WebhookInfo>(`/webhooks/${webhookId}`),
-    enabled: !!orgId && !!appId && !!webhookId,
+    enabled: !!orgId && !!applicationId && !!webhookId,
   });
 }
 
@@ -133,10 +133,10 @@ export function useRotateWebhookSecret() {
 
 export function useWebhookDeliveries(webhookId: string) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["webhooks", orgId, appId, webhookId, "deliveries"],
+    queryKey: ["webhooks", orgId, applicationId, webhookId, "deliveries"],
     queryFn: () => apiList<WebhookDelivery>(`/webhooks/${webhookId}/deliveries`),
-    enabled: !!orgId && !!appId && !!webhookId,
+    enabled: !!orgId && !!applicationId && !!webhookId,
   });
 }

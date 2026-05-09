@@ -14,9 +14,9 @@ export interface EndUserListParams {
 
 export function useEndUsers(params?: EndUserListParams) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["end-users", orgId, appId, params?.limit, params?.startingAfter],
+    queryKey: ["end-users", orgId, applicationId, params?.limit, params?.startingAfter],
     queryFn: () =>
       api<EndUserListResponse>(
         `/end-users${buildQs({
@@ -24,17 +24,17 @@ export function useEndUsers(params?: EndUserListParams) {
           startingAfter: params?.startingAfter,
         })}`,
       ),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 export function useEndUser(endUserId: string) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["end-users", orgId, appId, endUserId],
+    queryKey: ["end-users", orgId, applicationId, endUserId],
     queryFn: () => api<EndUserInfo>(`/end-users/${endUserId}`),
-    enabled: !!orgId && !!appId && !!endUserId,
+    enabled: !!orgId && !!applicationId && !!endUserId,
   });
 }
 

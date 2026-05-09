@@ -26,23 +26,24 @@ interface SettingsFormData {
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const appId = useCurrentApplicationId();
-  const { data: application, isLoading, error } = useApplication(appId ?? "");
+  const applicationId = useCurrentApplicationId();
+  const { data: application, isLoading, error } = useApplication(applicationId ?? "");
 
   if (!isAdmin) return null;
-  if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
+  if (!applicationId)
+    return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
   if (!application) return <ErrorState />;
 
-  return <GeneralForm appId={appId} application={application} />;
+  return <GeneralForm applicationId={applicationId} application={application} />;
 }
 
 function GeneralForm({
-  appId,
+  applicationId,
   application,
 }: {
-  appId: string;
+  applicationId: string;
   application: {
     name: string;
     isDefault: boolean;
@@ -65,7 +66,7 @@ function GeneralForm({
 
   const onSubmit = (data: SettingsFormData) => {
     updateMutation.mutate({
-      id: appId,
+      id: applicationId,
       data: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
     });
   };
@@ -163,7 +164,7 @@ function GeneralForm({
         description={t("applications.deleteConfirm", { name: application.name })}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
-          deleteMutation.mutate(appId, {
+          deleteMutation.mutate(applicationId, {
             onSuccess: () => {
               setConfirmOpen(false);
               navigate("/org-settings/applications");

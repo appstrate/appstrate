@@ -10,10 +10,11 @@ import { AppProfilesTab } from "../../../components/app-profiles-tab";
 export function OrgSettingsAppProfilesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
 
   if (!isAdmin) return null;
-  if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
+  if (!applicationId)
+    return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
 
   return <AppProfilesTab />;
 }

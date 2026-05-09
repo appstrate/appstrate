@@ -137,11 +137,11 @@ export function useOpenRouterModels(search: string | undefined) {
 
 export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-model", orgId, appId, packageId],
+    queryKey: ["agent-model", orgId, applicationId, packageId],
     queryFn: () => api<{ modelId: string | null }>(`/agents/${packageId}/model`),
-    enabled: !!orgId && !!appId && !!packageId,
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
 

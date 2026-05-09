@@ -45,7 +45,7 @@ describe("fetchRunConfigPayload", () => {
     const payload = await fetchRunConfigPayload({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       orgId: "org_1",
       scope: "@scope",
       name: "agent",
@@ -61,7 +61,7 @@ describe("fetchRunConfigPayload", () => {
     const payload = await fetchRunConfigPayload({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       scope: "@scope",
       name: "agent",
       fetchImpl,
@@ -75,7 +75,7 @@ describe("fetchRunConfigPayload", () => {
       fetchRunConfigPayload({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         scope: "@scope",
         name: "agent",
         fetchImpl,
@@ -89,14 +89,14 @@ describe("fetchRunConfigPayload", () => {
     await fetchRunConfigPayload({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       orgId: "org_1",
       scope: "@scope",
       name: "agent",
       fetchImpl,
     });
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
-    expect(capture.headers?.get("X-App-Id")).toBe("app_1");
+    expect(capture.headers?.get("X-Application-Id")).toBe("app_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
     // Literal `@` — the Hono server route `:scope{@[^/]+}` rejects
     // `%40scope` as 404. The CLI URL builder leaves scope/name unencoded.

@@ -180,7 +180,7 @@ describe("LocalProviderResolver", () => {
 });
 
 describe("RemoteAppstrateProviderResolver", () => {
-  it("POSTs to /api/credential-proxy/proxy with Authorization + X-App-Id", async () => {
+  it("POSTs to /api/credential-proxy/proxy with Authorization + X-Application-Id", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const providerPkg = makePackage("@afps/clickup", "1.0.0", "provider", {
@@ -190,7 +190,7 @@ describe("RemoteAppstrateProviderResolver", () => {
     const resolver = new RemoteAppstrateProviderResolver({
       instance: "https://app.appstrate.com",
       apiKey: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       endUserId: "eu_x",
       sessionId: "sess_1",
       fetch: ((url: string, init: RequestInit) => {
@@ -205,7 +205,7 @@ describe("RemoteAppstrateProviderResolver", () => {
     expect(calls[0]!.url).toBe("https://app.appstrate.com/api/credential-proxy/proxy");
     const h = calls[0]!.init.headers as Record<string, string>;
     expect(h.Authorization).toBe("Bearer ask_test");
-    expect(h["X-App-Id"]).toBe("app_1");
+    expect(h["X-Application-Id"]).toBe("app_1");
     expect(h["Appstrate-User"]).toBe("eu_x");
     expect(h["X-Session-Id"]).toBe("sess_1");
     expect(h["X-Provider"]).toBe("@afps/clickup");

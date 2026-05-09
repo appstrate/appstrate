@@ -39,7 +39,7 @@ export function useLibrary() {
 function updateLibraryCache(
   prev: LibraryResponse | undefined,
   packageId: string,
-  appId: string,
+  applicationId: string,
   action: "install" | "uninstall",
 ): LibraryResponse | undefined {
   if (!prev) return prev;
@@ -54,8 +54,8 @@ function updateLibraryCache(
             ...pkg,
             installedIn:
               action === "install"
-                ? [...pkg.installedIn, appId]
-                : pkg.installedIn.filter((id) => id !== appId),
+                ? [...pkg.installedIn, applicationId]
+                : pkg.installedIn.filter((id) => id !== applicationId),
           };
         }),
       ]),
@@ -99,28 +99,28 @@ export function useTogglePackageInstall() {
 
   return useMutation({
     mutationFn: async ({
-      appId,
+      applicationId,
       packageId,
       installed,
     }: {
-      appId: string;
+      applicationId: string;
       packageId: string;
       installed: boolean;
     }) => {
       if (installed) {
-        return api(`/applications/${appId}/packages/${packageId}`, { method: "DELETE" });
+        return api(`/applications/${applicationId}/packages/${packageId}`, { method: "DELETE" });
       }
-      return api(`/applications/${appId}/packages`, {
+      return api(`/applications/${applicationId}/packages`, {
         method: "POST",
         body: JSON.stringify({ packageId }),
       });
     },
-    onMutate: async ({ appId, packageId, installed }) => {
+    onMutate: async ({ applicationId, packageId, installed }) => {
       const key = ["library", orgId];
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<LibraryResponse>(key);
       qc.setQueryData<LibraryResponse>(key, (old) =>
-        updateLibraryCache(old, packageId, appId, installed ? "uninstall" : "install"),
+        updateLibraryCache(old, packageId, applicationId, installed ? "uninstall" : "install"),
       );
       return { prev };
     },

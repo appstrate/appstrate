@@ -24,7 +24,7 @@ export interface AppContextRow {
  * Shared by the app-context middleware and SSE auth.
  */
 export async function validateApplicationInOrg(
-  appId: string,
+  applicationId: string,
   orgId: string,
 ): Promise<AppContextRow | null> {
   const [app] = await db
@@ -34,7 +34,7 @@ export async function validateApplicationInOrg(
       isDefault: applications.isDefault,
     })
     .from(applications)
-    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
     .limit(1);
   return app ?? null;
 }
@@ -44,11 +44,11 @@ export async function validateApplicationInOrg(
  *
  * Resolution order:
  * 1. applicationId already pinned by an auth strategy (API key, OIDC JWT, …)
- * 2. X-App-Id header (session auth — dashboard users)
+ * 2. X-Application-Id header (session auth — dashboard users)
  *
  * If a strategy already pinned an application and the request also carries
- * an `X-App-Id` header, the header MUST match the pinned value. Otherwise
- * a holder of a Bearer token scoped to App A could spoof `X-App-Id: App B`
+ * an `X-Application-Id` header, the header MUST match the pinned value. Otherwise
+ * a holder of a Bearer token scoped to App A could spoof `X-Application-Id: App B`
  * (same org) and reach a second application's data. Session callers never
  * pin an application, so their header is still honoured as the primary
  * signal.
@@ -59,29 +59,29 @@ export async function validateApplicationInOrg(
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
     const pinned = c.get("applicationId");
-    const headerApp = c.req.header("X-App-Id");
+    const headerApp = c.req.header("X-Application-Id");
 
     if (pinned && headerApp && headerApp !== pinned) {
-      throw forbidden("X-App-Id does not match authenticated application");
+      throw forbidden("X-Application-Id does not match authenticated application");
     }
 
-    const appId = pinned ?? headerApp;
+    const applicationId = pinned ?? headerApp;
 
-    if (!appId) {
+    if (!applicationId) {
       throw invalidRequest(
-        "Application context required. Provide X-App-Id header or use an API key.",
-        "X-App-Id",
+        "Application context required. Provide X-Application-Id header or use an API key.",
+        "X-Application-Id",
       );
     }
 
     const orgId = c.get("orgId");
-    const app = await validateApplicationInOrg(appId, orgId);
+    const app = await validateApplicationInOrg(applicationId, orgId);
 
     if (!app) {
-      throw notFound(`Application '${appId}' not found in this organization`);
+      throw notFound(`Application '${applicationId}' not found in this organization`);
     }
 
-    c.set("applicationId", appId);
+    c.set("applicationId", applicationId);
     c.set("app", app);
     return next();
   };

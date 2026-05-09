@@ -12,7 +12,7 @@
  *   org current       — print pinned org id (scripts / prompts)
  *   org create [name] — create + auto-pin
  *
- * Cascade invariant (issue #217): the pinned `appId` is always scoped to
+ * Cascade invariant (issue #217): the pinned `applicationId` is always scoped to
  * the pinned `orgId`. `org switch` and `org create` therefore clear the
  * stale app pin and re-pin the new org's default application in the same
  * atomic operation — otherwise the next `appstrate api` call would 404
@@ -134,7 +134,7 @@ export async function orgSwitchCommand(
     // Clear the stale app pin first: it belongs to the previous org and
     // would immediately 404 on the next app-scoped call. Re-pin the new
     // org's default app in the same commit below.
-    await updateProfile(profileName, { orgId: chosen.id, appId: undefined });
+    await updateProfile(profileName, { orgId: chosen.id, applicationId: undefined });
     const repinned = await repinAppAfterOrgChange(profileName);
     const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
     process.stdout.write(
@@ -171,7 +171,7 @@ export async function orgCreateCommand(
     const created = await createOrg(profileName, input);
     // Server auto-provisions a default application on org creation — clear
     // any stale app pin from the previous org and re-pin the new default.
-    await updateProfile(profileName, { orgId: created.id, appId: undefined });
+    await updateProfile(profileName, { orgId: created.id, applicationId: undefined });
     const repinned = await repinAppAfterOrgChange(profileName);
     const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
     process.stdout.write(
@@ -198,7 +198,7 @@ async function repinAppAfterOrgChange(profileName: string): Promise<Application 
     if (apps.length === 0) return null;
     const chosen = findDefaultApplication(apps) ?? (apps.length === 1 ? apps[0]! : null);
     if (!chosen) return null;
-    await updateProfile(profileName, { appId: chosen.id });
+    await updateProfile(profileName, { applicationId: chosen.id });
     return chosen;
   } catch {
     return null;

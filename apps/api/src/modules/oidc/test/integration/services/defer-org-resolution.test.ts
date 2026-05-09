@@ -102,10 +102,10 @@ describe("deferOrgResolution in auth pipeline", () => {
   beforeEach(async () => {
     await truncateAll();
     const { id: ownerId } = await createTestUser();
-    const { org, defaultAppId: appId } = await createTestOrg(ownerId, { slug: "deferorg" });
+    const { org, defaultAppId: applicationId } = await createTestOrg(ownerId, { slug: "deferorg" });
     orgId = org.id;
     authUserId = ownerId;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
 
     const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
     instanceClientId = await ensureInstanceClient("http://localhost:3000");
@@ -114,14 +114,14 @@ describe("deferOrgResolution in auth pipeline", () => {
   it("defers org resolution — instance token + X-Org-Id resolves org context", async () => {
     const token = await mintInstanceToken(authUserId, instanceClientId);
 
-    // Hit an app-scoped route with X-Org-Id + X-App-Id.
+    // Hit an app-scoped route with X-Org-Id + X-Application-Id.
     // If deferOrgResolution works, the pipeline will resolve org via X-Org-Id
     // header (same as session auth) instead of requiring inline org context.
     const res = await app.request("/api/agents", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": orgId,
-        "X-App-Id": defaultAppId,
+        "X-Application-Id": defaultAppId,
       },
     });
     // 200 means: auth passed, org resolved via X-Org-Id, permissions derived from orgRole
@@ -149,7 +149,7 @@ describe("deferOrgResolution in auth pipeline", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": otherOrg.id,
-        "X-App-Id": "app_fake",
+        "X-Application-Id": "app_fake",
       },
     });
     // Not a member → org context middleware rejects

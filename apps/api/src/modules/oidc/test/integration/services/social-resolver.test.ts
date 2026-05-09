@@ -32,15 +32,15 @@ async function seedApp(): Promise<string> {
       createdBy: ownerId,
     })
     .returning();
-  const appId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(applications).values({
-    id: appId,
+    id: applicationId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
     createdBy: ownerId,
   });
-  return appId;
+  return applicationId;
 }
 
 describe("resolveSocialProviderForClient", () => {
@@ -50,23 +50,23 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("returns null for level=application when no row exists", async () => {
-    const appId = await seedApp();
+    const applicationId = await seedApp();
     const resolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     expect(resolved).toBeNull();
   });
 
   it("returns decrypted creds when per-app config exists", async () => {
-    const appId = await seedApp();
-    await upsertSocialProvider(appId, "google", {
+    const applicationId = await seedApp();
+    await upsertSocialProvider(applicationId, "google", {
       clientId: "tenant-google-client.apps.googleusercontent.com",
       clientSecret: "tenant-google-secret",
       scopes: ["openid", "email", "profile"],
     });
     const resolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     expect(resolved).not.toBeNull();
@@ -77,38 +77,38 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("isolates providers per (app, provider) — google config does not leak to github", async () => {
-    const appId = await seedApp();
-    await upsertSocialProvider(appId, "google", {
+    const applicationId = await seedApp();
+    await upsertSocialProvider(applicationId, "google", {
       clientId: "g",
       clientSecret: "gs",
     });
     const githubResolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "github",
     );
     expect(githubResolved).toBeNull();
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const appId = await seedApp();
+    const applicationId = await seedApp();
     expect(
       await resolveSocialProviderForClient(
-        { level: "application", referencedApplicationId: appId },
+        { level: "application", referencedApplicationId: applicationId },
         "google",
       ),
     ).toBeNull();
-    await upsertSocialProvider(appId, "google", {
+    await upsertSocialProvider(applicationId, "google", {
       clientId: "g",
       clientSecret: "gs",
     });
     const afterUpsert = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     expect(afterUpsert).not.toBeNull();
-    await deleteSocialProvider(appId, "google");
+    await deleteSocialProvider(applicationId, "google");
     const afterDelete = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     expect(afterDelete).toBeNull();
@@ -124,32 +124,32 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("invalidateSocialCache with provider arg clears only that provider", async () => {
-    const appId = await seedApp();
-    await upsertSocialProvider(appId, "google", {
+    const applicationId = await seedApp();
+    await upsertSocialProvider(applicationId, "google", {
       clientId: "g1",
       clientSecret: "s1",
     });
-    await upsertSocialProvider(appId, "github", {
+    await upsertSocialProvider(applicationId, "github", {
       clientId: "gh1",
       clientSecret: "ghs1",
     });
     // Prime the cache.
     await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "github",
     );
     // Update google directly (bypass service to avoid its own cache invalidation).
-    await upsertSocialProvider(appId, "google", {
+    await upsertSocialProvider(applicationId, "google", {
       clientId: "g2",
       clientSecret: "s2",
     });
-    invalidateSocialCache(appId, "google");
+    invalidateSocialCache(applicationId, "google");
     const google = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: appId },
+      { level: "application", referencedApplicationId: applicationId },
       "google",
     );
     expect(google!.clientId).toBe("g2");

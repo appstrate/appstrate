@@ -65,7 +65,7 @@ export interface AppstrateModule {
 
   /**
    * Route prefixes owned by this module that require the app context middleware
-   * (`X-App-Id` header resolution). Aggregated with core prefixes at boot.
+   * (`X-Application-Id` header resolution). Aggregated with core prefixes at boot.
    *
    * Only declare prefixes for app-scoped resources. Org-scoped or global
    * routes should be omitted.
@@ -528,7 +528,7 @@ export interface AuthResolution {
    * OIDC end_user flow) pin this so core's strict end-user filter has the
    * owning app in context. Dashboard strategies (OIDC dashboard flow) leave
    * it undefined — app context is then supplied per-request via the
-   * `X-App-Id` header handled by `requireAppContext()`.
+   * `X-Application-Id` header handled by `requireAppContext()`.
    */
   applicationId?: string;
   /** Permission strings already resolved by the strategy. */

@@ -18,11 +18,11 @@ import type { ProviderConfig } from "@appstrate/shared-types";
  */
 export function useProviders() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["providers", orgId, appId],
+    queryKey: ["providers", orgId, applicationId],
     queryFn: () => apiList<ProviderConfig>("/providers"),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
@@ -39,13 +39,13 @@ interface ProvidersEnvelopeWithCallback {
  */
 export function useProviderCallbackUrl() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["providers", "callback-url", orgId, appId],
+    queryKey: ["providers", "callback-url", orgId, applicationId],
     queryFn: async () => {
       const env = await api<ProvidersEnvelopeWithCallback>("/providers");
       return env.callbackUrl;
     },
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }

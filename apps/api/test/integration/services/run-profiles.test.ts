@@ -36,7 +36,7 @@ import type {
 describe("Run with provider profiles", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
   let actor: Actor;
   let defaultProfileId: string;
 
@@ -48,7 +48,7 @@ describe("Run with provider profiles", () => {
     userId = id;
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
     actor = { type: "user", id: userId };
 
     // Seed provider packages + enable them for the org
@@ -67,7 +67,7 @@ describe("Run with provider profiles", () => {
         },
       });
       await db.insert(applicationProviderCredentials).values({
-        applicationId: appId,
+        applicationId: applicationId,
         providerId: pid,
         credentialsEncrypted: "{}",
         enabled: true,
@@ -77,7 +77,7 @@ describe("Run with provider profiles", () => {
     // Ensure default profile + connections
     defaultProfileId = await getDefaultProfileId(actor);
     for (const pid of providerIds) {
-      await seedConnectionForApp(defaultProfileId, pid, orgId, appId, { api_key: "default-key" });
+      await seedConnectionForApp(defaultProfileId, pid, orgId, applicationId, { api_key: "default-key" });
     }
   });
 
@@ -159,7 +159,7 @@ describe("Run with provider profiles", () => {
   describe("resolveProviderProfiles", () => {
     it("uses per-provider overrides from user_agent_provider_profiles", async () => {
       const altProfile = await seedConnectionProfile({ userId, name: "Alt Gmail" });
-      await seedConnectionForApp(altProfile.id, "@system/gmail", orgId, appId, {
+      await seedConnectionForApp(altProfile.id, "@system/gmail", orgId, applicationId, {
         api_key: "alt-key",
       });
 
@@ -180,9 +180,9 @@ describe("Run with provider profiles", () => {
     });
 
     it("uses app profile bindings when appProfileId is provided", async () => {
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App Profile" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "App Profile" });
       const altProfile = await seedConnectionProfile({ userId, name: "Bound Source" });
-      await seedConnectionForApp(altProfile.id, "@system/gmail", orgId, appId, {
+      await seedConnectionForApp(altProfile.id, "@system/gmail", orgId, applicationId, {
         api_key: "org-key",
       });
 
@@ -195,7 +195,7 @@ describe("Run with provider profiles", () => {
         defaultProfileId,
         {},
         appProfile.id,
-        appId,
+        applicationId,
       );
 
       // gmail is bound in app profile -> uses app binding
@@ -226,12 +226,12 @@ describe("Run with provider profiles", () => {
     it("app binding takes priority over per-provider user override", async () => {
       const userOverrideProfile = await seedConnectionProfile({ userId, name: "User Override" });
       const appBoundProfile = await seedConnectionProfile({ userId, name: "App Bound" });
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App Profile" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "App Profile" });
 
-      await seedConnectionForApp(userOverrideProfile.id, "@system/gmail", orgId, appId, {
+      await seedConnectionForApp(userOverrideProfile.id, "@system/gmail", orgId, applicationId, {
         api_key: "u",
       });
-      await seedConnectionForApp(appBoundProfile.id, "@system/gmail", orgId, appId, {
+      await seedConnectionForApp(appBoundProfile.id, "@system/gmail", orgId, applicationId, {
         api_key: "o",
       });
 
@@ -244,7 +244,7 @@ describe("Run with provider profiles", () => {
         defaultProfileId,
         { "@system/gmail": userOverrideProfile.id },
         appProfile.id,
-        appId,
+        applicationId,
       );
 
       // App binding wins over user override
@@ -253,12 +253,12 @@ describe("Run with provider profiles", () => {
     });
 
     it("handles multiple providers with mixed app bindings and user overrides", async () => {
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Mixed App" });
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Mixed App" });
       const gmailBound = await seedConnectionProfile({ userId, name: "Gmail Bound" });
       const notionOverride = await seedConnectionProfile({ userId, name: "Notion Override" });
 
-      await seedConnectionForApp(gmailBound.id, "@system/gmail", orgId, appId, { api_key: "g" });
-      await seedConnectionForApp(notionOverride.id, "@system/notion", orgId, appId, {
+      await seedConnectionForApp(gmailBound.id, "@system/gmail", orgId, applicationId, { api_key: "g" });
+      await seedConnectionForApp(notionOverride.id, "@system/notion", orgId, applicationId, {
         api_key: "n",
       });
 
@@ -272,7 +272,7 @@ describe("Run with provider profiles", () => {
         defaultProfileId,
         { "@system/notion": notionOverride.id },
         appProfile.id,
-        appId,
+        applicationId,
       );
 
       // gmail: app binding
@@ -287,7 +287,7 @@ describe("Run with provider profiles", () => {
     });
 
     it("returns empty map when no providers are required", async () => {
-      const map = await resolveProviderProfiles([], defaultProfileId, undefined, undefined, appId);
+      const map = await resolveProviderProfiles([], defaultProfileId, undefined, undefined, applicationId);
       expect(map).toEqual({});
     });
   });
@@ -321,9 +321,9 @@ describe("Run with provider profiles", () => {
       // stays consistent with what the sidecar actually uses at run time.
       const work = await seedConnectionProfile({ userId, name: "Work" });
       const agent = await seedAgent({ id: "@testorg/sticky-agent", orgId, createdBy: userId });
-      await setMemberApplicationProfileId(userId, appId, work.id);
+      await setMemberApplicationProfileId(userId, applicationId, work.id);
 
-      const ctx = await resolveActorProfileContext(actor, agent.id, null, appId);
+      const ctx = await resolveActorProfileContext(actor, agent.id, null, applicationId);
 
       expect(ctx.defaultUserProfileId).toBe(work.id);
     });
@@ -331,7 +331,7 @@ describe("Run with provider profiles", () => {
     it("falls back to auto-created Default when no sticky is set", async () => {
       const agent = await seedAgent({ id: "@testorg/no-sticky", orgId, createdBy: userId });
 
-      const ctx = await resolveActorProfileContext(actor, agent.id, null, appId);
+      const ctx = await resolveActorProfileContext(actor, agent.id, null, applicationId);
 
       expect(ctx.defaultUserProfileId).toBe(defaultProfileId);
     });
@@ -343,17 +343,17 @@ describe("Run with provider profiles", () => {
       const agent = await seedAgentWithProviders(agentId);
 
       const appProfile = await seedConnectionProfile({
-        applicationId: appId,
+        applicationId: applicationId,
         name: "Configured App",
       });
       const boundProfile = await seedConnectionProfile({ userId, name: "Bound" });
-      await seedConnectionForApp(boundProfile.id, "@system/gmail", orgId, appId, { api_key: "b" });
+      await seedConnectionForApp(boundProfile.id, "@system/gmail", orgId, applicationId, { api_key: "b" });
 
       await bindAppProfileProvider(appProfile.id, "@system/gmail", boundProfile.id, userId);
 
       // Install the agent in the application, then set app profile
-      await installPackage({ orgId: orgId, applicationId: appId }, agentId);
-      await updateInstalledPackage({ orgId, applicationId: appId }, agentId, {
+      await installPackage({ orgId: orgId, applicationId: applicationId }, agentId);
+      await updateInstalledPackage({ orgId, applicationId: applicationId }, agentId, {
         appProfileId: appProfile.id,
       });
 
@@ -361,7 +361,7 @@ describe("Run with provider profiles", () => {
         agent,
         packageId: agentId,
         orgId,
-        applicationId: appId,
+        applicationId: applicationId,
         defaultUserProfileId: defaultProfileId,
         appProfileId: appProfile.id,
       });
@@ -378,9 +378,9 @@ describe("Run with provider profiles", () => {
       const agent = await seedAgentWithProviders(agentId);
 
       // Create app profile with no bindings
-      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Empty App" });
-      await installPackage({ orgId: orgId, applicationId: appId }, agentId);
-      await updateInstalledPackage({ orgId, applicationId: appId }, agentId, {
+      const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "Empty App" });
+      await installPackage({ orgId: orgId, applicationId: applicationId }, agentId);
+      await updateInstalledPackage({ orgId, applicationId: applicationId }, agentId, {
         appProfileId: appProfile.id,
       });
 
@@ -388,7 +388,7 @@ describe("Run with provider profiles", () => {
         agent,
         packageId: agentId,
         orgId,
-        applicationId: appId,
+        applicationId: applicationId,
         defaultUserProfileId: defaultProfileId,
         appProfileId: appProfile.id,
       });

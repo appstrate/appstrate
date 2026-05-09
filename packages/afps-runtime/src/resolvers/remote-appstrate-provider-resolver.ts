@@ -19,7 +19,7 @@ export interface RemoteAppstrateProviderResolverOptions {
   /** API key (ask_...) scoped with the `credential-proxy:call` permission. */
   apiKey: string;
   /** Application id (app_...) the API key is scoped to. */
-  appId: string;
+  applicationId: string;
   /**
    * Org id (org_...) the caller operates under. Required when the bearer
    * is a dashboard-user JWT (interactive CLI): the `/api/credential-proxy`
@@ -75,7 +75,7 @@ export interface RemoteAppstrateProviderResolverOptions {
 export class RemoteAppstrateProviderResolver implements ProviderResolver {
   private readonly instance: string;
   private readonly apiKey: string;
-  private readonly appId: string;
+  private readonly applicationId: string;
   private readonly orgId: string | undefined;
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
@@ -87,10 +87,11 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   constructor(opts: RemoteAppstrateProviderResolverOptions) {
     if (!opts.instance) throw new Error("RemoteAppstrateProviderResolver: instance is required");
     if (!opts.apiKey) throw new Error("RemoteAppstrateProviderResolver: apiKey is required");
-    if (!opts.appId) throw new Error("RemoteAppstrateProviderResolver: appId is required");
+    if (!opts.applicationId)
+      throw new Error("RemoteAppstrateProviderResolver: applicationId is required");
     this.instance = opts.instance.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
-    this.appId = opts.appId;
+    this.applicationId = opts.applicationId;
     this.orgId = opts.orgId;
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
@@ -136,7 +137,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       const profileForCall = this.providerProfileOverrides[ref.name] ?? this.connectionProfileId;
       const baseHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
-        "X-App-Id": this.appId,
+        "X-Application-Id": this.applicationId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
         "X-Provider": ref.name,

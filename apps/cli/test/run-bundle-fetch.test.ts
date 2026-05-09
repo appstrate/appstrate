@@ -54,7 +54,7 @@ describe("fetchBundleForRun — happy path", () => {
     const result = await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       orgId: "org_1",
       packageId: "@system/hello",
       spec: undefined,
@@ -84,7 +84,7 @@ describe("fetchBundleForRun — happy path", () => {
       "https://app.example.com/api/agents/@system/hello/bundle?source=draft",
     );
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
-    expect(capture.headers?.get("X-App-Id")).toBe("app_1");
+    expect(capture.headers?.get("X-Application-Id")).toBe("app_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
   });
 
@@ -97,7 +97,7 @@ describe("fetchBundleForRun — happy path", () => {
     const result = await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       packageId: "@scope/agent",
       spec: "^1.2",
       fetchImpl,
@@ -119,7 +119,7 @@ describe("fetchBundleForRun — happy path", () => {
     const result = await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       packageId: "@scope/agent",
       spec: "2.5.0",
       fetchImpl,
@@ -141,7 +141,7 @@ describe("fetchBundleForRun — happy path", () => {
     await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       packageId: "@system/hello",
       spec: undefined,
       fetchImpl,
@@ -149,7 +149,7 @@ describe("fetchBundleForRun — happy path", () => {
     await fetchBundleForRun({
       instance: "https://app.example.com",
       bearerToken: "ask_test",
-      appId: "app_1",
+      applicationId: "app_1",
       packageId: "@system/hello",
       spec: undefined,
       fetchImpl,
@@ -169,7 +169,7 @@ describe("fetchBundleForRun — integrity guards", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/hello",
         spec: undefined,
         fetchImpl,
@@ -183,7 +183,7 @@ describe("fetchBundleForRun — integrity guards", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/hello",
         spec: undefined,
         fetchImpl,
@@ -199,7 +199,7 @@ describe("fetchBundleForRun — errors", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/missing",
         spec: undefined,
         fetchImpl,
@@ -229,7 +229,7 @@ describe("fetchBundleForRun — errors", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_test",
+        applicationId: "app_test",
         packageId: "@me/x",
         spec: undefined,
         fetchImpl,
@@ -250,7 +250,7 @@ describe("fetchBundleForRun — errors", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/hello",
         spec: "9.9.9",
         fetchImpl,
@@ -264,7 +264,7 @@ describe("fetchBundleForRun — errors", () => {
       fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/hello",
         spec: undefined,
         fetchImpl,
@@ -279,7 +279,7 @@ describe("fetchBundleForRun — errors", () => {
       await fetchBundleForRun({
         instance: "https://app.example.com",
         bearerToken: "ask_test",
-        appId: "app_1",
+        applicationId: "app_1",
         packageId: "@system/missing",
         spec: undefined,
         fetchImpl,

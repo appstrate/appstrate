@@ -11,7 +11,7 @@
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
- *   - `appstrate app`:     manage the pinned application (`X-App-Id`).
+ *   - `appstrate app`:     manage the pinned application (`X-Application-Id`).
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -324,7 +324,7 @@ program
   )
   .option(
     "--no-app",
-    "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-App-Id: …` or pin later via `appstrate app switch`.",
+    "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-Application-Id: …` or pin later via `appstrate app switch`.",
   )
   .option(
     "--device-name <name>",
@@ -558,7 +558,7 @@ modelsGroup
 program
   .command("api <target> [extra]")
   .description(
-    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-App-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Application-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
       "Invocation forms (all curl-compatible):\n" +
       "  appstrate api GET /api/x             # explicit method + path\n" +

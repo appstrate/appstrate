@@ -29,9 +29,9 @@ describe("webhooks service", () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: applicationId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
   });
 
   function appLevel(overrides?: Record<string, unknown>) {

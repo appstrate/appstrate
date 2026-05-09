@@ -35,7 +35,7 @@ export function usePaginatedRuns({
   offset,
 }: UsePaginatedRunsOptions) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -52,11 +52,11 @@ export function usePaginatedRuns({
   });
 
   return useQuery({
-    queryKey: ["paginated-runs", orgId, appId, endpoint, user, kind, status, limit, offset],
+    queryKey: ["paginated-runs", orgId, applicationId, endpoint, user, kind, status, limit, offset],
     queryFn: async () => {
       return api<PaginatedResult>(`${endpoint}${qs}`);
     },
     placeholderData: (prev) => prev,
-    enabled: !!appId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
+    enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
   });
 }

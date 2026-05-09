@@ -45,7 +45,7 @@ const TENANT_GOOGLE_SECRET = "tenant-acme-google-secret";
 async function setupAppClient(opts: {
   google?: boolean;
   github?: boolean;
-}): Promise<{ appId: string; clientId: string }> {
+}): Promise<{ applicationId: string; clientId: string }> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -63,9 +63,9 @@ async function setupAppClient(opts: {
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const appId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(applications).values({
-    id: appId,
+    id: applicationId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -76,26 +76,26 @@ async function setupAppClient(opts: {
     level: "application",
     name: "E2E Social Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: appId,
+    referencedApplicationId: applicationId,
     // The "register page shows both buttons" test hits GET /register which
     // is now gated by `allowSignup` on every level — opt in.
     allowSignup: true,
   });
 
   if (opts.google) {
-    await upsertSocialProvider(appId, "google", {
+    await upsertSocialProvider(applicationId, "google", {
       clientId: TENANT_GOOGLE_CLIENT_ID,
       clientSecret: TENANT_GOOGLE_SECRET,
     });
   }
   if (opts.github) {
-    await upsertSocialProvider(appId, "github", {
+    await upsertSocialProvider(applicationId, "github", {
       clientId: "tenant-github-id",
       clientSecret: "tenant-github-secret",
     });
   }
 
-  return { appId, clientId: client.clientId };
+  return { applicationId, clientId: client.clientId };
 }
 
 describe("OIDC per-app social auth — E2E (app-level clients)", () => {

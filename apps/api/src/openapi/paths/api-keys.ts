@@ -113,7 +113,7 @@ export const apiKeysPaths = {
               type: "object",
               required: ["name"],
               description:
-                "The API key is scoped to the application specified by the X-App-Id header.",
+                "The API key is scoped to the application specified by the X-Application-Id header.",
               properties: {
                 name: {
                   type: "string",

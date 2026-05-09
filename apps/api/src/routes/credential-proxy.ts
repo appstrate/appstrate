@@ -536,7 +536,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
-  "x-app-id",
+  "x-application-id",
   "x-connection-profile-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",

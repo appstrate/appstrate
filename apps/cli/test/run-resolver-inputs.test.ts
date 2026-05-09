@@ -94,7 +94,7 @@ async function seedLoggedInProfile(profileName: string): Promise<void> {
     userId: "u_1",
     email: "a@example.com",
     orgId: "org_1",
-    appId: "app_1",
+    applicationId: "app_1",
   });
   await saveTokens(profileName, {
     accessToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
@@ -106,7 +106,7 @@ async function seedLoggedInProfile(profileName: string): Promise<void> {
 
 describe("buildResolverInputs — remote", () => {
   describe("headless path (APPSTRATE_API_KEY)", () => {
-    it("uses the explicit API key when paired with instance + appId env vars", async () => {
+    it("uses the explicit API key when paired with instance + applicationId env vars", async () => {
       process.env.APPSTRATE_API_KEY = "ask_headless_1";
       process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
       process.env.APPSTRATE_APP_ID = "app_ci";
@@ -118,11 +118,11 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://ci.example.com",
         bearerToken: "ask_headless_1",
-        appId: "app_ci",
+        applicationId: "app_ci",
       });
     });
 
-    it("falls back to the profile for instance + appId when env vars are unset", async () => {
+    it("falls back to the profile for instance + applicationId when env vars are unset", async () => {
       process.env.APPSTRATE_API_KEY = "ask_headless_2";
       await seedLoggedInProfile("default");
 
@@ -133,7 +133,7 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://app.example.com",
         bearerToken: "ask_headless_2",
-        appId: "app_1",
+        applicationId: "app_1",
         orgId: "org_1",
       });
     });
@@ -147,7 +147,7 @@ describe("buildResolverInputs — remote", () => {
       });
     });
 
-    it("throws a hint-bearing ResolverConfigError when appId cannot be resolved", async () => {
+    it("throws a hint-bearing ResolverConfigError when applicationId cannot be resolved", async () => {
       process.env.APPSTRATE_API_KEY = "ask_no_app";
       process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
       // No profile, no APPSTRATE_APP_ID → unresolvable.
@@ -181,7 +181,7 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://app.example.com",
         bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
-        appId: "app_1",
+        applicationId: "app_1",
         orgId: "org_1",
       });
     });

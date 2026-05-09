@@ -57,7 +57,7 @@ test.describe("Default app vs custom app access", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     const res = await customClient.get("/agents");
@@ -83,7 +83,7 @@ test.describe("Default app vs custom app access", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     // Before install — not visible
@@ -118,7 +118,7 @@ test.describe("Default app vs custom app access", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     // Before uninstall — visible
@@ -163,7 +163,7 @@ test.describe("Default app vs custom app access", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     // Custom app without this agent installed should get 404
@@ -190,7 +190,7 @@ test.describe("Default app vs custom app access", () => {
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      appId: customApp.id,
+      applicationId: customApp.id,
     });
 
     // Set config in default app (body IS the config object, not wrapped)

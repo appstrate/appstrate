@@ -10,7 +10,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 export interface ApiClientOptions {
   cookie: string;
   orgId: string;
-  appId: string;
+  applicationId: string;
 }
 
 export interface ApiClient {
@@ -19,17 +19,17 @@ export interface ApiClient {
   put(path: string, data?: unknown): Promise<APIResponse>;
   patch(path: string, data?: unknown): Promise<APIResponse>;
   delete(path: string): Promise<APIResponse>;
-  /** Create a new client with a different appId (same auth + org) */
-  withApp(appId: string): ApiClient;
+  /** Create a new client with a different applicationId (same auth + org) */
+  withApp(applicationId: string): ApiClient;
   /** Create a new client with different org + app context */
-  withContext(orgId: string, appId: string): ApiClient;
+  withContext(orgId: string, applicationId: string): ApiClient;
 }
 
 export function createApiClient(request: APIRequestContext, options: ApiClientOptions): ApiClient {
   const headers = (extra?: Record<string, string>) => ({
     Cookie: options.cookie,
     "X-Org-Id": options.orgId,
-    "X-App-Id": options.appId,
+    "X-Application-Id": options.applicationId,
     ...extra,
   });
 
@@ -58,17 +58,17 @@ export function createApiClient(request: APIRequestContext, options: ApiClientOp
     delete(path: string) {
       return request.delete(`/api${path}`, { headers: headers() });
     },
-    withApp(appId: string) {
-      return createApiClient(request, { ...options, appId });
+    withApp(applicationId: string) {
+      return createApiClient(request, { ...options, applicationId });
     },
-    withContext(orgId: string, appId: string) {
-      return createApiClient(request, { ...options, orgId, appId });
+    withContext(orgId: string, applicationId: string) {
+      return createApiClient(request, { ...options, orgId, applicationId });
     },
   };
 }
 
 /**
- * Create an API client for org-only routes (no X-App-Id header).
+ * Create an API client for org-only routes (no X-Application-Id header).
  */
 export function createOrgOnlyClient(
   request: APIRequestContext,

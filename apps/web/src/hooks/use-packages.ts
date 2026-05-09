@@ -38,24 +38,24 @@ type PackageDetailMap = {
 
 function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, appId],
+    queryKey: ["packages", cfg.path, orgId, applicationId],
     queryFn: () => apiList<OrgPackageItem>(`/packages/${cfg.path}`),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
 function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
 
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, appId, id],
+    queryKey: ["packages", cfg.path, orgId, applicationId, id],
     queryFn: () => api<PackageDetailMap[T]>(`/packages/${cfg.path}/${id}`),
-    enabled: !!orgId && !!appId && !!id,
+    enabled: !!orgId && !!applicationId && !!id,
   });
 }
 
@@ -111,11 +111,11 @@ export {
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId, appId],
+    queryKey: ["agents", orgId, applicationId],
     queryFn: () => apiList<AgentListItem>("/agents"),
-    enabled: !!orgId && !!appId,
+    enabled: !!orgId && !!applicationId,
   });
 }
 
@@ -191,27 +191,27 @@ export function useVersionDetail(
   version: string | undefined,
 ) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["version-detail", orgId, appId, type, packageId, version],
+    queryKey: ["version-detail", orgId, applicationId, type, packageId, version],
     queryFn: () =>
       api<VersionDetailResponse>(`${packageBasePath(type, packageId)}/versions/${version}`),
-    enabled: !!orgId && !!appId && !!packageId && !!version,
+    enabled: !!orgId && !!applicationId && !!packageId && !!version,
   });
 }
 
 export function usePackageVersions(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["package-versions", orgId, appId, type, packageId],
+    queryKey: ["package-versions", orgId, applicationId, type, packageId],
     queryFn: async () => {
       const data = await api<{ versions: VersionListItem[] }>(
         `${packageBasePath(type, packageId)}/versions`,
       );
       return data.versions;
     },
-    enabled: !!orgId && !!appId && !!packageId,
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
 
@@ -271,14 +271,14 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
 
 export function useVersionInfo(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["version-info", orgId, appId, type, packageId],
+    queryKey: ["version-info", orgId, applicationId, type, packageId],
     queryFn: () =>
       api<{ latestPublishedVersion: string | null; activeVersion: string | null }>(
         `${packageBasePath(type, packageId!)}/versions/info`,
       ),
-    enabled: !!orgId && !!appId && !!packageId,
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }
 

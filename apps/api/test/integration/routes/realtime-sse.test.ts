@@ -42,7 +42,7 @@ async function sseRequest(
   extra?: Record<string, string>,
 ): Promise<Response> {
   const separator = path.includes("?") ? "&" : "?";
-  const url = `${path}${separator}orgId=${ctx.orgId}&appId=${ctx.defaultAppId}`;
+  const url = `${path}${separator}orgId=${ctx.orgId}&applicationId=${ctx.defaultAppId}`;
   return await app.request(url, {
     headers: {
       Cookie: ctx.cookie,
@@ -208,7 +208,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 401 without appId query param", async () => {
+    it("returns 401 without applicationId query param", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`, {
         headers: { Cookie: ctx.cookie },
       });

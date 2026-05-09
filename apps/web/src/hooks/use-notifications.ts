@@ -7,23 +7,23 @@ import { useCurrentApplicationId } from "./use-current-application";
 
 export function useUnreadCount() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["unread-count", orgId, appId],
+    queryKey: ["unread-count", orgId, applicationId],
     queryFn: async () => {
       const data = await api<{ count: number }>("/notifications/unread-count");
       return data.count;
     },
     refetchInterval: 30_000,
-    enabled: !!appId,
+    enabled: !!applicationId,
   });
 }
 
 export function useUnreadCountsByAgent() {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["unread-counts-by-agent", orgId, appId],
+    queryKey: ["unread-counts-by-agent", orgId, applicationId],
     queryFn: async () => {
       const data = await api<{ counts: Record<string, number> }>(
         "/notifications/unread-counts-by-agent",
@@ -31,7 +31,7 @@ export function useUnreadCountsByAgent() {
       return data.counts;
     },
     refetchInterval: 30_000,
-    enabled: !!appId,
+    enabled: !!applicationId,
   });
 }
 

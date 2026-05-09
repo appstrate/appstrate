@@ -29,9 +29,9 @@ describe("app-profile-bindings", () => {
     await truncateAll();
     const { id } = await createTestUser({ name: "Test User" });
     userId = id;
-    const { org, defaultAppId: appId } = await createTestOrg(userId);
+    const { org, defaultAppId: applicationId } = await createTestOrg(userId);
     orgId = org.id;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
 
     const appProfile = await seedConnectionProfile({
       applicationId: defaultAppId,

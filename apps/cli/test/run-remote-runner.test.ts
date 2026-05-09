@@ -118,7 +118,7 @@ function buildBaseOpts(over: Partial<RunRemoteOptions> = {}): RunRemoteOptions {
   return {
     instance: "https://app.example.com",
     bearerToken: "ask_test_key",
-    appId: "app_1",
+    applicationId: "app_1",
     orgId: "org_1",
     scope: "@system",
     name: "hello-world",
@@ -270,10 +270,10 @@ describe("runRemote — happy path", () => {
     expect(outcome.logs.map((l) => l.id)).toEqual([1, 2]);
     expect(outcome.record.cost).toBe(0.0123);
 
-    // Trigger headers carry the bearer + X-App-Id + X-Org-Id
+    // Trigger headers carry the bearer + X-Application-Id + X-Org-Id
     const trigger = calls.find((c) => c.method === "POST" && c.url.includes("/run"))!;
     expect(trigger.headers["authorization"]).toBe("Bearer ask_test_key");
-    expect(trigger.headers["x-app-id"]).toBe("app_1");
+    expect(trigger.headers["x-application-id"]).toBe("app_1");
     expect(trigger.headers["x-org-id"]).toBe("org_1");
     expect(JSON.parse(trigger.body!)).toEqual({ input: { greeting: "hi" }, config: {} });
 

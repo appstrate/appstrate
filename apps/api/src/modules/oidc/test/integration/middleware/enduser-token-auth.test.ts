@@ -163,7 +163,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     // Strategy claimed the request, endUser context set, route reached.
@@ -180,7 +180,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     // Strategy returned null → fell through to core auth → no session → 401.
@@ -191,7 +191,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: "Bearer eyJhbGciOiJFUzI1NiJ9.bogus.signature",
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     expect(res.status).toBe(401);
@@ -204,16 +204,16 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: "Bearer ask_invalid_key_000000000000000000000000",
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     expect(res.status).toBe(401);
   });
 
-  it("rejects a spoofed X-App-Id header when the JWT pinned a different application", async () => {
+  it("rejects a spoofed X-Application-Id header when the JWT pinned a different application", async () => {
     // A1 — cross-application escalation guard. Holder of a valid JWT for
     // App A must not be able to reach App B (same org) by attaching a
-    // spoofed `X-App-Id: App B` header. `requireAppContext()` pins
+    // spoofed `X-Application-Id: App B` header. `requireAppContext()` pins
     // applicationId from the auth strategy first and rejects any header
     // that contradicts the pinned value.
     const { id: otherOwnerId } = await createTestUser();
@@ -231,15 +231,15 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": otherAppId, // spoof attempt: App B
+        "X-Application-Id": otherAppId, // spoof attempt: App B
       },
     });
     expect(res.status).toBe(403);
   });
 
-  it("accepts a matching X-App-Id header when the JWT already pinned the application", async () => {
+  it("accepts a matching X-Application-Id header when the JWT already pinned the application", async () => {
     // Regression guard for A1: the common case (satellite sends both
-    // Authorization and X-App-Id with matching values) must still reach
+    // Authorization and X-Application-Id with matching values) must still reach
     // the route handler.
     const token = await mintToken({
       sub: authUserId,
@@ -250,7 +250,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     expect(res.status).toBe(200);
@@ -266,10 +266,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
     // Sanity: the end-user still belongs to the first app.
     const [row] = await db
-      .select({ appId: endUsers.applicationId })
+      .select({ applicationId: endUsers.applicationId })
       .from(endUsers)
       .where(eq(endUsers.id, endUserId));
-    expect(row!.appId).toBe(applicationId);
+    expect(row!.applicationId).toBe(applicationId);
 
     // Token claims the end-user lives in otherApp — strategy should refuse.
     const token = await mintToken({
@@ -281,7 +281,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": otherAppId,
+        "X-Application-Id": otherAppId,
       },
     });
     // Strategy returned null (mismatch) → fell through → 401.
@@ -309,7 +309,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     // Strategy returns null for non-active end-user → falls through → 401.
@@ -341,7 +341,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const goodRes = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     expect(goodRes.status).toBe(200);
@@ -353,7 +353,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const badRes = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-App-Id": applicationId,
+        "X-Application-Id": applicationId,
       },
     });
     expect(badRes.status).toBe(401);

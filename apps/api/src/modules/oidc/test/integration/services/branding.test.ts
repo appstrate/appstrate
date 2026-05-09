@@ -37,7 +37,7 @@ describe("resolveAppBranding", () => {
   });
 
   it("returns fully-populated branding from a valid settings.branding blob", async () => {
-    const appId = await seedAppWithSettings({
+    const applicationId = await seedAppWithSettings({
       branding: {
         name: "Mon Workspace",
         logoUrl: "https://cdn.example.com/logo.png",
@@ -47,7 +47,7 @@ describe("resolveAppBranding", () => {
         fromName: "Mon Workspace Support",
       },
     });
-    const resolved = await resolveAppBranding(appId);
+    const resolved = await resolveAppBranding(applicationId);
     expect(resolved.name).toBe("Mon Workspace");
     expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
     expect(resolved.primaryColor).toBe("#22c55e");
@@ -57,8 +57,8 @@ describe("resolveAppBranding", () => {
   });
 
   it("falls back to application.name when branding.name is missing", async () => {
-    const appId = await seedAppWithSettings({ branding: { primaryColor: "#abcdef" } });
-    const resolved = await resolveAppBranding(appId);
+    const applicationId = await seedAppWithSettings({ branding: { primaryColor: "#abcdef" } });
+    const resolved = await resolveAppBranding(applicationId);
     // applications.name defaults to "Default" (seeded by createTestOrg)
     expect(resolved.name).toBe("Default");
     expect(resolved.primaryColor).toBe("#abcdef");
@@ -77,17 +77,17 @@ describe("resolveAppBranding", () => {
   it("safely falls back when branding has a malformed shape (Zod rejects)", async () => {
     // `primaryColor` must be #RRGGBB — a 3-char shorthand fails the regex
     // and the whole object is rejected; we fall back to defaults.
-    const appId = await seedAppWithSettings({
+    const applicationId = await seedAppWithSettings({
       branding: { name: "X", primaryColor: "#fff" },
     });
-    const resolved = await resolveAppBranding(appId);
+    const resolved = await resolveAppBranding(applicationId);
     expect(resolved.name).toBeTruthy();
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
   it("safely falls back when branding is not an object", async () => {
-    const appId = await seedAppWithSettings({ branding: "not-an-object" });
-    const resolved = await resolveAppBranding(appId);
+    const applicationId = await seedAppWithSettings({ branding: "not-an-object" });
+    const resolved = await resolveAppBranding(applicationId);
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
@@ -105,27 +105,27 @@ describe("resolveAppBranding", () => {
   ];
   for (const [label, logoUrl] of blockedLogoUrls) {
     it(`safely falls back when logoUrl is blocked (${label})`, async () => {
-      const appId = await seedAppWithSettings({
+      const applicationId = await seedAppWithSettings({
         branding: { name: "X", logoUrl },
       });
-      const resolved = await resolveAppBranding(appId);
+      const resolved = await resolveAppBranding(applicationId);
       expect(resolved.logoUrl).toBeNull();
     });
   }
 
   it("accepts a public https logoUrl", async () => {
-    const appId = await seedAppWithSettings({
+    const applicationId = await seedAppWithSettings({
       branding: { logoUrl: "https://cdn.example.com/logo.png" },
     });
-    const resolved = await resolveAppBranding(appId);
+    const resolved = await resolveAppBranding(applicationId);
     expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
   });
 
   it("accentColor inherits from primaryColor when primary is set and accent is not", async () => {
-    const appId = await seedAppWithSettings({
+    const applicationId = await seedAppWithSettings({
       branding: { primaryColor: "#22c55e" },
     });
-    const resolved = await resolveAppBranding(appId);
+    const resolved = await resolveAppBranding(applicationId);
     expect(resolved.primaryColor).toBe("#22c55e");
     // Resolver uses parsed.accentColor ?? parsed.primaryColor ?? DEFAULT_ACCENT
     expect(resolved.accentColor).toBe("#22c55e");

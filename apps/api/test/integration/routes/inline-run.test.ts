@@ -137,7 +137,7 @@ describe("POST /api/runs/inline — validation", () => {
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-App-Id": ctx.defaultAppId },
+      headers: { "Content-Type": "application/json", "X-Application-Id": ctx.defaultAppId },
       body: JSON.stringify({ manifest: validManifest(), prompt: "hi" }),
     });
     expect(res.status).toBe(401);

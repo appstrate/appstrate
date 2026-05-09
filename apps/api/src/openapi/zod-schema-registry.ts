@@ -373,13 +373,13 @@ const coreSchemas: ZodSchemaEntry[] = [
   // ─── Application Packages ──────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/applications/{appId}/packages",
+    path: "/api/applications/{applicationId}/packages",
     jsonSchema: toJsonSchema(installPackageSchema),
     description: "Install package in application",
   },
   {
     method: "PUT",
-    path: "/api/applications/{appId}/packages/{scope}/{name}",
+    path: "/api/applications/{applicationId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Update installed package config",
   },
@@ -387,7 +387,7 @@ const coreSchemas: ZodSchemaEntry[] = [
   // ─── Application Provider Credentials ──────────────────────────────────
   {
     method: "PUT",
-    path: "/api/applications/{appId}/providers/{scope}/{name}/credentials",
+    path: "/api/applications/{applicationId}/providers/{scope}/{name}/credentials",
     jsonSchema: toJsonSchema(appProviderCredentialsSchema),
     description: "Set app-level provider credentials",
   },

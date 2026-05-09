@@ -47,7 +47,7 @@ export const test = base.extend<MultiContextFixtures>({
       createApiClient(request, {
         cookie: ctxA.auth.cookie,
         orgId: ctxA.org.orgId,
-        appId: ctxA.org.defaultAppId,
+        applicationId: ctxA.org.defaultAppId,
       }),
     );
   },
@@ -57,7 +57,7 @@ export const test = base.extend<MultiContextFixtures>({
       createApiClient(request, {
         cookie: ctxB.auth.cookie,
         orgId: ctxB.org.orgId,
-        appId: ctxB.org.defaultAppId,
+        applicationId: ctxB.org.defaultAppId,
       }),
     );
   },

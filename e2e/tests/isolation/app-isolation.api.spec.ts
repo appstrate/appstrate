@@ -45,7 +45,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       // Create app-level webhook scoped to AppA (default app)
@@ -132,7 +132,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const eu = await createEndUser(clientA, { name: "AppA User" });
@@ -155,7 +155,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const eu = await createEndUser(clientA, { name: "AppA Detail User" });
@@ -174,7 +174,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const eu = await createEndUser(clientA, { name: "AppA Update Target" });
@@ -193,7 +193,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const eu = await createEndUser(clientA, { name: "AppA Delete Target" });
@@ -216,7 +216,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       // Create an agent in the org catalog (visible from default app)
@@ -251,7 +251,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -278,7 +278,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -305,7 +305,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -348,7 +348,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const key = await createApiKey(clientA, `AppA Key ${Date.now()}`);
@@ -374,7 +374,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       const resA = await clientA.get("/notifications/unread-count");
@@ -393,7 +393,7 @@ test.describe("Cross-app resource isolation", () => {
   // ─── End-user creation scoping ────────────
 
   test.describe("End-user creation scoping", () => {
-    test("POST /end-users ignores applicationId in body — always uses X-App-Id", async ({
+    test("POST /end-users ignores applicationId in body — always uses X-Application-Id", async ({
       request,
       apiClient: clientA,
       orgContext,
@@ -403,7 +403,7 @@ test.describe("Cross-app resource isolation", () => {
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        appId: appB.id,
+        applicationId: appB.id,
       });
 
       // Create end-user from AppA context, but sneak appB's ID in the body
@@ -414,7 +414,7 @@ test.describe("Cross-app resource isolation", () => {
       expect(res.status()).toBe(201);
       const eu = await res.json();
 
-      // The end-user should belong to AppA (the X-App-Id), not AppB
+      // The end-user should belong to AppA (the X-Application-Id), not AppB
       const resA = await clientA.get(`/end-users/${eu.id}`);
       expect(resA.status()).toBe(200);
 
@@ -424,10 +424,10 @@ test.describe("Cross-app resource isolation", () => {
     });
   });
 
-  // ─── SSE cookie auth requires appId ───────
+  // ─── SSE cookie auth requires applicationId ───────
 
   test.describe("SSE authentication", () => {
-    test("SSE returns 401 without appId query param", async ({ request, orgContext }) => {
+    test("SSE returns 401 without applicationId query param", async ({ request, orgContext }) => {
       const res = await request.get(`/api/realtime/runs?orgId=${orgContext.org.orgId}`, {
         headers: {
           Cookie: orgContext.auth.cookie,

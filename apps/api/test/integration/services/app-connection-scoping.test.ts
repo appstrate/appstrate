@@ -108,7 +108,7 @@ describe("Application-scoped connection isolation", () => {
     it("GET /connection-profiles/:id/connections does NOT expose credentialsEncrypted", async () => {
       await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "secret" });
 
-      // This endpoint is not app-scoped (no X-App-Id middleware), so returns empty.
+      // This endpoint is not app-scoped (no X-Application-Id middleware), so returns empty.
       // When app-scoped, it should strip sensitive fields.
       // Test that the raw listConnections result never leaks credentials.
       const credentialIds = await listProviderCredentialIds(db, appAId);

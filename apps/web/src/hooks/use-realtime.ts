@@ -23,11 +23,11 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
   useEffect(() => {
     if (!runId) return;
     const orgId = getCurrentOrgId();
-    const appId = getCurrentApplicationId();
-    if (!orgId || !appId) return;
+    const applicationId = getCurrentApplicationId();
+    if (!orgId || !applicationId) return;
 
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true`,
       { withCredentials: true },
     );
 

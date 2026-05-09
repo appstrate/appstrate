@@ -8,34 +8,34 @@ import type { Run, RunLog } from "@appstrate/shared-types";
 
 export function useRuns(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["runs", orgId, appId, packageId],
+    queryKey: ["runs", orgId, applicationId, packageId],
     queryFn: () => apiList<Run>(`/agents/${packageId}/runs`),
-    enabled: !!packageId && !!appId,
+    enabled: !!packageId && !!applicationId,
   });
 }
 
 export function useRun(runId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["run", orgId, appId, runId],
+    queryKey: ["run", orgId, applicationId, runId],
     queryFn: async () => {
       return api<Run>(`/runs/${runId}`);
     },
-    enabled: !!runId && !!appId,
+    enabled: !!runId && !!applicationId,
   });
 }
 
 export function useRunLogs(runId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const applicationId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["run-logs", orgId, appId, runId],
+    queryKey: ["run-logs", orgId, applicationId, runId],
     queryFn: async () => {
       return api<RunLog[]>(`/runs/${runId}/logs`);
     },
-    enabled: !!runId && !!appId,
+    enabled: !!runId && !!applicationId,
   });
 }

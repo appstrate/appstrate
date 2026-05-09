@@ -87,21 +87,21 @@ describe("buildResolver — remote", () => {
       buildResolver("remote", {
         instance: "",
         bearerToken: "ask_x",
-        appId: "app_x",
+        applicationId: "app_x",
       }),
     ).toThrow(ResolverConfigError);
     expect(() =>
       buildResolver("remote", {
         instance: "https://x.com",
         bearerToken: "",
-        appId: "app_x",
+        applicationId: "app_x",
       }),
     ).toThrow(ResolverConfigError);
     expect(() =>
       buildResolver("remote", {
         instance: "https://x.com",
         bearerToken: "ask_x",
-        appId: "",
+        applicationId: "",
       }),
     ).toThrow(ResolverConfigError);
   });
@@ -110,7 +110,7 @@ describe("buildResolver — remote", () => {
     const resolver = buildResolver("remote", {
       instance: "https://x.com",
       bearerToken: "ask_x",
-      appId: "app_x",
+      applicationId: "app_x",
     });
     expect(typeof resolver.resolve).toBe("function");
   });
@@ -119,7 +119,7 @@ describe("buildResolver — remote", () => {
     const resolver = buildResolver("remote", {
       instance: "https://x.com",
       bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
-      appId: "app_x",
+      applicationId: "app_x",
     });
     expect(typeof resolver.resolve).toBe("function");
   });
@@ -128,7 +128,7 @@ describe("buildResolver — remote", () => {
     const resolver = buildResolver("remote", {
       instance: "https://x.com",
       bearerToken: "ask_x",
-      appId: "app_x",
+      applicationId: "app_x",
       endUserId: "eu_x",
     });
     expect(typeof resolver.resolve).toBe("function");

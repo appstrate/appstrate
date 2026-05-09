@@ -85,7 +85,7 @@ async function validateSSEAuth(c: {
 
   if (!rows[0]) return null;
 
-  const applicationId = c.req.query("appId");
+  const applicationId = c.req.query("applicationId");
   if (!applicationId) return null;
 
   // Validate application belongs to org

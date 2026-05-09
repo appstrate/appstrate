@@ -79,7 +79,7 @@ export function createApplicationsRouter() {
   const router = new Hono<AppEnv>();
 
   router.use("/:id", apiKeyAppScopeGuard);
-  router.use("/:appId/*", apiKeyAppScopeGuard);
+  router.use("/:applicationId/*", apiKeyAppScopeGuard);
 
   // GET /api/applications — list applications for the org
   router.get("/", async (c) => {
@@ -127,15 +127,15 @@ export function createApplicationsRouter() {
   // GET /api/applications/:id — get application detail
   router.get("/:id", async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("id");
+    const applicationId = c.req.param("id");
 
     try {
-      const app = await getApplication(orgId, appId);
+      const app = await getApplication(orgId, applicationId);
       return c.json({ object: "application", ...app });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Failed to get application", {
-        appId,
+        applicationId,
         error: getErrorMessage(err),
       });
       throw internalError();
@@ -145,7 +145,7 @@ export function createApplicationsRouter() {
   // PATCH /api/applications/:id — update application
   router.patch("/:id", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("id")!;
+    const applicationId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(updateApplicationSchema, body);
 
@@ -155,7 +155,7 @@ export function createApplicationsRouter() {
     }
 
     try {
-      const app = await updateApplication(orgId, appId, data);
+      const app = await updateApplication(orgId, applicationId, data);
       await recordAuditFromContext(c, {
         action: "application.updated",
         resourceType: "application",
@@ -166,7 +166,7 @@ export function createApplicationsRouter() {
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Application update failed", {
-        appId,
+        applicationId,
         error: getErrorMessage(err),
       });
       throw internalError();
@@ -176,20 +176,20 @@ export function createApplicationsRouter() {
   // DELETE /api/applications/:id — delete application
   router.delete("/:id", requirePermission("applications", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("id")!;
+    const applicationId = c.req.param("id")!;
 
     try {
-      await deleteApplication(orgId, appId);
+      await deleteApplication(orgId, applicationId);
       await recordAuditFromContext(c, {
         action: "application.deleted",
         resourceType: "application",
-        resourceId: appId,
+        resourceId: applicationId,
       });
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Application deletion failed", {
-        appId,
+        applicationId,
         error: getErrorMessage(err),
       });
       throw internalError();
@@ -198,43 +198,47 @@ export function createApplicationsRouter() {
 
   // ─── Application Packages (install/uninstall/config) ─────────────────────
 
-  // Guard: validate that the application belongs to the org (once for all /:appId/packages/* routes)
-  router.use("/:appId/packages/*", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("appId")!);
+  // Guard: validate that the application belongs to the org (once for all /:applicationId/packages/* routes)
+  router.use("/:applicationId/packages/*", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
     return next();
   });
-  router.use("/:appId/packages", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("appId")!);
+  router.use("/:applicationId/packages", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
     return next();
   });
 
-  // GET /api/applications/:appId/packages — list installed packages
-  router.get("/:appId/packages", async (c) => {
-    const appId = c.req.param("appId")!;
+  // GET /api/applications/:applicationId/packages — list installed packages
+  router.get("/:applicationId/packages", async (c) => {
+    const applicationId = c.req.param("applicationId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages({ orgId, applicationId: appId }, type);
+    const rows = await listInstalledPackages({ orgId, applicationId: applicationId }, type);
     return c.json(listResponse(rows.map((row) => ({ object: "application_package", ...row }))));
   });
 
-  // POST /api/applications/:appId/packages — install a package
-  router.post("/:appId/packages", requirePermission("applications", "write"), async (c) => {
+  // POST /api/applications/:applicationId/packages — install a package
+  router.post("/:applicationId/packages", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("appId")!;
+    const applicationId = c.req.param("applicationId")!;
 
     const body = await c.req.json();
     const data = parseBody(installPackageSchema, body);
 
-    const row = await installPackage({ orgId, applicationId: appId }, data.packageId, data.config);
+    const row = await installPackage(
+      { orgId, applicationId: applicationId },
+      data.packageId,
+      data.config,
+    );
     return c.json({ object: "application_package", ...row }, 201);
   });
 
-  // GET /api/applications/:appId/packages/:packageId — get installed package detail
-  router.get("/:appId/packages/:scope{@[^/]+}/:name", async (c) => {
-    const appId = c.req.param("appId")!;
+  // GET /api/applications/:applicationId/packages/:packageId — get installed package detail
+  router.get("/:applicationId/packages/:scope{@[^/]+}/:name", async (c) => {
+    const applicationId = c.req.param("applicationId")!;
     const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage({ orgId, applicationId: appId }, packageId);
+    const row = await getInstalledPackage({ orgId, applicationId: applicationId }, packageId);
     if (!row) {
       throw new ApiError({
         status: 404,
@@ -246,14 +250,14 @@ export function createApplicationsRouter() {
     return c.json({ object: "application_package", ...row });
   });
 
-  // PUT /api/applications/:appId/packages/:packageId — update config
+  // PUT /api/applications/:applicationId/packages/:packageId — update config
   router.put(
-    "/:appId/packages/:scope{@[^/]+}/:name",
+    "/:applicationId/packages/:scope{@[^/]+}/:name",
     requirePermission("applications", "write"),
     async (c) => {
-      const appId = c.req.param("appId")!;
+      const applicationId = c.req.param("applicationId")!;
       const orgId = c.get("orgId");
-      const scope = { orgId, applicationId: appId };
+      const scope = { orgId, applicationId: applicationId };
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const body = await c.req.json();
       const data = parseBody(updatePackageSchema, body);
@@ -264,30 +268,30 @@ export function createApplicationsRouter() {
     },
   );
 
-  // DELETE /api/applications/:appId/packages/:packageId — uninstall
+  // DELETE /api/applications/:applicationId/packages/:packageId — uninstall
   router.delete(
-    "/:appId/packages/:scope{@[^/]+}/:name",
+    "/:applicationId/packages/:scope{@[^/]+}/:name",
     requirePermission("applications", "write"),
     async (c) => {
-      const appId = c.req.param("appId")!;
+      const applicationId = c.req.param("applicationId")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      await uninstallPackage({ orgId, applicationId: appId }, packageId);
+      await uninstallPackage({ orgId, applicationId: applicationId }, packageId);
       return c.body(null, 204);
     },
   );
 
-  // GET /api/applications/:appId/packages/:scope/:name/run-config —
+  // GET /api/applications/:applicationId/packages/:scope/:name/run-config —
   // single source of truth for the per-app config, model/proxy override,
   // version pin, and required-provider list. Consumed by the CLI to
   // reproduce a UI run without hand-stitching three separate calls.
   router.get(
-    "/:appId/packages/:scope{@[^/]+}/:name/run-config",
+    "/:applicationId/packages/:scope{@[^/]+}/:name/run-config",
     requirePermission("agents", "read"),
     async (c) => {
-      const appId = c.req.param("appId")!;
+      const applicationId = c.req.param("applicationId")!;
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const resolved = await getResolvedRunConfig(appId, packageId);
+      const resolved = await getResolvedRunConfig(applicationId, packageId);
       if (!resolved) {
         throw new ApiError({
           status: 404,
@@ -303,22 +307,22 @@ export function createApplicationsRouter() {
   // ─── Application-level provider credentials ──────────────────────────
 
   // Middleware: validate app exists for provider routes
-  router.use("/:appId/providers", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("appId")!);
+  router.use("/:applicationId/providers", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
     return next();
   });
-  router.use("/:appId/providers/*", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("appId")!);
+  router.use("/:applicationId/providers/*", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
     return next();
   });
 
-  // PUT /api/applications/:appId/providers/:scope/:name/credentials — set app-level credentials
+  // PUT /api/applications/:applicationId/providers/:scope/:name/credentials — set app-level credentials
   router.put(
-    "/:appId/providers/:scope{@[^/]+}/:name/credentials",
+    "/:applicationId/providers/:scope{@[^/]+}/:name/credentials",
     requirePermission("providers", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const appId = c.req.param("appId")!;
+      const applicationId = c.req.param("applicationId")!;
       const providerId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const body = await c.req.json();
       const data = parseBody(appProviderCredentialsSchema, body);
@@ -346,7 +350,7 @@ export function createApplicationsRouter() {
       await db
         .insert(applicationProviderCredentials)
         .values({
-          applicationId: appId,
+          applicationId: applicationId,
           providerId,
           credentialsEncrypted: hasCredentials
             ? encryptCredentials(data.credentials!)
@@ -365,19 +369,19 @@ export function createApplicationsRouter() {
     },
   );
 
-  // DELETE /api/applications/:appId/providers/:scope/:name/credentials — remove app-level override
+  // DELETE /api/applications/:applicationId/providers/:scope/:name/credentials — remove app-level override
   router.delete(
-    "/:appId/providers/:scope{@[^/]+}/:name/credentials",
+    "/:applicationId/providers/:scope{@[^/]+}/:name/credentials",
     requirePermission("providers", "write"),
     async (c) => {
-      const appId = c.req.param("appId")!;
+      const applicationId = c.req.param("applicationId")!;
       const providerId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
 
       await db
         .delete(applicationProviderCredentials)
         .where(
           and(
-            eq(applicationProviderCredentials.applicationId, appId),
+            eq(applicationProviderCredentials.applicationId, applicationId),
             eq(applicationProviderCredentials.providerId, providerId),
           ),
         );
@@ -386,9 +390,9 @@ export function createApplicationsRouter() {
     },
   );
 
-  // GET /api/applications/:appId/providers — list providers with app-level override status
-  router.get("/:appId/providers", async (c) => {
-    const appId = c.req.param("appId")!;
+  // GET /api/applications/:applicationId/providers — list providers with app-level override status
+  router.get("/:applicationId/providers", async (c) => {
+    const applicationId = c.req.param("applicationId")!;
 
     const appCreds = await db
       .select({
@@ -397,7 +401,7 @@ export function createApplicationsRouter() {
         enabled: applicationProviderCredentials.enabled,
       })
       .from(applicationProviderCredentials)
-      .where(eq(applicationProviderCredentials.applicationId, appId));
+      .where(eq(applicationProviderCredentials.applicationId, applicationId));
 
     const overrides = appCreds.map((row) => ({
       providerId: row.providerId,

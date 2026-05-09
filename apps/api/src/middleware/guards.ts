@@ -16,9 +16,9 @@ export function requireAgent() {
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
 
-    const agent = await getPackageWithAccess(packageId, orgId, appId);
+    const agent = await getPackageWithAccess(packageId, orgId, applicationId);
     if (!agent) {
       throw new ApiError({
         status: 404,
@@ -130,7 +130,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: for API key callers, reject with 403 when the `:id`/`:appId`
+/** Middleware: for API key callers, reject with 403 when the `:id`/`:applicationId`
  *  route param does not match the key's bound application. Sessions are
  *  passed through unchanged — any member can manage any app in their org.
  *
@@ -139,7 +139,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
  *  lets it escape its app within the same org. */
 export async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
   if (c.get("authMethod") !== "api_key") return next();
-  const paramAppId = c.req.param("id") ?? c.req.param("appId");
+  const paramAppId = c.req.param("id") ?? c.req.param("applicationId");
   if (paramAppId && paramAppId !== c.get("applicationId")) {
     throw forbidden("API key scope does not include this application");
   }

@@ -23,7 +23,7 @@ import type { LoadedPackage, ProviderProfileMap } from "../../../src/types/index
 describe("run preflight — provider profile resolution", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
+  let applicationId: string;
   let actor: Actor;
   let defaultProfileId: string;
   let altProfileId: string;
@@ -36,7 +36,7 @@ describe("run preflight — provider profile resolution", () => {
     userId = id;
     const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
-    appId = defaultAppId;
+    applicationId = defaultAppId;
     actor = { type: "user", id: userId };
 
     // Seed provider packages + enable them
@@ -55,7 +55,7 @@ describe("run preflight — provider profile resolution", () => {
         },
       });
       await db.insert(applicationProviderCredentials).values({
-        applicationId: appId,
+        applicationId: applicationId,
         providerId: pid,
         credentialsEncrypted: "{}",
         enabled: true,
@@ -65,13 +65,13 @@ describe("run preflight — provider profile resolution", () => {
     // Default profile + connections for both providers
     defaultProfileId = await getDefaultProfileId(actor);
     for (const pid of providerIds) {
-      await seedConnectionForApp(defaultProfileId, pid, orgId, appId, { api_key: "default-key" });
+      await seedConnectionForApp(defaultProfileId, pid, orgId, applicationId, { api_key: "default-key" });
     }
 
     // Alt profile + connection for gmail only
     const alt = await seedConnectionProfile({ userId, name: "Alt" });
     altProfileId = alt.id;
-    await seedConnectionForApp(altProfileId, "@system/gmail", orgId, appId, { api_key: "alt-key" });
+    await seedConnectionForApp(altProfileId, "@system/gmail", orgId, applicationId, { api_key: "alt-key" });
   });
 
   async function seedAgentWithProviders(agentId: string) {
@@ -153,7 +153,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
-      applicationId: appId,
+      applicationId: applicationId,
       defaultUserProfileId: defaultProfileId,
     });
 
@@ -171,7 +171,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
-      applicationId: appId,
+      applicationId: applicationId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": altProfileId },
     });
@@ -186,14 +186,14 @@ describe("run preflight — provider profile resolution", () => {
     const agent = await seedAgentWithProviders(agentId);
 
     // Create app profile + bind gmail to alt profile
-    const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App" });
+    const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "App" });
     await bindAppProfileProvider(appProfile.id, "@system/gmail", altProfileId, userId);
 
     const { providerProfiles } = await runPreflight({
       agent,
       packageId: agentId,
       orgId,
-      applicationId: appId,
+      applicationId: applicationId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": defaultProfileId },
       appProfileId: appProfile.id,
@@ -210,12 +210,12 @@ describe("run preflight — provider profile resolution", () => {
     const agentId = "@testorg/preflight-mixed";
     const agent = await seedAgentWithProviders(agentId);
 
-    const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App" });
+    const appProfile = await seedConnectionProfile({ applicationId: applicationId, name: "App" });
     // Only bind gmail, NOT clickup
     await bindAppProfileProvider(appProfile.id, "@system/gmail", altProfileId, userId);
 
     // Provide override for clickup
-    await seedConnectionForApp(altProfileId, "@system/clickup", orgId, appId, {
+    await seedConnectionForApp(altProfileId, "@system/clickup", orgId, applicationId, {
       api_key: "alt-cu",
     });
 
@@ -223,7 +223,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
-      applicationId: appId,
+      applicationId: applicationId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/clickup": altProfileId },
       appProfileId: appProfile.id,

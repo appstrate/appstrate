@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `GET /api/applications/{appId}/packages/{scope}/{name}/run-config`
+ * Integration tests for `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
  * — the resolver the CLI calls to reproduce a UI run.
  */
 
@@ -15,7 +15,7 @@ import { applicationPackages } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
-describe("GET /api/applications/:appId/packages/:scope/:name/run-config", () => {
+describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -129,13 +129,13 @@ describe("GET /api/applications/:appId/packages/:scope/:name/run-config", () => 
       config: { from: "other-app" },
     });
 
-    // The route uses the path's appId, not the X-App-Id header — we
-    // pass X-App-Id matching the path so the app-context middleware
+    // The route uses the path's applicationId, not the X-Application-Id header — we
+    // pass X-Application-Id matching the path so the app-context middleware
     // accepts the call, then verify the response is scoped to that app.
     const res = await app.request(
       `/api/applications/${otherAppId}/packages/@testorg/agent/run-config`,
       {
-        headers: { ...authHeaders(ctx), "X-App-Id": otherAppId },
+        headers: { ...authHeaders(ctx), "X-Application-Id": otherAppId },
       },
     );
     expect(res.status).toBe(200);

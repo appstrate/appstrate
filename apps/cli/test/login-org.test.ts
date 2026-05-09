@@ -226,7 +226,7 @@ async function readPinnedOrgId(profile = "default"): Promise<string | undefined>
 
 async function readPinnedAppId(profile = "default"): Promise<string | undefined> {
   const cfg = await readConfig();
-  return cfg.profiles[profile]?.appId;
+  return cfg.profiles[profile]?.applicationId;
 }
 
 describe("login org-pin branch", () => {
@@ -658,7 +658,7 @@ describe("login app-pin cascade", () => {
     expect(await readPinnedAppId()).toBe("app_default");
   });
 
-  it("warns on stderr and leaves appId unset when ≥2 apps but no default", async () => {
+  it("warns on stderr and leaves applicationId unset when ≥2 apps but no default", async () => {
     installDefaultResponders({
       listOrgs: oneOrg,
       listApplications: () =>
@@ -872,7 +872,7 @@ describe("login app-pin cascade", () => {
     expect(stderrChunks.join("")).toContain("Failed to list applications");
   });
 
-  it("preserves a prior appId across same-user re-login when /api/applications flakes", async () => {
+  it("preserves a prior applicationId across same-user re-login when /api/applications flakes", async () => {
     // First login — default-path cascade pins app_default via the
     // shared responder defaults.
     installDefaultResponders({
@@ -916,7 +916,7 @@ describe("login app-pin cascade", () => {
     expect(await readPinnedAppId()).toBe("app_pinned");
   });
 
-  it("does NOT preserve appId when re-logging-in as a different user", async () => {
+  it("does NOT preserve applicationId when re-logging-in as a different user", async () => {
     // First login — user A pins.
     installDefaultResponders({
       listOrgs: () =>

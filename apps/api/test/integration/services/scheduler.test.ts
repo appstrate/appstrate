@@ -40,10 +40,10 @@ describe("scheduler service", () => {
     await flushRedis();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: applicationId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     orgSlug = org.slug;
-    defaultAppId = appId;
+    defaultAppId = applicationId;
 
     const profile = await seedConnectionProfile({ userId, name: "Default" });
     profileId = profile.id;
