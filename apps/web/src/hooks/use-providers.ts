@@ -1,33 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { ProviderConfig } from "@appstrate/shared-types";
 
-interface ProvidersWireResponse {
+/**
+ * List configured providers for the current application. Uses the standard
+ * Stripe-canonical list envelope via `apiList`, so the hook returns a plain
+ * `ProviderConfig[]` — same shape as every other list hook in the app.
+ *
+ * The `/providers` endpoint also returns a top-level `callbackUrl` field
+ * (the OAuth redirect URI for the platform). That field is exposed by the
+ * separate `useProviderCallbackUrl()` hook below, since most consumers don't
+ * need it.
+ */
+export function useProviders() {
+  const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: ["providers", orgId, appId],
+    queryFn: () => apiList<ProviderConfig>("/providers"),
+    enabled: !!orgId && !!appId,
+  });
+}
+
+interface ProvidersEnvelopeWithCallback {
   object: "list";
   data: ProviderConfig[];
   hasMore: boolean;
   callbackUrl?: string;
 }
 
-interface ProvidersResponse {
-  providers: ProviderConfig[];
-  callbackUrl?: string;
-}
-
-export function useProviders() {
+/**
+ * Read the platform's OAuth callback URL from the `/providers` envelope.
+ * Only consumed by provider-credentials forms (OAuth setup screens).
+ */
+export function useProviderCallbackUrl() {
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();
-  return useQuery<ProvidersResponse>({
-    queryKey: ["providers", orgId, appId],
+  return useQuery({
+    queryKey: ["providers", "callback-url", orgId, appId],
     queryFn: async () => {
-      // /providers extends the list envelope with `callbackUrl`, so we still
-      // call api() here instead of apiList() to preserve that extra field.
-      const env = await api<ProvidersWireResponse>("/providers");
-      return { providers: env.data, callbackUrl: env.callbackUrl };
+      const env = await api<ProvidersEnvelopeWithCallback>("/providers");
+      return env.callbackUrl;
     },
     enabled: !!orgId && !!appId,
   });

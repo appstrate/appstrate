@@ -355,14 +355,14 @@ describe("Agents API", () => {
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
       });
 
@@ -719,7 +719,7 @@ describe("Agents API", () => {
         "@myorg/persist-list",
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         "checkpoint",
         { step: "user-checkpoint" },
         null,
@@ -809,21 +809,21 @@ describe("Agents API", () => {
         packageId: "@myorg/persist-runid",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
       const r2 = await seedRun({
         packageId: "@myorg/persist-runid",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
       await addMemories(
         "@myorg/persist-runid",
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["from-r1-a", "from-r1-b"],
         r1.id,
       );
@@ -831,7 +831,7 @@ describe("Agents API", () => {
         "@myorg/persist-runid",
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["from-r2"],
         r2.id,
       );

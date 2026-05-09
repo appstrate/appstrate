@@ -39,7 +39,7 @@ export const runs = pgTable(
     packageId: text("package_id").references(() => packages.id, {
       onDelete: "set null",
     }),
-    dashboardUserId: text("dashboard_user_id").references(() => user.id, {
+    userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
@@ -112,12 +112,6 @@ export const runs = pgTable(
     // can replay the exact same delta. Null when the run used persisted
     // defaults verbatim.
     configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
-    // Booleans driving "default vs override" badges on the run detail
-    // page. Cheaper than diffing snapshot vs persisted-at-run-time on
-    // every render. Stamped at INSERT, never updated.
-    modelOverridden: boolean("model_overridden").default(false).notNull(),
-    proxyOverridden: boolean("proxy_overridden").default(false).notNull(),
-    versionOverridden: boolean("version_overridden").default(false).notNull(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name
@@ -177,17 +171,12 @@ export const runs = pgTable(
   (table) => [
     index("idx_runs_package_id").on(table.packageId),
     index("idx_runs_status").on(table.status),
-    index("idx_runs_dashboard_user_id").on(table.dashboardUserId),
+    index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
     index("idx_runs_application_id").on(table.applicationId),
     index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
-    index("idx_runs_notification").on(
-      table.dashboardUserId,
-      table.orgId,
-      table.notifiedAt,
-      table.readAt,
-    ),
+    index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
     // Reaper scans only active sinks — cheap partial index.
     index("idx_runs_sink_expires_at")
       .on(table.sinkExpiresAt)
@@ -197,10 +186,7 @@ export const runs = pgTable(
     index("idx_runs_stall_sweep")
       .on(table.lastHeartbeatAt)
       .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
-    check(
-      "runs_at_most_one_actor",
-      sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
-    ),
+    check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
     // Invariant: an open sink row (has an expires_at) must have a secret to
     // verify against. Enforced for every origin so platform and remote share
     // the same ingestion code path without any conditional branches.

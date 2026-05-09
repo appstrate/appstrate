@@ -13,7 +13,7 @@ export type { ProviderProfileSource };
 import type { AgentManifest } from "@appstrate/core/validation";
 export type { AgentManifest };
 
-import type { ToolMeta } from "../services/adapters/types.ts";
+import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 export type { ToolMeta };
 
 export interface AgentProviderRequirement {

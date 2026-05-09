@@ -40,7 +40,7 @@ describe("Internal API", () => {
       packageId: pkgId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "running",
     });
     runningRunId = exec.id;
@@ -77,7 +77,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
       const doneToken = signRunToken(doneRun.id);
@@ -105,7 +105,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { counter: 1 },
       });
@@ -113,7 +113,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { counter: 2 },
       });
@@ -135,7 +135,7 @@ describe("Internal API", () => {
           packageId: pkgId,
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
-          dashboardUserId: ctx.user.id,
+          userId: ctx.user.id,
           status: "success",
           checkpoint: { i },
         });
@@ -188,7 +188,7 @@ describe("Internal API", () => {
         packageId: "@otherorg/test-agent",
         orgId: other.orgId,
         applicationId: other.defaultAppId,
-        dashboardUserId: other.user.id,
+        userId: other.user.id,
         status: "success",
         checkpoint: { foreign: true },
       });
@@ -207,7 +207,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { key: "value" },
         result: { output: "done" },
@@ -258,7 +258,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { key: "v" },
         result: { output: "irrelevant" },
@@ -291,7 +291,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: null,
+        userId: null,
         endUserId: eu.id,
         status: "success",
         checkpoint: { secret: true },
@@ -327,7 +327,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["archived fact A", "archived fact B"],
         runningRunId,
       );
@@ -351,7 +351,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["pinned-only"],
         runningRunId,
         { pinned: true },
@@ -360,7 +360,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["archive-only"],
         runningRunId,
       );
@@ -380,7 +380,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["User prefers Python", "User likes coffee", "API quirk: 429 on /v1/x"],
         runningRunId,
       );
@@ -401,7 +401,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         contents,
         runningRunId,
       );
@@ -454,7 +454,7 @@ describe("Internal API", () => {
         pkgId,
         ctx.defaultAppId,
         ctx.orgId,
-        { type: "member", id: ctx.user.id },
+        { type: "user", id: ctx.user.id },
         ["entry"],
         runningRunId,
       );
@@ -487,7 +487,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "failed",
       });
       const doneToken = signRunToken(doneRun.id);
@@ -576,7 +576,7 @@ describe("Internal API", () => {
         packageId: agentWithProvider.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
@@ -650,7 +650,7 @@ describe("Internal API", () => {
         packageId: agentWithCustom.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
@@ -726,7 +726,7 @@ describe("Internal API", () => {
         packageId: shadowAgent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
@@ -767,7 +767,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
@@ -871,7 +871,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });

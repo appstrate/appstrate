@@ -46,7 +46,7 @@ describe("NOTIFY triggers (regression)", () => {
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "pending",
     });
   });
@@ -56,7 +56,7 @@ describe("NOTIFY triggers (regression)", () => {
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "pending",
     });
     // A status transition is what production hits on every run lifecycle step.
@@ -70,7 +70,7 @@ describe("NOTIFY triggers (regression)", () => {
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      dashboardUserId: ctx.user.id,
+      userId: ctx.user.id,
       status: "running",
     });
     await seedRunLog({

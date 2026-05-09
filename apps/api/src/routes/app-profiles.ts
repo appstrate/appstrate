@@ -20,17 +20,15 @@ import {
   listAppProfilesWithUserBindings,
   getOrgMemberProfile,
 } from "../services/connection-profiles.ts";
-import {
-  listAllActorConnections,
-  deleteAllActorConnections,
-  hasActiveConnection,
-} from "../services/connection-manager/index.ts";
+import { listAllActorConnections } from "../services/connection-manager/providers.ts";
+import { deleteAllActorConnections } from "../services/connection-manager/operations.ts";
+import { hasActiveConnection } from "../services/connection-manager/status.ts";
 import {
   getAppProfileBindingsEnriched,
   bindAppProfileProvider,
   unbindAppProfileProvider,
   getBindingOwner,
-} from "../services/state/index.ts";
+} from "../services/state/app-profile-bindings.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 

@@ -42,7 +42,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { source: "appA" },
         startedAt: new Date("2025-01-01"),
@@ -53,7 +53,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { source: "appB" },
         startedAt: new Date("2025-01-02"),
@@ -80,7 +80,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         checkpoint: { source: "appB" },
       });
@@ -100,7 +100,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         startedAt: new Date("2025-01-01"),
       });
@@ -109,7 +109,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
         startedAt: new Date("2025-01-02"),
       });
@@ -132,7 +132,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
       });
 
@@ -140,7 +140,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
       });
 
@@ -148,7 +148,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "running",
       });
 
@@ -169,7 +169,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
 
@@ -177,7 +177,7 @@ describe("Cross-app run isolation (service layer)", () => {
         packageId: agentId,
         orgId: ctx.orgId,
         applicationId: appBId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         status: "success",
       });
 

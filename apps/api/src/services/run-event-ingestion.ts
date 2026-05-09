@@ -36,7 +36,7 @@ import {
   PersistingEventSink,
   hasRunnerLedgerRow,
   writeRunnerLedgerRow,
-} from "./adapters/appstrate-event-sink.ts";
+} from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -45,7 +45,7 @@ import {
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { getPackage } from "./agent-service.ts";
+import { getPackage } from "./package-catalog.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
@@ -53,7 +53,7 @@ import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { computeRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
-import type { TokenUsage } from "./adapters/types.ts";
+import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
 // service don't have to change.
@@ -379,14 +379,14 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // Resolve the run's actor for the unified persistence scope.
   const [actorRow] = await db
     .select({
-      dashboardUserId: runs.dashboardUserId,
+      userId: runs.userId,
       endUserId: runs.endUserId,
     })
     .from(runs)
     .where(eq(runs.id, run.id))
     .limit(1);
   const persistenceScope = scopeFromActor(
-    actorFromIds(actorRow?.dashboardUserId ?? null, actorRow?.endUserId ?? null),
+    actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
   );
 
   if (result.memories?.length) {

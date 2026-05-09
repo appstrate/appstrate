@@ -10,7 +10,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { DbPackageCatalog, pickVersion } from "../../src/services/adapters/db-package-catalog.ts";
+import {
+  DbPackageCatalog,
+  pickVersion,
+} from "../../src/services/run-launcher/db-package-catalog.ts";
 import type { PackageCatalog } from "@appstrate/afps-runtime/bundle";
 
 const row = (version: string, integrity: string, yanked = false) => ({

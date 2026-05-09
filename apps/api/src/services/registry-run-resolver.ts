@@ -25,7 +25,7 @@
  * route already enforces.
  */
 
-import { getPackage, resolveManifestCatalogDeps } from "./agent-service.ts";
+import { getPackage, resolveManifestCatalogDeps } from "./package-catalog.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 import { getVersionDetail } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";

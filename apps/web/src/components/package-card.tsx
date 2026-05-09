@@ -48,15 +48,15 @@ export function PackageCard({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();
-  const { data: providersData } = useProviders();
+  const { data: providers } = useProviders();
 
   const resolvedProviders = useMemo(() => {
-    if (!providerIds?.length || !providersData?.providers) return [];
-    const map = new Map(providersData.providers.map((p) => [p.id, p]));
+    if (!providerIds?.length || !providers) return [];
+    const map = new Map(providers.map((p) => [p.id, p]));
     return providerIds
       .map((pid) => map.get(pid))
       .filter((p): p is NonNullable<typeof p> => p != null);
-  }, [providerIds, providersData]);
+  }, [providerIds, providers]);
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (window.getSelection()?.toString()) return;

@@ -111,7 +111,7 @@ export async function listAllActorConnections(
 
   // Fetch org names
   const userOrgs =
-    actor.type === "member"
+    actor.type === "user"
       ? await db
           .select({
             orgId: organizationMembers.orgId,

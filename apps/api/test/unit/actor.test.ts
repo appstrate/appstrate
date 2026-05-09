@@ -16,7 +16,7 @@ import type { Column } from "drizzle-orm";
 // ---------------------------------------------------------------------------
 
 describe("getActor", () => {
-  it("returns member actor when no endUser in context", async () => {
+  it("returns user actor when no endUser in context", async () => {
     const app = new Hono<AppEnv>();
     let actorType = "";
     let actorId = "";
@@ -30,7 +30,7 @@ describe("getActor", () => {
     });
 
     await app.request("/test");
-    expect(actorType).toBe("member");
+    expect(actorType).toBe("user");
     expect(actorId).toBe("user-42");
   });
 
@@ -58,7 +58,7 @@ describe("getActor", () => {
     expect(actorId).toBe("eu_abc");
   });
 
-  it("prefers end_user over member when both are set", async () => {
+  it("prefers end_user over user when both are set", async () => {
     const app = new Hono<AppEnv>();
     let actorType = "";
     let actorId = "";
@@ -86,8 +86,8 @@ describe("getActor", () => {
 // ---------------------------------------------------------------------------
 
 describe("actorInsert", () => {
-  it("returns userId for member actor, endUserId null", () => {
-    const result = actorInsert({ type: "member", id: "user-42" });
+  it("returns userId for user actor, endUserId null", () => {
+    const result = actorInsert({ type: "user", id: "user-42" });
     expect(result).toEqual({
       userId: "user-42",
       endUserId: null,
@@ -102,9 +102,9 @@ describe("actorInsert", () => {
     });
   });
 
-  it("member actor sets userId to the actor id", () => {
-    const result = actorInsert({ type: "member", id: "member-id-123" });
-    expect(result.userId).toBe("member-id-123");
+  it("user actor sets userId to the actor id", () => {
+    const result = actorInsert({ type: "user", id: "user-id-123" });
+    expect(result.userId).toBe("user-id-123");
     expect(result.endUserId).toBeNull();
   });
 
@@ -126,8 +126,8 @@ describe("actorFilter", () => {
     endUserId: "endUserId" as unknown as Column,
   };
 
-  it("returns eq on userId column for member actor", () => {
-    const result = actorFilter({ type: "member", id: "user-42" }, mockCols);
+  it("returns eq on userId column for user actor", () => {
+    const result = actorFilter({ type: "user", id: "user-42" }, mockCols);
     const expected = eq(mockCols.userId, "user-42");
     // Verify the filter produces the same SQL structure
     expect(JSON.stringify(result)).toBe(JSON.stringify(expected));
@@ -139,8 +139,8 @@ describe("actorFilter", () => {
     expect(JSON.stringify(result)).toBe(JSON.stringify(expected));
   });
 
-  it("uses the correct actor id for member", () => {
-    const result = actorFilter({ type: "member", id: "specific-id-123" }, mockCols);
+  it("uses the correct actor id for user", () => {
+    const result = actorFilter({ type: "user", id: "specific-id-123" }, mockCols);
     const expected = eq(mockCols.userId, "specific-id-123");
     expect(JSON.stringify(result)).toBe(JSON.stringify(expected));
   });

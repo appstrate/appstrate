@@ -3,8 +3,8 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { getRunningRunCounts } from "../services/state/runs.ts";
 import {
-  getRunningRunCounts,
   listPinnedSlots,
   listMemories,
   deleteMemory,
@@ -13,7 +13,7 @@ import {
   deletePinnedSlotById,
   scopeFromActor,
   type PersistenceScope,
-} from "../services/state/index.ts";
+} from "../services/state/package-persistence.ts";
 import { validateConfig } from "../services/schema.ts";
 import {
   listAccessiblePackages,
@@ -21,7 +21,7 @@ import {
   getPackageConfig,
   hasPackageAccess,
 } from "../services/application-packages.ts";
-import { getPackage } from "../services/agent-service.ts";
+import { getPackage } from "../services/package-catalog.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -72,7 +72,7 @@ function scopeFromQueryParams(
   if (!actorTypeParam) return null;
   if (actorTypeParam === "shared") return { type: "shared" };
   if (actorTypeParam === "user" && actorIdParam) {
-    return { type: "member", id: actorIdParam };
+    return { type: "user", id: actorIdParam };
   }
   if (actorTypeParam === "end_user" && actorIdParam) {
     return { type: "end_user", id: actorIdParam };

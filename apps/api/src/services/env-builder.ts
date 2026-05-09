@@ -5,7 +5,7 @@ import type {
   FileReference,
   LlmConfig,
   ProviderSummary,
-} from "./adapters/types.ts";
+} from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
 import { getProvider } from "@appstrate/connect";
@@ -19,7 +19,7 @@ import {
   listPinnedMemories,
   listPinnedSlots,
   scopeFromActor,
-} from "./state/index.ts";
+} from "./state/package-persistence.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";

@@ -19,7 +19,7 @@ import {
   BundleSignatureError,
   loadAndVerifyBundle,
   _resetTrustRootCacheForTesting,
-} from "../../src/services/adapters/bundle-signature-policy.ts";
+} from "../../src/services/run-launcher/bundle-signature-policy.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const MINIMAL_MANIFEST = JSON.stringify({

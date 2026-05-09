@@ -22,7 +22,7 @@
  *     with one paste.
  */
 
-import { apiFetch } from "./api.ts";
+import { apiFetch, apiList } from "./api.ts";
 import type { ConnectionProfile as DbConnectionProfile } from "@appstrate/shared-types";
 
 /**
@@ -41,10 +41,6 @@ export interface ConnectionProfile extends Omit<DbConnectionProfile, "createdAt"
   updatedAt: string;
 }
 
-interface ListResponse {
-  data?: ConnectionProfile[];
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
@@ -52,8 +48,7 @@ export function isUuid(value: string): boolean {
 }
 
 export async function listConnectionProfiles(profileName: string): Promise<ConnectionProfile[]> {
-  const res = await apiFetch<ListResponse>(profileName, "/api/connection-profiles");
-  return Array.isArray(res.data) ? res.data : [];
+  return apiList<ConnectionProfile>(profileName, "/api/connection-profiles");
 }
 
 export async function createConnectionProfile(

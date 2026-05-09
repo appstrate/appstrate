@@ -599,4 +599,36 @@ describe("stripWrapperPrefix", () => {
     expect(result["root.txt"]).toBeDefined();
     expect(result["dir/nested.txt"]).toBeDefined();
   });
+
+  // Map<string, Uint8Array> overload — mirrors the afps-runtime shape.
+  it("empty map returns empty map", () => {
+    const out = stripWrapperPrefix(new Map<string, Uint8Array>());
+    expect(out).toBeInstanceOf(Map);
+    expect(out.size).toBe(0);
+  });
+
+  it("Map: single wrapper prefix — strips and returns Map", () => {
+    const files = new Map<string, Uint8Array>([
+      ["pkg/a.txt", enc("a")],
+      ["pkg/sub/b.txt", enc("b")],
+    ]);
+    const result = stripWrapperPrefix(files);
+    expect(result).toBeInstanceOf(Map);
+    expect([...result.keys()].sort()).toEqual(["a.txt", "sub/b.txt"]);
+  });
+
+  it("Map: root-level file — no stripping, returns same instance", () => {
+    const files = new Map<string, Uint8Array>([["file.txt", enc("ok")]]);
+    const result = stripWrapperPrefix(files);
+    expect(result).toBe(files);
+  });
+
+  it("Map: multiple prefixes — no stripping, returns same instance", () => {
+    const files = new Map<string, Uint8Array>([
+      ["dir-a/a.txt", enc("a")],
+      ["dir-b/b.txt", enc("b")],
+    ]);
+    const result = stripWrapperPrefix(files);
+    expect(result).toBe(files);
+  });
 });

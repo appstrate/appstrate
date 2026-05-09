@@ -60,13 +60,13 @@ async function recordOrgAudit(
 ): Promise<void> {
   const user = c.get("user");
   const apiKeyId = c.get("apiKeyId");
-  let actorType: "member" | "api_key" | "system" = "system";
+  let actorType: "user" | "api_key" | "system" = "system";
   let actorId: string | null = null;
   if (apiKeyId) {
     actorType = "api_key";
     actorId = apiKeyId;
   } else if (user) {
-    actorType = "member";
+    actorType = "user";
     actorId = user.id;
   }
   await recordAudit({

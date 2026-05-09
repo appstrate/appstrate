@@ -83,7 +83,23 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
 }
 import type { BlobStore } from "./blob-store.ts";
 import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
-import { UPSTREAM_META_KEY, buildUpstreamMeta, type UpstreamMeta } from "./upstream-meta.ts";
+import {
+  UPSTREAM_META_KEY,
+  buildPreflightUpstreamMeta,
+  buildUpstreamMeta,
+  type UpstreamMeta,
+} from "./upstream-meta.ts";
+
+/**
+ * `_meta` payload attached to every `provider_call` pre-flight error
+ * (no upstream contact). Surfacing `status: 0` lets the runtime
+ * distinguish "no upstream contact" from "upstream returned 5xx" via
+ * the status code rather than the absence of `_meta` — the runtime
+ * parser now requires `_meta` on every CallToolResult.
+ */
+const PROVIDER_CALL_PREFLIGHT_META: Record<string, unknown> = {
+  [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
+};
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
@@ -320,6 +336,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             },
           ],
           isError: true,
+          _meta: PROVIDER_CALL_PREFLIGHT_META,
         };
       }
 
@@ -335,6 +352,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             },
           ],
           isError: true,
+          _meta: PROVIDER_CALL_PREFLIGHT_META,
         };
       }
 
@@ -362,6 +380,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               },
             ],
             isError: true,
+            _meta: PROVIDER_CALL_PREFLIGHT_META,
           };
         }
         const decoded = decodeStrictBase64(args.body.fromBytes);
@@ -376,6 +395,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               },
             ],
             isError: true,
+            _meta: PROVIDER_CALL_PREFLIGHT_META,
           };
         }
         if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
@@ -402,6 +422,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               },
             },
             isError: true,
+            _meta: PROVIDER_CALL_PREFLIGHT_META,
           };
         }
         buffered = decoded.buffer.slice(
@@ -432,17 +453,22 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         return {
           content: [{ type: "text", text: `provider_call: ${result.error}` }],
           isError: true,
+          // Pre-flight failure (cred fetch, URL allowlist, etc): no
+          // upstream contact, but the runtime parser requires `_meta`
+          // on every CallToolResult — surface `status: 0` so the agent
+          // can distinguish "no upstream contact" from "upstream
+          // returned 5xx" via the status code.
+          _meta: PROVIDER_CALL_PREFLIGHT_META,
         };
       }
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         source: `provider:${args.providerId}`,
-        // Always attach upstream `{ status, headers }` to the
-        // CallToolResult `_meta` payload so the agent-side resolver can
-        // surface real HTTP status / response headers (Location, ETag,
-        // Upload-Offset, …) to chunked-upload protocols. Old clients
-        // ignore unknown `_meta` keys per MCP spec — backwards-compat
-        // safe.
+        // Attach upstream `{ status, headers }` to the CallToolResult
+        // `_meta` payload so the agent-side resolver can surface real
+        // HTTP status / response headers (Location, ETag,
+        // Upload-Offset, …) to chunked-upload protocols. Always on for
+        // `provider_call` — the runtime parser requires it.
         attachUpstreamMeta: true,
       });
     },

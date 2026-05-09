@@ -22,10 +22,10 @@ import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { getPlatformRunLimits } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
-import { getRunningRunCountForOrg } from "./state/index.ts";
+import { getRunningRunCountForOrg } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { resolveProviderStatuses } from "./connection-manager/index.ts";
+import { resolveProviderStatuses } from "./connection-manager/status.ts";
 
 export type PreflightGateError = { code: string; message: string; status?: number };
 

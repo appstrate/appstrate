@@ -48,25 +48,25 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
     return (
       <span
         className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs"
-        title={run.dashboardUserName ? `${tooltip} · ${run.dashboardUserName}` : tooltip}
+        title={run.userName ? `${tooltip} · ${run.userName}` : tooltip}
       >
         <RunnerIcon kind={run.runnerKind} />
         <span className="truncate">{run.runnerName}</span>
-        {run.dashboardUserName ? (
+        {run.userName ? (
           <>
             <span className="shrink-0">·</span>
             <User size={12} className="shrink-0" />
-            <span className="truncate">{run.dashboardUserName}</span>
+            <span className="truncate">{run.userName}</span>
           </>
         ) : null}
       </span>
     );
   }
-  if (run.dashboardUserName) {
+  if (run.userName) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <User size={12} className="shrink-0" />
-        <span className="truncate">{run.dashboardUserName}</span>
+        <span className="truncate">{run.userName}</span>
       </span>
     );
   }

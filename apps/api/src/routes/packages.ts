@@ -16,7 +16,7 @@ import { postInstallPackage } from "../services/post-install-package.ts";
 import { handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
-import { getAllPackageIds } from "../services/agent-service.ts";
+import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
@@ -29,12 +29,10 @@ import {
   createOrgItem,
   updateOrgItem,
   deleteOrgItem,
-  uploadPackageFiles,
-  downloadPackageFiles,
-  CONFIG_BY_TYPE,
   PackageAlreadyExistsError,
-  type PackageTypeConfig,
-} from "../services/package-items/index.ts";
+} from "../services/package-items/crud.ts";
+import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
+import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
@@ -55,7 +53,7 @@ import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getRunningRunsForPackage } from "../services/state/index.ts";
+import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";

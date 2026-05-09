@@ -369,6 +369,10 @@ export class McpProviderUploadResolver {
         { name: PROVIDER_CALL_TOOL_NAME, arguments: args },
         { signal },
       );
+      // The sidecar attaches `_meta` on every CallToolResult, including
+      // pre-flight errors (which carry `status: 0` to signal "no
+      // upstream contact"). A missing `_meta` is a protocol violation
+      // — `readUpstreamMeta` throws.
       const meta = readUpstreamMeta(result);
       // Upload-protocol responses are small (Drive: ~1KB JSON; S3:
       // ~500B XML; tus: empty 204; MS: ~1KB JSON). They sit well
@@ -379,20 +383,9 @@ export class McpProviderUploadResolver {
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
         .join("");
-      // Three flavours of result, distinguished here so the adapter
-      // never confuses them:
-      //  - meta present → use upstream status/headers verbatim.
-      //  - no meta + isError → sidecar pre-flight failure (cred fetch,
-      //    URL not in authorizedUris, etc). The body is a sidecar
-      //    message, NOT an upstream payload. Surface as status 0 so
-      //    adapters and failure() distinguish "no upstream contact"
-      //    from "upstream returned 5xx".
-      //  - no meta + ok → synthetic 200 (legacy sidecar pre-`_meta`,
-      //    or a test stub that doesn't ship meta).
-      const status = meta?.status ?? (result.isError ? 0 : 200);
       return {
-        status,
-        headers: meta?.headers ?? {},
+        status: meta.status,
+        headers: meta.headers,
         body,
       };
     };

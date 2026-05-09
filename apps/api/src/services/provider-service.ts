@@ -21,7 +21,7 @@ import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
-import { listPackages } from "./agent-service.ts";
+import { listPackages } from "./package-catalog.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { logger } from "../lib/logger.ts";
 

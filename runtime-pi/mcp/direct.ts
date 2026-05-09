@@ -17,63 +17,25 @@
  *   - Build the system prompt. We ship a 3-line capability prompt
  *     fragment via {@link DIRECT_TOOL_PROMPT}; the bundle owner
  *     decides whether to splice it in.
+ *
+ * The per-tool wiring (event emit → `mcp.callTool` → result-shape
+ * adapter) lives in `@appstrate/runner-pi/runtime-tools/mcp-forward`,
+ * symmetric with the bundle-driven `provider_call` factory in
+ * `runner-pi/provider-bridge`. This file is orchestration-only.
  */
 
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
   buildProviderCallExtensionFactory,
+  buildRuntimeToolFactories,
   readProviderRefs,
   RUNTIME_INJECTED_TOOLS,
   type ProviderEventEmitter,
-  type RuntimeInjectedTool,
 } from "@appstrate/runner-pi";
 import { McpProviderResolver } from "./provider-resolver.ts";
 import { buildProviderUploadExtensionFactory } from "./provider-upload-extension.ts";
-
-// ─── MCP CallToolResult → Pi AgentToolResult adapter ──────────────────
-// Folded in from the prior `./mcp-result.ts` module (single consumer
-// after the alias layer was retired). Pi's `AgentToolResult.content`
-// accepts only `text` and `image` blocks; MCP can also return
-// `resource_link` and inline `resource` blocks, which we render as
-// text pointers ("[resource <uri>]") so the LLM still sees the URI
-// and can request the resource via `resources/read` if it cares.
-
-type PiToolContent =
-  | { type: "text"; text: string }
-  | { type: "image"; data: string; mimeType: string };
-
-interface PiToolResult {
-  content: PiToolContent[];
-  details: undefined;
-}
-
-function callToolResultToPi(result: CallToolResult): PiToolResult {
-  const content: PiToolContent[] = result.content.map((c) => {
-    if (c.type === "text") return { type: "text", text: c.text };
-    if (c.type === "image") return { type: "image", data: c.data, mimeType: c.mimeType };
-    if (c.type === "resource_link") {
-      return {
-        type: "text",
-        text: `[resource ${c.uri}${c.name ? ` (${c.name})` : ""}]`,
-      };
-    }
-    if (c.type === "resource") {
-      const inner = c.resource;
-      return {
-        type: "text",
-        text: `[resource ${inner.uri}${"text" in inner && inner.text ? `\n${inner.text}` : ""}]`,
-      };
-    }
-    return {
-      type: "text",
-      text: `[unknown content type: ${(c as { type: string }).type}]`,
-    };
-  });
-  return { content, details: undefined };
-}
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 
@@ -116,9 +78,14 @@ interface BuildMcpDirectFactoriesOptions {
  * `{ fromFile | fromBytes | multipart | string }`) and observability
  * are identical across execution modes.
  *
+ * `run_history` and `recall_memory` are wired by `runner-pi`'s
+ * `buildRuntimeToolFactories`, which iterates {@link
+ * RUNTIME_INJECTED_TOOLS} and produces one Pi-tool registration per
+ * descriptor.
+ *
  * Returns `[]` for `provider_call` when the bundle declares no
  * providers (so the LLM doesn't see a tool whose `providerId` enum is
- * empty), but always emits the two platform tools.
+ * empty), but always emits the runtime-injected tools.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,
@@ -169,60 +136,12 @@ export async function buildMcpDirectFactories(
     });
     factories.push(...uploadFactories);
   }
-  for (const tool of RUNTIME_INJECTED_TOOLS) {
-    factories.push(makeMcpForwardExtension(tool, opts));
-  }
+  factories.push(
+    ...buildRuntimeToolFactories({
+      mcp: opts.mcp,
+      runId: opts.runId,
+      emit: opts.emit,
+    }),
+  );
   return factories;
-}
-
-/**
- * Generic extension factory for MCP-forwarding runtime-injected tools.
- *
- * One descriptor → one Pi-tool registration that:
- *   1. emits a `<tool.name>.called` event with `toolCallId`/`runId`,
- *   2. forwards the call verbatim to the sidecar via MCP `tools/call`,
- *   3. emits a `<tool.name>.completed` event with duration + isError,
- *   4. adapts the MCP `CallToolResult` to Pi's `AgentToolResult` shape.
- *
- * Pulling these into a single factory means adding a new runtime-
- * injected tool requires zero edits here — append to
- * `RUNTIME_INJECTED_TOOLS` and the registration loop above picks it up.
- */
-function makeMcpForwardExtension(
-  tool: RuntimeInjectedTool,
-  opts: BuildMcpDirectFactoriesOptions,
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: tool.name,
-      label: tool.name,
-      description: tool.description,
-      // `parameters` is plain JSON Schema in the descriptor; Pi accepts
-      // it through `Type.Unsafe`, which preserves the schema verbatim
-      // for the LLM tool advertisement without reinterpreting types.
-      parameters: Type.Unsafe<Record<string, unknown>>(tool.parameters as Record<string, unknown>),
-      async execute(toolCallId, params, signal) {
-        const startedAt = Date.now();
-        opts.emit({
-          type: `${tool.name}.called`,
-          runId: opts.runId,
-          toolCallId,
-          timestamp: startedAt,
-        });
-        const result = await opts.mcp.callTool(
-          { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
-          { ...(signal ? { signal } : {}) },
-        );
-        opts.emit({
-          type: `${tool.name}.completed`,
-          runId: opts.runId,
-          toolCallId,
-          durationMs: Date.now() - startedAt,
-          isError: result.isError === true,
-          timestamp: Date.now(),
-        });
-        return callToolResultToPi(result);
-      },
-    });
-  };
 }

@@ -111,7 +111,7 @@ describe("OAuth2 flows", () => {
     const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     appId = defaultAppId;
-    actor = { type: "member", id: userId };
+    actor = { type: "user", id: userId };
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
     profileId = profile.id;

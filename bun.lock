@@ -265,6 +265,9 @@
     "packages/emails": {
       "name": "@appstrate/emails",
       "version": "0.0.0",
+      "dependencies": {
+        "@appstrate/core": "workspace:*",
+      },
     },
     "packages/env": {
       "name": "@appstrate/env",
@@ -287,6 +290,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/mcp-transport": "workspace:*",
       },
       "devDependencies": {
         "@mariozechner/pi-ai": "^0.70.6",

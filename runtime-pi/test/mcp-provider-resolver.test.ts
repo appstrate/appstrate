@@ -54,12 +54,15 @@ async function makeServer(opts: {
   responseBlock?: { type: "text"; text: string };
   isError?: boolean;
   /**
-   * Optional `_meta` payload to surface alongside the result. Set this
-   * to test the resolver's upstream-meta consumption path
-   * (`{ "appstrate/upstream": { status, headers } }`). Tests that omit
-   * this assert the legacy fallback (synthesised 200 / `{}`).
+   * `_meta` payload surfaced alongside the result. The runtime parser
+   * now requires `_meta` on every CallToolResult — passing `null`
+   * explicitly forces an absent `_meta` (used to assert protocol
+   * violations). Omitting the field falls back to a default
+   * `{ status: 200, headers: {} }` payload (or `{ status: 0,
+   * headers: {} }` when `isError` is true) that matches what the live
+   * sidecar attaches.
    */
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> | null;
 }) {
   const captured: Captured = {};
   const tool: AppstrateToolDefinition = {
@@ -71,10 +74,25 @@ async function makeServer(opts: {
     handler: (async (args: Record<string, unknown>) => {
       captured.arguments = args;
       const block = opts.responseBlock ?? { type: "text", text: '{"ok":true}' };
+      // Default `_meta`: success → 200, error → 0 (sidecar pre-flight).
+      // `null` opts out (used to force a missing-meta protocol error).
+      let metaField: Record<string, unknown> | undefined;
+      if (opts.meta === null) {
+        metaField = undefined;
+      } else if (opts.meta !== undefined) {
+        metaField = opts.meta;
+      } else {
+        metaField = {
+          "appstrate/upstream": {
+            status: opts.isError ? 0 : 200,
+            headers: {},
+          },
+        };
+      }
       return {
         content: [block],
         ...(opts.isError ? { isError: true } : {}),
-        ...(opts.meta ? { _meta: opts.meta } : {}),
+        ...(metaField ? { _meta: metaField } : {}),
       };
     }) as never,
   };
@@ -582,33 +600,6 @@ describe("McpProviderResolver — upstream meta propagation", () => {
     }
   });
 
-  it("falls back to legacy 200 / {} when sidecar does not ship _meta", async () => {
-    // Backwards-compatibility regression: an old sidecar that hasn't
-    // rolled the propagation change still produces a usable response.
-    const { pair, mcp } = await makeServer({
-      responseBlock: { type: "text", text: '{"ok":true}' },
-      // no meta
-    });
-    try {
-      const resolver = new McpProviderResolver(mcp);
-      const [tool] = await resolver.resolve(
-        [{ name: "@test/echo", version: "^1.0.0" }],
-        makeBundle(),
-      );
-      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
-      const result = await tool!.execute(
-        { method: "GET", target: "https://api.example.com/items" },
-        ctxBase(workspace),
-      );
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.status).toBe(200);
-      // Headers carry the synthesised content-type only.
-      expect(parsed.body.kind).toBe("text");
-    } finally {
-      await pair.close();
-    }
-  });
-
   it("surfaces upstream 4xx status (and Retry-After) on tool-level errors", async () => {
     // Pre-meta behaviour returned 502 for every tool-level error; with
     // meta we surface the real upstream code so the agent can react
@@ -637,34 +628,6 @@ describe("McpProviderResolver — upstream meta propagation", () => {
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.status).toBe(429);
       expect(parsed.headers["retry-after"]).toBe("60");
-    } finally {
-      await pair.close();
-    }
-  });
-
-  it("ignores malformed _meta payloads (defence-in-depth)", async () => {
-    // A misbehaving sidecar shipping a non-object or a non-integer
-    // status must not crash the agent; the legacy fallback applies.
-    const { pair, mcp } = await makeServer({
-      responseBlock: { type: "text", text: '{"ok":true}' },
-      meta: {
-        "appstrate/upstream": "not-an-object",
-      },
-    });
-    try {
-      const resolver = new McpProviderResolver(mcp);
-      const [tool] = await resolver.resolve(
-        [{ name: "@test/echo", version: "^1.0.0" }],
-        makeBundle(),
-      );
-      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
-      const result = await tool!.execute(
-        { method: "GET", target: "https://api.example.com/items" },
-        ctxBase(workspace),
-      );
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      // Falls back to 200, no crash.
-      expect(parsed.status).toBe(200);
     } finally {
       await pair.close();
     }

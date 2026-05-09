@@ -176,7 +176,7 @@ function ProviderCard({
 export function PreferencesConnectorsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: userConns, isLoading } = useAllUserConnections();
-  const { data: providersData } = useProviders();
+  const { data: providerConfigs } = useProviders();
   const disconnectMutation = useDisconnect();
   const deleteAllMutation = useDeleteAllConnections();
 
@@ -285,7 +285,7 @@ export function PreferencesConnectorsPage() {
               }
               disconnecting={disconnectMutation.isPending}
               availableScopes={
-                providersData?.providers?.find((p) => p.id === pg.providerId)?.availableScopes
+                providerConfigs?.find((p) => p.id === pg.providerId)?.availableScopes
               }
             />
           ))}

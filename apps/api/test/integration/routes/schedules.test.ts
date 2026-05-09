@@ -316,7 +316,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        dashboardUserId: ctx.user.id,
+        userId: ctx.user.id,
         scheduleId: schedule.id,
         status: "success",
       });

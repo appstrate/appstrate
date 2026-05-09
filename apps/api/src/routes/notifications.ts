@@ -10,9 +10,8 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   listUserRuns,
-  listGlobalRuns,
-  type GlobalRunKind,
-} from "../services/state/index.ts";
+} from "../services/state/notifications.ts";
+import { listGlobalRuns, type GlobalRunKind } from "../services/state/runs.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";

@@ -9,8 +9,8 @@ import {
   listOrgItems,
   getOrgItem,
   deleteOrgItem,
-  CONFIG_BY_TYPE,
-} from "../../../src/services/package-items/index.ts";
+} from "../../../src/services/package-items/crud.ts";
+import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
 
 const SKILL_CONFIG = CONFIG_BY_TYPE.skill;
 const TOOL_CONFIG = CONFIG_BY_TYPE.tool;

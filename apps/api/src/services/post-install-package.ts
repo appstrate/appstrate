@@ -7,11 +7,10 @@ import {
   createOrgItem,
   updateOrgItem,
   getOrgItem,
-  uploadPackageFiles,
-  CONFIG_BY_TYPE,
-  type PackageTypeConfig,
   type CreateItemInput,
-} from "./package-items/index.ts";
+} from "./package-items/crud.ts";
+import { uploadPackageFiles } from "./package-items/storage.ts";
+import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
 

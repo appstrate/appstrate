@@ -309,3 +309,13 @@ export {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
+
+// Upstream-response metadata wire format — `_meta` key, header
+// allowlist, and `UpstreamMeta` type shared by the sidecar serializer
+// and the runtime-pi parser. Hosted here so both sides agree without
+// duplicating constants.
+export {
+  UPSTREAM_META_KEY,
+  UPSTREAM_HEADER_ALLOWLIST,
+  type UpstreamMeta,
+} from "./upstream-meta.ts";

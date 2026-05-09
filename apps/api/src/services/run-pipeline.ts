@@ -7,7 +7,7 @@
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { createRun } from "./state/index.ts";
+import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
@@ -18,9 +18,10 @@ import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
+import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { UploadedFile, FileReference } from "./adapters/types.ts";
+import type { UploadedFile, FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 
 /**
@@ -70,13 +71,6 @@ export interface RunPipelineParams {
   modelId?: string | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
-  /**
-   * Set when the caller's `modelId` differs from the persisted default. UI
-   * uses this for the "override" badge instead of diffing snapshot values.
-   */
-  modelOverridden?: boolean;
-  proxyOverridden?: boolean;
-  versionOverridden?: boolean;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
   /** Connection profile ID used to create the run. */
@@ -99,14 +93,10 @@ export interface RunPipelineParams {
   runnerKind?: string | null;
 }
 
-/**
- * Known codes: "model_not_configured", "unexpected", plus module-provided codes (via RunRejection).
- */
-export type RunPipelineError = { code: string; message: string; status?: number };
-
-export type RunPipelineResult =
-  | { ok: true; runId: string; modelSource: string | null }
-  | { ok: false; error: RunPipelineError };
+export interface RunPipelineSuccess {
+  runId: string;
+  modelSource: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Preflight — shared by run route and scheduler
@@ -170,10 +160,12 @@ export async function resolveRunPreflight(params: {
 /**
  * Build run context, run module pre-checks, create run record, and fire-and-forget execution.
  *
- * Returns a result type instead of throwing — callers decide how to surface errors
- * (e.g. throw ApiError for HTTP routes, or failSchedule for scheduled runs).
+ * Throws `ApiError` on validation / preflight failures (model not configured,
+ * rate limit, concurrency, beforeRun hook rejection) so the HTTP error handler
+ * can surface RFC 9457 problem details directly. Background callers (scheduler)
+ * catch `ApiError` to translate into their own failure semantics.
  */
-export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineResult> {
+export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
   const {
     runId,
     providerProfiles,
@@ -201,7 +193,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     agent: params.agent,
     providerProfiles,
   });
-  if (!gates.ok) return { ok: false, error: gates.error };
+  if (!gates.ok) {
+    throw new ApiError({
+      status: gates.error.status ?? 500,
+      code: gates.error.code,
+      title: gates.error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
+      detail: gates.error.message,
+    });
+  }
   const { agent, providerStatusSnapshots } = gates;
 
   // --- Step 1: Build run context ---
@@ -240,12 +239,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {
-      return { ok: false, error: { code: "model_not_configured", message: err.message } };
+      throw new ApiError({
+        status: 400,
+        code: "model_not_configured",
+        title: "Bad Request",
+        detail: err.message,
+      });
     }
-    return {
-      ok: false,
-      error: { code: "unexpected", message: err instanceof Error ? err.message : String(err) },
-    };
+    throw err;
   }
 
   // --- Step 2: Extract profile ID map ---
@@ -295,9 +296,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       agentName: agentDenorm.name,
       config,
       configOverride: params.configOverride ?? null,
-      modelOverridden: params.modelOverridden ?? false,
-      proxyOverridden: params.proxyOverridden ?? false,
-      versionOverridden: params.versionOverridden ?? false,
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
@@ -325,5 +323,5 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     });
   });
 
-  return { ok: true, runId, modelSource };
+  return { runId, modelSource };
 }

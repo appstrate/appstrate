@@ -21,7 +21,7 @@ import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
-import { listScheduleRuns } from "../services/state/index.ts";
+import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";

@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { BundleError } from "@appstrate/afps-runtime/bundle";
-import { ToolBundleCache } from "../../../src/services/adapters/tool-bundle-cache.ts";
+import { ToolBundleCache } from "../../../src/services/run-launcher/tool-bundle-cache.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b?: Uint8Array) => (b ? new TextDecoder().decode(b) : "");

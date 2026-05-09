@@ -42,7 +42,7 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
 
 export function RunInfoTab({ run }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: providersData } = useProviders();
+  const { data: providers } = useProviders();
   const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
@@ -90,7 +90,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         <SectionCard title={t("exec.infoConnections")}>
           <div className="space-y-1.5">
             {providerStatuses.map((svc) => {
-              const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
+              const providerMeta = providers?.find((p) => p.id === svc.id);
               return (
                 <ProviderStatusRow
                   key={svc.id}

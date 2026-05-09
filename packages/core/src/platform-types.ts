@@ -19,12 +19,12 @@ export type { SidecarConfig, LlmProxyConfig } from "./sidecar-types.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Identifies who initiated a run or API call — a dashboard member (BA user)
+ * Identifies who initiated a run or API call — a dashboard user (BA user)
  * or an end-user impersonated via `Appstrate-User`. Kept as a thin
  * discriminated union so modules can narrow by `type` without importing
  * `@appstrate/connect`.
  */
-export type Actor = { type: "member"; id: string } | { type: "end_user"; id: string };
+export type Actor = { type: "user"; id: string } | { type: "end_user"; id: string };
 
 // ---------------------------------------------------------------------------
 // Public DTO shapes — stable fields of platform entities

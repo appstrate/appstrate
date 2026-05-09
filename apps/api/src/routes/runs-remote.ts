@@ -34,8 +34,6 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
-import { resolveRemoteAgentIdentity } from "../services/remote-run-identity.ts";
-import { getPackage } from "../services/agent-service.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
@@ -160,10 +158,8 @@ export function createRunsRemoteRouter() {
       let modelIdOverride: string | null;
       let proxyIdOverride: string | null;
       // Attribution path counter — emitted once per request so we can
-      // track inline/registry/fallback share over time. The deprecated
-      // identity-resolver path is only safe to delete once the inline
-      // share trends to zero, so this metric is the tombstone gate.
-      let attributionPath: "registry" | "inline_attributed" | "inline_shadow";
+      // track the inline-vs-registry split over time.
+      let attributionPath: "registry" | "inline_shadow";
 
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
@@ -251,10 +247,9 @@ export function createRunsRemoteRouter() {
         });
       } else {
         // Inline path — the runner ships a manifest+prompt blob. Validate
-        // structurally, run readiness against a shadow LoadedPackage, then
-        // attempt fingerprint reconciliation against published versions
-        // for backwards-compatible attribution (older CLIs and any caller
-        // that still posts inline for a published agent).
+        // structurally, then create a shadow LoadedPackage. All inline
+        // runs land on a shadow ephemeral package ("Inline" badge in UI);
+        // callers who want deterministic attribution use kind=registry.
         const preflight = await runInlinePreflight({
           orgId,
           applicationId,
@@ -270,26 +265,8 @@ export function createRunsRemoteRouter() {
           },
         });
 
-        const resolved = await resolveRemoteAgentIdentity({
-          orgId,
-          manifest: preflight.manifest,
-          prompt: preflight.prompt,
-        });
-
-        if (resolved) {
-          const real = await getPackage(resolved.packageId, orgId);
-          if (real) {
-            agentForRun = real;
-            overrideVersionLabel = resolved.versionLabel;
-            attributionPath = "inline_attributed";
-          } else {
-            agentForRun = await createShadowAgent(preflight);
-            attributionPath = "inline_shadow";
-          }
-        } else {
-          agentForRun = await createShadowAgent(preflight);
-          attributionPath = "inline_shadow";
-        }
+        agentForRun = await createShadowAgent(preflight);
+        attributionPath = "inline_shadow";
 
         providerProfiles = preflight.providerProfiles;
         effectiveInput = preflight.effectiveInput;
@@ -301,7 +278,7 @@ export function createRunsRemoteRouter() {
       async function createShadowAgent(
         preflight: Awaited<ReturnType<typeof runInlinePreflight>>,
       ): Promise<LoadedPackage> {
-        const createdBy = actor?.type === "member" ? actor.id : null;
+        const createdBy = actor?.type === "user" ? actor.id : null;
         const shadowId = await insertShadowPackage({
           orgId,
           createdBy,

@@ -108,7 +108,7 @@ import { toISO } from "../../lib/date-helpers.ts";
 function enrichedRunSelect() {
   return {
     run: runs,
-    dashboardUserName: profiles.displayName,
+    userName: profiles.displayName,
     endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
     apiKeyName: apiKeys.name,
     scheduleName: schedules.name,
@@ -123,17 +123,49 @@ function enrichedRunSelect() {
  */
 type EnrichedRunRow = {
   run: typeof runs.$inferSelect;
-  dashboardUserName: string | null;
+  userName: string | null;
   endUserName: string | null;
   apiKeyName: string | null;
   scheduleName: string | null;
   packageEphemeral: boolean | null;
 };
 
+/**
+ * Derive the "default vs override" boolean for one slot. The columns
+ * `model_overridden` / `proxy_overridden` / `version_overridden` were
+ * dropped (migration 0018) — the booleans are computed here so the wire
+ * shape stays stable. Best-effort: when `config?.defaults?.<slot>` is
+ * missing (no codified `defaults` block in the snapshot), the badge
+ * defaults to `false`. The dashboard treats these flags as informational
+ * — `false` on missing data is the safe degradation.
+ */
+function isOverridden(
+  config: Record<string, unknown> | null,
+  slot: "model" | "proxy" | "version",
+  label: string | null,
+): boolean {
+  if (!label) return false;
+  const defaults =
+    config && typeof config === "object" && "defaults" in config
+      ? (config as { defaults?: unknown }).defaults
+      : undefined;
+  if (!defaults || typeof defaults !== "object") return false;
+  const def = (defaults as Record<string, unknown>)[slot];
+  if (typeof def !== "string") return false;
+  return def !== label;
+}
+
 function mapEnrichedRun(r: EnrichedRunRow) {
+  const config =
+    r.run.config && typeof r.run.config === "object"
+      ? (r.run.config as Record<string, unknown>)
+      : null;
   return {
     ...r.run,
-    dashboardUserName: r.dashboardUserName ?? null,
+    modelOverridden: isOverridden(config, "model", r.run.modelLabel),
+    proxyOverridden: isOverridden(config, "proxy", r.run.proxyLabel),
+    versionOverridden: isOverridden(config, "version", r.run.versionLabel),
+    userName: r.userName ?? null,
     endUserName: r.endUserName ?? null,
     apiKeyName: r.apiKeyName ?? null,
     scheduleName: r.scheduleName ?? null,
@@ -186,10 +218,6 @@ interface CreateRunParams {
    * button can replay the exact same delta.
    */
   configOverride?: Record<string, unknown> | null;
-  /** True when the caller's `modelId` differed from the persisted default. */
-  modelOverridden?: boolean;
-  proxyOverridden?: boolean;
-  versionOverridden?: boolean;
   /**
    * Which runner drives this run. Platform-origin runs execute in a
    * server-managed Docker container; remote-origin runs execute on the
@@ -223,7 +251,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
   await db.insert(runs).values({
     id,
     packageId,
-    dashboardUserId: actor?.type === "member" ? actor.id : null,
+    userId: actor?.type === "user" ? actor.id : null,
     endUserId: actor?.type === "end_user" ? actor.id : null,
     orgId: scope.orgId,
     status: "pending",
@@ -245,9 +273,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     agentName: params.agentName ?? null,
     config: parseRunConfig(params.config),
     configOverride: parseRunConfigOverride(params.configOverride),
-    modelOverridden: params.modelOverridden ?? false,
-    proxyOverridden: params.proxyOverridden ?? false,
-    versionOverridden: params.versionOverridden ?? false,
     runOrigin: params.runOrigin ?? "platform",
     ...(params.sinkSecretEncrypted !== undefined
       ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
@@ -279,7 +304,7 @@ export async function createFailedRun(
   await db.insert(runs).values({
     id,
     packageId,
-    dashboardUserId: actor?.type === "member" ? actor.id : null,
+    userId: actor?.type === "user" ? actor.id : null,
     endUserId: actor?.type === "end_user" ? actor.id : null,
     orgId: scope.orgId,
     applicationId: scope.applicationId,
@@ -359,9 +384,7 @@ export async function getLastCheckpoint(
     isNotNull(runs.checkpoint),
   ];
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
@@ -397,9 +420,7 @@ export async function getRecentRuns(
   // Actor isolation is mandatory — never leak cross-actor checkpoints.
   // Scheduled / system runs (`actor === null`) read the shared bucket only.
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   if (options.excludeRunId) {
@@ -440,9 +461,7 @@ export async function getLastRun(scope: AppScope, packageId: string, actor: Acto
     eq(runs.applicationId, scope.applicationId),
   ];
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
@@ -511,9 +530,7 @@ export async function getRunningRunsForPackage(
   conditions.push(eq(runs.applicationId, scope.applicationId));
 
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
@@ -573,7 +590,7 @@ export async function getRun(scope: AppScope, id: string) {
     .select({
       id: runs.id,
       status: runs.status,
-      dashboardUserId: runs.dashboardUserId,
+      userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
@@ -611,7 +628,7 @@ export async function listRunsWithFilter(
   const rows = await db
     .select(enrichedRunSelect())
     .from(runs)
-    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
+    .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
@@ -709,7 +726,7 @@ export async function listGlobalRuns(
     .select(enrichedRunSelect())
     .from(runs)
     .leftJoin(packages, eq(packages.id, runs.packageId))
-    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
+    .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
@@ -757,7 +774,7 @@ export async function getRunFull(scope: AppScope, id: string) {
       packagePrompt: packages.draftContent,
     })
     .from(runs)
-    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
+    .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))

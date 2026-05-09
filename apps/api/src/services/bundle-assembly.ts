@@ -25,8 +25,8 @@ import {
   type BundlePackage,
   type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
-import { DbPackageCatalog } from "./adapters/db-package-catalog.ts";
-import { DraftPackageCatalog } from "./adapters/draft-package-catalog.ts";
+import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
+import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { resolveVersion } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";

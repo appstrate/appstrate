@@ -8,7 +8,7 @@ import { schedules, connectionProfiles as connectionProfilesTable } from "@appst
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createFailedRun } from "./state/index.ts";
+import { createFailedRun } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import {
   prepareAndExecuteRun,
@@ -16,7 +16,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
-import { getPackage, packageExists } from "./agent-service.ts";
+import { getPackage, packageExists } from "./package-catalog.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
@@ -24,7 +24,7 @@ import {
   resolveScheduleProfileArgs,
   getAgentAppProfile,
 } from "./connection-profiles.ts";
-import { resolveProviderStatuses } from "./connection-manager/index.ts";
+import { resolveProviderStatuses } from "./connection-manager/status.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
@@ -368,36 +368,36 @@ async function triggerScheduledRun(
     const finalModelId = overrides.modelIdOverride ?? preflightModelId;
     const finalProxyId = overrides.proxyIdOverride ?? preflightProxyId;
 
-    const result = await prepareAndExecuteRun({
-      runId,
-      agent,
-      providerProfiles,
-      orgId,
-      actor,
-      input,
-      config: mergedConfig,
-      configOverride: overrides.configOverride,
-      modelId: finalModelId,
-      modelOverridden: overrides.modelIdOverride != null,
-      proxyId: finalProxyId,
-      proxyOverridden: overrides.proxyIdOverride != null,
-      overrideVersionLabel: overrides.versionOverride,
-      versionOverridden: overrides.versionOverride != null,
-      scheduleId,
-      connectionProfileId,
-      applicationId,
-    });
-
-    if (!result.ok) {
-      logger.warn("Scheduled run pipeline failed", {
-        scheduleId,
-        packageId,
+    try {
+      await prepareAndExecuteRun({
+        runId,
+        agent,
+        providerProfiles,
         orgId,
-        code: result.error.code,
-        detail: result.error.message,
+        actor,
+        input,
+        config: mergedConfig,
+        configOverride: overrides.configOverride,
+        modelId: finalModelId,
+        proxyId: finalProxyId,
+        overrideVersionLabel: overrides.versionOverride,
+        scheduleId,
+        connectionProfileId,
+        applicationId,
       });
-      await failSchedule(result.error.message, actor);
-      return;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        logger.warn("Scheduled run pipeline failed", {
+          scheduleId,
+          packageId,
+          orgId,
+          code: err.code,
+          detail: err.message,
+        });
+        await failSchedule(err.message, actor);
+        return;
+      }
+      throw err;
     }
 
     logger.info("Triggering scheduled run", {

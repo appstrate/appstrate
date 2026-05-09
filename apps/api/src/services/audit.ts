@@ -18,7 +18,7 @@ import { auditEvents } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 
-export type AuditActorType = "member" | "end_user" | "api_key" | "system" | (string & {});
+export type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
 export interface RecordAuditInput {
   orgId: string;
@@ -90,7 +90,7 @@ export async function recordAuditFromContext(
     actorType = "end_user";
     actorId = endUser.id;
   } else if (user) {
-    actorType = "member";
+    actorType = "user";
     actorId = user.id;
   }
 

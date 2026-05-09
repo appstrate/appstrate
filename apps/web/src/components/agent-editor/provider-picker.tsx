@@ -13,7 +13,7 @@ import { ProviderIcon } from "../provider-icon";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderCredentialsModal } from "../provider-credentials-modal";
 import { Modal } from "../modal";
-import { useProviders } from "../../hooks/use-providers";
+import { useProviders, useProviderCallbackUrl } from "../../hooks/use-providers";
 import type { ProviderEntry } from "./types";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { AvailableScope } from "@appstrate/core/validation";
@@ -181,8 +181,8 @@ function ScopeMultiSelect({
 
 export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
-  const { data: providersData, isLoading } = useProviders();
-  const providers = providersData?.providers;
+  const { data: providers, isLoading } = useProviders();
+  const { data: callbackUrl } = useProviderCallbackUrl();
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
 
@@ -408,7 +408,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
       {configureProvider && (
         <ProviderCredentialsModal
           provider={configureProvider}
-          callbackUrl={providersData?.callbackUrl}
+          callbackUrl={callbackUrl}
           onClose={() => setConfigureProvider(null)}
         />
       )}

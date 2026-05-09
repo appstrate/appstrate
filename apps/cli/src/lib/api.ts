@@ -370,3 +370,34 @@ export async function apiFetch<T>(
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/**
+ * Authenticated reader for Stripe-canonical list endpoints
+ * (`{ object: "list", data: T[], hasMore, total? }`). Returns the
+ * unwrapped `data` array so callers don't repeat the envelope shape
+ * inline.
+ *
+ * Mirrors `apps/web/src/api.ts::apiList<T>` and the
+ * `PlatformListResponse<T>` contract in `@appstrate/core/platform-types`.
+ *
+ * Strict by design: a payload missing `data` or whose `data` is not an
+ * array trips `ApiError(500, …)` instead of silently returning `[]`.
+ * The platform always emits the canonical envelope via
+ * `apps/api/src/lib/list-response.ts`, so a degenerate shape is a real
+ * server-side bug and surfacing it loudly beats hiding it.
+ */
+export async function apiList<T>(
+  profileName: string,
+  path: string,
+  init: ApiFetchInit = {},
+): Promise<T[]> {
+  const envelope = await apiFetch<{ data?: unknown }>(profileName, path, init);
+  if (!envelope || typeof envelope !== "object" || !Array.isArray(envelope.data)) {
+    throw new ApiError(
+      500,
+      `Malformed list response from ${path}: expected { object: "list", data: [...] }.`,
+      envelope,
+    );
+  }
+  return envelope.data as T[];
+}

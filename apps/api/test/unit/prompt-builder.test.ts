@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildPlatformSystemPrompt } from "../../src/services/adapters/prompt-builder.ts";
+import { buildPlatformSystemPrompt } from "../../src/services/run-launcher/prompt-builder.ts";
 import type {
   AppstrateRunPlan,
   FileReference,
   ProviderSummary,
   ToolMeta,
-} from "../../src/services/adapters/types.ts";
+} from "../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
 

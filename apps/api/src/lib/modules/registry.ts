@@ -20,7 +20,7 @@ import { applyModuleMigrations } from "./migrate.ts";
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { loadModel, listOrgModels } from "../../services/org-models.ts";
-import { getPackage, searchPackages } from "../../services/agent-service.ts";
+import { getPackage, searchPackages } from "../../services/package-catalog.ts";
 import { isInlineShadowPackageId, triggerInlineRun } from "../../services/inline-run.ts";
 import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
 import { getDefaultApplication } from "../../services/applications.ts";

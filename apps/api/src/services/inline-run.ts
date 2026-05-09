@@ -19,7 +19,6 @@ import { db } from "@appstrate/db/client";
 import { packages, runs } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { runInlinePreflight, type InlineRunBody } from "./inline-run-preflight.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
@@ -157,15 +156,14 @@ export async function triggerInlineRun(params: {
   } = preflight;
 
   // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
-  const createdBy = actor?.type === "member" ? actor.id : null;
+  const createdBy = actor?.type === "user" ? actor.id : null;
   const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
   const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
 
   // ----- 3. Fire the pipeline. -----
   const runId = `run_${crypto.randomUUID()}`;
-  let pipelineResult;
   try {
-    pipelineResult = await prepareAndExecuteRun({
+    await prepareAndExecuteRun({
       runId,
       agent: shadowAgent,
       providerProfiles,
@@ -182,33 +180,6 @@ export async function triggerInlineRun(params: {
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);
     throw err;
-  }
-
-  if (!pipelineResult.ok) {
-    await deleteOrphanShadowPackage(shadowId);
-    const { error } = pipelineResult;
-    if (error.code === "model_not_configured") {
-      throw new ApiError({
-        status: 400,
-        code: "model_not_configured",
-        title: "Bad Request",
-        detail: error.message,
-      });
-    }
-    if ("status" in error && typeof error.status === "number") {
-      throw new ApiError({
-        status: error.status,
-        code: error.code,
-        title: error.message,
-        detail: error.message,
-      });
-    }
-    throw new ApiError({
-      status: 500,
-      code: "inline_run_failed",
-      title: "Inline run failed",
-      detail: error.message,
-    });
   }
 
   return { runId, packageId: shadowId };

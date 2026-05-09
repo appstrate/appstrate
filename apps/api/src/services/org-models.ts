@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import type { ModelCost } from "./adapters/types.ts";
+import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";

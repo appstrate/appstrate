@@ -13,10 +13,10 @@
  * tools (`pin`, `note`) wrap them so external runners never see this
  * column shape.
  *
- * Storage-vocabulary note: `actor_type='user'` matches the `@afps-spec/schema`
- * wire format, while the in-process `Actor` type (`@appstrate/connect`) uses
- * `'member'` for dashboard users. This module speaks `Actor` at its public
- * boundary and translates at the DB boundary.
+ * Vocabulary: `actor_type='user'` matches both the `@afps-spec/schema`
+ * wire format and the in-process `Actor` type (`@appstrate/connect`).
+ * The `PersistenceScope` here narrows `Actor` by adding a `'shared'`
+ * variant for app-wide rows; non-shared scopes pass through unchanged.
  *
  * See `docs/adr/ADR-011-checkpoint-unification.md` and
  * `docs/adr/ADR-012-memory-as-tool.md`.
@@ -65,7 +65,7 @@ export const MAX_PINNED_KEY_LENGTH = 64;
  * opting into app-wide behaviour.
  */
 export type PersistenceScope =
-  | { type: "member"; id: string }
+  | { type: "user"; id: string }
   | { type: "end_user"; id: string }
   | { type: "shared" };
 

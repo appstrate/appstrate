@@ -29,7 +29,7 @@ describe("recordAudit", () => {
     await recordAudit({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      actorType: "member",
+      actorType: "user",
       actorId: ctx.user.id,
       action: "connection.created",
       resourceType: "connection",
@@ -45,7 +45,7 @@ describe("recordAudit", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.applicationId).toBe(ctx.defaultAppId);
-    expect(row.actorType).toBe("member");
+    expect(row.actorType).toBe("user");
     expect(row.actorId).toBe(ctx.user.id);
     expect(row.action).toBe("connection.created");
     expect(row.resourceType).toBe("connection");
@@ -65,7 +65,7 @@ describe("recordAudit", () => {
 
     await recordAudit({
       orgId: ctx.orgId,
-      actorType: "member",
+      actorType: "user",
       actorId: ctx.user.id,
       action: "api_key.rotated",
       resourceType: "api_key",
@@ -109,7 +109,7 @@ describe("recordAudit", () => {
 
     await recordAudit({
       orgId: ctxA.orgId,
-      actorType: "member",
+      actorType: "user",
       actorId: ctxA.user.id,
       action: "connection.created",
       resourceType: "connection",
@@ -117,7 +117,7 @@ describe("recordAudit", () => {
     });
     await recordAudit({
       orgId: ctxB.orgId,
-      actorType: "member",
+      actorType: "user",
       actorId: ctxB.user.id,
       action: "connection.created",
       resourceType: "connection",
@@ -149,7 +149,7 @@ describe("recordAudit", () => {
     for (let i = 0; i < 3; i++) {
       await recordAudit({
         orgId: ctx.orgId,
-        actorType: "member",
+        actorType: "user",
         actorId: ctx.user.id,
         action: i === 0 ? "api_key.created" : "api_key.used",
         resourceType: "api_key",

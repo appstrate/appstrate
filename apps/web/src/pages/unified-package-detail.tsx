@@ -18,7 +18,7 @@ import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
-import { useProviders } from "../hooks/use-providers";
+import { useProviders, useProviderCallbackUrl } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
@@ -173,11 +173,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
   const providersQuery = useProviders();
+  const callbackUrlQuery = useProviderCallbackUrl();
   const providerConfig =
-    type === "provider"
-      ? providersQuery.data?.providers.find((p) => p.id === packageId)
-      : undefined;
-  const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
+    type === "provider" ? providersQuery.data?.find((p) => p.id === packageId) : undefined;
+  const callbackUrl = type === "provider" ? callbackUrlQuery.data : undefined;
 
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();

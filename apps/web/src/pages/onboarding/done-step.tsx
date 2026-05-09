@@ -27,7 +27,7 @@ export function OnboardingDoneStep() {
 
   const { data: models } = useModels();
   const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: providersData } = useProviders();
+  const { data: providers } = useProviders();
   const { data: orgData } = useQuery({
     queryKey: ["org-members", orgId],
     queryFn: () => api<{ invitations: OrgInvitation[] }>(`/orgs/${orgId}`),
@@ -35,7 +35,7 @@ export function OnboardingDoneStep() {
   });
 
   const defaultModel = models?.find((m) => m.isDefault);
-  const configuredProviders = (providersData?.providers ?? []).filter((p) => p.enabled);
+  const configuredProviders = (providers ?? []).filter((p) => p.enabled);
   const invitationCount = orgData?.invitations?.length ?? 0;
 
   if (!orgId) return null;

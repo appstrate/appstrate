@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useProviders } from "../hooks/use-providers";
+import { useProviders, useProviderCallbackUrl } from "../hooks/use-providers";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
@@ -24,7 +24,8 @@ export function ProvidersPage() {
   const [showAll, setShowAll] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const { data: profiles } = useConnectionProfiles();
-  const { data: providersData } = useProviders();
+  const { data: providers } = useProviders();
+  const { data: callbackUrl } = useProviderCallbackUrl();
 
   // Resolve effective profile: user selection → default profile → first profile
   const profileId = useMemo(() => {
@@ -41,15 +42,13 @@ export function ProvidersPage() {
     const badges = new Map<string, ReactNode>();
     const actions = new Map<string, ReactNode>();
     const icons = new Map<string, string>();
-    if (providersData?.providers) {
-      for (const p of providersData.providers) {
+    if (providers) {
+      for (const p of providers) {
         if (p.iconUrl) icons.set(p.id, p.iconUrl);
 
         badges.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
-        const configButton = (
-          <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
-        );
+        const configButton = <ProviderConfigureButton provider={p} callbackUrl={callbackUrl} />;
 
         actions.set(
           p.id,
@@ -61,16 +60,16 @@ export function ProvidersPage() {
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providersData, profileId]);
+  }, [providers, callbackUrl, profileId]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();
-  if (providersData?.providers) {
-    for (const p of providersData.providers) {
+  if (providers) {
+    for (const p of providers) {
       if (p.enabled) enabledIds.add(p.id);
     }
   }
-  const allProviders = providersData?.providers ?? [];
+  const allProviders = providers ?? [];
 
   const filterToggle = (
     <div className="mt-2 flex items-center gap-3">
@@ -158,7 +157,7 @@ export function ProvidersPage() {
       {configureProvider && (
         <ProviderCredentialsModal
           provider={configureProvider}
-          callbackUrl={providersData?.callbackUrl}
+          callbackUrl={callbackUrl}
           onClose={() => setConfigureProvider(null)}
         />
       )}
