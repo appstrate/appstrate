@@ -259,10 +259,13 @@ interface TokenBudgetMeta {
  * call `proxyDeps.fetchFn` against the platform upstream. None of
  * these tools round-trip through a Hono HTTP envelope.
  *
- * When a `provider_call` upstream response is binary or exceeds
- * {@link INLINE_RESPONSE_THRESHOLD}, the bytes are stored in the
- * supplied {@link BlobStore} and the tool returns a `resource_link`
- * block instead of an inline text body.
+ * When a `provider_call` upstream response is binary, exceeds the
+ * per-call token cap, or would push the run-level cumulative budget
+ * past its ceiling (see {@link TokenBudget}), the bytes are stored in
+ * the supplied {@link BlobStore} and the tool returns a `resource_link`
+ * block instead of an inline text body. The legacy byte threshold
+ * {@link INLINE_RESPONSE_THRESHOLD_BYTES} is consulted only when no
+ * {@link TokenBudget} is wired (tests / embedders).
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
   const { blobStore, proxyDeps, tokenBudget } = options;
