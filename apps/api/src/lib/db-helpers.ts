@@ -5,7 +5,7 @@ import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
 /**
  * Shared helpers for system+DB merge patterns and partial update building.
  *
- * Used by org-models, org-proxies, org-provider-keys, and any service
+ * Used by org-models, org-proxies, org-model-provider-keys, and any service
  * that merges system-registry entries with database rows.
  */
 

@@ -237,19 +237,19 @@ export async function seedOrgProxy(
   return proxy!;
 }
 
-// ─── Org Provider Keys ───────────────────────────────────
+// ─── Org Model Provider Keys ─────────────────────────────
 
-type OrgProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
+type OrgModelProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
   orgId: string;
 };
 
-export async function seedOrgProviderKey(
-  overrides: OrgProviderKeyInsert,
+export async function seedOrgModelProviderKey(
+  overrides: OrgModelProviderKeyInsert,
 ): Promise<InferSelectModel<typeof orgSystemProviderKeys>> {
   const [key] = await db
     .insert(orgSystemProviderKeys)
     .values({
-      label: "Test Provider Key",
+      label: "Test Model Provider Key",
       api: "anthropic",
       baseUrl: "https://api.anthropic.com",
       apiKeyEncrypted: "encrypted-key-placeholder",

@@ -23,7 +23,7 @@ import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
-import { initSystemProviderKeys } from "../services/model-registry.ts";
+import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
@@ -159,7 +159,7 @@ export async function boot(): Promise<void> {
   logger.info("System proxies loaded");
 
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
-  initSystemProviderKeys();
+  initSystemModelProviderKeys();
   logger.info("System provider keys loaded");
 
   // Load system packages from ZIPs, sync to DB + S3

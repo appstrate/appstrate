@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const providerKeysPaths = {
-  "/api/provider-keys": {
+export const modelProviderKeysPaths = {
+  "/api/model-provider-keys": {
     get: {
-      operationId: "listProviderKeys",
-      tags: ["Provider Keys"],
-      summary: "List organization provider keys",
+      operationId: "listModelProviderKeys",
+      tags: ["Model Provider Keys"],
+      summary: "List organization model provider keys",
       description:
-        "Returns all provider keys for the current organization. API keys are never exposed.",
+        "Returns all LLM model provider keys (Anthropic, OpenAI, etc.) for the current organization. API keys are never exposed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
-          description: "Provider key list",
+          description: "Model provider key list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -25,7 +25,7 @@ export const providerKeysPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgProviderKey" },
+                    items: { $ref: "#/components/schemas/OrgModelProviderKey" },
                   },
                   hasMore: { type: "boolean" },
                 },
@@ -53,11 +53,11 @@ export const providerKeysPaths = {
       },
     },
     post: {
-      operationId: "createProviderKey",
-      tags: ["Provider Keys"],
-      summary: "Create a provider key",
+      operationId: "createModelProviderKey",
+      tags: ["Model Provider Keys"],
+      summary: "Create a model provider key",
       description:
-        "Create a new provider key for the organization. The API key is encrypted at rest.",
+        "Create a new LLM model provider key for the organization. The API key is encrypted at rest.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -70,7 +70,7 @@ export const providerKeysPaths = {
                 label: {
                   type: "string",
                   minLength: 1,
-                  description: "Display name for the provider key",
+                  description: "Display name for the model provider key",
                 },
                 api: {
                   type: "string",
@@ -81,7 +81,7 @@ export const providerKeysPaths = {
                 baseUrl: {
                   type: "string",
                   format: "uri",
-                  description: "Provider API base URL",
+                  description: "Model provider API base URL",
                 },
                 apiKey: { type: "string", minLength: 1, description: "API key for authentication" },
               },
@@ -91,7 +91,7 @@ export const providerKeysPaths = {
       },
       responses: {
         "201": {
-          description: "Provider key created",
+          description: "Model provider key created",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -113,13 +113,13 @@ export const providerKeysPaths = {
       },
     },
   },
-  "/api/provider-keys/test": {
+  "/api/model-provider-keys/test": {
     post: {
-      operationId: "testProviderKeyInline",
-      tags: ["Provider Keys"],
-      summary: "Test provider key configuration inline",
+      operationId: "testModelProviderKeyInline",
+      tags: ["Model Provider Keys"],
+      summary: "Test model provider key configuration inline",
       description:
-        "Test a provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -133,7 +133,7 @@ export const providerKeysPaths = {
                 baseUrl: {
                   type: "string",
                   format: "uri",
-                  description: "Provider API base URL",
+                  description: "Model provider API base URL",
                 },
                 apiKey: {
                   type: "string",
@@ -141,7 +141,7 @@ export const providerKeysPaths = {
                 },
                 existingKeyId: {
                   type: "string",
-                  description: "Existing provider key ID to fall back to for stored API key",
+                  description: "Existing model provider key ID to fall back to for stored API key",
                 },
               },
             },
@@ -168,12 +168,12 @@ export const providerKeysPaths = {
       },
     },
   },
-  "/api/provider-keys/{id}": {
+  "/api/model-provider-keys/{id}": {
     put: {
-      operationId: "updateProviderKey",
-      tags: ["Provider Keys"],
-      summary: "Update a provider key",
-      description: "Update a provider key configuration.",
+      operationId: "updateModelProviderKey",
+      tags: ["Model Provider Keys"],
+      summary: "Update a model provider key",
+      description: "Update a model provider key configuration.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -196,7 +196,7 @@ export const providerKeysPaths = {
       },
       responses: {
         "200": {
-          description: "Provider key updated",
+          description: "Model provider key updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -213,18 +213,18 @@ export const providerKeysPaths = {
       },
     },
     delete: {
-      operationId: "deleteProviderKey",
-      tags: ["Provider Keys"],
-      summary: "Delete a provider key",
+      operationId: "deleteModelProviderKey",
+      tags: ["Model Provider Keys"],
+      summary: "Delete a model provider key",
       description:
-        "Delete a provider key. Models using this key will have their providerKeyId set to null.",
+        "Delete a model provider key. Models using this key will have their providerKeyId set to null.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
-          description: "Provider key deleted",
+          description: "Model provider key deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
@@ -234,13 +234,13 @@ export const providerKeysPaths = {
       },
     },
   },
-  "/api/provider-keys/{id}/test": {
+  "/api/model-provider-keys/{id}/test": {
     post: {
-      operationId: "testProviderKey",
-      tags: ["Provider Keys"],
-      summary: "Test provider key connection",
+      operationId: "testModelProviderKey",
+      tags: ["Model Provider Keys"],
+      summary: "Test model provider key connection",
       description:
-        "Test that the provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "Test that the model provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -259,7 +259,7 @@ export const providerKeysPaths = {
           },
         },
         "404": {
-          description: "Provider key not found",
+          description: "Model provider key not found",
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

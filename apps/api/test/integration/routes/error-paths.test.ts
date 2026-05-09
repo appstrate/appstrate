@@ -33,7 +33,7 @@ describe("401 — unauthenticated requests", () => {
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
     { method: "POST", path: "/api/proxies" },
-    { method: "GET", path: "/api/provider-keys" },
+    { method: "GET", path: "/api/model-provider-keys" },
     { method: "GET", path: "/api/connection-profiles" },
     { method: "GET", path: "/api/notifications" },
     { method: "GET", path: "/api/packages" },
@@ -67,7 +67,7 @@ describe("400 — missing X-Org-Id header on org-scoped routes", () => {
     { method: "GET", path: "/api/applications" },
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
-    { method: "GET", path: "/api/provider-keys" },
+    { method: "GET", path: "/api/model-provider-keys" },
     { method: "GET", path: "/api/packages" },
   ];
 

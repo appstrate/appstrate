@@ -4,16 +4,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgSystemProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
-import { getSystemProviderKeys } from "./model-registry.ts";
-import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import { getSystemModelProviderKeys } from "./model-registry.ts";
+import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
 
-export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKeyInfo[]> {
-  const system = getSystemProviderKeys();
+export async function listOrgModelProviderKeys(orgId: string): Promise<OrgModelProviderKeyInfo[]> {
+  const system = getSystemModelProviderKeys();
   const rows = await db
     .select()
     .from(orgSystemProviderKeys)
@@ -23,7 +23,7 @@ export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKey
   return mergeSystemAndDb({
     system,
     rows,
-    mapSystem: (id, def): OrgProviderKeyInfo => ({
+    mapSystem: (id, def): OrgModelProviderKeyInfo => ({
       id,
       label: def.label,
       api: def.api,
@@ -48,7 +48,7 @@ export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKey
 
 // --- CRUD ---
 
-export async function createOrgProviderKey(
+export async function createOrgModelProviderKey(
   orgId: string,
   label: string,
   api: string,
@@ -70,7 +70,7 @@ export async function createOrgProviderKey(
   return row!.id;
 }
 
-export async function updateOrgProviderKey(
+export async function updateOrgModelProviderKey(
   orgId: string,
   id: string,
   data: { label?: string; api?: string; baseUrl?: string; apiKey?: string },
@@ -86,7 +86,7 @@ export async function updateOrgProviderKey(
     );
 }
 
-export async function deleteOrgProviderKey(orgId: string, id: string): Promise<void> {
+export async function deleteOrgModelProviderKey(orgId: string, id: string): Promise<void> {
   await db
     .delete(orgSystemProviderKeys)
     .where(
@@ -96,12 +96,12 @@ export async function deleteOrgProviderKey(orgId: string, id: string): Promise<v
 
 // --- Credential loading ---
 
-export async function loadProviderKeyCredentials(
+export async function loadModelProviderKeyCredentials(
   orgId: string,
   id: string,
 ): Promise<{ api: string; baseUrl: string; apiKey: string } | null> {
-  // Check system provider keys first (same pattern as loadModel checks system models)
-  const systemKey = getSystemProviderKeys().get(id);
+  // Check system model provider keys first (same pattern as loadModel checks system models)
+  const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
   }
@@ -125,9 +125,17 @@ export async function loadProviderKeyCredentials(
 
 // --- Connection test ---
 
-export async function testProviderKeyConnection(orgId: string, id: string): Promise<TestResult> {
-  const creds = await loadProviderKeyCredentials(orgId, id);
+export async function testModelProviderKeyConnection(
+  orgId: string,
+  id: string,
+): Promise<TestResult> {
+  const creds = await loadModelProviderKeyCredentials(orgId, id);
   if (!creds)
-    return { ok: false, latency: 0, error: "KEY_NOT_FOUND", message: "Provider key not found" };
+    return {
+      ok: false,
+      latency: 0,
+      error: "KEY_NOT_FOUND",
+      message: "Model provider key not found",
+    };
   return testModelConfig({ ...creds, modelId: "_test" });
 }

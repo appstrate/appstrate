@@ -37,7 +37,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { seedApiKey, seedOrgProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import { seedApiKey, seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -56,7 +56,7 @@ async function buildHarness(overrides?: {
   scopes?: string[];
 }): Promise<Harness> {
   const ctx = await createTestContext({ orgSlug: "llmproxyorg" });
-  const providerKey = await seedOrgProviderKey({
+  const providerKey = await seedOrgModelProviderKey({
     orgId: ctx.orgId,
     label: "Upstream",
     api: overrides?.api ?? "openai-completions",

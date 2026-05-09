@@ -501,7 +501,7 @@ export interface OrgModelInfo {
   updatedAt: string;
 }
 
-export interface OrgProviderKeyInfo {
+export interface OrgModelProviderKeyInfo {
   id: string;
   label: string;
   api: string;

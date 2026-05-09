@@ -54,8 +54,8 @@ describe("resolvePermissions", () => {
     expect(perms.has("members:remove")).toBe(false);
     // Cannot manage api-keys
     expect(perms.has("api-keys:read")).toBe(false);
-    // Provider-keys and webhooks stay admin-only
-    expect(perms.has("provider-keys:read")).toBe(false);
+    // Model-provider-keys and webhooks stay admin-only
+    expect(perms.has("model-provider-keys:read")).toBe(false);
     expect(perms.has("webhooks:read")).toBe(false);
   });
 
@@ -173,9 +173,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "app-profiles:write",
       "app-profiles:delete",
       "app-profiles:bind",
-      "provider-keys:read",
-      "provider-keys:write",
-      "provider-keys:delete",
+      "model-provider-keys:read",
+      "model-provider-keys:write",
+      "model-provider-keys:delete",
     ];
     for (const perm of excluded) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);

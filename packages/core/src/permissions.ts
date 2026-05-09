@@ -74,7 +74,7 @@ export interface CoreResources {
   profiles: "read" | "write" | "delete";
   "app-profiles": "read" | "write" | "delete" | "bind";
   models: "read" | "write" | "delete";
-  "provider-keys": "read" | "write" | "delete";
+  "model-provider-keys": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
   "api-keys": "read" | "create" | "revoke";
   applications: "read" | "write" | "delete";
@@ -119,7 +119,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "profiles",
   "app-profiles",
   "models",
-  "provider-keys",
+  "model-provider-keys",
   "proxies",
   "api-keys",
   "applications",

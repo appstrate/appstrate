@@ -31,7 +31,7 @@ export const OIDC_IDENTITY_SCOPE_SET: ReadonlySet<string> = new Set(OIDC_IDENTIT
  *
  * Destructive and admin-scoped permissions (`agents:write`, `agents:delete`,
  * `runs:delete`, `api-keys:*`, `webhooks:*`, `applications:*`, `end-users:*`,
- * `provider-keys:*`, etc.) are excluded — they are admin work, not end-user
+ * `model-provider-keys:*`, etc.) are excluded — they are admin work, not end-user
  * work, and granting them through a user-consented OAuth flow would let an
  * embedding app silently escalate.
  *

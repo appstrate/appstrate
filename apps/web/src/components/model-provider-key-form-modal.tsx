@@ -17,8 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useTestProviderKeyInline } from "../hooks/use-provider-keys";
-import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import { useTestModelProviderKeyInline } from "../hooks/use-model-provider-keys";
+import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
@@ -37,7 +37,7 @@ interface ProviderKeyFormData {
 interface ProviderKeyFormModalProps {
   open: boolean;
   onClose: () => void;
-  providerKey: OrgProviderKeyInfo | null;
+  providerKey: OrgModelProviderKeyInfo | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
 }
@@ -49,7 +49,7 @@ interface ProviderKeyFormFields {
   apiKey: string;
 }
 
-function detectProviderFromKey(key: OrgProviderKeyInfo | null): string {
+function detectProviderFromKey(key: OrgModelProviderKeyInfo | null): string {
   if (!key) return "";
   const match = findProviderByApiAndBaseUrl(key.api, key.baseUrl);
   return match ? match.id : CUSTOM_ID;
@@ -61,7 +61,7 @@ function ProviderKeyFormBody({
   onSubmit,
   onClose,
 }: {
-  providerKey: OrgProviderKeyInfo | null;
+  providerKey: OrgModelProviderKeyInfo | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
   onClose: () => void;
@@ -94,7 +94,7 @@ function ProviderKeyFormBody({
     name: ["api", "baseUrl", "apiKey", "label"],
   });
 
-  const testMutation = useTestProviderKeyInline();
+  const testMutation = useTestModelProviderKeyInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const canTest = !!api.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!providerKey);
 
@@ -313,7 +313,7 @@ function ProviderKeyFormBody({
   );
 }
 
-export function ProviderKeyFormModal({
+export function ModelProviderKeyFormModal({
   open,
   onClose,
   providerKey,
