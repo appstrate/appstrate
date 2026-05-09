@@ -213,8 +213,8 @@ test.describe("Default app vs custom app access", () => {
 
     const detailA = await resDetailA.json();
     const detailB = await resDetailB.json();
-    expect(detailA.agent?.config?.current?.mode).toBe("default-app-value");
-    expect(detailB.agent?.config?.current?.mode).toBe("custom-app-value");
+    expect(detailA.config?.current?.mode).toBe("default-app-value");
+    expect(detailB.config?.current?.mode).toBe("custom-app-value");
   });
 
   test("Installed packages list is per-app", async ({
