@@ -128,27 +128,33 @@ COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules     ./pack
 COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runtime-pi/node_modules
 
 # Workspace sources — `@appstrate/afps-runtime`, `@appstrate/mcp-transport`,
-# and `@appstrate/runner-pi` are source-only (Bun loads .ts directly, no
-# build step).
+# `@appstrate/runner-pi`, and `@appstrate/core` are source-only (Bun loads
+# .ts directly, no build step). `core` is consumed via `@appstrate/core/errors`
+# and `@appstrate/core/{form,naming,…}` by entrypoint.ts, extension-wrapper.ts,
+# env.ts, and the MCP upload helpers.
 COPY --chown=pi:pi packages/afps-runtime/src            ./packages/afps-runtime/src
 COPY --chown=pi:pi packages/afps-runtime/package.json   ./packages/afps-runtime/
 COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport/src
 COPY --chown=pi:pi packages/mcp-transport/package.json  ./packages/mcp-transport/
 COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
 COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
+COPY --chown=pi:pi packages/core/src                    ./packages/core/src
+COPY --chown=pi:pi packages/core/package.json           ./packages/core/
 
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
+ && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
         node_modules/@appstrate/afps-runtime \
         node_modules/@appstrate/mcp-transport \
-        node_modules/@appstrate/runner-pi
+        node_modules/@appstrate/runner-pi \
+        node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
 # in runtime-pi/node_modules per bun's hoisting decisions. Extension
