@@ -12,7 +12,6 @@
  */
 
 import { closeSync, openSync, writeSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
 import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
@@ -55,7 +54,12 @@ import {
   type InstallMode,
 } from "../lib/install/upgrade.ts";
 import type { EnvVars } from "../lib/install/secrets.ts";
-import { deriveProjectName, readProjectFile, writeProjectFile } from "../lib/install/project.ts";
+import {
+  defaultInstallDir,
+  deriveProjectName,
+  readProjectFile,
+  writeProjectFile,
+} from "../lib/install/project.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
@@ -78,7 +82,7 @@ export interface InstallOptions {
   /**
    * Skip every interactive prompt and accept the smart defaults:
    *   - tier: Docker-aware default (3 when Docker is reachable, else 0)
-   *   - dir: DEFAULT_INSTALL_DIR (~/appstrate)
+   *   - dir: `defaultInstallDir()` (~/appstrate)
    *   - port: 3000 (or --port / APPSTRATE_PORT)
    *   - upgrade confirm: proceed
    *   - Bun install confirm (Tier 0): install
@@ -93,7 +97,6 @@ export interface InstallOptions {
   autoConfirm?: boolean;
 }
 
-const DEFAULT_INSTALL_DIR = join(homedir(), "appstrate");
 const DEFAULT_PORT = 3000;
 const DEFAULT_MINIO_CONSOLE_PORT = 9001;
 
@@ -697,7 +700,7 @@ export async function resolveTier(
  * circuit without spawning a real askText prompt.
  */
 export interface DirResolverDeps {
-  /** When true, accept `DEFAULT_INSTALL_DIR` without prompting. */
+  /** When true, accept `defaultInstallDir()` without prompting. */
   autoConfirm?: boolean;
 }
 
@@ -711,7 +714,7 @@ export async function resolveDir(
 ): Promise<string> {
   // --yes path: skip askText (no raw mode, no Bun bug, works in CI).
   if (raw === undefined && deps.autoConfirm === true) {
-    return resolve(DEFAULT_INSTALL_DIR);
+    return resolve(defaultInstallDir());
   }
   if (raw === undefined && !process.stdin.isTTY) {
     throw new Error(
@@ -721,7 +724,7 @@ export async function resolveDir(
         "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
     );
   }
-  const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
+  const chosen = raw ?? (await askText("Install directory", defaultInstallDir()));
   // `tier0.ts` passes `dir` as an argv positional to `tar`, `curl`,
   // `git`, etc. without a shell wrapper, so interpolation injection is
   // already ruled out at the spawn layer. But newlines + NUL bytes in
@@ -1022,7 +1025,7 @@ async function installDockerTier(
   // (or remember) the derived hash. We pass `--dir` only when the
   // install isn't at the default `~/appstrate`, to keep the hint short
   // for the most common path.
-  const dirHint = resolve(dir) === resolve(DEFAULT_INSTALL_DIR) ? "" : ` --dir ${dir}`;
+  const dirHint = resolve(dir) === resolve(defaultInstallDir()) ? "" : ` --dir ${dir}`;
   outro(
     `Appstrate is running at ${appUrl}.\n` +
       `Manage the stack:\n` +

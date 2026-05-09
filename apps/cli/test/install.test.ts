@@ -178,7 +178,7 @@ describe("resolveTier (--yes / autoConfirm)", () => {
 });
 
 describe("resolveDir (--yes / autoConfirm)", () => {
-  it("returns DEFAULT_INSTALL_DIR without prompting when --dir is missing", async () => {
+  it("returns defaultInstallDir() without prompting when --dir is missing", async () => {
     // Under --yes we must never enter askText — same setRawMode bypass
     // story as resolveTier. The returned path must be absolute so the
     // tier0/tier123 spawn layer gets a stable cwd.
