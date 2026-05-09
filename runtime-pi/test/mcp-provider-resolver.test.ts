@@ -53,6 +53,13 @@ interface Captured {
 async function makeServer(opts: {
   responseBlock?: { type: "text"; text: string };
   isError?: boolean;
+  /**
+   * Optional `_meta` payload to surface alongside the result. Set this
+   * to test the resolver's upstream-meta consumption path
+   * (`{ "appstrate/upstream": { status, headers } }`). Tests that omit
+   * this assert the legacy fallback (synthesised 200 / `{}`).
+   */
+  meta?: Record<string, unknown>;
 }) {
   const captured: Captured = {};
   const tool: AppstrateToolDefinition = {
@@ -67,6 +74,7 @@ async function makeServer(opts: {
       return {
         content: [block],
         ...(opts.isError ? { isError: true } : {}),
+        ...(opts.meta ? { _meta: opts.meta } : {}),
       };
     }) as never,
   };
@@ -532,6 +540,131 @@ describe("McpProviderResolver — response handling", () => {
       expect(parsed.status).toBe(502);
       expect(parsed.body.kind).toBe("text");
       expect(parsed.body.text).toContain("upstream rate-limited");
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
+describe("McpProviderResolver — upstream meta propagation", () => {
+  it("uses real upstream status + headers when sidecar ships _meta", async () => {
+    const { pair, mcp } = await makeServer({
+      responseBlock: { type: "text", text: "" },
+      meta: {
+        "appstrate/upstream": {
+          status: 308,
+          headers: {
+            location: "https://api.example.com/upload/session-xyz",
+            "content-range": "bytes 0-4194303/8388608",
+          },
+        },
+      },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "POST", target: "https://api.example.com/upload" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      // 308 is the Google resumable mid-upload signal — must surface
+      // verbatim, not be synthesised to 200.
+      expect(parsed.status).toBe(308);
+      expect(parsed.headers.location).toBe("https://api.example.com/upload/session-xyz");
+      expect(parsed.headers["content-range"]).toBe("bytes 0-4194303/8388608");
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("falls back to legacy 200 / {} when sidecar does not ship _meta", async () => {
+    // Backwards-compatibility regression: an old sidecar that hasn't
+    // rolled the propagation change still produces a usable response.
+    const { pair, mcp } = await makeServer({
+      responseBlock: { type: "text", text: '{"ok":true}' },
+      // no meta
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.status).toBe(200);
+      // Headers carry the synthesised content-type only.
+      expect(parsed.body.kind).toBe("text");
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("surfaces upstream 4xx status (and Retry-After) on tool-level errors", async () => {
+    // Pre-meta behaviour returned 502 for every tool-level error; with
+    // meta we surface the real upstream code so the agent can react
+    // appropriately (Retry-After, rate limit, auth refresh).
+    const { pair, mcp } = await makeServer({
+      responseBlock: { type: "text", text: "rate limited" },
+      isError: true,
+      meta: {
+        "appstrate/upstream": {
+          status: 429,
+          headers: { "retry-after": "60" },
+        },
+      },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "POST", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.status).toBe(429);
+      expect(parsed.headers["retry-after"]).toBe("60");
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("ignores malformed _meta payloads (defence-in-depth)", async () => {
+    // A misbehaving sidecar shipping a non-object or a non-integer
+    // status must not crash the agent; the legacy fallback applies.
+    const { pair, mcp } = await makeServer({
+      responseBlock: { type: "text", text: '{"ok":true}' },
+      meta: {
+        "appstrate/upstream": "not-an-object",
+      },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      // Falls back to 200, no crash.
+      expect(parsed.status).toBe(200);
     } finally {
       await pair.close();
     }

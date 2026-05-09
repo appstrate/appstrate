@@ -29,6 +29,7 @@
       "https://www.googleapis.com/drive/**",
       "https://www.googleapis.com/upload/drive/**"
     ],
+    "uploadProtocols": ["google-resumable"],
     "availableScopes": [
       {
         "value": "https://www.googleapis.com/auth/drive.file",

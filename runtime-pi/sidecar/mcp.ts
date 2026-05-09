@@ -83,6 +83,7 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
 }
 import type { BlobStore } from "./blob-store.ts";
 import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
+import { UPSTREAM_META_KEY, buildUpstreamMeta, type UpstreamMeta } from "./upstream-meta.ts";
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
@@ -436,6 +437,13 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         source: `provider:${args.providerId}`,
+        // Always attach upstream `{ status, headers }` to the
+        // CallToolResult `_meta` payload so the agent-side resolver can
+        // surface real HTTP status / response headers (Location, ETag,
+        // Upload-Offset, …) to chunked-upload protocols. Old clients
+        // ignore unknown `_meta` keys per MCP spec — backwards-compat
+        // safe.
+        attachUpstreamMeta: true,
       });
     },
   };
@@ -614,6 +622,19 @@ interface ResponseToToolResultOptions {
    * very large dumps. Defaults to {@link INLINE_RESPONSE_THRESHOLD}.
    */
   inlineThreshold?: number;
+  /**
+   * When true, attach upstream `{ status, headers }` to the
+   * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
+   * Required for protocols where the agent must read response
+   * headers (`Location:` for resumable uploads, `ETag:` for S3
+   * multipart, `Upload-Offset:` for tus). Headers are filtered
+   * server-side via the allowlist in `./upstream-meta.ts`.
+   *
+   * Defaults to false on the legacy `provider_call` path so an
+   * existing agent connection sees no wire-format change. The new
+   * `provider_upload` Pi tool always passes `true`.
+   */
+  attachUpstreamMeta?: boolean;
 }
 
 /**
@@ -646,14 +667,40 @@ async function responseToToolResult(
       }
   >;
   isError?: boolean;
+  _meta?: Record<string, unknown>;
 }> {
+  // Capture upstream status + allowlisted headers BEFORE consuming the
+  // body. The Response object's `headers` view stays valid after read,
+  // but resolving the meta up-front keeps the code path linear and
+  // documents the dependency: meta is independent of content.
+  const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
+    ? buildUpstreamMeta(res)
+    : undefined;
+  const metaField: Record<string, unknown> | undefined = upstreamMeta
+    ? { [UPSTREAM_META_KEY]: upstreamMeta }
+    : undefined;
+
+  // Helper: attach `_meta` to every return path. The meta payload is
+  // identical across happy/error paths (it describes the upstream
+  // exchange, not the agent-side mapping), so we centralise the merge
+  // rather than duplicate the field in every literal below.
+  type Result = {
+    content: Array<
+      | { type: "text"; text: string }
+      | { type: "resource_link"; uri: string; name: string; mimeType?: string }
+    >;
+    isError?: boolean;
+    _meta?: Record<string, unknown>;
+  };
+  const withMeta = (r: Result): Result => (metaField ? { ...r, _meta: metaField } : r);
+
   const ct = res.headers.get("content-type") ?? "";
   const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
   const threshold = options.inlineThreshold ?? INLINE_RESPONSE_THRESHOLD;
 
   if (!isText) {
     if (!options.blobStore) {
-      return {
+      return withMeta({
         content: [
           {
             type: "text",
@@ -664,7 +711,7 @@ async function responseToToolResult(
           },
         ],
         isError: true,
-      };
+      });
     }
     // Spill to blob store and return a resource_link.
     // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE:
@@ -675,7 +722,7 @@ async function responseToToolResult(
     const binaryReadCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
     const bytes = await readBodyToBuffer(res, binaryReadCap);
     if (bytes === "exceeded") {
-      return {
+      return withMeta({
         content: [
           {
             type: "text",
@@ -685,7 +732,7 @@ async function responseToToolResult(
           },
         ],
         isError: true,
-      };
+      });
     }
     let record;
     try {
@@ -694,7 +741,7 @@ async function responseToToolResult(
         ...(options.source !== undefined ? { source: options.source } : {}),
       });
     } catch (err) {
-      return {
+      return withMeta({
         content: [
           {
             type: "text",
@@ -702,7 +749,7 @@ async function responseToToolResult(
           },
         ],
         isError: true,
-      };
+      });
     }
     const link = {
       type: "resource_link" as const,
@@ -710,7 +757,7 @@ async function responseToToolResult(
       name: options.source ?? "blob",
       mimeType: record.mimeType,
     };
-    return res.ok ? { content: [link] } : { content: [link], isError: true };
+    return withMeta(res.ok ? { content: [link] } : { content: [link], isError: true });
   }
 
   // Text — bound the read. We stream into a buffer rather than calling
@@ -739,9 +786,11 @@ async function responseToToolResult(
       });
     } catch {
       // Blob store full — fall back to inline truncation.
-      return res.ok
-        ? { content: [{ type: "text", text }] }
-        : { content: [{ type: "text", text }], isError: true };
+      return withMeta(
+        res.ok
+          ? { content: [{ type: "text", text }] }
+          : { content: [{ type: "text", text }], isError: true },
+      );
     }
     const link = {
       type: "resource_link" as const,
@@ -749,13 +798,13 @@ async function responseToToolResult(
       name: options.source ?? "blob",
       mimeType: record.mimeType,
     };
-    return res.ok ? { content: [link] } : { content: [link], isError: true };
+    return withMeta(res.ok ? { content: [link] } : { content: [link], isError: true });
   }
 
   if (!res.ok) {
-    return { content: [{ type: "text", text }], isError: true };
+    return withMeta({ content: [{ type: "text", text }], isError: true });
   }
-  return { content: [{ type: "text", text }] };
+  return withMeta({ content: [{ type: "text", text }] });
 }
 
 /**

@@ -35,16 +35,16 @@ The only path that decodes the request body to UTF-8 is the optional `substitute
 
 ## Size limits
 
-| Constant                     | Value  | Purpose                                                                |
-| ---------------------------- | ------ | ---------------------------------------------------------------------- |
-| `MAX_RESPONSE_SIZE`          | 256 KB | Default cap on upstream response bytes returned inline to the agent.   |
+| Constant                     | Value  | Purpose                                                                                                                                                                                                                                                  |
+| ---------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_RESPONSE_SIZE`          | 256 KB | Default cap on upstream response bytes returned inline to the agent.                                                                                                                                                                                     |
 | `ABSOLUTE_MAX_RESPONSE_SIZE` | 32 MB  | Ceiling on upstream bytes the sidecar buffers before refusing — only applied when a `BlobStore` is configured (otherwise `MAX_RESPONSE_SIZE` is the cap). Sized to cover real-world binaries (PDFs, images, archives) routed through the spillover path. |
-| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.     |
-| `STREAMING_THRESHOLD`        | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.     |
-| `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                       |
-| `INLINE_RESPONSE_THRESHOLD`  | 32 KB  | Above this responses spill to the `BlobStore` as a `resource_link`.    |
-| `OUTBOUND_TIMEOUT_MS`        | 30 s   | Upstream `provider_call` request timeout.                              |
-| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions). |
+| `MAX_SUBSTITUTE_BODY_SIZE`   | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.                                                                                                                                                                                       |
+| `STREAMING_THRESHOLD`        | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.                                                                                                                                                                                       |
+| `MAX_STREAMED_BODY_SIZE`     | 100 MB | Ceiling on streamed request and response bodies.                                                                                                                                                                                                         |
+| `INLINE_RESPONSE_THRESHOLD`  | 32 KB  | Above this responses spill to the `BlobStore` as a `resource_link`.                                                                                                                                                                                      |
+| `OUTBOUND_TIMEOUT_MS`        | 30 s   | Upstream `provider_call` request timeout.                                                                                                                                                                                                                |
+| `LLM_PROXY_TIMEOUT_MS`       | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions).                                                                                                                                                                                |
 
 When the upstream response exceeds the inline threshold, the bytes are stored in the run-scoped `BlobStore` (256 MB cap, ULID URIs, traversal-safe) and the tool returns a `resource_link` block. The agent reads the bytes on demand via `client.readResource({ uri })`.
 
@@ -61,8 +61,50 @@ The MCP `provider_call.body` schema accepts either `string` (text/JSON) or `{ fr
 
 The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver reads the response bytes (inline text block or `resource_link` → `resources/read`) and writes them to the workspace before handing a `{ kind: "file", path, size, sha256 }` summary back to the agent.
 
+## Upstream response-header propagation
+
+`provider_call` ships upstream HTTP `status` + an allowlist of response headers back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
+
+```jsonc
+{
+  "content": [{ "type": "text", "text": "<upstream body>" }],
+  "_meta": {
+    "appstrate/upstream": {
+      "status": 308,
+      "headers": { "location": "https://...", "content-range": "bytes=0-4194303" },
+    },
+  },
+}
+```
+
+The allowlist is defined in [`runtime-pi/sidecar/upstream-meta.ts`](./upstream-meta.ts) and includes every header the four chunked-upload protocols depend on (`Location`, `ETag`, `Content-Range`, `Upload-Offset`, `Upload-Length`, `Tus-Resumable`, …) plus standard caching headers (`Cache-Control`, `Last-Modified`, `Vary`, `Retry-After`). Credential-bearing headers (`Set-Cookie`, `Authorization`, `WWW-Authenticate`) are deliberately excluded.
+
+Old MCP clients ignore unknown `_meta` keys per spec — the propagation is wire-compatible.
+
+The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-meta.ts) re-applies the allowlist defensively, so a compromised sidecar can't slip an extra header through.
+
+## Chunked uploads (`provider_upload`)
+
+Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single `provider_call` envelope after base64 inflation. The runtime exposes a separate `provider_upload` Pi tool that orchestrates chunked uploads using the existing `provider_call` per chunk:
+
+| Protocol           | Providers                                             | Notes                                                              |
+| ------------------ | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| `google-resumable` | Drive, Cloud Storage (XML/JSON), YouTube, Photos      | Chunks must be 256-KiB aligned (last excepted)                     |
+| `s3-multipart`     | S3, R2, MinIO, Backblaze B2, Wasabi                   | Parts must be ≥5 MiB except the last; ETag aggregated via XML body |
+| `tus`              | Cloudflare Stream, Vimeo, tusd, IETF Resumable Drafts | PATCH with `Upload-Offset`; HEAD for resume (out of scope)         |
+| `ms-resumable`     | OneDrive, SharePoint, Microsoft Graph                 | Chunks must be 320-KiB aligned, ≤60 MiB                            |
+
+Critically, **the sidecar is not modified**: each chunk transits through the existing `provider_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
+
+A provider opts into `provider_upload` by declaring `definition.uploadProtocols: string[]` in its manifest. The tool is registered by the runtime only when ≥1 declared provider supports a known protocol; absent declarations, the tool isn't advertised.
+
+The resolver streams the file off disk via `Bun.file().stream()`, slices it into `partSizeBytes`-sized chunks, computes a streaming SHA-256 over the bytes committed to the wire, and surfaces it in the result so post-upload byte-equivalence is verifiable. End-to-end memory ceiling is one chunk in the runtime + one chunk in the sidecar — bounded by `MAX_REQUEST_BODY_SIZE` regardless of file size.
+
+Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues a best-effort DELETE on the upstream session URL (Drive `DELETE <session>`, S3 `AbortMultipartUpload`, tus `DELETE <files>`, MS Graph `DELETE <uploadUrl>`).
+
 ## What lives outside this README
 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/provider-tool.ts`](../../packages/afps-runtime/src/resolvers/provider-tool.ts).
+- The `provider_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/provider-upload-resolver.ts`](../mcp/provider-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
 - Sidecar pool lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
 - Provider auth modes (`oauth2` / `oauth1` / `api_key` / `basic` / `custom`) and the `credentialHeaderName` / `credentialHeaderPrefix` injection contract live in `@appstrate/connect`.
