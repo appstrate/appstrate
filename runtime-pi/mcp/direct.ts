@@ -29,6 +29,7 @@ import {
   type ProviderEventEmitter,
 } from "@appstrate/runner-pi";
 import { McpProviderResolver } from "./provider-resolver.ts";
+import { buildProviderUploadExtensionFactory } from "./provider-upload-extension.ts";
 
 // ─── MCP CallToolResult → Pi AgentToolResult adapter ──────────────────
 // Folded in from the prior `./mcp-result.ts` module (single consumer
@@ -150,6 +151,21 @@ export async function buildMcpDirectFactories(
       emitProvider: opts.emitProvider,
     });
     factories.push(...providerFactories);
+
+    // `provider_upload` is gated by the bundle's manifest declaring
+    // `definition.uploadProtocols` on at least one provider — when
+    // none does, the factory list is empty and the tool never
+    // appears in `tools/list`. This avoids advertising a capability
+    // the LLM can't actually use.
+    const uploadFactories = buildProviderUploadExtensionFactory({
+      bundle: opts.bundle,
+      providerRefs: refs,
+      mcp: opts.mcp,
+      runId: opts.runId,
+      workspace: opts.workspace,
+      emit: opts.emit,
+    });
+    factories.push(...uploadFactories);
   }
   factories.push(makeRunHistoryExtension(opts));
   factories.push(makeRecallMemoryExtension(opts));

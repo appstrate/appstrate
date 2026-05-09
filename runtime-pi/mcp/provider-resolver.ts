@@ -57,6 +57,7 @@ import {
   type Tool,
 } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
+import { readUpstreamMeta, synthesiseUpstreamResponse } from "./upstream-meta.ts";
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
 
@@ -175,6 +176,13 @@ export class McpProviderResolver implements ProviderResolver {
     req: ProviderCallRequest,
     ctx: ProviderCallContext,
   ): Promise<ProviderCallResponse> {
+    // Pull upstream `{ status, headers }` from the sidecar's `_meta`
+    // payload. Returns `undefined` against legacy sidecars that don't
+    // ship the meta — we then fall back to the historical synthesised
+    // 200 / `{}` so an old sidecar still works (read-only deploy
+    // ordering: roll the runtime first, sidecars later).
+    const upstream = readUpstreamMeta(result);
+
     if (result.isError) {
       // Concatenate every text block to give the agent a full error
       // message even when the sidecar split it across multiple blocks.
@@ -182,9 +190,18 @@ export class McpProviderResolver implements ProviderResolver {
         .map((c) => (c.type === "text" ? c.text : ""))
         .filter(Boolean)
         .join("\n");
+      // When the sidecar shipped upstream metadata, surface the real
+      // 4xx/5xx status (and any allowlisted headers — `Retry-After`,
+      // `WWW-Authenticate` is not on the allowlist by design) so the
+      // agent's reasoning sees the upstream code instead of a flat
+      // `502`. Pre-flight failures originating in the sidecar (cred
+      // fetch, URL allowlist) have no upstream status — keep `502` for
+      // those (the meta payload is absent).
+      const status = upstream?.status ?? 502;
+      const headers = upstream?.headers ?? {};
       return {
-        status: 502,
-        headers: {},
+        status,
+        headers,
         body: { kind: "text", text: text || "provider_call: upstream error" },
       };
     }
@@ -199,15 +216,13 @@ export class McpProviderResolver implements ProviderResolver {
     }
 
     if (block.type === "text") {
-      // The sidecar returns text bodies as-is for text/JSON/XML
-      // upstream content-types. The original Content-Type is not
-      // currently propagated over MCP, so we declare `text/plain;
-      // charset=utf-8` — `serializeFetchResponse` will route it to
-      // `body.kind === "text"` either way.
-      const fake = new Response(block.text, {
-        status: 200,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+      // Synthesise a Response carrying the upstream status + headers
+      // so `serializeFetchResponse` performs the same routing the
+      // CLI's HTTP-backed resolver would. The fallback Content-Type
+      // (`text/plain; charset=utf-8`) only takes effect when the
+      // upstream did not send one — we never override an explicit
+      // upstream `Content-Type`.
+      const fake = synthesiseUpstreamResponse(block.text, upstream, "text/plain; charset=utf-8");
       return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
     }
 
@@ -238,10 +253,7 @@ export class McpProviderResolver implements ProviderResolver {
           },
         };
       }
-      const fake = new Response(bytes, {
-        status: 200,
-        headers: { "content-type": mimeType },
-      });
+      const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
       return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
     }
 

@@ -336,6 +336,131 @@ describe("POST /mcp — tools/call provider_call", () => {
     expect(result.content[0]!.text).toContain("not authorized");
   });
 
+  it("attaches upstream { status, headers } via _meta on success (text body)", async () => {
+    // Header propagation regression test: the sidecar must surface
+    // upstream HTTP status + allowlisted response headers under
+    // `_meta['appstrate/upstream']` so the agent-side resolver can
+    // drive resumable-upload protocols (Location, ETag, Upload-Offset).
+    const fetchFn = mock(
+      async () =>
+        new Response('{"id":"abc"}', {
+          status: 201,
+          headers: {
+            "Content-Type": "application/json",
+            Location: "https://api.example.com/upload/session-123",
+            ETag: '"v1-abc"',
+            "Set-Cookie": "session=secret", // must NOT propagate
+          },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/items",
+          method: "POST",
+          body: '{"x":1}',
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as {
+      content: Array<{ text: string }>;
+      _meta?: Record<string, unknown>;
+    };
+    expect(result._meta).toBeDefined();
+    const meta = result._meta!["appstrate/upstream"] as {
+      status: number;
+      headers: Record<string, string>;
+    };
+    expect(meta.status).toBe(201);
+    expect(meta.headers.location).toBe("https://api.example.com/upload/session-123");
+    expect(meta.headers.etag).toBe('"v1-abc"');
+    expect(meta.headers["content-type"]).toBe("application/json");
+    // Cookie must not be propagated.
+    expect(meta.headers).not.toHaveProperty("set-cookie");
+    expect(meta.headers).not.toHaveProperty("authorization");
+  });
+
+  it("attaches upstream meta even on tool-level errors (4xx upstream)", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"error":"not found"}', {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "30",
+          },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/missing",
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as {
+      isError?: boolean;
+      _meta?: Record<string, unknown>;
+    };
+    // With propagation, a 404 surfaces as a tool-level error.
+    expect(result.isError).toBe(true);
+    const meta = result._meta!["appstrate/upstream"] as {
+      status: number;
+      headers: Record<string, string>;
+    };
+    expect(meta.status).toBe(404);
+    expect(meta.headers["retry-after"]).toBe("30");
+  });
+
+  it("attaches upstream meta when response spills to BlobStore (binary)", async () => {
+    // Even when content[] becomes a `resource_link` (binary spill),
+    // the meta payload still ships so the agent can read upstream
+    // status + headers without fetching the blob.
+    const fetchFn = mock(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "4",
+            ETag: '"bin-abc"',
+          },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/binary",
+        },
+      },
+    });
+    const result = res.json.result as {
+      content: Array<{ type: string; uri?: string }>;
+      _meta?: Record<string, unknown>;
+    };
+    expect(result.content[0]!.type).toBe("resource_link");
+    const meta = result._meta!["appstrate/upstream"] as {
+      status: number;
+      headers: Record<string, string>;
+    };
+    expect(meta.status).toBe(200);
+    expect(meta.headers.etag).toBe('"bin-abc"');
+  });
+
   it("spills non-text upstream responses to a resource_link", async () => {
     // Binary upstream responses are stored in a run-scoped blob cache
     // and returned as a `resource_link` that the agent can read on

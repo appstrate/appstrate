@@ -56,6 +56,7 @@ export {
   providerCallRequestJsonSchema,
   resolveBodyForFetch,
   resolveBodyStream,
+  resolveSafeFile,
   resolveSafePath,
   serializeFetchResponse,
   type MakeProviderToolOptions,
