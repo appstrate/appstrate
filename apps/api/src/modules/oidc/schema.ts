@@ -65,11 +65,12 @@ export const jwks = pgTable("jwks", {
 // official CLI. One row per in-flight or approved device code. `deviceCode`
 // is the opaque verifier the CLI polls with; `userCode` (`XXXX-XXXX`) is
 // the short code the user types into `/activate`. `status` transitions:
-// `pending` → `approved` | `denied` (terminal) → row deleted by BA's
-// `/device/token` handler once the token is minted. The realm/level guard
-// runs in `oidcGuardsPlugin` on `/device/approve` (see `auth/guards.ts`)
-// because the BA plugin bypasses `@better-auth/oauth-provider` — its
-// default session-mint path doesn't consult `oauth_clients` metadata.
+// `pending` → `approved` | `denied` (terminal) → row deleted by the
+// `/cli/token` handler (issue #165) once the JWT + refresh pair is
+// minted. The realm/level guard runs in `oidcGuardsPlugin` on
+// `/device/approve` (see `auth/guards.ts`) because the BA plugin
+// bypasses `@better-auth/oauth-provider` — its default session-mint
+// path doesn't consult `oauth_clients` metadata.
 
 export const deviceCode = pgTable("device_codes", {
   id: text("id").primaryKey(),

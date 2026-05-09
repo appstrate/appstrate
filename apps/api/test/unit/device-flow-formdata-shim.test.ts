@@ -3,8 +3,8 @@
 /**
  * Unit tests for `maybeTransformDeviceFlowFormBody` — the platform-level
  * shim that rewrites `application/x-www-form-urlencoded` bodies on
- * `/api/auth/device/code`, `/api/auth/device/token`, `/api/auth/cli/token`
- * and `/api/auth/cli/revoke` into JSON before Better Auth's `better-call`
+ * `/api/auth/device/code`, `/api/auth/cli/token`, and
+ * `/api/auth/cli/revoke` into JSON before Better Auth's `better-call`
  * router (which only accepts JSON) sees the request. Belt-and-braces
  * coverage for the pure transform — the end-to-end wiring is covered by
  * the integration suite.
@@ -34,20 +34,6 @@ describe("maybeTransformDeviceFlowFormBody", () => {
       client_id: "appstrate-cli",
       scope: "openid profile email",
     });
-  });
-
-  it("rewrites form-urlencoded → JSON on /api/auth/device/token", async () => {
-    const original = formRequest("http://host/api/auth/device/token", {
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      device_code: "dc_123",
-      client_id: "appstrate-cli",
-    });
-    const transformed = await maybeTransformDeviceFlowFormBody(original);
-    expect(transformed.headers.get("content-type")).toBe("application/json");
-    const body = (await transformed.json()) as Record<string, string>;
-    expect(body.grant_type).toBe("urn:ietf:params:oauth:grant-type:device_code");
-    expect(body.device_code).toBe("dc_123");
-    expect(body.client_id).toBe("appstrate-cli");
   });
 
   it("preserves JSON bodies untouched (tolerant server also accepts JSON)", async () => {
@@ -117,7 +103,7 @@ describe("maybeTransformDeviceFlowFormBody", () => {
   });
 
   it("is case-insensitive on the content-type match", async () => {
-    const original = new Request("http://host/api/auth/device/token", {
+    const original = new Request("http://host/api/auth/cli/token", {
       method: "POST",
       headers: { "Content-Type": "Application/X-WWW-Form-UrlEncoded" },
       body: new URLSearchParams({ client_id: "cli" }).toString(),

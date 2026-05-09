@@ -8,7 +8,7 @@
  *   2. Ask for instance URL if not passed via `--instance`.
  *   3. POST /api/auth/device/code → receive user_code + verification URL.
  *   4. Print the code in the terminal + open the browser.
- *   5. Poll /api/auth/device/token until approval.
+ *   5. Poll /api/auth/cli/token until approval.
  *   6. Store the JWT access + rotating refresh pair in the keyring
  *      (issue #165); decode `sub` + `email` from the JWT payload
  *      (via `lib/jwt-identity.ts`) to capture userId + email;

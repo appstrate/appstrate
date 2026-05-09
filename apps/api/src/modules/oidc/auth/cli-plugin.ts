@@ -3,10 +3,10 @@
 /**
  * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165, #251).
  *
- * Exposes the rotating-refresh-token surface that replaces BA's default
- * session-minting `/device/token`. Mounted alongside the existing
- * `deviceAuthorization()` plugin — the 2.x CLI polls `/cli/token` which
- * returns a JWT + rotating refresh-token pair.
+ * Exposes the rotating-refresh-token surface used by the 2.x CLI.
+ * Mounted alongside the existing `deviceAuthorization()` plugin — the
+ * CLI polls `/cli/token` which returns a JWT + rotating refresh-token
+ * pair.
  *
  * Endpoints:
  *

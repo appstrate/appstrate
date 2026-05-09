@@ -15,7 +15,7 @@
  *     gates, not on the id.
  *   - **Public client** — `type="native"`, `tokenEndpointAuthMethod="none"`,
  *     no stored `client_secret`. The device grant uses `client_id` alone at
- *     `/device/token` and relies on the server-enforced `device_code` as
+ *     `/cli/token` and relies on the server-enforced `device_code` as
  *     its proof-of-possession.
  *   - **Device + refresh grants only**. `authorization_code` is omitted
  *     because the CLI never performs a browser redirect (the device flow

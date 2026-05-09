@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Rate-limit regressions on the `/oauth2/token` and `/device/token`
- * endpoints.
+ * Rate-limit regressions on the `/oauth2/token` endpoint and on BA's
+ * `GET /device?user_code=…` user_code probe.
  *
  * Two axes:
  *   1. **Per-IP** — the existing `enforceRateLimit` pipes every request

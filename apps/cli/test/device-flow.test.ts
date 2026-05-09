@@ -251,10 +251,9 @@ describe("pollDeviceFlow", () => {
       interval: 0, // skip real waits
       expiresIn: 60,
     });
-    // Issue #165: polling hits the new `/cli/token` endpoint, not the
-    // legacy `/device/token`. The response shape widens with
-    // refresh_token + refresh_expires_in — both surface on the parsed
-    // return value.
+    // Issue #165: polling hits `/cli/token`, which returns
+    // refresh_token + refresh_expires_in alongside the access_token —
+    // all three surface on the parsed return value.
     expect(capturedUrl).toBe("https://app/api/auth/cli/token");
     expect(result).toEqual({
       accessToken: "tok",
@@ -267,8 +266,8 @@ describe("pollDeviceFlow", () => {
   });
 
   it("surfaces missing refresh_token as undefined (server downgrade signal)", async () => {
-    // A pre-2.x platform would keep the old `/device/token` response
-    // shape without a refresh_token. The CLI `commands/login.ts`
+    // A platform without the `/cli/token` endpoint (pre-issue-#165)
+    // would respond without a refresh_token. The CLI `commands/login.ts`
     // refuses to persist such a response — here we verify the parser
     // faithfully reports `undefined` so that higher-level code can act
     // on it, rather than silently coerce to an empty string.
