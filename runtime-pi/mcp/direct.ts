@@ -26,9 +26,9 @@ import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transpor
 import {
   buildProviderCallExtensionFactory,
   readProviderRefs,
-  RECALL_MEMORY_INJECTED_TOOL,
-  RUN_HISTORY_INJECTED_TOOL,
+  RUNTIME_INJECTED_TOOLS,
   type ProviderEventEmitter,
+  type RuntimeInjectedTool,
 } from "@appstrate/runner-pi";
 import { McpProviderResolver } from "./provider-resolver.ts";
 
@@ -75,12 +75,6 @@ function callToolResultToPi(result: CallToolResult): PiToolResult {
 }
 
 const PROVIDER_CALL_TOOL_NAME = "provider_call";
-// Pull the canonical names + descriptions from the single-source-of-truth
-// runtime-injected tool descriptors so the Pi-tool registration here,
-// the platform prompt's `### Tools` listing, and the in-prompt usage doc
-// stay in lockstep automatically.
-const RUN_HISTORY_TOOL_NAME = RUN_HISTORY_INJECTED_TOOL.name;
-const RECALL_MEMORY_TOOL_NAME = RECALL_MEMORY_INJECTED_TOOL.name;
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -132,10 +126,12 @@ export async function buildMcpDirectFactories(
   const providerIds = refs.map((r) => r.name);
 
   // Discover the sidecar's tool surface so we can fail fast if the
-  // expected tools are missing.
+  // expected tools are missing. The expected set is derived from the
+  // shared `RUNTIME_INJECTED_TOOLS` descriptor list — adding a new
+  // runtime tool to that list automatically updates this guard.
   const { tools } = await opts.mcp.listTools();
   const advertised = new Set(tools.map((t) => t.name));
-  const expected = [RUN_HISTORY_TOOL_NAME, RECALL_MEMORY_TOOL_NAME];
+  const expected = RUNTIME_INJECTED_TOOLS.map((t) => t.name);
   if (providerIds.length > 0) expected.push(PROVIDER_CALL_TOOL_NAME);
   for (const name of expected) {
     if (!advertised.has(name)) {
@@ -157,83 +153,52 @@ export async function buildMcpDirectFactories(
     });
     factories.push(...providerFactories);
   }
-  factories.push(makeRunHistoryExtension(opts));
-  factories.push(makeRecallMemoryExtension(opts));
+  for (const tool of RUNTIME_INJECTED_TOOLS) {
+    factories.push(makeMcpForwardExtension(tool, opts));
+  }
   return factories;
 }
 
-function makeRunHistoryExtension(opts: BuildMcpDirectFactoriesOptions): ExtensionFactory {
+/**
+ * Generic extension factory for MCP-forwarding runtime-injected tools.
+ *
+ * One descriptor → one Pi-tool registration that:
+ *   1. emits a `<tool.name>.called` event with `toolCallId`/`runId`,
+ *   2. forwards the call verbatim to the sidecar via MCP `tools/call`,
+ *   3. emits a `<tool.name>.completed` event with duration + isError,
+ *   4. adapts the MCP `CallToolResult` to Pi's `AgentToolResult` shape.
+ *
+ * Pulling these into a single factory means adding a new runtime-
+ * injected tool requires zero edits here — append to
+ * `RUNTIME_INJECTED_TOOLS` and the registration loop above picks it up.
+ */
+function makeMcpForwardExtension(
+  tool: RuntimeInjectedTool,
+  opts: BuildMcpDirectFactoriesOptions,
+): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
-      name: RUN_HISTORY_TOOL_NAME,
-      label: RUN_HISTORY_TOOL_NAME,
-      description: RUN_HISTORY_INJECTED_TOOL.description,
-      parameters: Type.Unsafe<Record<string, unknown>>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-          fields: {
-            type: "array",
-            items: { type: "string", enum: ["checkpoint", "result"] },
-            uniqueItems: true,
-          },
-        },
-      }),
+      name: tool.name,
+      label: tool.name,
+      description: tool.description,
+      // `parameters` is plain JSON Schema in the descriptor; Pi accepts
+      // it through `Type.Unsafe`, which preserves the schema verbatim
+      // for the LLM tool advertisement without reinterpreting types.
+      parameters: Type.Unsafe<Record<string, unknown>>(tool.parameters as Record<string, unknown>),
       async execute(toolCallId, params, signal) {
         const startedAt = Date.now();
         opts.emit({
-          type: "run_history.called",
+          type: `${tool.name}.called`,
           runId: opts.runId,
           toolCallId,
           timestamp: startedAt,
         });
         const result = await opts.mcp.callTool(
-          { name: RUN_HISTORY_TOOL_NAME, arguments: (params as Record<string, unknown>) ?? {} },
+          { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
           { ...(signal ? { signal } : {}) },
         );
         opts.emit({
-          type: "run_history.completed",
-          runId: opts.runId,
-          toolCallId,
-          durationMs: Date.now() - startedAt,
-          isError: result.isError === true,
-          timestamp: Date.now(),
-        });
-        return callToolResultToPi(result);
-      },
-    });
-  };
-}
-
-function makeRecallMemoryExtension(opts: BuildMcpDirectFactoriesOptions): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
-    pi.registerTool({
-      name: RECALL_MEMORY_TOOL_NAME,
-      label: RECALL_MEMORY_TOOL_NAME,
-      description: RECALL_MEMORY_INJECTED_TOOL.description,
-      parameters: Type.Unsafe<Record<string, unknown>>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          q: { type: "string", minLength: 1, maxLength: 2000 },
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-        },
-      }),
-      async execute(toolCallId, params, signal) {
-        const startedAt = Date.now();
-        opts.emit({
-          type: "recall_memory.called",
-          runId: opts.runId,
-          toolCallId,
-          timestamp: startedAt,
-        });
-        const result = await opts.mcp.callTool(
-          { name: RECALL_MEMORY_TOOL_NAME, arguments: (params as Record<string, unknown>) ?? {} },
-          { ...(signal ? { signal } : {}) },
-        );
-        opts.emit({
-          type: "recall_memory.completed",
+          type: `${tool.name}.completed`,
           runId: opts.runId,
           toolCallId,
           durationMs: Date.now() - startedAt,

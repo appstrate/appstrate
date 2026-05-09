@@ -37,7 +37,17 @@
 /**
  * Descriptor for a tool wired by the runtime container outside of any
  * AFPS bundle package. Mirrors the shape of `PlatformPromptTool` plus
- * a `doc` carrying the equivalent of a bundle's `TOOL.md`.
+ * a `doc` carrying the equivalent of a bundle's `TOOL.md`, plus a
+ * `parameters` JSON Schema describing the tool's call surface.
+ *
+ * Together these four fields are sufficient for both consumers:
+ *   - The platform prompt builder uses `id`/`name`/`description`/`doc`
+ *     to extend `availableTools` and `toolDocs`.
+ *   - The runtime container uses `name`/`description`/`parameters` to
+ *     register a generic MCP-forwarding Pi tool.
+ *
+ * Adding a new runtime-injected tool means appending one entry below.
+ * No edits anywhere else.
  */
 export interface RuntimeInjectedTool {
   /** Stable tool id — same string used as `id` and `name` since these tools have no package identity. */
@@ -46,6 +56,14 @@ export interface RuntimeInjectedTool {
   readonly name: string;
   /** Short description shown in the `### Tools` listing and in MCP tool advertisements. */
   readonly description: string;
+  /**
+   * JSON Schema for the tool's `arguments` payload (i.e. the LLM-facing
+   * call surface). Used by the runtime container to register the Pi
+   * tool with the same shape the sidecar advertises via MCP. Plain
+   * JSON Schema so this module stays free of Pi-AI / typebox imports —
+   * the runtime wraps it with `Type.Unsafe(schema)` at registration.
+   */
+  readonly parameters: Readonly<Record<string, unknown>>;
   /**
    * `TOOL.md`-equivalent doc: a complete prose fragment that teaches
    * the LLM how to use the tool — parameters, scoping, common
@@ -80,20 +98,31 @@ Pair with \`note\` (from \`@appstrate/note\`) to write new entries: \`note\` sav
 /**
  * Descriptor for `run_history`. Mirrors `runtime-pi/sidecar/mcp.ts`'s
  * registration; if the sidecar's parameter schema or behaviour
- * changes, update both this descriptor and the sidecar in lockstep.
+ * changes, update this descriptor and the sidecar in lockstep.
  */
 export const RUN_HISTORY_INJECTED_TOOL: RuntimeInjectedTool = {
   id: "run_history",
   name: "run_history",
   description:
     "Fetch metadata and optionally checkpoint/result of recent past runs (current run excluded).",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      fields: {
+        type: "array",
+        items: { type: "string", enum: ["checkpoint", "result"] },
+        uniqueItems: true,
+      },
+    },
+  },
   doc: RUN_HISTORY_DOC,
 };
 
 /**
- * Descriptor for `recall_memory`. The sidecar advertises a richer
- * substring-match description; we keep the same wording so MCP-list
- * output matches the Pi-tool registration verbatim.
+ * Descriptor for `recall_memory`. The sidecar advertises the same
+ * wording so MCP-list output matches the Pi-tool registration verbatim.
  */
 export const RECALL_MEMORY_INJECTED_TOOL: RuntimeInjectedTool = {
   id: "recall_memory",
@@ -102,6 +131,14 @@ export const RECALL_MEMORY_INJECTED_TOOL: RuntimeInjectedTool = {
     "Search the agent's archive memories — durable facts and learnings from past runs that " +
     "are NOT in the system prompt by default. Pass `q` to filter by case-insensitive " +
     "substring; omit it for the most recent archive memories.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      q: { type: "string", minLength: 1, maxLength: 2000 },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+    },
+  },
   doc: RECALL_MEMORY_DOC,
 };
 
