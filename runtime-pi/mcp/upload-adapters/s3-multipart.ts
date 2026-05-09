@@ -61,7 +61,8 @@ export const s3MultipartAdapter: UploadAdapter = {
     if (partSizeBytes < MIN_PART_SIZE) {
       throw new Error(
         `s3-multipart: partSizeBytes ${partSizeBytes} below S3 minimum ${MIN_PART_SIZE} (5 MiB) ` +
-          `for multi-part uploads. Use ≥5 MiB or upload the whole file in a single PUT (responseMode.* paths).`,
+          `for multi-part uploads. Use ≥5 MiB, or send the whole file in one shot via ` +
+          `provider_call with body: { fromFile: "..." } when it fits under MAX_REQUEST_BODY_SIZE.`,
       );
     }
     return partSizeBytes;
