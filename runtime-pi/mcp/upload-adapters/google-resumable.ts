@@ -31,12 +31,13 @@
  *     `metadata` map that the agent may pass through verbatim.
  */
 
-import type {
-  AdapterContext,
-  ChunkInfo,
-  SessionState,
-  UploadAdapter,
-  UploadResult,
+import {
+  UploadError,
+  type AdapterContext,
+  type ChunkInfo,
+  type SessionState,
+  type UploadAdapter,
+  type UploadResult,
 } from "./types.ts";
 
 const GRID_BYTES = 256 * 1024; // 256 KiB
@@ -100,13 +101,21 @@ export const googleResumableAdapter: UploadAdapter = {
       body: metadataJson,
     });
     if (res.status < 200 || res.status >= 300) {
-      throw new InitFailureError(res.status, res.headers, res.body);
+      throw new UploadError(
+        `google-resumable: init failed (status ${res.status})`,
+        res.status,
+        res.headers,
+        res.body,
+      );
     }
     const sessionUrl = res.headers["location"];
     if (!sessionUrl) {
-      throw new Error(
+      throw new UploadError(
         `google-resumable: init response missing 'Location' header (got status ${res.status}). ` +
           `The provider's authorizedUris must allow the upload session URL — verify the manifest.`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     return {
@@ -142,11 +151,21 @@ export const googleResumableAdapter: UploadAdapter = {
     // explicitly out of scope per ISSUE-283 §"Out of scope").
     if (chunk.final) {
       if (res.status !== 200 && res.status !== 201) {
-        throw new ChunkFailureError(chunk.index, res.status, res.headers, res.body);
+        throw new UploadError(
+          `google-resumable: chunk ${chunk.index} (final) failed (status ${res.status})`,
+          res.status,
+          res.headers,
+          res.body,
+        );
       }
     } else {
       if (res.status !== 308) {
-        throw new ChunkFailureError(chunk.index, res.status, res.headers, res.body);
+        throw new UploadError(
+          `google-resumable: chunk ${chunk.index} failed (status ${res.status}; expected 308)`,
+          res.status,
+          res.headers,
+          res.body,
+        );
       }
     }
     return {
@@ -159,15 +178,7 @@ export const googleResumableAdapter: UploadAdapter = {
 
   async finalize(state: SessionState, _ctx: AdapterContext): Promise<UploadResult> {
     const s = state as GoogleSessionState;
-    return {
-      ok: true,
-      status: s.lastStatus,
-      headers: s.lastHeaders,
-      body: s.lastBody,
-      // Filled in by the resolver — adapter doesn't carry the SHA.
-      sha256: "",
-      size: 0,
-    };
+    return { ok: true, status: s.lastStatus, headers: s.lastHeaders, body: s.lastBody };
   },
 
   async abort(state: SessionState, ctx: AdapterContext): Promise<void> {
@@ -184,31 +195,3 @@ export const googleResumableAdapter: UploadAdapter = {
     }
   },
 };
-
-/**
- * Errors thrown by the adapter — captured by the resolver and
- * converted into structured `UploadFailure` results so the agent
- * sees a uniform shape regardless of which step failed.
- */
-export class InitFailureError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly headers: Record<string, string>,
-    public readonly body: string,
-  ) {
-    super(`google-resumable: init failed (status ${status})`);
-    this.name = "InitFailureError";
-  }
-}
-
-export class ChunkFailureError extends Error {
-  constructor(
-    public readonly chunkIndex: number,
-    public readonly status: number,
-    public readonly headers: Record<string, string>,
-    public readonly body: string,
-  ) {
-    super(`google-resumable: chunk ${chunkIndex} failed (status ${status})`);
-    this.name = "ChunkFailureError";
-  }
-}

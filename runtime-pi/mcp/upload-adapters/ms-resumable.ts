@@ -25,12 +25,13 @@
  *     recommended as a default; 60 MiB is the maximum per chunk.
  */
 
-import type {
-  AdapterContext,
-  ChunkInfo,
-  SessionState,
-  UploadAdapter,
-  UploadResult,
+import {
+  UploadError,
+  type AdapterContext,
+  type ChunkInfo,
+  type SessionState,
+  type UploadAdapter,
+  type UploadResult,
 } from "./types.ts";
 
 const GRID_BYTES = 320 * 1024; // 320 KiB
@@ -85,21 +86,32 @@ export const msResumableAdapter: UploadAdapter = {
       body,
     });
     if (res.status < 200 || res.status >= 300) {
-      throw new Error(
+      throw new UploadError(
         `ms-resumable: createUploadSession failed (status ${res.status}): ${res.body.slice(0, 256)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     let parsed: { uploadUrl?: string };
     try {
       parsed = JSON.parse(res.body);
     } catch (err) {
-      throw new Error(
+      throw new UploadError(
         `ms-resumable: createUploadSession returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     const uploadUrl = parsed.uploadUrl;
     if (!uploadUrl || typeof uploadUrl !== "string") {
-      throw new Error(`ms-resumable: createUploadSession response missing uploadUrl`);
+      throw new UploadError(
+        `ms-resumable: createUploadSession response missing uploadUrl`,
+        res.status,
+        res.headers,
+        res.body,
+      );
     }
     return {
       uploadUrl,
@@ -128,8 +140,11 @@ export const msResumableAdapter: UploadAdapter = {
     });
     if (chunk.final) {
       if (res.status !== 200 && res.status !== 201) {
-        throw new Error(
+        throw new UploadError(
           `ms-resumable: final chunk failed (status ${res.status}; expected 200/201): ${res.body.slice(0, 256)}`,
+          res.status,
+          res.headers,
+          res.body,
         );
       }
     } else {
@@ -138,8 +153,11 @@ export const msResumableAdapter: UploadAdapter = {
       // sequential and never gets out of sync — but we do require
       // 202 so a non-202 mid-chunk fails fast.
       if (res.status !== 202) {
-        throw new Error(
+        throw new UploadError(
           `ms-resumable: mid-chunk PUT failed (status ${res.status}; expected 202): ${res.body.slice(0, 256)}`,
+          res.status,
+          res.headers,
+          res.body,
         );
       }
     }
@@ -153,14 +171,7 @@ export const msResumableAdapter: UploadAdapter = {
 
   async finalize(state: SessionState, _ctx: AdapterContext): Promise<UploadResult> {
     const s = state as MsSessionState;
-    return {
-      ok: true,
-      status: s.lastStatus,
-      headers: s.lastHeaders,
-      body: s.lastBody,
-      sha256: "",
-      size: 0,
-    };
+    return { ok: true, status: s.lastStatus, headers: s.lastHeaders, body: s.lastBody };
   },
 
   async abort(state: SessionState, ctx: AdapterContext): Promise<void> {

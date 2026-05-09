@@ -133,21 +133,21 @@ export interface ChunkInfo {
 export type SessionState = unknown;
 
 /**
- * Successful upload outcome. The `body` is the upstream's final
- * response body (Drive: file metadata JSON; S3:
- * `CompleteMultipartUploadResult` XML; tus: 204 empty; MS Graph:
+ * Successful upload outcome surfaced by `adapter.finalize`. The `body`
+ * is the upstream's final response body (Drive: file metadata JSON;
+ * S3: `CompleteMultipartUploadResult` XML; tus: 204 empty; MS Graph:
  * DriveItem JSON). The resolver returns it verbatim to the agent so
  * the LLM can extract whatever it needs (file ID, ETag, web URL).
+ *
+ * `sha256` and `size` are derived by the resolver from the bytes
+ * committed to the wire — the adapter itself never sees the running
+ * digest, so they are NOT part of this contract.
  */
 export interface UploadSuccess {
   ok: true;
   status: number;
   headers: Record<string, string>;
   body: string;
-  /** SHA-256 (hex) of the full file bytes as transmitted. */
-  sha256: string;
-  /** Total bytes uploaded. */
-  size: number;
 }
 
 export interface UploadFailure {
@@ -163,6 +163,27 @@ export interface UploadFailure {
 }
 
 export type UploadResult = UploadSuccess | UploadFailure;
+
+/**
+ * Shared error class thrown by every adapter on init / chunk failures.
+ *
+ * The resolver's `failure()` helper reads `status`, `headers`, and
+ * `body` off the thrown thing to surface upstream context to the
+ * agent. Without a structured carrier the agent gets only the message
+ * string and `status: 0 / headers: {}`. All four adapters use this so
+ * the agent UX is identical regardless of which protocol failed.
+ */
+export class UploadError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly headers: Record<string, string>,
+    public readonly body: string,
+  ) {
+    super(message);
+    this.name = "UploadError";
+  }
+}
 
 export interface UploadAdapter {
   /** Stable protocol identifier — matches the Pi tool's enum. */

@@ -26,12 +26,13 @@
  *     (100 MB), so we never hit it.
  */
 
-import type {
-  AdapterContext,
-  ChunkInfo,
-  SessionState,
-  UploadAdapter,
-  UploadResult,
+import {
+  UploadError,
+  type AdapterContext,
+  type ChunkInfo,
+  type SessionState,
+  type UploadAdapter,
+  type UploadResult,
 } from "./types.ts";
 
 const MIN_PART_SIZE = 5 * 1024 * 1024; // 5 MiB — S3 protocol minimum
@@ -83,14 +84,20 @@ export const s3MultipartAdapter: UploadAdapter = {
       headers,
     });
     if (res.status < 200 || res.status >= 300) {
-      throw new Error(
+      throw new UploadError(
         `s3-multipart: CreateMultipartUpload failed (status ${res.status}): ${truncateForError(res.body)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     const uploadId = parseUploadId(res.body);
     if (!uploadId) {
-      throw new Error(
+      throw new UploadError(
         `s3-multipart: CreateMultipartUpload response missing <UploadId>: ${truncateForError(res.body)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     return { uploadId, parts: [] } satisfies S3SessionState;
@@ -123,14 +130,20 @@ export const s3MultipartAdapter: UploadAdapter = {
       body: chunk.bytes,
     });
     if (res.status < 200 || res.status >= 300) {
-      throw new Error(
+      throw new UploadError(
         `s3-multipart: UploadPart ${partNumber} failed (status ${res.status}): ${truncateForError(res.body)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     const etag = res.headers["etag"];
     if (!etag) {
-      throw new Error(
+      throw new UploadError(
         `s3-multipart: UploadPart ${partNumber} response missing ETag header (status ${res.status})`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     return {
@@ -163,14 +176,7 @@ export const s3MultipartAdapter: UploadAdapter = {
         body: res.body,
       };
     }
-    return {
-      ok: true,
-      status: res.status,
-      headers: res.headers,
-      body: res.body,
-      sha256: "",
-      size: 0,
-    };
+    return { ok: true, status: res.status, headers: res.headers, body: res.body };
   },
 
   async abort(state: SessionState, ctx: AdapterContext): Promise<void> {

@@ -19,21 +19,6 @@ export const ADAPTERS: Readonly<Record<UploadProtocol, UploadAdapter>> = {
   "ms-resumable": msResumableAdapter,
 };
 
-/**
- * Look up an adapter by protocol identifier. Throws when the
- * protocol is unknown so the resolver fails fast — the Pi tool's
- * input schema enum already constrains the LLM, so a miss here
- * indicates a code-path bypass.
- */
-export function getAdapter(protocol: UploadProtocol): UploadAdapter {
-  const adapter = ADAPTERS[protocol];
-  if (!adapter) {
-    throw new Error(`No upload adapter registered for protocol '${protocol}'`);
-  }
-  return adapter;
-}
-
-export { googleResumableAdapter, msResumableAdapter, s3MultipartAdapter, tusAdapter };
 export type {
   UploadAdapter,
   UploadProtocol,
@@ -47,4 +32,4 @@ export type {
   AdapterProviderCallRequest,
   AdapterProviderResponse,
 } from "./types.ts";
-export { UPLOAD_PROTOCOLS } from "./types.ts";
+export { UPLOAD_PROTOCOLS, UploadError } from "./types.ts";

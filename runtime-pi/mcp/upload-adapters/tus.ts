@@ -24,12 +24,13 @@
  * default to stay well within the sidecar envelope.
  */
 
-import type {
-  AdapterContext,
-  ChunkInfo,
-  SessionState,
-  UploadAdapter,
-  UploadResult,
+import {
+  UploadError,
+  type AdapterContext,
+  type ChunkInfo,
+  type SessionState,
+  type UploadAdapter,
+  type UploadResult,
 } from "./types.ts";
 
 const DEFAULT_PART_SIZE = 4 * 1024 * 1024;
@@ -74,13 +75,21 @@ export const tusAdapter: UploadAdapter = {
       headers,
     });
     if (res.status !== 201) {
-      throw new Error(
+      throw new UploadError(
         `tus: Create failed (status ${res.status}; expected 201): ${res.body.slice(0, 256)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     const sessionUrl = res.headers["location"];
     if (!sessionUrl) {
-      throw new Error(`tus: Create response missing Location header`);
+      throw new UploadError(
+        `tus: Create response missing Location header`,
+        res.status,
+        res.headers,
+        res.body,
+      );
     }
     return {
       sessionUrl: resolveLocation(ctx.target, sessionUrl),
@@ -117,19 +126,30 @@ export const tusAdapter: UploadAdapter = {
       body: chunk.bytes,
     });
     if (res.status !== 204 && res.status !== 200) {
-      throw new Error(
+      throw new UploadError(
         `tus: PATCH failed (status ${res.status}; expected 204): ${res.body.slice(0, 256)}`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     const newOffsetStr = res.headers["upload-offset"];
     const newOffset = newOffsetStr !== undefined ? parseInt(newOffsetStr, 10) : NaN;
     if (!Number.isFinite(newOffset)) {
-      throw new Error(`tus: PATCH response missing/invalid Upload-Offset (got ${newOffsetStr})`);
+      throw new UploadError(
+        `tus: PATCH response missing/invalid Upload-Offset (got ${newOffsetStr})`,
+        res.status,
+        res.headers,
+        res.body,
+      );
     }
     if (newOffset !== chunk.end + 1) {
-      throw new Error(
+      throw new UploadError(
         `tus: server advanced to offset ${newOffset}, expected ${chunk.end + 1}. ` +
           `Refusing to continue with desynced state.`,
+        res.status,
+        res.headers,
+        res.body,
       );
     }
     return {
@@ -152,14 +172,7 @@ export const tusAdapter: UploadAdapter = {
         body: s.lastBody,
       };
     }
-    return {
-      ok: true,
-      status: s.lastStatus,
-      headers: s.lastHeaders,
-      body: s.lastBody,
-      sha256: "",
-      size: 0,
-    };
+    return { ok: true, status: s.lastStatus, headers: s.lastHeaders, body: s.lastBody };
   },
 
   async abort(state: SessionState, ctx: AdapterContext): Promise<void> {

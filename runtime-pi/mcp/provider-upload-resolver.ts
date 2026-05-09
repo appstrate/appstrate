@@ -68,8 +68,6 @@ export interface ProviderUploadRequest {
   uploadProtocol: UploadProtocol;
   metadata?: Record<string, unknown>;
   partSizeBytes?: number;
-  /** Forwarded to the adapter for protocols that support it. Currently unused. */
-  responseMode?: { toFile?: string };
 }
 
 /**
@@ -313,35 +311,15 @@ export class McpProviderUploadResolver {
         { signal: callerCtx.signal },
       );
       const meta = readUpstreamMeta(result);
-      // Body: concatenate every `text` block. `resource_link` blocks
-      // are handled below — most upload-protocol responses are
-      // small text/XML/JSON and never spill to BlobStore, but we
-      // honour the link by reading the resource bytes if it does.
-      const textParts: string[] = [];
-      let resourceLinkUri: string | undefined;
-      for (const c of result.content) {
-        if (c.type === "text") textParts.push(c.text);
-        else if (c.type === "resource_link") resourceLinkUri = c.uri;
-      }
-      let body = textParts.join("");
-      if (resourceLinkUri) {
-        try {
-          const resource = await this.mcp.readResource(
-            { uri: resourceLinkUri },
-            { signal: callerCtx.signal },
-          );
-          const part = resource.contents[0];
-          if (part) {
-            if ("text" in part && typeof part.text === "string") {
-              body = part.text;
-            } else if ("blob" in part && typeof part.blob === "string") {
-              body = Buffer.from(part.blob, "base64").toString("utf-8");
-            }
-          }
-        } catch {
-          // Leave body as the textParts concatenation.
-        }
-      }
+      // Upload-protocol responses are small (Drive: ~1KB JSON; S3:
+      // ~500B XML; tus: empty 204; MS: ~1KB JSON). They sit well
+      // under the sidecar's INLINE_RESPONSE_THRESHOLD (32 KB), so
+      // every response arrives as inline text blocks — concatenate
+      // them and we're done.
+      const body = result.content
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join("");
       // When sidecar shipped meta, use it; else fall back to a
       // synthetic 200 / no headers (matches legacy `provider_call`
       // behaviour and lets adapters running against a stub server
