@@ -63,6 +63,7 @@ import {
   MAX_RESPONSE_SIZE,
   PROVIDER_ID_RE,
 } from "./helpers.ts";
+import { TokenBudget, estimateTokens, type BudgetDecision } from "./token-budget.ts";
 
 /**
  * Strict standard base64 decoder (RFC 4648 §4). Refuses URL-safe
@@ -209,19 +210,46 @@ function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
 }
 
 /**
- * Inline payload threshold for `provider_call`. Above this size the
- * response is stored in the BlobStore and the tool returns a
- * `resource_link` content block — saves the agent from blowing its
- * context window on a 5MB JSON dump. The agent reads
- * via `client.readResource({ uri })` only if it actually needs the
- * bytes.
+ * Legacy byte-based inline threshold. Kept as a defence-in-depth
+ * fallback when no {@link TokenBudget} is configured (today: never in
+ * production, but the option keeps tests and embedders simple).
  *
- * 32KB is generous for typical LLM-targeted text payloads (a verbose
- * Gmail thread or a Notion page rarely exceeds that), and small enough
- * that >100KB JSON dumps from heavy enterprise APIs spill to blob
- * automatically.
+ * The token-aware path (see {@link TokenBudget}) is the primary
+ * gate: dense JSON / base64 hits the agent's context budget far
+ * harder than a byte cap suggests, and small calls accumulate.
  */
-const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
+const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
+
+/**
+ * MCP `_meta` key under which the sidecar surfaces token-budget
+ * accounting to the agent runtime. Agent-side resolvers can read this
+ * to display "X / Y tokens of run budget consumed" or to react to
+ * structured truncation events.
+ *
+ * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
+ * `{ status, headers }`) so a CallToolResult can carry both without
+ * collision.
+ */
+export const TOKEN_BUDGET_META_KEY = "appstrate://token-budget";
+
+/**
+ * Shape of the {@link TOKEN_BUDGET_META_KEY} payload. Stable wire
+ * contract — extensions append, never rename.
+ */
+interface TokenBudgetMeta {
+  /** Tokens estimated for *this* tool output. */
+  estimatedTokens: number;
+  /** Cumulative tool-output tokens consumed in the run so far. */
+  consumedTokens: number;
+  /** Configured run-level ceiling. */
+  runBudgetTokens: number;
+  /** Configured per-call inline cap. */
+  inlineCapTokens: number;
+  /** What the budget tracker decided. */
+  decision: BudgetDecision["decision"];
+  /** Why it decided that way (machine-readable). */
+  reason: BudgetDecision["reason"];
+}
 
 /**
  * Build the `provider_call`, `run_history`, and `recall_memory` MCP
@@ -237,7 +265,7 @@ const INLINE_RESPONSE_THRESHOLD = 32 * 1024;
  * block instead of an inline text body.
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
-  const { blobStore, proxyDeps } = options;
+  const { blobStore, proxyDeps, tokenBudget } = options;
   const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
@@ -464,6 +492,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       }
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
+        ...(tokenBudget ? { tokenBudget } : {}),
         source: `provider:${args.providerId}`,
         // Attach upstream `{ status, headers }` to the CallToolResult
         // `_meta` payload so the agent-side resolver can surface real
@@ -523,7 +552,11 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           isError: true,
         };
       }
-      return responseToToolResult(res, { source: "run_history" });
+      return responseToToolResult(res, {
+        source: "run_history",
+        ...(blobStore ? { blobStore } : {}),
+        ...(tokenBudget ? { tokenBudget } : {}),
+      });
     },
   };
 
@@ -584,7 +617,11 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           isError: true,
         };
       }
-      return responseToToolResult(res, { source: "recall_memory" });
+      return responseToToolResult(res, {
+        source: "recall_memory",
+        ...(blobStore ? { blobStore } : {}),
+        ...(tokenBudget ? { tokenBudget } : {}),
+      });
     },
   };
 
@@ -641,14 +678,22 @@ function buildBlobResourceProvider(blobStore: BlobStore) {
 interface ResponseToToolResultOptions {
   /** Run-scoped blob store; required to spill non-text or oversized responses. */
   blobStore?: BlobStore;
+  /**
+   * Run-scoped token budget. When provided, the inline-vs-spill
+   * decision for text responses is made on **estimated tokens**, not
+   * raw bytes — dense JSON or base64 that would otherwise sneak under
+   * the 32 KB byte threshold spills correctly, and a cumulative
+   * counter tightens the inline path as the agent's run budget runs
+   * down. Absent → fall back to the legacy byte threshold.
+   */
+  tokenBudget?: TokenBudget;
   /** Source label propagated to the BlobStore record (for observability). */
   source?: string;
   /**
-   * Inline threshold override. Above this size, even text responses
-   * spill to the blob store so the agent context isn't poisoned by
-   * very large dumps. Defaults to {@link INLINE_RESPONSE_THRESHOLD}.
+   * Legacy byte threshold override (used when no `tokenBudget` is
+   * configured). Defaults to {@link INLINE_RESPONSE_THRESHOLD_BYTES}.
    */
-  inlineThreshold?: number;
+  inlineThresholdBytes?: number;
   /**
    * When true, attach upstream `{ status, headers }` to the
    * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
@@ -673,12 +718,23 @@ interface ResponseToToolResultOptions {
  * domain-level signals.
  *
  * Behaviour:
- * - Text/JSON/XML under {@link INLINE_RESPONSE_THRESHOLD} → inline `text` block.
- * - Text/JSON/XML over the threshold OR binary content → spilled to
- *   the BlobStore, returned as a `resource_link` block. The agent
- *   reads the bytes via `client.readResource({ uri })` only if needed.
- * - No BlobStore configured → binary rejected with a clear tool-level
- *   error (production always supplies a BlobStore via `mountMcp`).
+ * - Text/JSON/XML whose **estimated token count** fits under the
+ *   per-call inline cap AND the run-level cumulative budget → inline
+ *   `text` block. Token estimation uses the Anthropic-recommended
+ *   ~3.5 chars/token heuristic (see `./token-budget.ts`).
+ * - Text/JSON/XML that exceeds the per-call cap OR would push the
+ *   cumulative budget past its ceiling → spilled to the BlobStore as
+ *   a `resource_link`. The agent reads the bytes via
+ *   `client.readResource({ uri })` only if needed.
+ * - Binary content → always spilled regardless of size (binary in the
+ *   agent's context window is never useful).
+ * - No BlobStore configured → binary rejected; text falls back to the
+ *   legacy byte threshold. Production always supplies a BlobStore +
+ *   TokenBudget via `mountMcp`.
+ *
+ * Every text-path result carries an `appstrate://token-budget` `_meta`
+ * payload (when a TokenBudget is configured) so the agent runtime can
+ * surface accounting and react to structured truncation events.
  */
 async function responseToToolResult(
   res: Response,
@@ -703,14 +759,13 @@ async function responseToToolResult(
   const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
     ? buildUpstreamMeta(res)
     : undefined;
-  const metaField: Record<string, unknown> | undefined = upstreamMeta
-    ? { [UPSTREAM_META_KEY]: upstreamMeta }
-    : undefined;
 
-  // Helper: attach `_meta` to every return path. The meta payload is
-  // identical across happy/error paths (it describes the upstream
-  // exchange, not the agent-side mapping), so we centralise the merge
-  // rather than duplicate the field in every literal below.
+  // Budget meta accumulates per-response: estimated cost + the
+  // tracker's decision are folded in by the text path below. Stays
+  // undefined for binary spills (no estimate is meaningful) and when
+  // no TokenBudget is configured.
+  let budgetMeta: TokenBudgetMeta | undefined;
+
   type Result = {
     content: Array<
       | { type: "text"; text: string }
@@ -719,11 +774,21 @@ async function responseToToolResult(
     isError?: boolean;
     _meta?: Record<string, unknown>;
   };
-  const withMeta = (r: Result): Result => (metaField ? { ...r, _meta: metaField } : r);
+  // Helper: attach `_meta` to every return path. We merge upstream-
+  // exchange meta and token-budget meta into a single payload — both
+  // are independent of agent-side mapping, both can be present
+  // simultaneously.
+  const withMeta = (r: Result): Result => {
+    if (!upstreamMeta && !budgetMeta) return r;
+    const meta: Record<string, unknown> = {};
+    if (upstreamMeta) meta[UPSTREAM_META_KEY] = upstreamMeta;
+    if (budgetMeta) meta[TOKEN_BUDGET_META_KEY] = budgetMeta;
+    return { ...r, _meta: meta };
+  };
 
   const ct = res.headers.get("content-type") ?? "";
   const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
-  const threshold = options.inlineThreshold ?? INLINE_RESPONSE_THRESHOLD;
+  const byteThreshold = options.inlineThresholdBytes ?? INLINE_RESPONSE_THRESHOLD_BYTES;
 
   if (!isText) {
     if (!options.blobStore) {
@@ -800,10 +865,32 @@ async function responseToToolResult(
   const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
   const text = await readBodyBounded(res, readCap);
 
-  // If the text body breaches the inline threshold AND we have a blob
-  // store, spill it. The agent gets a pointer instead of poisoning its
-  // context with a multi-megabyte dump.
-  if (options.blobStore && text.length > threshold) {
+  // Token-aware spill decision. With a TokenBudget we estimate the
+  // tokens this response would burn, then ask the budget tracker
+  // whether it fits inline (per-call cap + cumulative budget). Without
+  // a TokenBudget we fall back to the legacy byte threshold so older
+  // tests + embedders that don't wire a budget keep working.
+  const shouldSpillForBudget = ((): boolean => {
+    if (options.tokenBudget) {
+      const estimated = estimateTokens(text);
+      const decision = options.tokenBudget.decide(estimated);
+      budgetMeta = {
+        estimatedTokens: estimated,
+        consumedTokens: decision.consumedTokens,
+        runBudgetTokens: decision.runBudgetTokens,
+        inlineCapTokens: decision.inlineCapTokens,
+        decision: decision.decision,
+        reason: decision.reason,
+      };
+      return decision.decision === "spill";
+    }
+    return text.length > byteThreshold;
+  })();
+
+  // If the text body should spill AND we have a blob store, spill it.
+  // The agent gets a pointer instead of poisoning its context with a
+  // dense JSON dump that would silently consume its run budget.
+  if (options.blobStore && shouldSpillForBudget) {
     const bytes = new TextEncoder().encode(text);
     let record;
     try {
@@ -812,12 +899,28 @@ async function responseToToolResult(
         ...(options.source !== undefined ? { source: options.source } : {}),
       });
     } catch {
-      // Blob store full — fall back to inline truncation.
-      return withMeta(
-        res.ok
-          ? { content: [{ type: "text", text }] }
-          : { content: [{ type: "text", text }], isError: true },
-      );
+      // Blob store full — fall back to inline. We do NOT record the
+      // tokens against the budget when the blob store rejects the put
+      // because the budget is a *delivery* counter (we are about to
+      // deliver this content inline as a last resort) — recording
+      // happens below on the inline path.
+      if (options.tokenBudget && budgetMeta) {
+        // Update the meta to reflect the forced fallback so the agent
+        // can see we exceeded the inline cap but had no spill path.
+        budgetMeta = {
+          ...budgetMeta,
+          decision: "inline",
+          reason: "no_blob_store_fallback_inline",
+        };
+      }
+      const fallback: Result = res.ok
+        ? { content: [{ type: "text", text }] }
+        : { content: [{ type: "text", text }], isError: true };
+      // Best-effort recording — caller already paid the context cost.
+      if (options.tokenBudget && budgetMeta) {
+        options.tokenBudget.record(budgetMeta.estimatedTokens);
+      }
+      return withMeta(fallback);
     }
     const link = {
       type: "resource_link" as const,
@@ -826,6 +929,21 @@ async function responseToToolResult(
       mimeType: record.mimeType,
     };
     return withMeta(res.ok ? { content: [link] } : { content: [link], isError: true });
+  }
+
+  // Inline path — record the actual delivered tokens against the
+  // budget. If the budget said `spill` but no blob store was
+  // configured, surface the forced-inline reason so the agent can
+  // flag the missing spill path rather than silently overspending.
+  if (options.tokenBudget && budgetMeta) {
+    if (shouldSpillForBudget && !options.blobStore) {
+      budgetMeta = {
+        ...budgetMeta,
+        decision: "inline",
+        reason: "no_blob_store_fallback_inline",
+      };
+    }
+    options.tokenBudget.record(budgetMeta.estimatedTokens);
   }
 
   if (!res.ok) {
@@ -940,6 +1058,18 @@ export interface MountMcpOptions {
    * HTTP-route fallback.
    */
   proxyDeps: ProviderCallDeps;
+  /**
+   * Run-scoped token budget. When present, every tool output is run
+   * through the budget tracker before being delivered to the agent —
+   * dense JSON that fits under the byte cap but would exhaust the
+   * context window now spills to the blob store, and a structured
+   * `appstrate://token-budget` `_meta` payload records the accounting.
+   *
+   * Optional only so tests and embedders that don't care about the
+   * token path can omit it; production wires a `TokenBudget`
+   * unconditionally via `createApp` (see `app.ts`).
+   */
+  tokenBudget?: TokenBudget;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
