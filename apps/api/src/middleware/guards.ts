@@ -27,7 +27,7 @@ export function requireAgent() {
         detail: `Agent '${packageId}' not found`,
       });
     }
-    c.set("agent", agent);
+    c.set("package", agent);
     return next();
   };
 }
@@ -51,7 +51,7 @@ export function requireOrgAgent() {
         detail: `Agent '${packageId}' not found`,
       });
     }
-    c.set("agent", agent);
+    c.set("package", agent);
     return next();
   };
 }
@@ -149,7 +149,7 @@ export async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
 /** Middleware: reject if agent is system (403) or has running runs (409). */
 export function requireMutableAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     if (agent.source === "system") {
       throw forbidden("Cannot modify a system agent");
     }

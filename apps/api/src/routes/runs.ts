@@ -251,7 +251,7 @@ export function createRunsRouter() {
     requireAgent(),
     requirePermission("agents", "run"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
       const packageId = agent.id;
@@ -359,7 +359,7 @@ export function createRunsRouter() {
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
   router.get("/agents/:scope{@[^/]+}/:name/runs", requireAgent(), async (c) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const scope = getAppScope(c);
     const limit = z.coerce
       .number()
@@ -571,7 +571,7 @@ export function createRunsRouter() {
     requireAgent(),
     requirePermission("runs", "delete"),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const scope = getAppScope(c);
 
       const running = await getRunningRunsForPackage(scope, agent.id);

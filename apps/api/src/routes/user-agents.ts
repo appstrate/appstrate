@@ -77,7 +77,7 @@ export function createUserAgentsRouter() {
     requireOrgAgent(),
     requireMutableAgent(),
     async (c) => {
-      const agent = c.get("agent");
+      const agent = c.get("package");
       const packageId = agent.id;
 
       const body = await c.req.json();
@@ -100,7 +100,7 @@ export function createUserAgentsRouter() {
 
   // PUT /api/agents/:scope/:name/tools — set tool references for an agent
   router.put("/:scope{@[^/]+}/:name/tools", requireOrgAgent(), requireMutableAgent(), async (c) => {
-    const agent = c.get("agent");
+    const agent = c.get("package");
     const packageId = agent.id;
 
     const body = await c.req.json();
