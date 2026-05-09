@@ -277,13 +277,12 @@ describe("PersistingEventSink", () => {
     expect(runRow?.cost).toBeNull();
   });
 
-  it("concurrent metric writes for the same run land at most one runner row", async () => {
+  it("concurrent metric writes for the same run land at most one runner row (max wins)", async () => {
     // The runner row is dedup'd via the partial unique index
-    // `uq_llm_usage_runner_run_id`. Multiple concurrent writers (the
-    // metric event handler and the finalize fallback) both target the
-    // same key — whichever lands first owns the row, the others no-op
-    // via ON CONFLICT DO NOTHING. The total row count is 1 regardless
-    // of how many writers raced.
+    // `uq_llm_usage_runner_run_id`. The runner emits cumulative
+    // running totals on every metric event, so concurrent writers
+    // UPSERT with monotonic-max semantics — the highest-seen
+    // `cost_usd` wins regardless of arrival order.
     const totals = [0.001, 0.003, 0.006, 0.01, 0.015];
     await Promise.all(
       totals.map((cost) => {
@@ -306,6 +305,72 @@ describe("PersistingEventSink", () => {
       .from(llmUsage)
       .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
     expect(rows).toHaveLength(1);
+    // Whichever order the writers landed in, the surviving row holds
+    // the maximum cost — never a regressed value.
+    expect(rows[0]!.costUsd).toBeCloseTo(0.015, 5);
+  });
+
+  it("monotonic upsert: a smaller subsequent cost cannot regress the recorded value", async () => {
+    const sink = new PersistingEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+      writeLedger: true,
+    });
+
+    // First emit — cost 0.01, tokens 200/100
+    await sink.handle(
+      event("appstrate.metric", {
+        usage: { input_tokens: 200, output_tokens: 100 },
+        cost: 0.01,
+      }),
+    );
+
+    // Second emit — REGRESSES to cost 0.005 (a finalize fallback that
+    // raced an earlier metric event with a higher running total). The
+    // monotonic guard MUST keep the higher value.
+    await sink.handle(
+      event("appstrate.metric", {
+        usage: { input_tokens: 50, output_tokens: 25 },
+        cost: 0.005,
+      }),
+    );
+
+    const rows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.costUsd).toBeCloseTo(0.01, 5);
+    expect(rows[0]!.inputTokens).toBe(200);
+    expect(rows[0]!.outputTokens).toBe(100);
+  });
+
+  it("monotonic upsert: a larger subsequent cost replaces the recorded value (streaming totals)", async () => {
+    const sink = new PersistingEventSink({
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      runId,
+      writeLedger: true,
+    });
+
+    // Three increasing emits — each must replace the previous row.
+    await sink.handle(
+      event("appstrate.metric", { usage: { input_tokens: 100, output_tokens: 0 }, cost: 0.001 }),
+    );
+    await sink.handle(
+      event("appstrate.metric", { usage: { input_tokens: 200, output_tokens: 50 }, cost: 0.005 }),
+    );
+    await sink.handle(
+      event("appstrate.metric", { usage: { input_tokens: 350, output_tokens: 120 }, cost: 0.012 }),
+    );
+
+    const rows = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.costUsd).toBeCloseTo(0.012, 5);
+    expect(rows[0]!.inputTokens).toBe(350);
+    expect(rows[0]!.outputTokens).toBe(120);
   });
 
   it("writeLedger off (default) → metric event still writes tokenUsage but no ledger row", async () => {

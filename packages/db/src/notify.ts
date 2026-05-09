@@ -4,6 +4,54 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 
 /**
+ * Wire payload for `run_metric` PG NOTIFY broadcasts.
+ *
+ * Fired application-side (not from a trigger) after persisting an
+ * `appstrate.metric` event so the running cumulative cost can be
+ * computed from the unified `llm_usage` ledger and bundled with the
+ * notification — a trigger would only see one row at a time and
+ * couldn't sum across the run.
+ *
+ * Snake-case keys mirror the existing `run_update` / `run_log_insert`
+ * channels so the realtime subscriber's snake-to-camel mapper handles
+ * all three identically.
+ */
+export interface RunMetricNotifyPayload {
+  /** The run id (matches `subscriber.filter.runId`). */
+  run_id: string;
+  /** Owning org (cross-tenant isolation gate). */
+  org_id: string;
+  /** Owning application (cross-app isolation gate). */
+  application_id: string;
+  /** Agent id, used by the per-agent runs SSE stream filter. */
+  package_id: string;
+  /** Cumulative token usage as last reported by the runner. */
+  token_usage: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  } | null;
+  /** Running aggregate of `llm_usage.cost_usd` for this run, in USD. */
+  cost_so_far: number;
+}
+
+/**
+ * Broadcast a metric update on the `run_metric` PG NOTIFY channel.
+ *
+ * Fire-and-forget: errors are intentionally surfaced to the caller so
+ * the ingestion path can log + drop them — a missing notification must
+ * never fail the persistence write that came before it.
+ *
+ * The payload is JSON-encoded inline; postgres truncates NOTIFY
+ * payloads at 8 KB but ours is bounded by the four `token_usage`
+ * integers + a float, well under that ceiling.
+ */
+export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): Promise<void> {
+  await db.execute(drizzleSql`SELECT pg_notify('run_metric', ${JSON.stringify(payload)})`);
+}
+
+/**
  * Install NOTIFY trigger functions and triggers on runs and run_logs tables.
  * Safe to call multiple times (uses CREATE OR REPLACE).
  */

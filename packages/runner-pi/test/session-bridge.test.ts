@@ -486,7 +486,12 @@ describe("installSessionBridge — agent_end + usage accumulation", () => {
 
     session.emit({ type: "agent_end" });
 
-    const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
+    // Each `message_end` with usage now emits a streaming
+    // `appstrate.metric` snapshot (cumulative running total) plus
+    // the final emit at `agent_end` — three total. The
+    // platform-side upsert with monotonic-max semantics means the
+    // last (largest) value wins.
+    const metricEvents = sink.events.filter((e) => e.type === "appstrate.metric") as unknown as {
       usage: {
         input_tokens: number;
         output_tokens: number;
@@ -494,12 +499,64 @@ describe("installSessionBridge — agent_end + usage accumulation", () => {
         cache_read_input_tokens: number;
       };
       cost: number;
-    };
-    expect(metric.usage.input_tokens).toBe(15);
-    expect(metric.usage.output_tokens).toBe(35);
-    expect(metric.usage.cache_creation_input_tokens).toBe(5);
-    expect(metric.usage.cache_read_input_tokens).toBe(1);
-    expect(metric.cost).toBeCloseTo(0.003, 5);
+    }[];
+    expect(metricEvents).toHaveLength(3);
+
+    // First message_end snapshot — running totals after turn 1.
+    expect(metricEvents[0]!.usage.input_tokens).toBe(10);
+    expect(metricEvents[0]!.cost).toBeCloseTo(0.001, 5);
+
+    // Second message_end snapshot — running totals after turn 2.
+    expect(metricEvents[1]!.usage.input_tokens).toBe(15);
+    expect(metricEvents[1]!.usage.output_tokens).toBe(35);
+    expect(metricEvents[1]!.cost).toBeCloseTo(0.003, 5);
+
+    // agent_end final snapshot — same totals as the last message_end
+    // (no further usage was added between them).
+    const final = metricEvents[2]!;
+    expect(final.usage.input_tokens).toBe(15);
+    expect(final.usage.output_tokens).toBe(35);
+    expect(final.usage.cache_creation_input_tokens).toBe(5);
+    expect(final.usage.cache_read_input_tokens).toBe(1);
+    expect(final.cost).toBeCloseTo(0.003, 5);
+  });
+
+  it("emits a streaming metric snapshot on each message_end with usage", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // Turn 1
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 100, output: 50, cost: { total: 0.005 } },
+      content: [{ type: "text", text: "first" }],
+    });
+    session.emit({ type: "message_end" });
+
+    // No further turns yet — the streaming snapshot from message_end
+    // must already exist and reflect turn-1 totals.
+    const streamed = sink.events.filter((e) => e.type === "appstrate.metric");
+    expect(streamed).toHaveLength(1);
+    expect((streamed[0] as unknown as { cost: number }).cost).toBeCloseTo(0.005, 5);
+  });
+
+  it("does not emit a metric on a message_end with no usage payload", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // No-op turn — assistant message without `usage` (e.g. tool-only).
+    session.pushMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "tool turn" }],
+    });
+    session.emit({ type: "message_end" });
+
+    // No streaming snapshot — would just be a duplicate of the prior
+    // state and waste a NOTIFY.
+    const streamed = sink.events.filter((e) => e.type === "appstrate.metric");
+    expect(streamed).toHaveLength(0);
   });
 
   it("tolerates missing usage.cost on individual messages", () => {

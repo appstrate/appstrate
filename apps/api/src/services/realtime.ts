@@ -78,6 +78,31 @@ export async function initRealtime(): Promise<void> {
     }
   });
 
+  // `run_metric` carries the running cumulative cost + token usage
+  // emitted by the event sink after each `appstrate.metric` event,
+  // throttled per run by the broadcaster. Routed to the same
+  // org/application/run filters as `run_update` and `run_log_insert`
+  // — no new isolation rule. The scope filters here are the ONLY
+  // tenant gate for this channel; do not relax without updating the
+  // broadcaster payload contract.
+  await listenClient.listen("run_metric", (payload) => {
+    try {
+      const raw = JSON.parse(payload) as Record<string, unknown>;
+      const data = snakeToCamel(raw);
+      for (const sub of subscribers.values()) {
+        if (sub.filter.orgId !== raw.org_id) continue;
+        if (sub.filter.applicationId !== raw.application_id) continue;
+        if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
+        if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
+        sub.send({ event: "run_metric", data });
+      }
+    } catch (err) {
+      logger.error("Failed to parse run_metric payload", {
+        error: getErrorMessage(err),
+      });
+    }
+  });
+
   logger.info("Realtime LISTEN channels initialized");
 }
 

@@ -472,6 +472,27 @@ export function installSessionBridge(
           totalUsage.cacheRead += u.cacheRead ?? 0;
           totalUsage.cacheWrite += u.cacheWrite ?? 0;
           totalUsage.cost += u.cost?.total ?? 0;
+
+          // Mid-run cumulative snapshot — fires after every assistant
+          // turn so the platform can stream live cost to the UI. The
+          // server upserts on the partial unique index with monotonic
+          // semantics (latest cost wins), so a later `agent_end` emit
+          // with the same totals is a no-op rather than a duplicate.
+          // Only fire when we actually accumulated tokens this turn —
+          // a no-op turn (e.g. tool-only step with no LLM round-trip)
+          // would emit an identical payload and waste a NOTIFY.
+          fire({
+            type: "appstrate.metric",
+            timestamp: Date.now(),
+            runId,
+            usage: {
+              input_tokens: totalUsage.input,
+              output_tokens: totalUsage.output,
+              cache_creation_input_tokens: totalUsage.cacheWrite,
+              cache_read_input_tokens: totalUsage.cacheRead,
+            },
+            cost: totalUsage.cost,
+          });
         }
 
         // SDK error (e.g. LLM API unreachable, auth failures)

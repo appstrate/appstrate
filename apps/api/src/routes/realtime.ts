@@ -25,6 +25,8 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
     const { data: _data, ...rest } = evt.data;
     return rest;
   }
+  // `run_metric` carries only bounded numeric fields + four small
+  // identifiers — no user content to strip. Pass through unmodified.
   return evt.data;
 }
 

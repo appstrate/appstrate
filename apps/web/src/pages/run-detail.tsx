@@ -11,7 +11,7 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
-import { useRunRealtime } from "../hooks/use-realtime";
+import { useRunRealtime, type RunMetricEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
@@ -22,7 +22,12 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
-import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
+import {
+  ACTIVE_RUN_STATUSES,
+  type Run,
+  type RunLog,
+  type EnrichedRun,
+} from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -103,11 +108,11 @@ export function RunDetailPage() {
   const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
   const resultSubTab = userSubTab ?? autoSubTab;
 
-  // Per-run SSE for log inserts only. Status patches come from
-  // `useGlobalRunSync` (mounted in MainLayout), which writes directly into
-  // the same `["run", orgId, applicationId, runId]` cache key. Terminal-status
-  // refetch is also already triggered globally via
-  // `invalidateRunAndNotificationQueries`.
+  // Per-run SSE for log inserts + live metric updates. Status patches
+  // come from `useGlobalRunSync` (mounted in MainLayout), which writes
+  // directly into the same `["run", orgId, applicationId, runId]`
+  // cache key. Terminal-status refetch is also already triggered
+  // globally via `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
     onNewLog: useCallback(
       (newLog: Record<string, unknown>) => {
@@ -116,6 +121,26 @@ export function RunDetailPage() {
           if (!prev) return [log];
           if (prev.some((l) => l.id === log.id)) return prev;
           return [...prev, log];
+        });
+      },
+      [qc, orgId, applicationId, runId],
+    ),
+    onMetric: useCallback(
+      (metric: RunMetricEvent) => {
+        // Patch the cached run row with the running token usage + cost
+        // so the Info tab reflects live progress without polling.
+        // `runs.cost` is the cached aggregate written at finalize on
+        // the server; mid-run we render the broadcaster's
+        // `cost_so_far` instead. The next terminal-status invalidation
+        // refetches the canonical row so this in-cache shadow is
+        // bounded by the run's lifetime.
+        qc.setQueryData<Run>(["run", orgId, applicationId, runId], (prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            tokenUsage: metric.tokenUsage ?? prev.tokenUsage,
+            cost: metric.costSoFar,
+          } as Run;
         });
       },
       [qc, orgId, applicationId, runId],

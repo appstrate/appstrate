@@ -125,6 +125,7 @@
   "exec.usageOutputTokens": "Tokens de sortie",
   "exec.usageCacheCreation": "Tokens de création de cache",
   "exec.usageCacheRead": "Tokens de lecture de cache",
+  "exec.usageLive": "En direct",
   "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier AFPS, AFPS-bundle ou ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",

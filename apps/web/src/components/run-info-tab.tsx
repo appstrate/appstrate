@@ -9,7 +9,11 @@ import { EmptyState } from "./page-states";
 import { ProviderStatusRow } from "./provider-status-row";
 import { RunTrigger } from "./run-trigger";
 import { useProviders } from "../hooks/use-providers";
-import type { EnrichedRun, RunProviderSnapshot } from "@appstrate/shared-types";
+import {
+  ACTIVE_RUN_STATUSES,
+  type EnrichedRun,
+  type RunProviderSnapshot,
+} from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
   run: EnrichedRun;
@@ -141,9 +145,22 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </div>
       </SectionCard>
 
-      {/* Usage */}
+      {/* Usage — `cost` and `tokenUsage` reflect the running totals
+          while the run is in progress (patched into the React Query
+          cache by `useRunRealtime` `onMetric` events) and the
+          authoritative finalize-time values once the run terminates. */}
       {hasUsage ? (
-        <SectionCard title={t("exec.infoUsage")}>
+        <SectionCard
+          title={t("exec.infoUsage")}
+          headerRight={
+            run.status && ACTIVE_RUN_STATUSES.has(run.status) ? (
+              <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+                {t("exec.usageLive")}
+              </span>
+            ) : null
+          }
+        >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {run.cost != null && (
               <InfoCard label={t("exec.usageCost")} value={`$${run.cost.toFixed(4)}`} />
