@@ -27,7 +27,7 @@ import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { notFound } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -464,6 +464,56 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
+}
+
+/**
+ * Re-enter {@link finalizeRun} with a terminal `RunResult` synthesised by
+ * the platform — the canonical entry point for any code path that needs to
+ * close out a run without going through the runner-posted finalize.
+ *
+ * Three callers funnel through here today:
+ *
+ *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. Without
+ *     this convergence, the cancel route used to write `status='cancelled'`
+ *     directly and the `afterRun` hook never fired — billing modules
+ *     observed zero charge for cancelled runs that had already burned LLM
+ *     tokens (issue #12 follow-up).
+ *   - `listOrphanRunIds` + boot loop — runs that were `running` when the
+ *     server crashed are finalised here so billing/observability hooks see
+ *     the exact same lifecycle as a clean termination.
+ *   - `executeAgentInBackground` synthesised termination — container exit
+ *     code, timeout, or orchestrator failure when the runner did not post
+ *     its own finalize.
+ *
+ * Idempotent by design: the CAS on `sink_closed_at IS NULL` inside
+ * `finalizeRun` makes this a no-op when the runner has already posted its
+ * own terminal — so concurrent synthesis + container-posted finalize ends
+ * up applying exactly once.
+ */
+export async function synthesiseFinalize(
+  runId: string,
+  terminal: {
+    status: "success" | "failed" | "timeout" | "cancelled";
+    error?: { message: string; stack?: string };
+    durationMs?: number;
+  },
+): Promise<void> {
+  const run = await getRunSinkContext(runId);
+  if (!run) {
+    logger.error("synthesiseFinalize: run sink context missing", { runId });
+    return;
+  }
+
+  const result: RunResult = emptyRunResult();
+  result.status = terminal.status;
+  if (terminal.error) result.error = terminal.error;
+  if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
+
+  await finalizeRun({
+    run,
+    result,
+    webhookId: `synthesized-${runId}`,
+  });
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

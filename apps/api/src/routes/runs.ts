@@ -6,7 +6,6 @@ import { logger } from "../lib/logger.ts";
 import type { LoadedPackage, AppEnv } from "../types/index.ts";
 import {
   updateRun,
-  appendRunLog,
   getRun,
   getRunFull,
   getRunningRunsForPackage,
@@ -21,7 +20,6 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { runPlatformContainer } from "../services/run-launcher/pi.ts";
 import type { PlatformContainerResult } from "../services/run-launcher/pi.ts";
 import type { ContainerOrchestrator } from "../services/orchestrator/index.ts";
-import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -46,7 +44,7 @@ import {
   type InlineRunBody,
 } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-import { finalizeRun, getRunSinkContext } from "../services/run-event-ingestion.ts";
+import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import type { SinkCredentials } from "../lib/mint-sink-credentials.ts";
 
 // --- Background run (decoupled from client) ---
@@ -160,7 +158,8 @@ export async function executeAgentInBackground(
     // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
     // we fill in the terminal state the platform observed.
     if (lifecycle.cancelled) {
-      // Cancel route already wrote status + closed the sink — nothing to do.
+      // Cancel route already routed the run through `synthesiseFinalize`,
+      // which CAS'd the sink closed and ran `afterRun`. Nothing to do here.
       return;
     }
 
@@ -204,38 +203,6 @@ export async function executeAgentInBackground(
   } finally {
     untrackRun(runId);
   }
-}
-
-/**
- * Re-enter `finalizeRun` with a terminal result synthesised by the
- * platform. Idempotent by design: the CAS on `sink_closed_at IS NULL`
- * inside `finalizeRun` makes this a no-op if the container already
- * posted its own finalize.
- */
-async function synthesiseFinalize(
-  runId: string,
-  terminal: {
-    status: "success" | "failed" | "timeout" | "cancelled";
-    error?: { message: string; stack?: string };
-    durationMs?: number;
-  },
-): Promise<void> {
-  const run = await getRunSinkContext(runId);
-  if (!run) {
-    logger.error("synthesiseFinalize: run sink context missing", { runId });
-    return;
-  }
-
-  const result: RunResult = emptyRunResult();
-  result.status = terminal.status;
-  if (terminal.error) result.error = terminal.error;
-  if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
-
-  await finalizeRun({
-    run,
-    result,
-    webhookId: `synthesized-${runId}`,
-  });
 }
 
 // --- Router ---
@@ -444,6 +411,15 @@ export function createRunsRouter() {
   });
 
   // POST /api/runs/:id/cancel — cancel a running/pending run
+  //
+  // Funnels through `synthesiseFinalize` so the cancellation traverses the
+  // exact same terminal-state pipeline as success/timeout/fail: cost is
+  // aggregated from `llm_usage`, `afterRun` fires (billing in cloud, …),
+  // the `run_completed` log row + `onRunStatusChange` broadcast happen
+  // exactly once. Pre-fix, this route wrote `status='cancelled'` and closed
+  // the sink directly — `afterRun` was never called and the cloud module
+  // never debited credits for cancelled runs that had already burned LLM
+  // tokens.
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getAppScope(c);
@@ -458,45 +434,19 @@ export function createRunsRouter() {
       throw conflict("not_cancellable", "This run cannot be cancelled");
     }
 
-    // Update DB + close the signed-event sink atomically — any in-flight
-    // event POST from the container will now reject with 410 gone, and
-    // `finalizeRun`'s CAS makes server-side synthesis a no-op.
-    const now = new Date().toISOString();
-    await updateRun(scope, runId, {
-      status: "cancelled",
-      error: "Cancelled by user",
-      completedAt: now,
-      notifiedAt: now,
-      sinkClosedAt: now,
-    });
-
-    // Log the cancellation
-    await appendRunLog(
-      scope,
-      runId,
-      "system",
-      "run_completed",
-      null,
-      {
-        runId,
-        status: "cancelled",
-      },
-      "info",
-    );
-
-    // Abort in-flight fetch calls immediately, then stop the container as backup
+    // Abort in-flight fetch calls + stop the container BEFORE synthesising
+    // the terminal so the runner stops emitting metric events and the
+    // sidecar can be reclaimed promptly. `finalizeRun` then drains any
+    // events that landed before this point, computes the authoritative
+    // cost from `llm_usage`, and writes the terminal state under CAS.
     abortRun(runId);
     getOrchestrator()
       .stopByRunId(runId)
       .catch(() => {});
 
-    void emitEvent("onRunStatusChange", {
-      orgId: scope.orgId,
-      runId,
-      packageId: run.packageId,
-      applicationId: scope.applicationId,
+    await synthesiseFinalize(runId, {
       status: "cancelled",
-      packageEphemeral: isInlineShadowPackageId(run.packageId),
+      error: { message: "Cancelled by user" },
     });
 
     return c.json({ ok: true });

@@ -35,7 +35,8 @@ import {
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/storage.ts";
 import { storageFolderForType } from "../services/package-items/config.ts";
-import { markOrphanRunsFailed } from "../services/state/runs.ts";
+import { listOrphanRunIds } from "../services/state/runs.ts";
+import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
@@ -185,12 +186,33 @@ export async function boot(): Promise<void> {
     }),
   ]);
 
-  // Sequential cleanup: orphan runs must be marked before container cleanup,
+  // Sequential cleanup: orphan runs must be finalized before container cleanup,
   // and containers must be cleaned before sidecar pool init.
+  //
+  // Each orphan flows through `synthesiseFinalize` → `finalizeRun` so the
+  // afterRun hook fires (billing, observability, ...) for runs that burned
+  // LLM tokens before the previous process died. The CAS in `finalizeRun`
+  // makes this race-safe against a delayed metric POST that lands during
+  // the same boot window.
   try {
-    const { count, runIds } = await markOrphanRunsFailed();
-    if (count > 0) {
-      logger.info("Marked orphaned runs as failed", { count, runIds });
+    const orphanIds = await listOrphanRunIds();
+    if (orphanIds.length > 0) {
+      let finalized = 0;
+      for (const runId of orphanIds) {
+        try {
+          await synthesiseFinalize(runId, {
+            status: "failed",
+            error: { message: "Server restarted while run was in progress. Please retry." },
+          });
+          finalized++;
+        } catch (err) {
+          logger.warn("Could not finalize orphaned run", {
+            runId,
+            error: getErrorMessage(err),
+          });
+        }
+      }
+      logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
     }
   } catch (err) {
     logger.warn("Could not clean orphaned runs", {

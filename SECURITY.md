@@ -447,11 +447,17 @@ export function requireAdmin() {
 
 ### Orphaned run recovery
 
-On platform startup, any runs left in `pending` or `running` state from a previous crash are marked as `failed`. This prevents stale run tokens from remaining valid:
+On platform startup, any runs left in `pending` or `running` state from a previous crash are listed and finalized through `synthesiseFinalize` → `finalizeRun`. Routing through the canonical terminal-state pipeline (rather than a direct `UPDATE`) ensures the `afterRun` hook fires for every orphan, so billing and observability modules see the exact same lifecycle whether a run terminated cleanly, was cancelled, timed out, or was killed by a server crash. This also prevents stale run tokens from remaining valid:
 
 ```typescript
-// index.ts — startup
-await markOrphanRunsFailed();
+// boot.ts — startup
+const orphanIds = await listOrphanRunIds();
+for (const runId of orphanIds) {
+  await synthesiseFinalize(runId, {
+    status: "failed",
+    error: { message: "Server restarted while run was in progress. Please retry." },
+  });
+}
 ```
 
 **Standard:** This multi-layer authentication model implements the access control architecture described in **NIST SP 800-207** (Zero Trust Architecture): per-request verification, no implicit trust, and session-scoped credentials with automatic expiration.
