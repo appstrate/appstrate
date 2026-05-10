@@ -345,6 +345,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     cost: row.cost as ModelCost | null,
     isSystemModel: false,
     providerPackageId: creds.providerPackageId,
+    accountId: creds.accountId,
   };
 }
 
