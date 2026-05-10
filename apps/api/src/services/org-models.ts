@@ -480,6 +480,54 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
 const PROBE_TIMEOUT_MS = 15_000;
 
 /**
+ * Inference probe request shape — `fetch()` arguments factored out as a
+ * pure function so the headers + body can be unit-tested without standing
+ * up an HTTP listener. `testCodexInference` / `testClaudeCodeInference`
+ * are the only callers.
+ */
+export interface InferenceProbeRequest {
+  url: string;
+  method: "POST";
+  headers: Record<string, string>;
+  body: string;
+}
+
+/**
+ * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
+ * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
+ * providers/openai-codex-responses.js). The wire format is the regression-
+ * prone part — Codex rejects requests that drop any of the headers below
+ * (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
+ */
+export function buildCodexInferenceRequest(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  accountId: string;
+}): InferenceProbeRequest {
+  return {
+    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "chatgpt-account-id": config.accountId,
+      originator: "appstrate",
+      "OpenAI-Beta": "responses=experimental",
+      accept: "text/event-stream",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      store: false,
+      stream: true,
+      instructions: "ping",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
+      include: [],
+    }),
+  };
+}
+
+/**
  * Codex (ChatGPT subscription) inference probe — single-token request to
  * `${baseUrl}/codex/responses` with the SSE shape pi-ai uses in production
  * (cf. node_modules/@mariozechner/pi-ai/dist/providers/openai-codex-responses.js).
@@ -502,28 +550,13 @@ async function testCodexInference(config: {
       message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
     };
   }
-  const url = `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`;
-  const body = JSON.stringify({
-    model: config.modelId,
-    store: false,
-    stream: true,
-    instructions: "ping",
-    input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
-    include: [],
-  });
+  const req = buildCodexInferenceRequest({ ...config, accountId: config.accountId });
   const start = performance.now();
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "chatgpt-account-id": config.accountId,
-        originator: "appstrate",
-        "OpenAI-Beta": "responses=experimental",
-        accept: "text/event-stream",
-        "content-type": "application/json",
-      },
-      body,
+    const res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const latency = Math.round(performance.now() - start);
@@ -564,35 +597,66 @@ async function testCodexInference(config: {
  * cf. node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js (search
  * for `claudeCodeVersion`). Keep the version in sync with what pi-ai pins.
  */
-const CLAUDE_CODE_CLI_VERSION = "2.1.75";
+// Exported for the sync-guard test (apps/api/test/unit/build-inference-probe-request.test.ts)
+// against pi-ai's `claudeCodeVersion`. Drift breaks production silently —
+// Anthropic 429s any User-Agent that doesn't match a recent CLI version.
+export const CLAUDE_CODE_CLI_VERSION = "2.1.75";
+
+/**
+ * Claude Code stealth-mode "system" preamble — required by Anthropic's
+ * third-party enforcement (since 2026-01-09). Without this exact string
+ * as the first system message, requests carrying a Claude Code OAuth
+ * token are rejected even when the User-Agent + headers all match.
+ */
+export const CLAUDE_CODE_STEALTH_SYSTEM_PROMPT =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/**
+ * Build the Claude Code inference probe request. Mirrors pi-ai's
+ * "stealth mode" exactly (cf. node_modules/@mariozechner/pi-ai/dist/
+ * providers/anthropic.js — search for `claudeCodeVersion`). All five
+ * signals below are load-bearing — drop any one and Anthropic 429s
+ * the request as third-party tier abuse.
+ */
+export function buildClaudeCodeInferenceRequest(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}): InferenceProbeRequest {
+  return {
+    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
+      "x-app": "cli",
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      max_tokens: 1,
+      system: [{ type: "text", text: CLAUDE_CODE_STEALTH_SYSTEM_PROMPT }],
+      messages: [{ role: "user", content: "ping" }],
+    }),
+  };
+}
 
 async function testClaudeCodeInference(config: {
   baseUrl: string;
   modelId: string;
   apiKey: string;
 }): Promise<TestResult> {
-  const url = `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`;
-  const body = JSON.stringify({
-    model: config.modelId,
-    max_tokens: 1,
-    system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
-    messages: [{ role: "user", content: "ping" }],
-  });
+  const req = buildClaudeCodeInferenceRequest(config);
   const start = performance.now();
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-        "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
-        "x-app": "cli",
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body,
+    const res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const latency = Math.round(performance.now() - start);
