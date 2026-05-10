@@ -164,8 +164,6 @@ const expectedEndpoints = [
   "DELETE /api/model-provider-keys/{id}",
   "POST /api/model-provider-keys/{id}/test",
   // OAuth Model Providers (subscription billing)
-  "POST /api/model-providers-oauth/initiate",
-  "GET /api/model-providers-oauth/callback",
   "POST /api/model-providers-oauth/import",
 
   // Models

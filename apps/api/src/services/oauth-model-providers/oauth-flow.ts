@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth Model Providers — initiate + callback flow.
+ * OAuth Model Providers — token-import flow.
  *
- * Parallel to `services/connection-manager/oauth.ts` but specialized for
- * public PKCE clients (Codex, Claude Code) with no `client_secret`. The
- * official flow in @appstrate/connect requires a secret (read from
- * `applicationProviderCredentials`); we read `clientId` from the runtime
- * registry and skip the secret entirely.
+ * Specialized for public PKCE clients (Codex, Claude Code) with no
+ * `client_secret`. The official flow in @appstrate/connect requires a secret
+ * (read from `applicationProviderCredentials`); we read `clientId` from the
+ * runtime registry and skip the secret entirely.
  *
- * The persisted shape is the same — `userProviderConnections` rows, an
- * `applicationProviderCredentials` row (auto-seeded with empty secret as
- * a placeholder), and an `orgSystemProviderKeys` row in `authMode='oauth'`.
+ * The persisted shape is the same as a regular integration OAuth connection
+ * — `userProviderConnections` rows, an `applicationProviderCredentials` row
+ * (auto-seeded with empty secret as a placeholder), and an
+ * `orgSystemProviderKeys` row in `authMode='oauth'`.
+ *
+ * Why no `/initiate` + `/callback` here: the public CLI client_ids
+ * (Codex `app_EMoamE…`, Claude Code `9d1c2…`) only allowlist
+ * `http://localhost:PORT/...` redirect_uris baked into the official CLIs.
+ * Any platform-hosted callback is rejected at the provider's authorize
+ * step. The CLI (`appstrate connect <provider>`) does the loopback dance
+ * locally via `@mariozechner/pi-ai`'s `loginOpenAICodex` / `loginAnthropic`
+ * and POSTs the resulting tokens to `/api/model-providers-oauth/import`,
+ * which calls `importOAuthModelProviderConnection()` below.
  *
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
-import { randomBytes, createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -24,44 +32,11 @@ import {
   orgSystemProviderKeys,
   userProviderConnections,
 } from "@appstrate/db/schema";
-import {
-  encryptCredentials,
-  parseTokenResponse,
-  parseTokenErrorResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-} from "@appstrate/connect";
+import { encryptCredentials } from "@appstrate/connect";
 import { ensureDefaultProfile } from "../connection-profiles.ts";
-import {
-  getOAuthModelProviderConfig,
-  isOAuthModelProvider,
-  OAUTH_MODEL_PROVIDER_TOKEN_URLS,
-  type OAuthModelProviderConfig,
-} from "./registry.ts";
-import {
-  decodeCodexJwtPayload,
-  readClaudeEmail,
-  readClaudeSubscriptionType,
-  type OAuthModelProviderCredentials,
-} from "./credentials.ts";
+import { getOAuthModelProviderConfig, type OAuthModelProviderConfig } from "./registry.ts";
+import { decodeCodexJwtPayload, type OAuthModelProviderCredentials } from "./credentials.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
-import { oauthStateStore } from "../connection-manager/oauth-state-store.ts";
-import type { OAuthStateRecord } from "@appstrate/connect";
-
-const OAUTH_STATE_TTL_SECONDS = 10 * 60;
-
-const PROVIDER_AUTHORIZATION_URL: Record<string, string> = {
-  "@appstrate/provider-codex": "https://auth.openai.com/oauth/authorize",
-  "@appstrate/provider-claude-code": "https://claude.ai/oauth/authorize",
-};
-
-function randomBase64Url(byteLength: number): string {
-  return randomBytes(byteLength).toString("base64url");
-}
-
-function sha256Base64Url(input: string): string {
-  return createHash("sha256").update(input).digest("base64url");
-}
 
 /**
  * Ensure an `applicationProviderCredentials` row exists for the given
@@ -109,13 +84,7 @@ async function ensureProviderCredentialRow(
 export interface PersistOAuthModelProviderTokensInput {
   orgId: string;
   applicationId: string;
-  /**
-   * The user attributed for the connection. Nullable because the legacy
-   * authorization-code flow's `OAuthStateRecord` allows null user (other
-   * actor types reuse the same store), even though the model-provider
-   * route guards always set it. The DB column is nullable to match.
-   */
-  userId: string | null;
+  userId: string;
   connectionProfileId: string;
   providerPackageId: string;
   label: string;
@@ -151,10 +120,11 @@ export interface PersistOAuthModelProviderTokensResult {
  * inserts the matching `orgSystemProviderKeys` row in `authMode='oauth'`
  * inside a single DB transaction so a half-baked persistence is impossible.
  *
- * Both entry points (the legacy callback and the new CLI-driven `/import`)
- * funnel through this helper to keep the persisted shape exactly identical
- * — the sidecar's token cache + refresh worker are written against the
- * shape this function produces and must not see drift.
+ * Currently a single caller (`importOAuthModelProviderConnection` below),
+ * but kept as a separate exported helper because the sidecar's token cache
+ * + refresh worker are written against the persisted shape and must not
+ * see drift if a future caller (e.g. an alternative bring-your-own-token
+ * upload path) gets added.
  */
 export async function persistOAuthModelProviderTokens(
   input: PersistOAuthModelProviderTokensInput,
@@ -236,249 +206,6 @@ export async function persistOAuthModelProviderTokens(
   return { connectionId, providerKeyId };
 }
 
-export interface InitiateOAuthModelProviderInput {
-  orgId: string;
-  applicationId: string;
-  userId: string;
-  providerPackageId: string;
-  label: string;
-  redirectUri: string;
-}
-
-export interface InitiateOAuthModelProviderResult {
-  authorizationUrl: string;
-  state: string;
-}
-
-/**
- * Initiate the OAuth flow for a model provider. Idempotent w.r.t.
- * `applicationProviderCredentials` (auto-seeds row if absent) and the
- * user's default `connectionProfile` (creates one if missing).
- *
- * Throws `invalidRequest`/`notFound` on user-facing errors so the route
- * can return RFC 9457 responses without re-mapping.
- */
-export async function initiateOAuthModelProviderConnection(
-  input: InitiateOAuthModelProviderInput,
-): Promise<InitiateOAuthModelProviderResult> {
-  const config = getOAuthModelProviderConfig(input.providerPackageId);
-  if (!config) {
-    throw notFound(
-      `Unknown OAuth model provider: ${input.providerPackageId} (not in registry whitelist)`,
-    );
-  }
-  if (!input.label.trim()) {
-    throw invalidRequest("`label` is required", "label");
-  }
-
-  const authorizationUrl = PROVIDER_AUTHORIZATION_URL[input.providerPackageId];
-  if (!authorizationUrl) {
-    throw notFound(
-      `No authorization URL registered for ${input.providerPackageId}. Update PROVIDER_AUTHORIZATION_URL.`,
-    );
-  }
-
-  const profile = await ensureDefaultProfile({ type: "user", id: input.userId });
-  await ensureProviderCredentialRow(input.applicationId, input.providerPackageId, config);
-
-  const state = crypto.randomUUID();
-  const codeVerifier = randomBase64Url(32);
-  const codeChallenge = sha256Base64Url(codeVerifier);
-
-  // Reuse the platform's OAuthStateRecord shape so the state store schema
-  // stays homogeneous. `authMode: "oauth2"` + `connectionProfileId` are
-  // the load-bearing fields; everything else is positional.
-  const record: OAuthStateRecord = {
-    state,
-    orgId: input.orgId,
-    userId: input.userId,
-    endUserId: null,
-    applicationId: input.applicationId,
-    connectionProfileId: profile.id,
-    providerId: input.providerPackageId,
-    codeVerifier,
-    scopesRequested: [...config.scopes],
-    redirectUri: input.redirectUri,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_SECONDS * 1000).toISOString(),
-    authMode: "oauth2",
-    // Custom payload — discriminates this state row from regular integration
-    // OAuth flows during the shared callback handling. The `metadata` field is
-    // a free-form bag in `OAuthStateRecord`; we tag it so the callback router
-    // can route to our handler.
-    metadata: {
-      kind: "oauth_model_provider",
-      providerPackageId: input.providerPackageId,
-      label: input.label,
-    },
-  };
-  await oauthStateStore.set(state, record, OAUTH_STATE_TTL_SECONDS);
-
-  const params = new URLSearchParams({
-    client_id: config.clientId,
-    redirect_uri: input.redirectUri,
-    response_type: "code",
-    state,
-    scope: config.scopes.join(" "),
-    code_challenge: codeChallenge,
-    code_challenge_method: config.pkce,
-  });
-
-  return {
-    authorizationUrl: `${authorizationUrl}?${params.toString()}`,
-    state,
-  };
-}
-
-export interface OAuthModelProviderCallbackInput {
-  code: string;
-  state: string;
-}
-
-export interface OAuthModelProviderCallbackResult {
-  providerKeyId: string;
-  connectionId: string;
-  providerPackageId: string;
-  email?: string;
-  subscriptionType?: string;
-  /** Comma-separated list of `id`s available for one-click `org_models` creation. */
-  availableModelIds: string[];
-}
-
-/**
- * Handle the OAuth callback for a model provider. Exchanges the code,
- * decodes provider-specific claims, and creates the persistence chain
- * (`userProviderConnections` + `orgSystemProviderKeys`) in a single
- * transaction so a partial failure leaves no orphan rows.
- *
- * Throws `invalidRequest`/`notFound` for user-recoverable failures and
- * `Error` for systemic ones (network, decryption, etc.).
- */
-export async function handleOAuthModelProviderCallback(
-  input: OAuthModelProviderCallbackInput,
-): Promise<OAuthModelProviderCallbackResult> {
-  const stateRow = await oauthStateStore.get(input.state);
-  if (!stateRow) {
-    throw invalidRequest("Invalid or expired OAuth state", "state");
-  }
-  const meta = stateRow.metadata;
-  if (!meta || meta["kind"] !== "oauth_model_provider") {
-    throw invalidRequest("State is not for an OAuth model provider flow", "state");
-  }
-  const providerPackageId = meta["providerPackageId"] as string | undefined;
-  const label = (meta["label"] as string | undefined) ?? "OAuth model provider";
-  if (!providerPackageId || !isOAuthModelProvider(providerPackageId)) {
-    throw notFound(`Unknown OAuth model provider in state: ${providerPackageId ?? "<missing>"}`);
-  }
-
-  const config = getOAuthModelProviderConfig(providerPackageId)!;
-  const tokenUrl = OAUTH_MODEL_PROVIDER_TOKEN_URLS[providerPackageId];
-  if (!tokenUrl) {
-    throw notFound(
-      `No token URL registered for ${providerPackageId}. Update OAUTH_MODEL_PROVIDER_TOKEN_URLS.`,
-    );
-  }
-
-  // Public PKCE client — no client_secret. Send only client_id + verifier.
-  const tokenParams: Record<string, string> = {
-    grant_type: "authorization_code",
-    code: input.code,
-    redirect_uri: stateRow.redirectUri,
-    client_id: config.clientId,
-    code_verifier: stateRow.codeVerifier,
-  };
-
-  let tokenResponse: Response;
-  try {
-    tokenResponse = await fetch(tokenUrl, {
-      method: "POST",
-      headers: buildTokenHeaders(undefined, config.clientId, "", undefined),
-      body: buildTokenBody(tokenParams),
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (err) {
-    throw new Error(
-      `Token exchange network error for '${providerPackageId}': ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-
-  if (!tokenResponse.ok) {
-    const text = await tokenResponse.text();
-    const classification = parseTokenErrorResponse(tokenResponse.status, text);
-    if (classification.kind === "revoked") {
-      // Auth code is dead — clean state row, surface invalid_grant
-      try {
-        await oauthStateStore.delete(input.state);
-      } catch {
-        /* swallowed: TTL will reap */
-      }
-    }
-    throw invalidRequest(
-      `Token exchange failed for '${providerPackageId}': ${
-        classification.error ?? `HTTP ${tokenResponse.status}`
-      }`,
-    );
-  }
-
-  let tokenData: Record<string, unknown>;
-  try {
-    tokenData = (await tokenResponse.json()) as Record<string, unknown>;
-  } catch {
-    throw new Error(`Token exchange returned non-JSON response for '${providerPackageId}'`);
-  }
-
-  const parsed = parseTokenResponse(tokenData, [...config.scopes]);
-  if (!parsed.refreshToken) {
-    // Both Codex and Claude return refresh tokens — absence is a sign of a
-    // misconfiguration (wrong scopes / wrong client_id).
-    throw new Error(
-      `Token response missing refresh_token for '${providerPackageId}' — likely a scope or client_id misconfiguration`,
-    );
-  }
-
-  // Provider-specific claim extraction
-  let chatgpt_account_id: string | undefined;
-  let email: string | undefined;
-  let subscription_type: string | undefined;
-  if (providerPackageId === "@appstrate/provider-codex") {
-    const claims = decodeCodexJwtPayload(parsed.accessToken);
-    chatgpt_account_id = claims?.chatgpt_account_id;
-    email = claims?.email;
-  } else if (providerPackageId === "@appstrate/provider-claude-code") {
-    subscription_type = readClaudeSubscriptionType(tokenData);
-    email = readClaudeEmail(tokenData);
-  }
-
-  const { connectionId, providerKeyId } = await persistOAuthModelProviderTokens({
-    orgId: stateRow.orgId,
-    applicationId: stateRow.applicationId,
-    userId: stateRow.userId,
-    connectionProfileId: stateRow.connectionProfileId,
-    providerPackageId,
-    label,
-    accessToken: parsed.accessToken,
-    refreshToken: parsed.refreshToken,
-    expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
-    scopesGranted: parsed.scopesGranted,
-    email,
-    subscriptionType: subscription_type,
-    chatgptAccountId: chatgpt_account_id,
-  });
-
-  await oauthStateStore.delete(input.state);
-
-  return {
-    providerKeyId,
-    connectionId,
-    providerPackageId,
-    email,
-    subscriptionType: subscription_type,
-    availableModelIds: config.models.map((m) => m.id),
-  };
-}
-
 export interface ImportOAuthModelProviderInput {
   orgId: string;
   applicationId: string;
@@ -511,15 +238,6 @@ export interface ImportOAuthModelProviderResult {
  * Persist a token bundle that the CLI obtained on the user's machine via
  * a loopback OAuth dance against the official provider client_id. This is
  * the platform-side counterpart of `apps/cli/src/commands/connect.ts`.
- *
- * The CLI cannot use `/initiate` + `/callback` because the public client_ids
- * baked into Codex / Claude Code only allowlist the loopback `redirect_uri`s
- * their own CLIs use (`http://localhost:1455/auth/callback` and
- * `http://localhost:53692/callback`). Any platform-hosted callback URL is
- * rejected by the provider's authorization server. So we delegate the
- * loopback dance to the user's terminal via `@mariozechner/pi-ai`, receive
- * the resulting tokens, and persist them via the same helper the legacy
- * callback used.
  *
  * Provider-specific extras:
  *   - Codex: `chatgpt_account_id` is decoded from the access JWT here, not
