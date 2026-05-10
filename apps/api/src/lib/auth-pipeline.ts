@@ -295,6 +295,7 @@ export function skipAuth(path: string, publicPaths: Set<string>): boolean {
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
+  if (path === "/api/model-providers-oauth/callback") return true; // OAuth model provider redirect — orgId is recovered from the OAuthStateRecord
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   // Unified-runner event ingestion: `/api/runs/:runId/events` and

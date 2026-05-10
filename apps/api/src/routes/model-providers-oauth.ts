@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAppContext } from "../middleware/app-context.ts";
 import {
   initiateOAuthModelProviderConnection,
   handleOAuthModelProviderCallback,
@@ -33,31 +34,40 @@ export function createModelProvidersOAuthRouter() {
 
   // POST /api/model-providers-oauth/initiate
   // Returns { authorizationUrl, state } — frontend redirects the browser there.
-  router.post("/initiate", requirePermission("model-provider-keys", "write"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const user = c.get("user");
-    const body = await c.req.json();
-    const { providerPackageId, label } = parseBody(initiateBody, body);
+  // App context required (consumes c.get("applicationId") to seed the
+  // applicationProviderCredentials row); we apply requireAppContext() locally
+  // because /callback can't carry X-Application-Id (browser redirect from
+  // the provider — applicationId is recovered from the OAuthStateRecord).
+  router.post(
+    "/initiate",
+    requireAppContext(),
+    requirePermission("model-provider-keys", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const user = c.get("user");
+      const body = await c.req.json();
+      const { providerPackageId, label } = parseBody(initiateBody, body);
 
-    const { authorizationUrl, state } = await initiateOAuthModelProviderConnection({
-      orgId,
-      applicationId,
-      userId: user.id,
-      providerPackageId,
-      label,
-      redirectUri: getCallbackUrl(),
-    });
+      const { authorizationUrl, state } = await initiateOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId: user.id,
+        providerPackageId,
+        label,
+        redirectUri: getCallbackUrl(),
+      });
 
-    await recordAuditFromContext(c, {
-      action: "oauth_model_provider.initiated",
-      resourceType: "oauth_model_provider",
-      resourceId: state,
-      after: { providerPackageId, label },
-    });
+      await recordAuditFromContext(c, {
+        action: "oauth_model_provider.initiated",
+        resourceType: "oauth_model_provider",
+        resourceId: state,
+        after: { providerPackageId, label },
+      });
 
-    return c.json({ authorizationUrl, state });
-  });
+      return c.json({ authorizationUrl, state });
+    },
+  );
 
   // GET /api/model-providers-oauth/callback?code=...&state=...
   // Handles the OAuth redirect from the provider. On success, persists the

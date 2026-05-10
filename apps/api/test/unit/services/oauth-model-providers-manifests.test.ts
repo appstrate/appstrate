@@ -72,7 +72,7 @@ describe("OAuth model provider AFPS manifests", () => {
       });
 
       it("tokenUrl matches the runtime token-resolver registration", () => {
-        expect(manifest.definition.oauth2!.tokenUrl).toBe(TOKEN_URL_BY_PACKAGE_ID[packageId]);
+        expect(manifest.definition.oauth2!.tokenUrl).toBe(TOKEN_URL_BY_PACKAGE_ID[packageId]!);
       });
 
       it("manifest defaultScopes are a subset of the runtime registry scopes", () => {
