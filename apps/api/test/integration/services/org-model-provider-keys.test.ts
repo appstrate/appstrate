@@ -13,10 +13,11 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys } from "@appstrate/db/schema";
+import { orgSystemProviderKeys, userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import {
   createOrgModelProviderKey,
   deleteOrgModelProviderKey,
@@ -24,8 +25,34 @@ import {
   loadModelProviderKeyCredentials,
   updateOrgModelProviderKey,
 } from "../../../src/services/org-model-provider-keys.ts";
+import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
+
+const CODEX = "@appstrate/provider-codex";
+const CLAUDE = "@appstrate/provider-claude-code";
+
+/**
+ * Build a synthetic Codex-shaped JWT carrying a `chatgpt_account_id` claim.
+ * Mirrors `oauth-model-providers-import.test.ts` — the platform decodes the
+ * payload defensively without verifying the signature, so an unsigned token
+ * is sufficient for tests that exercise the read path.
+ */
+function makeFakeCodexJwt(payload: { chatgpt_account_id?: string; email?: string }): string {
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const claims = {
+    iss: "https://auth.openai.com",
+    aud: "codex-cli",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    "https://api.openai.com/auth": payload.chatgpt_account_id
+      ? { chatgpt_account_id: payload.chatgpt_account_id }
+      : {},
+    ...(payload.email ? { email: payload.email } : {}),
+  };
+  const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `${header}.${body}.x`;
+}
 
 describe("org-model-provider-keys service", () => {
   beforeEach(async () => {
@@ -214,6 +241,143 @@ describe("org-model-provider-keys service", () => {
         .where(eq(orgSystemProviderKeys.id, id));
       expect(after!.blob).toBe(before!.blob);
       expect(after!.label).toBe("renamed");
+    });
+  });
+
+  /**
+   * OAuth path coverage — `loadModelProviderKeyCredentials` has two distinct
+   * branches: API key (covered above) and OAuth (covered here). Both bug 2
+   * (returned null for OAuth rows) and bug 4 (silently dropped `accountId`
+   * from the return shape during a `replace_all` refactor) lived in this
+   * branch — the regressions reached production because nothing in the
+   * test suite exercised this path end-to-end.
+   *
+   * The setup uses `importOAuthModelProviderConnection` rather than hand-
+   * building rows: it mirrors the prod control-flow exactly (insert
+   * connection + key + decrypted creds) and would catch any future drift
+   * between import and read shapes.
+   */
+  describe("OAuth path", () => {
+    let userId: string;
+    let orgId: string;
+    let applicationId: string;
+
+    beforeEach(async () => {
+      // truncateAll() already ran in the outer beforeEach.
+      const user = await createTestUser();
+      userId = user.id;
+      const { org, defaultAppId } = await createTestOrg(userId, { slug: "vault-oauth" });
+      orgId = org.id;
+      applicationId = defaultAppId;
+      // applicationProviderCredentials.providerId references packages.id —
+      // seed both system providers so the import helper's auto-row creation
+      // can succeed.
+      for (const id of [CODEX, CLAUDE]) {
+        await seedPackage({ orgId: null, id, type: "provider", source: "system" }).catch(() => {});
+      }
+    });
+
+    it("Codex: returns access token + providerPackageId + accountId from connection", async () => {
+      const accessJwt = makeFakeCodexJwt({
+        chatgpt_account_id: "acc-codex-123",
+        email: "user@example.com",
+      });
+      const imported = await importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: CODEX,
+        label: "ChatGPT Pro",
+        accessToken: accessJwt,
+        refreshToken: "rt-codex",
+        expiresAt: Date.now() + 3600 * 1000,
+      });
+
+      const creds = await loadModelProviderKeyCredentials(orgId, imported.providerKeyId);
+      expect(creds).not.toBeNull();
+      // Bug 2 regression guard — OAuth rows must not return null on read.
+      expect(creds!.apiKey).toBe(accessJwt);
+      // Bug 4 regression guard — accountId must be propagated through the
+      // return shape (a missing field here is what surfaced as the
+      // "Missing chatgpt-account-id" error in the model-test endpoint).
+      expect(creds!.accountId).toBe("acc-codex-123");
+      // providerPackageId is what the inference probe branches on to apply
+      // the Codex-specific request shape (`/codex/responses` + the account
+      // header). Drop it and tests fall back to the generic OpenAI path.
+      expect(creds!.providerPackageId).toBe(CODEX);
+    });
+
+    it("Claude: returns access token + providerPackageId; accountId stays undefined (Codex-only field)", async () => {
+      const imported = await importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: CLAUDE,
+        label: "Claude Max",
+        accessToken: "sk-ant-oat01-fake",
+        refreshToken: "sk-ant-ort01-fake",
+        expiresAt: Date.now() + 3600 * 1000,
+        subscriptionType: "max",
+        email: "user@anthropic-test.com",
+      });
+
+      const creds = await loadModelProviderKeyCredentials(orgId, imported.providerKeyId);
+      expect(creds).not.toBeNull();
+      expect(creds!.apiKey).toBe("sk-ant-oat01-fake");
+      expect(creds!.providerPackageId).toBe(CLAUDE);
+      // Anthropic OAuth carries no account-scoping claim — `accountId`
+      // staying undefined is the contract (lets the inference probe skip
+      // the `chatgpt-account-id` header it would otherwise require).
+      expect(creds!.accountId).toBeUndefined();
+    });
+
+    it("returns null when the underlying OAuth connection needs reconnection", async () => {
+      const imported = await importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: CLAUDE,
+        label: "Claude (about to revoke)",
+        accessToken: "sk-ant-oat01-fake",
+        refreshToken: "sk-ant-ort01-fake",
+        expiresAt: Date.now() + 3600 * 1000,
+      });
+
+      // Simulate the refresh worker flagging the connection after a
+      // 400 invalid_grant from the upstream provider.
+      await db
+        .update(userProviderConnections)
+        .set({ needsReconnection: true })
+        .where(eq(userProviderConnections.id, imported.connectionId));
+
+      // The resolver throws `gone(...)`; the service swallows it and
+      // returns null so callers fall through to their own
+      // "key unusable" handling (route returns KEY_NOT_FOUND).
+      const creds = await loadModelProviderKeyCredentials(orgId, imported.providerKeyId);
+      expect(creds).toBeNull();
+    });
+
+    it("cross-org isolation: org B cannot read org A's OAuth-backed key", async () => {
+      const importedA = await importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: CLAUDE,
+        label: "Claude org-A",
+        accessToken: "sk-ant-oat01-orgA",
+        refreshToken: "sk-ant-ort01-orgA",
+        expiresAt: Date.now() + 3600 * 1000,
+      });
+
+      const userB = await createTestUser({ email: "b@example.com" });
+      const { org: orgB } = await createTestOrg(userB.id, { slug: "vault-oauth-b" });
+
+      const leaked = await loadModelProviderKeyCredentials(orgB.id, importedA.providerKeyId);
+      expect(leaked).toBeNull();
+
+      // Owner still resolves correctly — sanity check.
+      const own = await loadModelProviderKeyCredentials(orgId, importedA.providerKeyId);
+      expect(own?.apiKey).toBe("sk-ant-oat01-orgA");
     });
   });
 });
