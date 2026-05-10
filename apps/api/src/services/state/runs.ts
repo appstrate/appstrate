@@ -840,22 +840,21 @@ export async function listRunLogs(args: {
 }
 
 /**
- * Mark all in-flight runs as failed on server restart.
- * ⚠️ Single-instance only — in multi-instance deployments, this will fail ALL
- * instances' in-flight runs. Multi-instance support requires per-instance run tracking.
+ * List all in-flight run IDs at server startup. The caller (boot) feeds
+ * each id through `synthesiseFinalize` so the same lifecycle that fires
+ * for clean termination (afterRun, terminal log, onRunStatusChange) also
+ * fires for runs that survived a server crash. Without that convergence,
+ * any LLM tokens already burned by the crashed-runner before the crash
+ * would silently never be billed (cloud's `afterRun` would never see them).
+ *
+ * ⚠️ Single-instance only — in multi-instance deployments, this lists ALL
+ * instances' in-flight runs. Multi-instance support requires per-instance
+ * run tracking.
  */
-export async function markOrphanRunsFailed(): Promise<{
-  count: number;
-  runIds: string[];
-}> {
-  const updated = await db
-    .update(runs)
-    .set({
-      status: "failed",
-      error: "Server restarted while run was in progress. Please retry.",
-      completedAt: new Date(),
-    })
-    .where(inArray(runs.status, [...activeRunStatusValues]))
-    .returning({ id: runs.id });
-  return { count: updated.length, runIds: updated.map((r) => r.id) };
+export async function listOrphanRunIds(): Promise<string[]> {
+  const rows = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(inArray(runs.status, [...activeRunStatusValues]));
+  return rows.map((r) => r.id);
 }

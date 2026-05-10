@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -501,7 +504,7 @@ describe("Runs API", () => {
   // ─── POST /api/runs/:id/cancel ─────────────────────────────
 
   describe("POST /api/runs/:id/cancel", () => {
-    it("cancels a running run", async () => {
+    it("cancels a running run and transitions it to cancelled", async () => {
       await seedAgent({ id: "@runorg/cancel-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/cancel-agent",
@@ -509,6 +512,10 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
+        // synthesiseFinalize requires sink_secret_encrypted to be present —
+        // every real run created via run-pipeline gets one at INSERT time.
+        sinkSecretEncrypted: "test-secret",
+        sinkExpiresAt: new Date(Date.now() + 3600_000),
       });
 
       const res = await app.request(`/api/runs/${run.id}/cancel`, {
@@ -519,9 +526,19 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
+
+      // Convergence assertion — the cancel route flowed through finalizeRun
+      // (status flipped to cancelled, sink closed). See `runs-cancel-
+      // convergence.test.ts` for the afterRun-hook side of the contract.
+      const final = await db
+        .select({ status: runs.status, sinkClosedAt: runs.sinkClosedAt })
+        .from(runs)
+        .where(eq(runs.id, run.id));
+      expect(final[0]!.status).toBe("cancelled");
+      expect(final[0]!.sinkClosedAt).not.toBeNull();
     });
 
-    it("cancels a pending run", async () => {
+    it("cancels a pending run and transitions it to cancelled", async () => {
       await seedAgent({ id: "@runorg/cancel-pending", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/cancel-pending",
@@ -529,6 +546,8 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "pending",
+        sinkSecretEncrypted: "test-secret",
+        sinkExpiresAt: new Date(Date.now() + 3600_000),
       });
 
       const res = await app.request(`/api/runs/${run.id}/cancel`, {
@@ -539,6 +558,9 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
+
+      const final = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
+      expect(final[0]!.status).toBe("cancelled");
     });
 
     it("returns 409 for non-running run", async () => {
@@ -577,6 +599,8 @@ describe("Runs API", () => {
         applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "running",
+        sinkSecretEncrypted: "test-secret",
+        sinkExpiresAt: new Date(Date.now() + 3600_000),
       });
 
       const res = await app.request(`/api/runs/${run.id}/cancel`, {
