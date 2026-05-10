@@ -35,6 +35,7 @@ import {
   type OAuthModelProviderConfig,
 } from "./registry.ts";
 import { gone, notFound } from "../../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
 
 /** Refresh `expiresAt` lead time. Mirrors the sidecar threshold (SPEC §5.2). */
 const REFRESH_LEAD_MS = 5 * 60_000;
@@ -130,7 +131,17 @@ function buildResolvedToken(state: ConnectionState): ResolvedToken {
   // don't require a reconnect to start working with the inference probe.
   let accountId = state.creds.chatgpt_account_id;
   if (!accountId && state.providerPackageId === "@appstrate/provider-codex") {
-    accountId = decodeCodexJwtPayload(state.creds.access_token)?.chatgpt_account_id;
+    const decoded = decodeCodexJwtPayload(state.creds.access_token);
+    accountId = decoded?.chatgpt_account_id;
+    logger.warn("oauth model provider: chatgpt_account_id missing in stored creds", {
+      connectionId: state.connectionId,
+      providerPackageId: state.providerPackageId,
+      jwtDecodeAttempted: true,
+      jwtParsed: decoded !== null,
+      jwtHadAccountId: !!decoded?.chatgpt_account_id,
+      accessTokenStartsWithJwtHeader: state.creds.access_token.startsWith("eyJ"),
+      accessTokenSegments: state.creds.access_token.split(".").length,
+    });
   }
   return {
     accessToken: state.creds.access_token,

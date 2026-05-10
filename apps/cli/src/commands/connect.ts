@@ -195,6 +195,16 @@ async function runLoopbackOAuth(slug: ConnectProviderSlug): Promise<{
       typeof (creds as Record<string, unknown>).accountId === "string"
         ? ((creds as Record<string, unknown>).accountId as string)
         : undefined;
+    if (slug === "codex" && !accountId) {
+      // Surface the actual shape pi-ai returned so we can spot a renamed
+      // field — historically `accountId` but pi-ai's contract is `[key:
+      // string]: unknown` so any future rename would silently strip it.
+      process.stderr.write(
+        `[appstrate connect] warning: pi-ai login returned no accountId field. Available keys: ${Object.keys(
+          creds as Record<string, unknown>,
+        ).join(", ")}\n`,
+      );
+    }
     return {
       accessToken: creds.access,
       refreshToken: creds.refresh,

@@ -37,6 +37,7 @@ import { ensureDefaultProfile } from "../connection-profiles.ts";
 import { getOAuthModelProviderConfig, type OAuthModelProviderConfig } from "./registry.ts";
 import { decodeCodexJwtPayload, type OAuthModelProviderCredentials } from "./credentials.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
 
 /**
  * Ensure an `applicationProviderCredentials` row exists for the given
@@ -292,7 +293,24 @@ export async function importOAuthModelProviderConnection(
     const claims = decodeCodexJwtPayload(input.accessToken);
     if (!chatgptAccountId) chatgptAccountId = claims?.chatgpt_account_id;
     if (!email) email = claims?.email;
+    // Hard fail on missing chatgpt-account-id at import time — the inference
+    // probe and runtime calls both require this header. Persisting a
+    // connection without it produces a key that can't actually be used.
+    if (!chatgptAccountId) {
+      throw invalidRequest(
+        "Could not resolve chatgpt-account-id from the Codex token. " +
+          "The CLI must forward `accountId` (pi-ai surfaces it as a top-level " +
+          "field after a successful login) — rebuild the CLI: " +
+          "`cd apps/cli && bun run build`.",
+      );
+    }
   }
+  logger.info("oauth model provider connection import", {
+    providerPackageId: input.providerPackageId,
+    hasAccountIdFromBody: !!input.accountId,
+    hasAccountIdFinal: !!chatgptAccountId,
+    accountIdLength: chatgptAccountId?.length ?? 0,
+  });
 
   const result = await persistOAuthModelProviderTokens({
     orgId: input.orgId,
