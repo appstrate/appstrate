@@ -641,6 +641,8 @@
   "providerKeys.test": "Tester",
   "providerKeys.testSuccess": "OK ({{latency}}ms)",
   "providerKeys.testFailed": "Échec : {{message}}",
+  "providerKeys.disabledBadge": "Désactivé par l'admin",
+  "providerKeys.disabledTooltip": "Ce provider a été désactivé par l'administrateur. Vous pouvez supprimer cette credential mais pas la reconnecter.",
   "providerKeys.empty": "Aucune clé de provider de modèle",
   "providerKeys.emptyHint": "Ajoutez une clé pour la partager entre plusieurs modèles.",
   "providerKeys.form.title": "Ajouter une clé de provider de modèle",

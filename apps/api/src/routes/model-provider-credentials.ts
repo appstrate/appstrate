@@ -17,7 +17,8 @@ import {
 } from "../services/model-provider-credentials.ts";
 import {
   getModelProviderConfig,
-  listModelProviders,
+  isModelProviderEnabled,
+  listEnabledModelProviders,
 } from "../services/oauth-model-providers/registry.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
@@ -25,6 +26,7 @@ import { logger } from "../lib/logger.ts";
 import {
   ApiError,
   conflict,
+  forbidden,
   invalidRequest,
   notFound,
   internalError,
@@ -85,7 +87,7 @@ export function createModelProviderCredentialsRouter() {
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
-    const data = listModelProviders().map((p) => ({
+    const data = listEnabledModelProviders().map((p) => ({
       providerId: p.providerId,
       displayName: p.displayName,
       iconUrl: p.iconUrl,
@@ -118,12 +120,15 @@ export function createModelProviderCredentialsRouter() {
     const user = c.get("user");
     const body = await c.req.json();
     const data = parseBody(createSchema, body);
+    const { label, apiShape, baseUrl, apiKey } = data;
+    // The route still accepts the historic `(apiShape, baseUrl)` form — reverse-
+    // resolve it to the canonical `providerId` (with `baseUrlOverride` for
+    // any unrecognized combo) before persisting.
+    const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
+    if (!isModelProviderEnabled(providerId)) {
+      throw forbidden(`Provider ${providerId} is disabled by platform admin`);
+    }
     try {
-      const { label, apiShape, baseUrl, apiKey } = data;
-      // The route still accepts the historic `(apiShape, baseUrl)` form — reverse-
-      // resolve it to the canonical `providerId` (with `baseUrlOverride` for
-      // any unrecognized combo) before persisting.
-      const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
       const id = await createApiKeyCredential({
         orgId,
         userId: user.id,
@@ -140,6 +145,7 @@ export function createModelProviderCredentialsRouter() {
       });
       return c.json({ id }, 201);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Model provider credential create failed", {
         error: getErrorMessage(err),
       });

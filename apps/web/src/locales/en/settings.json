@@ -641,6 +641,8 @@
   "providerKeys.test": "Test",
   "providerKeys.testSuccess": "OK ({{latency}}ms)",
   "providerKeys.testFailed": "Failed: {{message}}",
+  "providerKeys.disabledBadge": "Disabled by admin",
+  "providerKeys.disabledTooltip": "This provider has been disabled by the administrator. You can delete this credential but cannot reconnect it.",
   "providerKeys.empty": "No model provider keys",
   "providerKeys.emptyHint": "Add a key to share it across multiple models.",
   "providerKeys.form.title": "Add model provider key",
