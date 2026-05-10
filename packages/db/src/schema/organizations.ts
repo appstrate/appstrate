@@ -165,6 +165,45 @@ export const orgSystemProviderKeys = pgTable(
   ],
 );
 
+/**
+ * Unified credentials table for LLM model providers (API-key + OAuth alike).
+ *
+ * Replaces `org_system_provider_keys` (Phase 8 drop). The `provider_id` column
+ * is a free-text registry key (e.g. "codex", "openai") — NOT a FK to
+ * `packages.id`. Inference wire format and default base URL are read from the
+ * platform registry (`apps/api/src/services/oauth-model-providers/registry.ts`)
+ * keyed by `provider_id`. `base_url_override` is honored only for providers
+ * whose registry entry has `baseUrlOverridable: true` (e.g. "openai-compatible").
+ *
+ * The encrypted blob's plaintext is a tagged union:
+ *   { kind: "api_key", apiKey: string }
+ *   { kind: "oauth",   accessToken, refreshToken, expiresAt, accountId?,
+ *                       scopesGranted: string[], needsReconnection: boolean }
+ *
+ * Decryption goes through `services/model-provider-credentials.loadCredentials`,
+ * which fans out to the right code path based on the registry's `authMode`.
+ */
+export const modelProviderCredentials = pgTable(
+  "model_provider_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    providerId: text("provider_id").notNull(),
+    credentialsEncrypted: text("credentials_encrypted").notNull(),
+    baseUrlOverride: text("base_url_override"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_model_provider_credentials_org_id").on(t.orgId),
+    index("idx_model_provider_credentials_org_provider").on(t.orgId, t.providerId),
+  ],
+);
+
 export const orgModels = pgTable(
   "org_models",
   {
