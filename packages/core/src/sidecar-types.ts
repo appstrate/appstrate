@@ -43,7 +43,7 @@ export interface LlmProxyOauthConfig {
   authMode: "oauth";
   /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
   baseUrl: string;
-  /** ID of the `userProviderConnections` row backing this OAuth connection. */
+  /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   oauthConnectionId: string;
   /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
   apiShape: "anthropic-messages" | "openai-responses";

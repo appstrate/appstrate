@@ -303,17 +303,3 @@ async function doRefresh(credentialId: string): Promise<ResolvedToken> {
 
   return toResolvedToken(state.config, parsed.accessToken, expiresAtMs, accountId);
 }
-
-/**
- * Lookup helper used by the internal sidecar route to confirm the requested
- * credentialId is one this platform manages (not an arbitrary UUID guess).
- * Returns true iff the row exists in `model_provider_credentials`.
- */
-export async function isConnectionUsedByModelProviderKey(credentialId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: modelProviderCredentials.id })
-    .from(modelProviderCredentials)
-    .where(eq(modelProviderCredentials.id, credentialId))
-    .limit(1);
-  return Boolean(row);
-}

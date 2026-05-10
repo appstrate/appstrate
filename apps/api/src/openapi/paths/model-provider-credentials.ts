@@ -296,7 +296,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Delete a model provider credential",
       description:
-        "Delete a model provider credential. Rejected with 409/500 if any org_models row still references it (FK ON DELETE RESTRICT) — detach the model first.",
+        "Delete a model provider credential. Returns 409 with `credential_in_use` if any `org_models` row still references it (FK ON DELETE RESTRICT) — detach the model first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -310,6 +310,14 @@ export const modelProviderCredentialsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description: "Credential is still referenced by one or more models (credential_in_use)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

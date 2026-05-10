@@ -24,6 +24,7 @@ import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
+  conflict,
   invalidRequest,
   notFound,
   internalError,
@@ -49,6 +50,24 @@ export const updateSchema = z.object({
   apiKey: z.string().min(1).optional(),
 });
 
+/** PG `foreign_key_violation`. Drizzle wraps the underlying postgres.js error
+ * via `new Error(..., { cause })`, so the SQLSTATE code lives on `err.cause`. */
+function isForeignKeyViolation(err: unknown): boolean {
+  return pgErrorCode(err) === "23503";
+}
+
+function pgErrorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const top = (err as { code?: string }).code;
+  if (typeof top === "string") return top;
+  const cause = (err as { cause?: unknown }).cause;
+  if (typeof cause === "object" && cause !== null) {
+    const inner = (cause as { code?: string }).code;
+    if (typeof inner === "string") return inner;
+  }
+  return undefined;
+}
+
 export const testInlineSchema = z.object({
   apiShape: z.string().min(1),
   baseUrl: z.url(),
@@ -61,8 +80,10 @@ export function createModelProviderCredentialsRouter() {
 
   // GET /api/model-provider-credentials/registry — surfaces the in-code
   // MODEL_PROVIDERS registry so the UI can render a provider picker without
-  // hard-coding the catalog client-side. Read-only; member-level scope is
-  // sufficient (the catalog itself is non-sensitive metadata).
+  // hard-coding the catalog client-side. Read-only; admin-only because it
+  // sits behind the same `model-provider-credentials:read` permission as
+  // the rest of this resource (the catalog itself is non-sensitive metadata
+  // — the gate is for surface uniformity, not the data).
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
     const data = listModelProviders().map((p) => ({
       providerId: p.providerId,
@@ -240,6 +261,15 @@ export function createModelProviderCredentialsRouter() {
       });
       return c.body(null, 204);
     } catch (err) {
+      // `org_models.provider_key_id` has ON DELETE RESTRICT — surface the
+      // PG `foreign_key_violation` (23503) as a 409 with an actionable
+      // message rather than a generic 500.
+      if (isForeignKeyViolation(err)) {
+        throw conflict(
+          "credential_in_use",
+          "Cannot delete this credential while one or more models reference it. Detach the model first.",
+        );
+      }
       logger.error("Model provider credential delete failed", {
         id,
         error: getErrorMessage(err),

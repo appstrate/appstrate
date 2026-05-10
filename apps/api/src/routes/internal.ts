@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, userProviderConnections } from "@appstrate/db/schema";
+import { modelProviderCredentials, runs, userProviderConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -32,7 +32,6 @@ import { unauthorized, forbidden, notFound, invalidRequest, internalError } from
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
-  isConnectionUsedByModelProviderKey,
   resolveOAuthTokenForSidecar,
 } from "../services/oauth-model-providers/token-resolver.ts";
 
@@ -422,46 +421,57 @@ export function createInternalRouter() {
   //
   // Sidecar polls these endpoints during /llm/* request lifecycle (cf.
   // SPEC §5.2). Auth is the same Bearer run-token mechanism as the rest
-  // of /internal/* — `assertOAuthModelConnection` additionally verifies
-  // the requested connectionId belongs to the run's org and is wired to
-  // an `org_system_provider_keys` row in `authMode='oauth'`.
+  // of /internal/* — `assertOAuthModelCredential` additionally verifies
+  // the requested credentialId resolves to a `model_provider_credentials`
+  // row owned by the run's org.
 
   router.get("/oauth-token/:connectionId", async (c) => {
     const { run } = await verifyRunToken(c);
-    const connectionId = c.req.param("connectionId");
-    await assertOAuthModelConnection(connectionId, run.orgId);
-    return c.json(await resolveOAuthTokenForSidecar(connectionId));
+    const credentialId = c.req.param("connectionId");
+    await assertOAuthModelCredential(credentialId, run.orgId);
+    return c.json(await resolveOAuthTokenForSidecar(credentialId));
   });
 
   router.post("/oauth-token/:connectionId/refresh", async (c) => {
     const { run } = await verifyRunToken(c);
-    const connectionId = c.req.param("connectionId");
-    await assertOAuthModelConnection(connectionId, run.orgId);
-    return c.json(await forceRefreshOAuthModelProviderToken(connectionId));
+    const credentialId = c.req.param("connectionId");
+    await assertOAuthModelCredential(credentialId, run.orgId);
+    return c.json(await forceRefreshOAuthModelProviderToken(credentialId));
   });
 
   return router;
 }
 
 /**
- * Verify a connection exists, belongs to the run's org, and is wired to
- * an OAuth model provider key. Throws `notFound` / `forbidden` otherwise.
+ * Verify a `model_provider_credentials` row exists and belongs to the
+ * run's org. Throws `notFound` / `forbidden` otherwise. The route param
+ * is still called `connectionId` for sidecar wire compatibility, but the
+ * value is a `model_provider_credentials.id` since the OAuth model
+ * provider refactor.
  */
-async function assertOAuthModelConnection(connectionId: string, runOrgId: string): Promise<void> {
-  const [connOrg] = await db
-    .select({ orgId: userProviderConnections.orgId })
-    .from(userProviderConnections)
-    .where(eq(userProviderConnections.id, connectionId))
-    .limit(1);
-  if (!connOrg) {
-    throw notFound(`Connection ${connectionId} not found`);
+async function assertOAuthModelCredential(credentialId: string, runOrgId: string): Promise<void> {
+  let row: { orgId: string } | undefined;
+  try {
+    [row] = await db
+      .select({ orgId: modelProviderCredentials.orgId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, credentialId))
+      .limit(1);
+  } catch (err) {
+    // PG `invalid_text_representation` (22P02) when the path param is not
+    // a valid UUID — treat as not-found rather than leaking a 500. Drizzle
+    // wraps the underlying postgres.js error via `new Error(…, { cause })`.
+    const code =
+      (err as { code?: string })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+    if (code === "22P02") {
+      throw notFound(`OAuth model provider credential ${credentialId} not found`);
+    }
+    throw err;
   }
-  if (connOrg.orgId !== runOrgId) {
-    throw forbidden(`Connection ${connectionId} not in run org`);
+  if (!row) {
+    throw notFound(`OAuth model provider credential ${credentialId} not found`);
   }
-  if (!(await isConnectionUsedByModelProviderKey(connectionId))) {
-    throw notFound(
-      `Connection ${connectionId} is not registered as an OAuth model provider connection`,
-    );
+  if (row.orgId !== runOrgId) {
+    throw forbidden(`Credential ${credentialId} not in run org`);
   }
 }

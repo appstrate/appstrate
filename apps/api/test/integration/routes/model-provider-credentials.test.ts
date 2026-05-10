@@ -114,6 +114,44 @@ describe("Model Provider Keys API", () => {
       const found = body.data.find((k: { id: string }) => k.id === id);
       expect(found).toBeUndefined();
     });
+
+    it("returns 409 CREDENTIAL_IN_USE when an org_models row still references it", async () => {
+      // Create a credential.
+      const createRes = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Pinned",
+          apiShape: "anthropic-messages",
+          baseUrl: "https://api.anthropic.com",
+          apiKey: "sk-anth-test",
+        }),
+      });
+      const { id: credId } = (await createRes.json()) as { id: string };
+
+      // Attach a model to it so the FK is non-empty.
+      const modelRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Sonnet pinned",
+          providerKeyId: credId,
+          modelId: "claude-sonnet-4-6",
+          apiShape: "anthropic-messages",
+          baseUrl: "https://api.anthropic.com",
+        }),
+      });
+      expect(modelRes.status).toBe(201);
+
+      // Now attempt deletion — FK ON DELETE RESTRICT should surface as 409.
+      const res = await app.request(`/api/model-provider-credentials/${credId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("credential_in_use");
+    });
   });
 
   /**

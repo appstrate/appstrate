@@ -11,7 +11,11 @@ import {
   seedConnectionForApp,
   seedPackage,
   seedEndUser,
+  seedOrgModelProviderKey,
 } from "../../helpers/seed.ts";
+import { modelProviderCredentials } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
+import type { OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
 import { userProviderConnections } from "@appstrate/db/schema";
@@ -847,6 +851,94 @@ describe("Internal API", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${runningToken}` },
       });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── GET /internal/oauth-token/:connectionId ───────────
+  //
+  // The route param is named `connectionId` for sidecar wire compat, but
+  // the value is a `model_provider_credentials.id` since the OAuth model
+  // provider refactor. These tests pin that contract so the bug that
+  // shipped pre-fix (validation against `userProviderConnections.id`,
+  // always 404) cannot reappear.
+
+  describe("GET /internal/oauth-token/:connectionId", () => {
+    async function seedOAuthCredential(orgId: string): Promise<string> {
+      const blob: OAuthBlob = {
+        kind: "oauth",
+        accessToken: "test-access-token",
+        refreshToken: "test-refresh-token",
+        expiresAt: Date.now() + 3600_000,
+        scopesGranted: ["user:inference"],
+        needsReconnection: false,
+      };
+      const [row] = await db
+        .insert(modelProviderCredentials)
+        .values({
+          orgId,
+          label: "Test OAuth Credential",
+          providerId: "claude-code",
+          credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+          createdBy: null,
+        })
+        .returning({ id: modelProviderCredentials.id });
+      return row!.id;
+    }
+
+    it("returns 401 without a run token", async () => {
+      const res = await app.request("/internal/oauth-token/some-id");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when the credentialId does not exist", async () => {
+      const res = await app.request("/internal/oauth-token/00000000-0000-0000-0000-000000000000", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 (not 500) when the credentialId is not a valid UUID", async () => {
+      const res = await app.request("/internal/oauth-token/not-a-uuid", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 403 when the credential belongs to another org", async () => {
+      const otherOrg = await createTestContext({ orgSlug: "otherorg" });
+      const credentialId = await seedOAuthCredential(otherOrg.orgId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with a resolved token when the credential matches the run org", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { accessToken: string; providerId: string };
+      expect(body.accessToken).toBe("test-access-token");
+      expect(body.providerId).toBe("claude-code");
+    });
+
+    it("rejects api_key credentials (only OAuth rows are valid here)", async () => {
+      const apiKeyRow = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiKey: "sk-test",
+        providerId: "anthropic",
+      });
+
+      const res = await app.request(`/internal/oauth-token/${apiKeyRow.id}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      // assertOAuthModelCredential passes (orgId matches); resolveOAuthTokenForSidecar
+      // throws notFound because the provider isn't OAuth-enabled.
       expect(res.status).toBe(404);
     });
   });
