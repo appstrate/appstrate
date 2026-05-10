@@ -170,12 +170,12 @@ RUN mkdir -p node_modules/@mariozechner \
         node_modules/@mariozechner/pi-ai \
         node_modules/@mariozechner/pi-coding-agent
 
-# Bootstrap sources.
-COPY --chown=pi:pi runtime-pi/extensions/          ./extensions/
-COPY --chown=pi:pi runtime-pi/mcp/                 ./mcp/
-COPY --chown=pi:pi runtime-pi/extension-wrapper.ts ./extension-wrapper.ts
-COPY --chown=pi:pi runtime-pi/env.ts               ./env.ts
-COPY --chown=pi:pi runtime-pi/entrypoint.ts        ./entrypoint.ts
+# Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
+# or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked
+# up automatically — no Dockerfile edit required.
+COPY --chown=pi:pi runtime-pi/extensions/ ./extensions/
+COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
+COPY --chown=pi:pi runtime-pi/*.ts        ./
 
 # Agent workspace. AFPS tools ship pre-bundled with their deps inlined
 # (AFPS §3.4, via `@appstrate/core/tool-bundler`), so nothing under

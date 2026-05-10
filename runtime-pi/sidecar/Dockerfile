@@ -65,20 +65,10 @@ COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
 
-# Sidecar sources.
-COPY runtime-pi/sidecar/server.ts           \
-     runtime-pi/sidecar/app.ts              \
-     runtime-pi/sidecar/helpers.ts          \
-     runtime-pi/sidecar/forward-proxy.ts    \
-     runtime-pi/sidecar/ssrf.ts             \
-     runtime-pi/sidecar/mcp.ts              \
-     runtime-pi/sidecar/mcp-host.ts         \
-     runtime-pi/sidecar/blob-store.ts       \
-     runtime-pi/sidecar/credential-proxy.ts \
-     runtime-pi/sidecar/roots.ts            \
-     runtime-pi/sidecar/logger.ts           \
-     runtime-pi/sidecar/upstream-meta.ts    \
-     runtime-pi/sidecar/
+# Sidecar sources. Glob is single-level (no recursion into `test/`),
+# so adding a new `.ts` file at `runtime-pi/sidecar/*.ts` is picked up
+# automatically — no Dockerfile edit required.
+COPY runtime-pi/sidecar/*.ts runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
 RUN bun build --compile --minify server.ts --outfile sidecar
