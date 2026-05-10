@@ -12,8 +12,8 @@
     "authMode": "oauth2",
     "oauth2": {
       "authorizationUrl": "https://claude.ai/oauth/authorize",
-      "tokenUrl": "https://claude.ai/v1/oauth/token",
-      "refreshUrl": "https://claude.ai/v1/oauth/token",
+      "tokenUrl": "https://platform.claude.com/v1/oauth/token",
+      "refreshUrl": "https://platform.claude.com/v1/oauth/token",
       "defaultScopes": ["org:create_api_key", "user:profile", "user:inference"],
       "scopeSeparator": " ",
       "pkceEnabled": true,

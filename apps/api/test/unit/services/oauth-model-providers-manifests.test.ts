@@ -49,7 +49,7 @@ function loadManifest(packageId: string): ProviderManifest {
 
 const TOKEN_URL_BY_PACKAGE_ID: Record<string, string> = {
   "@appstrate/provider-codex": "https://auth.openai.com/oauth/token",
-  "@appstrate/provider-claude-code": "https://claude.ai/v1/oauth/token",
+  "@appstrate/provider-claude-code": "https://platform.claude.com/v1/oauth/token",
 };
 
 describe("OAuth model provider AFPS manifests", () => {
