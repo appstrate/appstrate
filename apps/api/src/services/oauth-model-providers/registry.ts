@@ -19,6 +19,10 @@
  * See docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §3.3 for rationale.
  */
 
+/** Canonical package ids — single source of truth for platform-side branching. */
+export const CODEX_PACKAGE_ID = "@appstrate/provider-codex";
+export const CLAUDE_CODE_PACKAGE_ID = "@appstrate/provider-claude-code";
+
 export type ModelApiShape = "anthropic-messages" | "openai-responses";
 
 export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
@@ -63,7 +67,7 @@ export interface OAuthModelProviderConfig {
 }
 
 const codexConfig: OAuthModelProviderConfig = {
-  packageId: "@appstrate/provider-codex",
+  packageId: CODEX_PACKAGE_ID,
   clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
   pkce: "S256",
   scopes: ["openid", "profile", "email"],
@@ -84,7 +88,7 @@ const codexConfig: OAuthModelProviderConfig = {
 };
 
 const claudeCodeConfig: OAuthModelProviderConfig = {
-  packageId: "@appstrate/provider-claude-code",
+  packageId: CLAUDE_CODE_PACKAGE_ID,
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   pkce: "S256",
   scopes: ["org:create_api_key", "user:profile", "user:inference"],
@@ -124,8 +128,8 @@ const claudeCodeConfig: OAuthModelProviderConfig = {
  * the smoke tests.
  */
 export const OAUTH_MODEL_PROVIDER_TOKEN_URLS: Readonly<Record<string, string>> = Object.freeze({
-  "@appstrate/provider-codex": "https://auth.openai.com/oauth/token",
-  "@appstrate/provider-claude-code": "https://platform.claude.com/v1/oauth/token",
+  [CODEX_PACKAGE_ID]: "https://auth.openai.com/oauth/token",
+  [CLAUDE_CODE_PACKAGE_ID]: "https://platform.claude.com/v1/oauth/token",
 });
 
 export const OAUTH_MODEL_PROVIDERS: Readonly<Record<string, OAuthModelProviderConfig>> =

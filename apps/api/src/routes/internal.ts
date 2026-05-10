@@ -30,6 +30,11 @@ import {
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import {
+  forceRefreshOAuthModelProviderToken,
+  isConnectionUsedByModelProviderKey,
+  resolveOAuthTokenForSidecar,
+} from "../services/oauth-model-providers/token-resolver.ts";
 
 /**
  * Safety margin used when deciding whether a stored access token is still
@@ -417,72 +422,46 @@ export function createInternalRouter() {
   //
   // Sidecar polls these endpoints during /llm/* request lifecycle (cf.
   // SPEC §5.2). Auth is the same Bearer run-token mechanism as the rest
-  // of /internal/* — the sidecar's run is verified against the runs row
-  // and we additionally check that the requested connectionId is actually
-  // wired to an org_system_provider_keys row in authMode='oauth' belonging
-  // to the same org as the run.
+  // of /internal/* — `assertOAuthModelConnection` additionally verifies
+  // the requested connectionId belongs to the run's org and is wired to
+  // an `org_system_provider_keys` row in `authMode='oauth'`.
 
-  // GET /internal/oauth-token/:connectionId
   router.get("/oauth-token/:connectionId", async (c) => {
     const { run } = await verifyRunToken(c);
     const connectionId = c.req.param("connectionId");
-
-    const [connOrg] = await db
-      .select({
-        orgId: userProviderConnections.orgId,
-      })
-      .from(userProviderConnections)
-      .where(eq(userProviderConnections.id, connectionId))
-      .limit(1);
-    if (!connOrg) {
-      throw notFound(`Connection ${connectionId} not found`);
-    }
-    if (connOrg.orgId !== run.orgId) {
-      throw forbidden(`Connection ${connectionId} not in run org`);
-    }
-
-    const { isConnectionUsedByModelProviderKey, resolveOAuthTokenForSidecar } =
-      await import("../services/oauth-model-providers/token-resolver.ts");
-    const isOurs = await isConnectionUsedByModelProviderKey(connectionId);
-    if (!isOurs) {
-      throw notFound(
-        `Connection ${connectionId} is not registered as an OAuth model provider connection`,
-      );
-    }
-
-    const resolved = await resolveOAuthTokenForSidecar(connectionId);
-    return c.json(resolved);
+    await assertOAuthModelConnection(connectionId, run.orgId);
+    return c.json(await resolveOAuthTokenForSidecar(connectionId));
   });
 
-  // POST /internal/oauth-token/:connectionId/refresh
   router.post("/oauth-token/:connectionId/refresh", async (c) => {
     const { run } = await verifyRunToken(c);
     const connectionId = c.req.param("connectionId");
-
-    const [connOrg] = await db
-      .select({ orgId: userProviderConnections.orgId })
-      .from(userProviderConnections)
-      .where(eq(userProviderConnections.id, connectionId))
-      .limit(1);
-    if (!connOrg) {
-      throw notFound(`Connection ${connectionId} not found`);
-    }
-    if (connOrg.orgId !== run.orgId) {
-      throw forbidden(`Connection ${connectionId} not in run org`);
-    }
-
-    const { isConnectionUsedByModelProviderKey, forceRefreshOAuthModelProviderToken } =
-      await import("../services/oauth-model-providers/token-resolver.ts");
-    const isOurs = await isConnectionUsedByModelProviderKey(connectionId);
-    if (!isOurs) {
-      throw notFound(
-        `Connection ${connectionId} is not registered as an OAuth model provider connection`,
-      );
-    }
-
-    const resolved = await forceRefreshOAuthModelProviderToken(connectionId);
-    return c.json(resolved);
+    await assertOAuthModelConnection(connectionId, run.orgId);
+    return c.json(await forceRefreshOAuthModelProviderToken(connectionId));
   });
 
   return router;
+}
+
+/**
+ * Verify a connection exists, belongs to the run's org, and is wired to
+ * an OAuth model provider key. Throws `notFound` / `forbidden` otherwise.
+ */
+async function assertOAuthModelConnection(connectionId: string, runOrgId: string): Promise<void> {
+  const [connOrg] = await db
+    .select({ orgId: userProviderConnections.orgId })
+    .from(userProviderConnections)
+    .where(eq(userProviderConnections.id, connectionId))
+    .limit(1);
+  if (!connOrg) {
+    throw notFound(`Connection ${connectionId} not found`);
+  }
+  if (connOrg.orgId !== runOrgId) {
+    throw forbidden(`Connection ${connectionId} not in run org`);
+  }
+  if (!(await isConnectionUsedByModelProviderKey(connectionId))) {
+    throw notFound(
+      `Connection ${connectionId} is not registered as an OAuth model provider connection`,
+    );
+  }
 }

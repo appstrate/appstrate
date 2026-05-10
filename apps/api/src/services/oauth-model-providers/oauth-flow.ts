@@ -34,7 +34,11 @@ import {
 } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import { ensureDefaultProfile } from "../connection-profiles.ts";
-import { getOAuthModelProviderConfig, type OAuthModelProviderConfig } from "./registry.ts";
+import {
+  CODEX_PACKAGE_ID,
+  getOAuthModelProviderConfig,
+  type OAuthModelProviderConfig,
+} from "./registry.ts";
 import { decodeCodexJwtPayload, type OAuthModelProviderCredentials } from "./credentials.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -80,131 +84,6 @@ async function ensureProviderCredentialRow(
     })
     .returning({ id: applicationProviderCredentials.id });
   return created!.id;
-}
-
-export interface PersistOAuthModelProviderTokensInput {
-  orgId: string;
-  applicationId: string;
-  userId: string;
-  connectionProfileId: string;
-  providerPackageId: string;
-  label: string;
-  accessToken: string;
-  refreshToken: string;
-  /** Computed from `expires_in` at token-exchange time, or `null` if absent. */
-  expiresAt: Date | null;
-  /**
-   * Scopes effectively granted by the provider. Defaults to the registry's
-   * declared scope list when the provider response did not echo the granted
-   * set (Anthropic does not always include `scope` in the token response).
-   */
-  scopesGranted: string[];
-  /** Optional account email for UI display. */
-  email?: string;
-  /** Claude-only: subscription tier (`pro`, `max`, `team`, `enterprise`). */
-  subscriptionType?: string;
-  /** Codex-only: extracted from JWT `https://api.openai.com/auth.chatgpt_account_id`. */
-  chatgptAccountId?: string;
-}
-
-export interface PersistOAuthModelProviderTokensResult {
-  providerKeyId: string;
-  connectionId: string;
-}
-
-/**
- * Persist a freshly-acquired OAuth token bundle from a model provider.
- *
- * Builds the encrypted credential blob (access + refresh + provider claims),
- * upserts the `userProviderConnections` row keyed by
- * `(connectionProfileId, providerId, orgId, providerCredentialId)`, and
- * inserts the matching `orgSystemProviderKeys` row in `authMode='oauth'`
- * inside a single DB transaction so a half-baked persistence is impossible.
- *
- * Currently a single caller (`importOAuthModelProviderConnection` below),
- * but kept as a separate exported helper because the sidecar's token cache
- * + refresh worker are written against the persisted shape and must not
- * see drift if a future caller (e.g. an alternative bring-your-own-token
- * upload path) gets added.
- */
-export async function persistOAuthModelProviderTokens(
-  input: PersistOAuthModelProviderTokensInput,
-): Promise<PersistOAuthModelProviderTokensResult> {
-  const config = getOAuthModelProviderConfig(input.providerPackageId);
-  if (!config) {
-    throw notFound(
-      `Unknown OAuth model provider: ${input.providerPackageId} (not in registry whitelist)`,
-    );
-  }
-
-  const credPayload: OAuthModelProviderCredentials = {
-    access_token: input.accessToken,
-    refresh_token: input.refreshToken,
-    token_type: "Bearer",
-    ...(input.chatgptAccountId ? { chatgpt_account_id: input.chatgptAccountId } : {}),
-    ...(input.subscriptionType ? { subscription_type: input.subscriptionType } : {}),
-    ...(input.email ? { email: input.email } : {}),
-  };
-
-  const providerCredentialId = await ensureProviderCredentialRow(
-    input.applicationId,
-    input.providerPackageId,
-    config,
-  );
-  const credentialsEncrypted = encryptCredentials(
-    credPayload as unknown as Record<string, unknown>,
-  );
-
-  const { connectionId, providerKeyId } = await db.transaction(async (tx) => {
-    const [conn] = await tx
-      .insert(userProviderConnections)
-      .values({
-        connectionProfileId: input.connectionProfileId,
-        providerId: input.providerPackageId,
-        orgId: input.orgId,
-        providerCredentialId,
-        credentialsEncrypted,
-        scopesGranted: input.scopesGranted,
-        expiresAt: input.expiresAt,
-        needsReconnection: false,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [
-          userProviderConnections.connectionProfileId,
-          userProviderConnections.providerId,
-          userProviderConnections.orgId,
-          userProviderConnections.providerCredentialId,
-        ],
-        set: {
-          credentialsEncrypted,
-          scopesGranted: input.scopesGranted,
-          expiresAt: input.expiresAt,
-          needsReconnection: false,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({ id: userProviderConnections.id });
-
-    const [key] = await tx
-      .insert(orgSystemProviderKeys)
-      .values({
-        orgId: input.orgId,
-        label: input.label,
-        api: config.api.apiShape,
-        baseUrl: config.api.baseUrl,
-        apiKeyEncrypted: null,
-        authMode: "oauth",
-        oauthConnectionId: conn!.id,
-        providerPackageId: input.providerPackageId,
-        createdBy: input.userId,
-      })
-      .returning({ id: orgSystemProviderKeys.id });
-
-    return { connectionId: conn!.id, providerKeyId: key!.id };
-  });
-
-  return { connectionId, providerKeyId };
 }
 
 export interface ImportOAuthModelProviderInput {
@@ -289,7 +168,7 @@ export async function importOAuthModelProviderConnection(
   // because Codex's backend rejects mismatched chatgpt-account-id headers.
   let chatgptAccountId: string | undefined = input.accountId;
   let email: string | undefined = input.email;
-  if (input.providerPackageId === "@appstrate/provider-codex") {
+  if (input.providerPackageId === CODEX_PACKAGE_ID) {
     const claims = decodeCodexJwtPayload(input.accessToken);
     if (!chatgptAccountId) chatgptAccountId = claims?.chatgpt_account_id;
     if (!email) email = claims?.email;
@@ -309,28 +188,84 @@ export async function importOAuthModelProviderConnection(
     providerPackageId: input.providerPackageId,
     hasAccountIdFromBody: !!input.accountId,
     hasAccountIdFinal: !!chatgptAccountId,
-    accountIdLength: chatgptAccountId?.length ?? 0,
   });
 
-  const result = await persistOAuthModelProviderTokens({
-    orgId: input.orgId,
-    applicationId: input.applicationId,
-    userId: input.userId,
-    connectionProfileId,
-    providerPackageId: input.providerPackageId,
-    label: input.label,
-    accessToken: input.accessToken,
-    refreshToken: input.refreshToken,
-    expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-    scopesGranted: [...config.scopes],
-    email,
-    subscriptionType: input.subscriptionType,
-    chatgptAccountId,
-  });
+  const credPayload: OAuthModelProviderCredentials = {
+    access_token: input.accessToken,
+    refresh_token: input.refreshToken,
+    token_type: "Bearer",
+    ...(chatgptAccountId ? { chatgpt_account_id: chatgptAccountId } : {}),
+    ...(input.subscriptionType ? { subscription_type: input.subscriptionType } : {}),
+    ...(email ? { email } : {}),
+  };
+  const credentialsEncrypted = encryptCredentials(
+    credPayload as unknown as Record<string, unknown>,
+  );
+  const providerCredentialId = await ensureProviderCredentialRow(
+    input.applicationId,
+    input.providerPackageId,
+    config,
+  );
+  const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+  const scopesGranted = [...config.scopes];
+
+  // Persist connection + provider key in one transaction so a half-baked
+  // import is impossible — the auth-mode XOR CHECK constraint on
+  // org_system_provider_keys enforces both rows must commit together.
+  const { connectionId: persistedConnectionId, providerKeyId } = await db.transaction(
+    async (tx) => {
+      const [conn] = await tx
+        .insert(userProviderConnections)
+        .values({
+          connectionProfileId,
+          providerId: input.providerPackageId,
+          orgId: input.orgId,
+          providerCredentialId,
+          credentialsEncrypted,
+          scopesGranted,
+          expiresAt,
+          needsReconnection: false,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [
+            userProviderConnections.connectionProfileId,
+            userProviderConnections.providerId,
+            userProviderConnections.orgId,
+            userProviderConnections.providerCredentialId,
+          ],
+          set: {
+            credentialsEncrypted,
+            scopesGranted,
+            expiresAt,
+            needsReconnection: false,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: userProviderConnections.id });
+
+      const [key] = await tx
+        .insert(orgSystemProviderKeys)
+        .values({
+          orgId: input.orgId,
+          label: input.label,
+          api: config.api.apiShape,
+          baseUrl: config.api.baseUrl,
+          apiKeyEncrypted: null,
+          authMode: "oauth",
+          oauthConnectionId: conn!.id,
+          providerPackageId: input.providerPackageId,
+          createdBy: input.userId,
+        })
+        .returning({ id: orgSystemProviderKeys.id });
+
+      return { connectionId: conn!.id, providerKeyId: key!.id };
+    },
+  );
 
   return {
-    providerKeyId: result.providerKeyId,
-    connectionId: result.connectionId,
+    providerKeyId,
+    connectionId: persistedConnectionId,
     providerPackageId: input.providerPackageId,
     email,
     subscriptionType: input.subscriptionType,

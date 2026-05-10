@@ -49,10 +49,6 @@ export interface AppDeps {
   runId?: string;
 }
 
-function isOauthLlmConfig(llm: LlmProxyConfig | undefined): llm is LlmProxyOauthConfig {
-  return llm?.authMode === "oauth";
-}
-
 /**
  * Headers forwarded from the upstream LLM provider verbatim. Limited to
  * the ones the in-container agent legitimately needs to react to:
@@ -229,7 +225,7 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
     }
 
-    if (isOauthLlmConfig(config.llm)) {
+    if (config.llm.authMode === "oauth") {
       return handleOauthLlmRequest(c, config.llm);
     }
 
