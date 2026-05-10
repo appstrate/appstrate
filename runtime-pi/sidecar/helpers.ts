@@ -108,7 +108,12 @@ export const STREAMING_THRESHOLD = 1 * 1024 * 1024; // 1 MB
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
-export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
+export type {
+  SidecarConfig,
+  LlmProxyConfig,
+  LlmProxyApiKeyConfig,
+  LlmProxyOauthConfig,
+} from "@appstrate/core/sidecar-types";
 
 // The credentials payload the sidecar receives over HTTP is
 // wire-identical to what the platform's `/api/credential-proxy/proxy`

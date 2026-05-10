@@ -11,11 +11,13 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications } from "./applications.ts";
+import { userProviderConnections } from "./connections.ts";
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -138,12 +140,29 @@ export const orgSystemProviderKeys = pgTable(
     label: text("label").notNull(),
     api: text("api").notNull(),
     baseUrl: text("base_url").notNull(),
-    apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    apiKeyEncrypted: text("api_key_encrypted"),
+    authMode: text("auth_mode", { enum: ["api_key", "oauth"] })
+      .notNull()
+      .default("api_key"),
+    oauthConnectionId: uuid("oauth_connection_id").references(() => userProviderConnections.id, {
+      onDelete: "cascade",
+    }),
+    providerPackageId: text("provider_package_id"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => [index("idx_org_system_provider_keys_org_id").on(t.orgId)],
+  (t) => [
+    index("idx_org_system_provider_keys_org_id").on(t.orgId),
+    index("idx_org_system_provider_keys_oauth_conn").on(t.oauthConnectionId),
+    check(
+      "org_system_provider_keys_auth_mode_consistency",
+      sql`(
+        (auth_mode = 'api_key' AND api_key_encrypted IS NOT NULL AND oauth_connection_id IS NULL) OR
+        (auth_mode = 'oauth'   AND api_key_encrypted IS NULL     AND oauth_connection_id IS NOT NULL)
+      )`,
+    ),
+  ],
 );
 
 export const orgModels = pgTable(

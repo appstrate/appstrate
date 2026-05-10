@@ -40,9 +40,19 @@ export type { OAuth1CallbackResult } from "./oauth1.ts";
 // Token refresh
 export { RefreshError } from "./token-refresh.ts";
 
-// Token error classification (shared by callback + refresh paths)
-export { parseTokenErrorResponse } from "./token-utils.ts";
-export type { TokenErrorKind, TokenErrorClassification } from "./token-utils.ts";
+// Token error classification + low-level OAuth token endpoint helpers
+// (shared by callback + refresh + custom OAuth flows like model providers).
+export {
+  parseTokenErrorResponse,
+  parseTokenResponse,
+  buildTokenHeaders,
+  buildTokenBody,
+} from "./token-utils.ts";
+export type {
+  TokenErrorKind,
+  TokenErrorClassification,
+  ParsedTokenResponse,
+} from "./token-utils.ts";
 
 // Credentials
 export {

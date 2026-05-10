@@ -163,6 +163,9 @@ const expectedEndpoints = [
   "PUT /api/model-provider-keys/{id}",
   "DELETE /api/model-provider-keys/{id}",
   "POST /api/model-provider-keys/{id}/test",
+  // OAuth Model Providers (subscription billing)
+  "POST /api/model-providers-oauth/initiate",
+  "GET /api/model-providers-oauth/callback",
 
   // Models
   "GET /api/models",
@@ -286,6 +289,8 @@ const expectedEndpoints = [
   "GET /internal/memories",
   "GET /internal/credentials/{scope}/{name}",
   "POST /internal/credentials/{scope}/{name}/refresh",
+  "GET /internal/oauth-token/{connectionId}",
+  "POST /internal/oauth-token/{connectionId}/refresh",
 
   // Meta
   "GET /api/openapi.json",

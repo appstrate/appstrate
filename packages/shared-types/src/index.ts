@@ -507,6 +507,16 @@ export interface OrgModelProviderKeyInfo {
   api: string;
   baseUrl: string;
   source: "built-in" | "custom";
+  /** Auth mode of the underlying credential. Defaults to `"api_key"` for OSS rows that predate OAuth model providers. */
+  authMode?: "api_key" | "oauth";
+  /** Set when `authMode === "oauth"`. Identifies the AFPS provider package backing the connection. */
+  providerPackageId?: string | null;
+  /** Set when `authMode === "oauth"`. Lets the UI render reconnect / disconnect actions targeting the right connection. */
+  oauthConnectionId?: string | null;
+  /** Surface email of the OAuth account (Codex JWT claim or Claude `claudeAiOauth.email`). UI shows it as transparency hint. */
+  oauthEmail?: string | null;
+  /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
+  needsReconnection?: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

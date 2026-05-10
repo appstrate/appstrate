@@ -39,6 +39,7 @@ import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
+import { initOAuthModelRefreshWorker } from "../services/oauth-model-providers/refresh-worker.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -249,6 +250,11 @@ export async function boot(): Promise<void> {
     }),
     initInlineCompactionWorker().catch((err) => {
       logger.warn("Could not initialize inline compaction worker", {
+        error: getErrorMessage(err),
+      });
+    }),
+    initOAuthModelRefreshWorker().catch((err) => {
+      logger.warn("Could not initialize OAuth model refresh worker", {
         error: getErrorMessage(err),
       });
     }),

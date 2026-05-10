@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
+  "name": "@appstrate/provider-codex",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Codex (ChatGPT)",
+  "description": "Run agents against your ChatGPT Plus / Pro / Business subscription via Codex.",
+  "iconUrl": "openai",
+  "categories": ["llm", "model-provider"],
+  "docsUrl": "https://platform.openai.com/docs/guides/codex",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://auth.openai.com/oauth/authorize",
+      "tokenUrl": "https://auth.openai.com/oauth/token",
+      "refreshUrl": "https://auth.openai.com/oauth/token",
+      "defaultScopes": ["openid", "profile", "email"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://chatgpt.com/backend-api/codex/**"],
+    "availableScopes": [
+      { "value": "openid", "label": "Identify the connected account" },
+      { "value": "profile", "label": "Read account profile" },
+      { "value": "email", "label": "Read account email" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "The redirect URI is provisioned by Appstrate (no manual setup). Click 'Connect via OAuth' in Settings > Models to start.",
+    "steps": [
+      {
+        "label": "Active a ChatGPT Plus, Pro, or Business subscription",
+        "url": "https://chatgpt.com/#pricing"
+      },
+      {
+        "label": "Click 'Connect via OAuth' in Settings > Models inside Appstrate"
+      }
+    ]
+  },
+  "schemaVersion": "1.1"
+}

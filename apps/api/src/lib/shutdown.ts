@@ -12,6 +12,7 @@ import {
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
+import { shutdownOAuthModelRefreshWorker } from "../services/oauth-model-providers/refresh-worker.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
@@ -56,6 +57,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down inline compaction worker...");
     await shutdownInlineCompactionWorker();
+
+    logger.info("Shutting down OAuth model refresh worker...");
+    await shutdownOAuthModelRefreshWorker();
 
     logger.info("Shutting down modules...");
     await shutdownModules();

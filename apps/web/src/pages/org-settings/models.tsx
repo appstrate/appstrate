@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, KeyRound } from "lucide-react";
+import { BrainCircuit, ChevronDown, KeyRound } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useModels,
@@ -27,6 +34,7 @@ import {
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { ModelProviderKeyFormModal } from "../../components/model-provider-key-form-modal";
+import { OAuthModelProviderDialog } from "../../components/oauth-model-provider-dialog";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
@@ -224,6 +232,7 @@ function ProviderKeysSection({
   onEdit,
   onDelete,
   onRename,
+  onConnectOAuth,
 }: {
   providerKeys: OrgModelProviderKeyInfo[] | undefined;
   isLoading: boolean;
@@ -232,6 +241,7 @@ function ProviderKeysSection({
   onEdit: (pk: OrgModelProviderKeyInfo) => void;
   onDelete: (pk: OrgModelProviderKeyInfo) => void;
   onRename: (pk: OrgModelProviderKeyInfo, newLabel: string) => void;
+  onConnectOAuth: (providerPackageId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderKey();
@@ -240,27 +250,59 @@ function ProviderKeysSection({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
+  const addMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button>
+          {t("providerKeys.add")} <ChevronDown className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onCreate}>
+          <KeyRound className="size-4" /> {t("providerKeys.add")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onConnectOAuth("@appstrate/provider-codex")}>
+          {t("providerKeys.oauth.connectCodex")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onConnectOAuth("@appstrate/provider-claude-code")}>
+          {t("providerKeys.oauth.connectClaude")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="mb-8">
-      <div className="mb-4 flex items-center justify-end gap-2">
-        <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
-      </div>
+      <div className="mb-4 flex items-center justify-end gap-2">{addMenu}</div>
 
       {providerKeys && providerKeys.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
           {providerKeys.map((pk) => {
             const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            const isOauth = pk.authMode === "oauth";
             return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
                 {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
                 <div className="min-w-0 flex-1">
-                  <InlineEditableLabel
-                    value={pk.label}
-                    editable={pk.source === "custom"}
-                    onSave={(newLabel) => onRename(pk, newLabel)}
-                  />
-                  <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <InlineEditableLabel
+                      value={pk.label}
+                      editable={pk.source === "custom" && !isOauth}
+                      onSave={(newLabel) => onRename(pk, newLabel)}
+                    />
+                    {isOauth && (
+                      <Badge variant="secondary" className="text-[0.65rem]">
+                        {t("providerKeys.oauth.badgeOauth")}
+                      </Badge>
+                    )}
+                    {pk.needsReconnection && (
+                      <Badge variant="destructive" className="text-[0.65rem]">
+                        {t("providerKeys.oauth.needsReconnection")}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
                     <span>{pk.api}</span>
                     {pk.createdAt && (
                       <>
@@ -268,17 +310,25 @@ function ProviderKeysSection({
                         <span>{formatDateField(pk.createdAt)}</span>
                       </>
                     )}
+                    {isOauth && pk.oauthEmail && (
+                      <>
+                        <span>&middot;</span>
+                        <span>{t("providerKeys.oauth.connectedAs", { email: pk.oauthEmail })}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleTest(pk.id)}
-                    disabled={testingId === pk.id}
-                  >
-                    {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
-                  </Button>
+                  {!isOauth && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleTest(pk.id)}
+                      disabled={testingId === pk.id}
+                    >
+                      {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
+                    </Button>
+                  )}
                   {testResults[pk.id] && (
                     <TestResultSpan
                       result={testResults[pk.id]!}
@@ -286,13 +336,29 @@ function ProviderKeysSection({
                       failedKey="providerKeys.testFailed"
                     />
                   )}
-                  {pk.source === "custom" && (
+                  {pk.source === "custom" && !isOauth && (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => onEdit(pk)}>
                         {t("providerKeys.edit")}
                       </Button>
                       <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
                         {t("providerKeys.delete")}
+                      </Button>
+                    </>
+                  )}
+                  {isOauth && (
+                    <>
+                      {pk.needsReconnection && pk.providerPackageId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onConnectOAuth(pk.providerPackageId!)}
+                        >
+                          {t("providerKeys.oauth.reconnect")}
+                        </Button>
+                      )}
+                      <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
+                        {t("providerKeys.oauth.disconnect")}
                       </Button>
                     </>
                   )}
@@ -311,7 +377,7 @@ function ProviderKeysSection({
           icon={KeyRound}
           compact
         >
-          <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
+          {addMenu}
         </EmptyState>
       )}
     </div>
@@ -345,6 +411,26 @@ export function OrgSettingsModelsPage() {
   const createPkMutation = useCreateModelProviderKey();
   const updatePkMutation = useUpdateModelProviderKey();
   const deletePkMutation = useDeleteModelProviderKey();
+
+  const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
+
+  // Surface OAuth callback outcomes — `?connected=:providerKeyId` or `?error=...`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const connected = searchParams.get("oauthConnected");
+    const error = searchParams.get("oauthError");
+    if (connected) {
+      toast.success(t("providerKeys.oauth.callbackSuccess"));
+      const next = new URLSearchParams(searchParams);
+      next.delete("oauthConnected");
+      setSearchParams(next, { replace: true });
+    } else if (error) {
+      toast.error(t("providerKeys.oauth.callbackError", { error }));
+      const next = new URLSearchParams(searchParams);
+      next.delete("oauthError");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams, t]);
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
@@ -395,6 +481,22 @@ export function OrgSettingsModelsPage() {
           onRename={(pk, newLabel) => {
             updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
           }}
+          onConnectOAuth={(providerPackageId) => setOauthDialogProviderId(providerPackageId)}
+        />
+      )}
+
+      {oauthDialogProviderId && (
+        <OAuthModelProviderDialog
+          open
+          providerPackageId={oauthDialogProviderId}
+          defaultLabel={
+            oauthDialogProviderId === "@appstrate/provider-codex"
+              ? "ChatGPT"
+              : oauthDialogProviderId === "@appstrate/provider-claude-code"
+                ? "Claude"
+                : "OAuth provider"
+          }
+          onClose={() => setOauthDialogProviderId(null)}
         />
       )}
 

@@ -16,8 +16,43 @@ export interface SidecarConfig {
   llm?: LlmProxyConfig;
 }
 
-export interface LlmProxyConfig {
+/**
+ * Discriminated union covering the two LLM auth modes the sidecar can serve:
+ *
+ *   - `api_key`: legacy path. The agent SDK builds the auth header with a
+ *     placeholder and the sidecar swaps the placeholder for the real key.
+ *   - `oauth`: the sidecar fetches a fresh access token from the platform
+ *     (`GET /internal/oauth-token/:connectionId`) and injects it as the
+ *     bearer + the per-provider identity headers + applies provider-specific
+ *     body transforms (Claude identity prepend, Codex stream/store coercion).
+ *
+ * Backward compat: a config object without `authMode` is treated as
+ * `api_key` (the historical default) so existing pooled sidecars continue
+ * to work after upgrade.
+ */
+export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
+
+export interface LlmProxyApiKeyConfig {
+  authMode?: "api_key";
   baseUrl: string;
   apiKey: string;
   placeholder: string;
+}
+
+export interface LlmProxyOauthConfig {
+  authMode: "oauth";
+  /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
+  baseUrl: string;
+  /** ID of the `userProviderConnections` row backing this OAuth connection. */
+  oauthConnectionId: string;
+  /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
+  apiShape: "anthropic-messages" | "openai-responses";
+  /** Used to look up the identity-header / body-transform strategy. */
+  providerPackageId: string;
+  /** Optional URL rewriting (e.g. Codex `/v1/responses` → `/codex/responses`). */
+  rewriteUrlPath?: { from: string; to: string };
+  /** Codex: force `stream: true` in the request body. */
+  forceStream?: boolean;
+  /** Codex: force `store: false` in the request body. */
+  forceStore?: boolean;
 }

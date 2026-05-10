@@ -249,4 +249,138 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/oauth-token/{connectionId}": {
+    get: {
+      operationId: "getOAuthModelProviderToken",
+      tags: ["Internal"],
+      summary: "Fetch a fresh access token for an OAuth model provider connection",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, rewriteUrlPath, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "user_provider_connections.id referenced by the orgSystemProviderKeys row.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Resolved token and runtime config.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["accessToken", "apiShape", "baseUrl", "providerPackageId"],
+                properties: {
+                  accessToken: { type: "string" },
+                  expiresAt: {
+                    type: ["integer", "null"],
+                    description: "Epoch milliseconds. null when expiry is unknown.",
+                  },
+                  apiShape: {
+                    type: "string",
+                    enum: ["anthropic-messages", "openai-responses"],
+                  },
+                  baseUrl: { type: "string", format: "uri" },
+                  rewriteUrlPath: {
+                    type: "object",
+                    properties: {
+                      from: { type: "string" },
+                      to: { type: "string" },
+                    },
+                    required: ["from", "to"],
+                  },
+                  forceStream: { type: "boolean" },
+                  forceStore: { type: "boolean" },
+                  accountId: {
+                    type: "string",
+                    description: "Codex only — used as `chatgpt-account-id` header.",
+                  },
+                  providerPackageId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description:
+            "Connection needs reconnection (refresh token revoked or missing). Sidecar should propagate as 401 to the agent.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/internal/oauth-token/{connectionId}/refresh": {
+    post: {
+      operationId: "refreshOAuthModelProviderToken",
+      tags: ["Internal"],
+      summary: "Force a refresh of the access token for an OAuth model provider connection",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on revoked refresh tokens, flips needsReconnection=true on the connection and returns 410.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Refreshed token and runtime config (same shape as GET).",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["accessToken", "apiShape", "baseUrl", "providerPackageId"],
+                properties: {
+                  accessToken: { type: "string" },
+                  expiresAt: { type: ["integer", "null"] },
+                  apiShape: {
+                    type: "string",
+                    enum: ["anthropic-messages", "openai-responses"],
+                  },
+                  baseUrl: { type: "string", format: "uri" },
+                  rewriteUrlPath: {
+                    type: "object",
+                    properties: {
+                      from: { type: "string" },
+                      to: { type: "string" },
+                    },
+                    required: ["from", "to"],
+                  },
+                  forceStream: { type: "boolean" },
+                  forceStore: { type: "boolean" },
+                  accountId: { type: "string" },
+                  providerPackageId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description: "Refresh token revoked — connection flagged needsReconnection.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
 } as const;

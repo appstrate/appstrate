@@ -14,6 +14,7 @@ import {
   removeNetwork,
 } from "./docker.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { LlmProxyConfig } from "@appstrate/core/sidecar-types";
 import {
   SIDECAR_MEMORY_BYTES,
   SIDECAR_NANO_CPUS,
@@ -94,7 +95,7 @@ export async function acquireSidecar(
     runToken: string;
     platformApiUrl: string;
     proxyUrl?: string;
-    llm?: { baseUrl: string; apiKey: string; placeholder: string };
+    llm?: LlmProxyConfig;
   },
   platformNetwork?: { networkId: string; hostname: string } | null,
 ): Promise<string | null> {

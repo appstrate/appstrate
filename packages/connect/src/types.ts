@@ -48,6 +48,14 @@ export interface OAuthStateRecord {
   expiresAt: string;
   authMode: string;
   oauthTokenSecret?: string;
+  /**
+   * Free-form discriminator/payload bag. The shared callback router uses
+   * `metadata.kind` to route the callback to the correct handler — e.g.
+   * `"oauth_model_provider"` selects the model-provider flow over the
+   * default integration flow. Carriers SHOULD only put primitives or
+   * shallow JSON inside; the record is JSON-serialized at rest.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /**

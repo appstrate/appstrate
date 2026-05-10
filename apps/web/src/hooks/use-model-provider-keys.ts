@@ -91,3 +91,19 @@ export function useTestModelProviderKeyInline() {
       }),
   });
 }
+
+/**
+ * Kick off the OAuth dance for a model provider package.
+ * On success the API returns an `authorizationUrl` — caller should
+ * navigate the browser to it (full-page redirect) so the user lands
+ * on the provider's consent screen.
+ */
+export function useInitiateOAuthModelProvider() {
+  return useMutation({
+    mutationFn: (data: { providerPackageId: string; label: string }) =>
+      api<{ authorizationUrl: string; state: string }>("/model-providers-oauth/initiate", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  });
+}

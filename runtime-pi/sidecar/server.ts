@@ -4,6 +4,7 @@ import { createApp } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse } from "./helpers.ts";
 import { logger } from "./logger.ts";
+import { OAuthTokenCache } from "./oauth-token-cache.ts";
 
 // Mutable config — can be set via env vars at startup or updated at runtime
 // via POST /configure (used by sidecar pool for pre-warmed containers).
@@ -54,6 +55,14 @@ async function refreshCredentials(providerId: string): Promise<CredentialsRespon
 const port = parseInt(process.env.PORT || "8080", 10);
 const proxy = createForwardProxy({ config, listenPort: port + 1 });
 const preConfigured = Boolean(process.env.RUN_TOKEN);
+// One cache per sidecar process — a sidecar serves a single run, so
+// cross-run pollution is impossible. The cache reads from the live
+// `config` object via getter functions so that tokens follow the
+// (potentially-pooled) runtime configuration after `/configure`.
+const oauthTokenCache = new OAuthTokenCache({
+  getPlatformApiUrl: () => config.platformApiUrl,
+  getRunToken: () => config.runToken,
+});
 const app = createApp({
   config,
   fetchCredentials,
@@ -62,6 +71,7 @@ const app = createApp({
   isReady: () => proxy.readySync,
   configSecret: process.env.CONFIG_SECRET || undefined,
   preConfigured,
+  oauthTokenCache,
 });
 
 logger.info("Sidecar proxy listening", { port });

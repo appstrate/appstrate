@@ -129,11 +129,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (resolvedConfig.proxyUrl) {
       sidecarEnv.PROXY_URL = resolvedConfig.proxyUrl;
     }
-    if (resolvedConfig.llm) {
+    if (resolvedConfig.llm && resolvedConfig.llm.authMode !== "oauth") {
       sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
       sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
       sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
     }
+    // OAuth-mode env wiring (PI_OAUTH_CONNECTION_ID, etc.) lands in Phase 5.7.
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timingSafeEqual } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { mountMcp } from "./mcp.ts";
 import { BlobStore } from "./blob-store.ts";
 import {
@@ -11,6 +11,7 @@ import {
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyConfig,
+  type LlmProxyOauthConfig,
 } from "./helpers.ts";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -18,6 +19,8 @@ import {
   TokenBudget,
   readPositiveTokenEnv,
 } from "./token-budget.ts";
+import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
+import { buildIdentityHeaders, transformBody, adaptBetaHeaderForRetry } from "./oauth-identity.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -31,6 +34,12 @@ export interface AppDeps {
   configSecret?: string; // One-time config secret (from CONFIG_SECRET env var)
   preConfigured?: boolean; // true when credentials come via env vars (fresh sidecar)
   /**
+   * OAuth token cache. Required when the sidecar serves OAuth-mode LLM
+   * configs (`config.llm.authMode === "oauth"`). Production server.ts
+   * builds one against the platform API; tests pass a stub.
+   */
+  oauthTokenCache?: OAuthTokenCache;
+  /**
    * Run identifier for the agent run this sidecar serves. Used to
    * scope the MCP blob cache — a single sidecar process serves a single
    * run, so the run id can be set once at boot. Defaults to `"unknown"`
@@ -38,6 +47,72 @@ export interface AppDeps {
    * / `/configure`.
    */
   runId?: string;
+}
+
+function isOauthLlmConfig(llm: LlmProxyConfig | undefined): llm is LlmProxyOauthConfig {
+  return llm?.authMode === "oauth";
+}
+
+/**
+ * Headers forwarded from the upstream LLM provider verbatim. Limited to
+ * the ones the in-container agent legitimately needs to react to:
+ *
+ *   - `Content-Type` — required for the agent to parse the body
+ *   - `Retry-After`, `RateLimit*` — required for backoff on 429
+ *   - `x-request-id` — useful for cross-correlating provider-side errors
+ *
+ * Everything else (Set-Cookie, hop-by-hop, internal Anthropic headers) is
+ * dropped to keep the sidecar↔agent boundary tight.
+ */
+const PASSTHROUGH_RESPONSE_HEADERS = [
+  "content-type",
+  "retry-after",
+  "ratelimit-limit",
+  "ratelimit-remaining",
+  "ratelimit-reset",
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-reset-requests",
+  "x-ratelimit-limit-tokens",
+  "x-ratelimit-remaining-tokens",
+  "x-ratelimit-reset-tokens",
+  "x-request-id",
+];
+
+function passUpstream(upstream: Response): Response {
+  const responseHeaders: Record<string, string> = {};
+  for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value !== null) {
+      // Re-cased to preserve canonical HTTP form for the agent.
+      responseHeaders[name.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase())] = value;
+    }
+  }
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: responseHeaders,
+  });
+}
+
+function llmFetchErrorResponse(
+  // Hono context — typed loosely to avoid coupling to its internal generics.
+  c: { json: (body: unknown, status: number) => Response },
+  targetUrl: string,
+  err: unknown,
+): Response {
+  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+  let domain: string | undefined;
+  try {
+    domain = new URL(targetUrl).hostname;
+  } catch {}
+  const suffix = code ? `: ${code}` : "";
+  const domainHint = domain ? ` (${domain})` : "";
+  return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
+}
+
+function stringifyError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
 }
 
 /**
@@ -131,37 +206,48 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ status: "configured" });
   });
 
-  // LLM reverse proxy. The Pi SDK formats every header (auth, beta,
-  // identity) using the platform-supplied placeholder; we swap the
-  // placeholder value for the real key in every header before
-  // forwarding. Request and response bodies stream through (zero-copy).
+  // LLM reverse proxy. Two modes:
+  //
+  //   - api_key (legacy): the Pi SDK formats every header (auth, beta,
+  //     identity) using the platform-supplied placeholder; we swap the
+  //     placeholder for the real key. Request/response bodies stream
+  //     through zero-copy.
+  //   - oauth: the sidecar resolves a fresh access token from the
+  //     platform (`/internal/oauth-token/:id`), injects bearer +
+  //     provider identity headers, applies provider-specific body
+  //     transforms (Claude identity prepend, Codex stream/store
+  //     coercion). Bodies are buffered (transform requirement) but the
+  //     response still streams. On 401 we refresh + retry once; on
+  //     400-with-out-of-extra-usage we strip `context-1m-2025-08-07`
+  //     and retry once.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
     }
 
-    const baseUrl = config.llm.baseUrl;
-
-    // Block SSRF — baseUrl comes from user config, must not target private networks
-    if (isBlockedUrl(baseUrl)) {
+    if (isBlockedUrl(config.llm.baseUrl)) {
       return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
     }
 
-    // Extract path after /llm (e.g. /llm/v1/messages → /v1/messages)
+    if (isOauthLlmConfig(config.llm)) {
+      return handleOauthLlmRequest(c, config.llm);
+    }
+
+    const apiKeyConfig = config.llm; // discriminated narrowing
+    const baseUrl = apiKeyConfig.baseUrl;
+
     const path = c.req.path.slice("/llm".length) || "/";
     const qs = new URL(c.req.url).search;
     const targetUrl = `${baseUrl}${path}${qs}`;
 
-    // Forward headers — replace placeholder with real key, strip hop-by-hop
     const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(filtered)) {
-      forwardedHeaders[key] = value.includes(config.llm.placeholder)
-        ? value.replace(config.llm.placeholder, config.llm.apiKey)
+      forwardedHeaders[key] = value.includes(apiKeyConfig.placeholder)
+        ? value.replace(apiKeyConfig.placeholder, apiKeyConfig.apiKey)
         : value;
     }
 
-    // Stream-through request body
     const method = c.req.method;
     const body = method !== "GET" && method !== "HEAD" ? (c.req.raw.body ?? undefined) : undefined;
 
@@ -172,24 +258,12 @@ export function createApp(deps: AppDeps): Hono {
         headers: forwardedHeaders,
         body,
         signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-        // `duplex: "half"` is required when the body is a ReadableStream
-        // (streaming upload). It is not part of the standard `RequestInit`
-        // type, so the cast is intentional.
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       } as RequestInit);
     } catch (err) {
-      const code =
-        err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-      let domain: string | undefined;
-      try {
-        domain = new URL(targetUrl).hostname;
-      } catch {}
-      const suffix = code ? `: ${code}` : "";
-      const domainHint = domain ? ` (${domain})` : "";
-      return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
+      return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    // Stream-through response (zero-copy — no buffering/truncation)
     const responseHeaders: Record<string, string> = {};
     const ct = upstream.headers.get("content-type");
     if (ct) responseHeaders["Content-Type"] = ct;
@@ -199,6 +273,138 @@ export function createApp(deps: AppDeps): Hono {
       headers: responseHeaders,
     });
   });
+
+  async function handleOauthLlmRequest(
+    c: Context,
+    llmConfig: LlmProxyOauthConfig,
+  ): Promise<Response> {
+    const tokenCache = deps.oauthTokenCache;
+    if (!tokenCache) {
+      return c.json({ error: "OAuth token cache not configured" }, 503);
+    }
+
+    let token: CachedToken;
+    try {
+      token = await tokenCache.getToken(llmConfig.oauthConnectionId);
+    } catch (err) {
+      if (err instanceof NeedsReconnectionError) {
+        return c.json(
+          { error: "OAuth connection needs reconnection", needsReconnection: true },
+          401,
+        );
+      }
+      return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
+    }
+
+    const baseUrl = token.baseUrl || llmConfig.baseUrl;
+    if (isBlockedUrl(baseUrl)) {
+      return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
+    }
+
+    const incomingPath = c.req.path.slice("/llm".length) || "/";
+    const qs = new URL(c.req.url).search;
+    const rewrite = token.rewriteUrlPath ?? llmConfig.rewriteUrlPath;
+    const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
+    const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
+
+    const method = c.req.method;
+    const filtered = filterHeaders(c.req.header());
+    const baseHeaders: Record<string, string> = { ...filtered };
+
+    // Strip any auth/api-key the agent SDK may have set with a placeholder —
+    // OAuth path always overwrites with the real bearer.
+    delete baseHeaders["authorization"];
+    delete baseHeaders["x-api-key"];
+
+    const identityHeaders = buildIdentityHeaders(llmConfig.providerPackageId, token);
+    let forwardedHeaders: Record<string, string> = {
+      ...baseHeaders,
+      ...identityHeaders,
+      authorization: `Bearer ${token.accessToken}`,
+    };
+
+    let bodyText: string | undefined;
+    if (method !== "GET" && method !== "HEAD") {
+      bodyText = await c.req.raw.text();
+      if (bodyText) {
+        bodyText = transformBody(llmConfig.providerPackageId, bodyText, {
+          forceStream: token.forceStream ?? llmConfig.forceStream,
+          forceStore: token.forceStore ?? llmConfig.forceStore,
+        });
+        // Refresh content-length to match the transformed body so the
+        // upstream doesn't read a stale value forwarded from the agent.
+        forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);
+      }
+    }
+
+    const doFetch = async (
+      headers: Record<string, string>,
+      body: string | undefined,
+    ): Promise<Response> => {
+      return fetchFn(targetUrl, {
+        method,
+        headers,
+        body,
+        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+      } as RequestInit);
+    };
+
+    let upstream: Response;
+    try {
+      upstream = await doFetch(forwardedHeaders, bodyText);
+    } catch (err) {
+      return llmFetchErrorResponse(c, targetUrl, err);
+    }
+
+    // 401 retry: invalidate cache, force-refresh token, replay once.
+    if (upstream.status === 401) {
+      tokenCache.invalidate(llmConfig.oauthConnectionId);
+      let refreshed: CachedToken;
+      try {
+        refreshed = await tokenCache.forceRefresh(llmConfig.oauthConnectionId);
+      } catch (err) {
+        if (err instanceof NeedsReconnectionError) {
+          return c.json(
+            { error: "OAuth connection needs reconnection", needsReconnection: true },
+            401,
+          );
+        }
+        // Fall through with the original 401 — best-effort.
+        return passUpstream(upstream);
+      }
+      forwardedHeaders = {
+        ...forwardedHeaders,
+        ...buildIdentityHeaders(llmConfig.providerPackageId, refreshed),
+        authorization: `Bearer ${refreshed.accessToken}`,
+      };
+      try {
+        upstream = await doFetch(forwardedHeaders, bodyText);
+      } catch (err) {
+        return llmFetchErrorResponse(c, targetUrl, err);
+      }
+      // No second-level retry on the retry — propagate whatever we got.
+    }
+
+    // Adaptive Anthropic beta exclusion: best-effort retry once after
+    // stripping `context-1m-2025-08-07` from `anthropic-beta`.
+    if (
+      upstream.status === 400 &&
+      llmConfig.providerPackageId === "@appstrate/provider-claude-code"
+    ) {
+      const text = await upstream.clone().text();
+      const adapted = adaptBetaHeaderForRetry(upstream.status, text, forwardedHeaders);
+      if (adapted) {
+        try {
+          upstream = await doFetch(adapted.headers, bodyText);
+          forwardedHeaders = adapted.headers;
+        } catch (err) {
+          return llmFetchErrorResponse(c, targetUrl, err);
+        }
+      }
+    }
+
+    return passUpstream(upstream);
+  }
 
   // MCP exposure — the agent-facing surface for `provider_call`,
   // `run_history`, and `recall_memory`. `mountMcp` forwards

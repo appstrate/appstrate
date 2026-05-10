@@ -199,11 +199,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       RUN_TOKEN: config.runToken,
     };
     if (config.proxyUrl) env.PROXY_URL = config.proxyUrl;
-    if (config.llm) {
+    if (config.llm && config.llm.authMode !== "oauth") {
       env.PI_BASE_URL = config.llm.baseUrl;
       env.PI_API_KEY = config.llm.apiKey;
       env.PI_PLACEHOLDER = config.llm.placeholder;
     }
+    // OAuth-mode env wiring lands in Phase 5.7.
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
