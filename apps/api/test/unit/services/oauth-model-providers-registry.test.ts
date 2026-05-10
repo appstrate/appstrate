@@ -6,18 +6,16 @@
  *   - the OAuth providers (codex, claude-code) keep their stealth-mode quirks
  *     (Codex `forceStream`+path rewrite to /codex/responses, Claude Code
  *     uses plain `/v1/messages` against api.anthropic.com)
- *   - the legacy AFPS package id alias still resolves until Phase 8 drops it
+ *   - the legacy AFPS package id alias still resolves (kept for backward
+ *     compatibility on inputs; the deprecated typed exports have been removed)
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   MODEL_PROVIDERS,
-  OAUTH_MODEL_PROVIDERS,
   getModelProviderConfig,
-  getOAuthModelProviderConfig,
   isOAuthModelProvider,
   listModelProviders,
-  listOAuthModelProviders,
 } from "../../../src/services/oauth-model-providers/registry.ts";
 
 const CANONICAL_IDS = ["codex", "claude-code", "openai", "anthropic", "openai-compatible"] as const;
@@ -144,28 +142,5 @@ describe("isOAuthModelProvider() (legacy)", () => {
     expect(isOAuthModelProvider("@appstrate/provider-gmail")).toBe(false);
     expect(isOAuthModelProvider("@unknown/x")).toBe(false);
     expect(isOAuthModelProvider("")).toBe(false);
-  });
-});
-
-describe("OAUTH_MODEL_PROVIDERS legacy alias", () => {
-  it("still keys by AFPS package id and narrows to authMode='oauth2'", () => {
-    expect(Object.keys(OAUTH_MODEL_PROVIDERS).sort()).toEqual([
-      "@appstrate/provider-claude-code",
-      "@appstrate/provider-codex",
-    ]);
-    for (const cfg of Object.values(OAUTH_MODEL_PROVIDERS)) {
-      expect(cfg.authMode).toBe("oauth2");
-      expect(cfg.oauth.clientId.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("getOAuthModelProviderConfig() returns null for api-key providers", () => {
-    expect(getOAuthModelProviderConfig("openai")).toBeNull();
-    expect(getOAuthModelProviderConfig("anthropic")).toBeNull();
-  });
-
-  it("listOAuthModelProviders() returns only OAuth entries", () => {
-    const ids = listOAuthModelProviders().map((p) => p.providerId);
-    expect(ids.sort()).toEqual([...OAUTH_IDS].sort());
   });
 });
