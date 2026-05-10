@@ -223,6 +223,14 @@ export interface ImportOAuthModelProviderInput {
   subscriptionType?: string;
   /** Provider account email — Codex extracts from JWT, Claude from token body. */
   email?: string;
+  /**
+   * Codex only — pi-ai's `loginOpenAICodex` surfaces the JWT's
+   * `chatgpt_account_id` claim as a top-level field on its return value.
+   * The CLI forwards it here so the platform can persist the canonical
+   * value. The server still falls back to JWT decoding (defense in depth)
+   * — this is the preferred source.
+   */
+  accountId?: string;
 }
 
 export interface ImportOAuthModelProviderResult {
@@ -272,14 +280,17 @@ export async function importOAuthModelProviderConnection(
     connectionProfileId = profile.id;
   }
 
-  // Provider-specific claim extraction. We re-run JWT decoding server-side
-  // for Codex even though the CLI saw the same token — the JWT is signed by
-  // OpenAI, so reading `chatgpt_account_id` from it is the canonical move.
-  let chatgptAccountId: string | undefined;
+  // Provider-specific claim extraction. The CLI forwards pi-ai's surfaced
+  // `accountId` (preferred — same value pi-ai's runtime already validated
+  // against the upstream contract), and we fall back to a server-side JWT
+  // decode if the CLI didn't include it. Defense in depth covers both
+  // paths: an attacker can't forge `accountId` past the token itself
+  // because Codex's backend rejects mismatched chatgpt-account-id headers.
+  let chatgptAccountId: string | undefined = input.accountId;
   let email: string | undefined = input.email;
   if (input.providerPackageId === "@appstrate/provider-codex") {
     const claims = decodeCodexJwtPayload(input.accessToken);
-    chatgptAccountId = claims?.chatgpt_account_id;
+    if (!chatgptAccountId) chatgptAccountId = claims?.chatgpt_account_id;
     if (!email) email = claims?.email;
   }
 

@@ -49,6 +49,14 @@ export const modelProvidersOAuthPaths = {
                   maxLength: 320,
                   description: "Account email — Codex re-derives from JWT, Claude relies on this.",
                 },
+                accountId: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 64,
+                  pattern: "^[A-Za-z0-9_-]+$",
+                  description:
+                    "Codex-only: pi-ai surfaces the JWT's `chatgpt_account_id` claim as a top-level field. Forwarded here so the platform persists the canonical value rather than re-deriving it.",
+                },
               },
             },
           },

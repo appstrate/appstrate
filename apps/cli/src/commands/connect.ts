@@ -140,6 +140,13 @@ async function runLoopbackOAuth(slug: ConnectProviderSlug): Promise<{
   expiresAt: number;
   email?: string;
   subscriptionType?: string;
+  /**
+   * Codex only — pi-ai extracts this from the JWT and surfaces it as a
+   * top-level field. We forward it to the platform so it can persist the
+   * canonical value rather than re-deriving it (and risking a JWT-decode
+   * mismatch with the upstream contract).
+   */
+  accountId?: string;
 }> {
   const sp = spinner();
   sp.start(`Waiting for provider authorization (${DISPLAY_NAME[slug]})…`);
@@ -184,12 +191,17 @@ async function runLoopbackOAuth(slug: ConnectProviderSlug): Promise<{
       typeof (creds as Record<string, unknown>).email === "string"
         ? ((creds as Record<string, unknown>).email as string)
         : undefined;
+    const accountId =
+      typeof (creds as Record<string, unknown>).accountId === "string"
+        ? ((creds as Record<string, unknown>).accountId as string)
+        : undefined;
     return {
       accessToken: creds.access,
       refreshToken: creds.refresh,
       expiresAt: typeof creds.expires === "number" ? creds.expires : 0,
       email: directEmail ?? accountEmail,
       subscriptionType,
+      accountId,
     };
   } catch (err) {
     sp.stop("Authorization failed.");
@@ -261,6 +273,7 @@ export async function connectCommand(
             : {}),
           ...(tokens.email ? { email: tokens.email } : {}),
           ...(tokens.subscriptionType ? { subscriptionType: tokens.subscriptionType } : {}),
+          ...(tokens.accountId ? { accountId: tokens.accountId } : {}),
         }),
       },
     );

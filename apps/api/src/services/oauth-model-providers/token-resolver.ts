@@ -124,6 +124,14 @@ async function loadConnectionState(connectionId: string): Promise<ConnectionStat
 }
 
 function buildResolvedToken(state: ConnectionState): ResolvedToken {
+  // Codex back-fill: connections imported before the CLI started forwarding
+  // pi-ai's `accountId` may have `chatgpt_account_id = null` in storage. Try
+  // a JWT decode here as a defense-in-depth fallback so existing connections
+  // don't require a reconnect to start working with the inference probe.
+  let accountId = state.creds.chatgpt_account_id;
+  if (!accountId && state.providerPackageId === "@appstrate/provider-codex") {
+    accountId = decodeCodexJwtPayload(state.creds.access_token)?.chatgpt_account_id;
+  }
   return {
     accessToken: state.creds.access_token,
     expiresAt: state.expiresAt ? state.expiresAt.getTime() : null,
@@ -132,7 +140,7 @@ function buildResolvedToken(state: ConnectionState): ResolvedToken {
     rewriteUrlPath: state.config.api.rewriteUrlPath,
     forceStream: state.config.api.forceStream,
     forceStore: state.config.api.forceStore,
-    accountId: state.creds.chatgpt_account_id,
+    accountId,
     providerPackageId: state.providerPackageId,
   };
 }

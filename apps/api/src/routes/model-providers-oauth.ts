@@ -41,6 +41,19 @@ const importBody = z.object({
   subscriptionType: z.string().max(40).optional(),
   /** Account email; Codex re-derives from JWT, Claude relies on this. */
   email: z.string().email().max(320).optional(),
+  /**
+   * Codex only — pi-ai surfaces the `chatgpt_account_id` claim as a
+   * top-level `accountId` field after a successful login. We accept it
+   * here so we can persist the canonical value rather than re-deriving
+   * it from the JWT (which risks a base64url decode mismatch). Bounded
+   * to a UUID-ish shape to keep this from being a free-form sink.
+   */
+  accountId: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_-]+$/, "accountId must be alphanumeric/dash/underscore")
+    .optional(),
 });
 
 export function createModelProvidersOAuthRouter() {
@@ -74,6 +87,7 @@ export function createModelProvidersOAuthRouter() {
         expiresAt: input.expiresAt ?? null,
         subscriptionType: input.subscriptionType,
         email: input.email,
+        accountId: input.accountId,
       });
 
       await recordAuditFromContext(c, {
