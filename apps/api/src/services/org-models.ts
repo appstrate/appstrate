@@ -220,6 +220,8 @@ interface ResolvedModel {
   isSystemModel: boolean;
   /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
   providerPackageId?: string;
+  /** Codex only: required as `chatgpt-account-id` header on inference probes/runs. */
+  accountId?: string;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -281,6 +283,7 @@ export async function resolveModel(
         cost: dbDefault.cost as ModelCost | null,
         isSystemModel: false,
         providerPackageId: creds.providerPackageId,
+        accountId: creds.accountId,
       };
     }
   }
@@ -413,6 +416,7 @@ export async function testModelConfig(config: {
   modelId: string;
   apiKey: string;
   providerPackageId?: string;
+  accountId?: string;
 }): Promise<TestResult> {
   if (isBlockedUrl(config.baseUrl)) {
     return {
@@ -423,13 +427,17 @@ export async function testModelConfig(config: {
     };
   }
 
-  // Codex (ChatGPT subscription) has no public discovery endpoint on
-  // `chatgpt.com/backend-api` — `/models` 404s even with a valid token.
-  // Reaching this point already implies a successful token resolution
-  // (the OAuth resolver refreshes if needed and throws on dead tokens),
-  // so report ok without an upstream probe.
+  // OAuth-backed providers don't expose a `/models` discovery endpoint
+  // compatible with the Bearer token (Codex has no /models at all on
+  // chatgpt.com/backend-api; Claude Code's /v1/models would 200 even when
+  // /v1/messages is blocked by the third-party OAuth ban). Issue a real
+  // single-token inference probe so the test reflects whether the key can
+  // actually serve traffic.
   if (config.providerPackageId === "@appstrate/provider-codex") {
-    return { ok: true, latency: 0 };
+    return testCodexInference(config);
+  }
+  if (config.providerPackageId === "@appstrate/provider-claude-code") {
+    return testClaudeCodeInference(config);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -464,4 +472,149 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
 
   return testModelConfig(model);
+}
+
+// --- OAuth inference probes ---
+
+const PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * Codex (ChatGPT subscription) inference probe — single-token request to
+ * `${baseUrl}/codex/responses` with the SSE shape pi-ai uses in production
+ * (cf. node_modules/@mariozechner/pi-ai/dist/providers/openai-codex-responses.js).
+ *
+ * On 200 the connection works end-to-end (oauth + chatgpt backend +
+ * subscription + model availability). The streaming body is canceled
+ * immediately — we only care about the response status.
+ */
+async function testCodexInference(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  accountId?: string;
+}): Promise<TestResult> {
+  if (!config.accountId) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "AUTH_FAILED",
+      message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
+    };
+  }
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`;
+  const body = JSON.stringify({
+    model: config.modelId,
+    store: false,
+    stream: true,
+    instructions: "ping",
+    input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
+    include: [],
+  });
+  const start = performance.now();
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "chatgpt-account-id": config.accountId,
+        originator: "appstrate",
+        "OpenAI-Beta": "responses=experimental",
+        accept: "text/event-stream",
+        "content-type": "application/json",
+      },
+      body,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const latency = Math.round(performance.now() - start);
+    // We only need the response status — abort the stream we've started.
+    void res.body?.cancel().catch(() => {});
+    if (res.ok) return { ok: true, latency };
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        latency,
+        error: "AUTH_FAILED",
+        message: "ChatGPT subscription rejected the token (auth failed or subscription inactive)",
+      };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "PROVIDER_ERROR",
+      message: `Codex backend returned ${res.status}`,
+    };
+  } catch (err) {
+    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
+  }
+}
+
+/**
+ * Claude Code (Anthropic subscription) inference probe — single-token
+ * `/v1/messages` call with the OAuth headers Anthropic recognizes for
+ * Claude-Code-issued tokens. Catches the post-2026-01-09 enforcement that
+ * lets `/v1/models` 200 while `/v1/messages` 403s third-party callers.
+ */
+async function testClaudeCodeInference(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}): Promise<TestResult> {
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`;
+  const body = JSON.stringify({
+    model: config.modelId,
+    max_tokens: 1,
+    messages: [{ role: "user", content: "ping" }],
+  });
+  const start = performance.now();
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const latency = Math.round(performance.now() - start);
+    if (res.ok) {
+      void res.body?.cancel().catch(() => {});
+      return { ok: true, latency };
+    }
+    // Read the error body up to 1 KB to catch the third-party enforcement signal.
+    const text = await res
+      .text()
+      .then((t) => t.slice(0, 1024))
+      .catch(() => "");
+    if (
+      res.status === 403 &&
+      /third.?party|claude code|oauth.{0,40}(not allowed|not permitted|disabled)/i.test(text)
+    ) {
+      return {
+        ok: false,
+        latency,
+        error: "OAUTH_TIER_BLOCKED",
+        message:
+          "Anthropic blocks third-party use of Claude Code OAuth tokens (in effect since 2026-01-09). Use a paid API plan instead.",
+      };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        latency,
+        error: "AUTH_FAILED",
+        message: "Anthropic rejected the token (auth failed or subscription inactive)",
+      };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "PROVIDER_ERROR",
+      message: `Anthropic returned ${res.status}`,
+    };
+  } catch (err) {
+    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
+  }
 }

@@ -137,18 +137,20 @@ describe("buildModelTestRequest", () => {
 });
 
 describe("testModelConfig", () => {
-  // chatgpt.com/backend-api has no /models discovery endpoint — probing it
-  // 404s even with a valid OAuth token. The OAuth resolver upstream of this
-  // function already validates the token, so reaching here = ok.
-  it("provider-codex: short-circuits to ok without an upstream probe", async () => {
+  // The Codex/Claude Code branches issue a real single-token inference
+  // probe and need an outbound fetch — covered in the integration test
+  // suite where we can intercept the upstream call. This unit suite only
+  // covers the static request shape via buildModelTestRequest above.
+  it("provider-codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
     const result = await testModelConfig({
       api: "openai-responses",
       baseUrl: "https://chatgpt.com/backend-api",
-      modelId: "gpt-5.5",
-      apiKey: "fake-codex-jwt",
+      modelId: "gpt-5.4-mini",
+      apiKey: "not-a-jwt",
       providerPackageId: "@appstrate/provider-codex",
+      // intentionally no accountId — simulates a malformed token
     });
-    expect(result.ok).toBe(true);
-    expect(result.latency).toBe(0);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("AUTH_FAILED");
   });
 });

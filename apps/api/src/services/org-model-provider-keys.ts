@@ -11,6 +11,7 @@ import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import type { OAuthModelProviderCredentials } from "./oauth-model-providers/credentials.ts";
 import { resolveOAuthTokenForSidecar } from "./oauth-model-providers/token-resolver.ts";
+import { getOAuthModelProviderConfig } from "./oauth-model-providers/registry.ts";
 import { logger } from "../lib/logger.ts";
 
 // --- List (system + DB) ---
@@ -148,6 +149,8 @@ export interface ModelProviderKeyCredentials {
   baseUrl: string;
   apiKey: string;
   providerPackageId?: string;
+  /** Codex only: extracted from the JWT and required as `chatgpt-account-id` header on inference. */
+  accountId?: string;
 }
 
 export async function loadModelProviderKeyCredentials(
@@ -186,6 +189,7 @@ export async function loadModelProviderKeyCredentials(
         baseUrl: row.baseUrl,
         apiKey: token.accessToken,
         providerPackageId: row.providerPackageId ?? undefined,
+        accountId: token.accountId,
       };
     } catch (err) {
       logger.warn("OAuth model provider token resolution failed", {
@@ -219,5 +223,14 @@ export async function testModelProviderKeyConnection(
       error: "KEY_NOT_FOUND",
       message: "Model provider key not found",
     };
-  return testModelConfig({ ...creds, modelId: "_test" });
+
+  // For OAuth keys the inference probe needs a real model id (the upstream
+  // rejects `_test`). Fall back to the registry's first model — sized to be
+  // a low-cost probe (single token in/out) regardless of which one we pick.
+  let modelId = "_test";
+  if (creds.providerPackageId) {
+    const cfg = getOAuthModelProviderConfig(creds.providerPackageId);
+    if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
+  }
+  return testModelConfig({ ...creds, modelId });
 }
