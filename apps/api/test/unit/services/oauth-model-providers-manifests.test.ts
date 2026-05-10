@@ -78,7 +78,7 @@ describe("OAuth model provider AFPS manifests", () => {
       it("manifest defaultScopes are a subset of the runtime registry scopes", () => {
         const cfg = OAUTH_MODEL_PROVIDERS[packageId]!;
         const manifestScopes = manifest.definition.oauth2!.defaultScopes ?? [];
-        const registryScopes = new Set<string>(cfg.scopes);
+        const registryScopes = new Set<string>(cfg.oauth.scopes);
         for (const scope of manifestScopes) {
           expect(registryScopes.has(scope)).toBe(true);
         }

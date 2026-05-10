@@ -30,9 +30,9 @@ import {
 } from "@appstrate/connect";
 import { decodeCodexJwtPayload, type OAuthModelProviderCredentials } from "./credentials.ts";
 import {
-  CODEX_PACKAGE_ID,
   getOAuthModelProviderConfig,
   OAUTH_MODEL_PROVIDER_TOKEN_URLS,
+  type ModelApiShape,
   type OAuthModelProviderConfig,
 } from "./registry.ts";
 import { gone, notFound } from "../../lib/errors.ts";
@@ -56,7 +56,7 @@ export interface ResolvedToken {
   accessToken: string;
   /** Epoch milliseconds. `null` when the token's expiry is unknown — sidecar treats this as "always refresh". */
   expiresAt: number | null;
-  apiShape: "anthropic-messages" | "openai-responses";
+  apiShape: ModelApiShape;
   baseUrl: string;
   rewriteUrlPath?: { from: string; to: string };
   forceStream?: boolean;
@@ -125,55 +125,36 @@ async function loadConnectionState(connectionId: string): Promise<ConnectionStat
   };
 }
 
-/**
- * Build a `ResolvedToken` from a connection state + freshly-resolved
- * access token + expiry. Centralizes the registry → wire shape mapping
- * shared by the read path and the refresh path.
- */
-function toResolvedToken(
-  state: ConnectionState,
-  accessToken: string,
-  expiresAt: Date | null,
-  accountId: string | undefined,
-): ResolvedToken {
+function buildResolvedToken(state: ConnectionState): ResolvedToken {
+  // Codex back-fill: connections imported before the CLI started forwarding
+  // pi-ai's `accountId` may have `chatgpt_account_id = null` in storage. Try
+  // a JWT decode here as a defense-in-depth fallback so existing connections
+  // don't require a reconnect to start working with the inference probe.
+  let accountId = state.creds.chatgpt_account_id;
+  if (!accountId && state.providerPackageId === "@appstrate/provider-codex") {
+    const decoded = decodeCodexJwtPayload(state.creds.access_token);
+    accountId = decoded?.chatgpt_account_id;
+    logger.warn("oauth model provider: chatgpt_account_id missing in stored creds", {
+      connectionId: state.connectionId,
+      providerPackageId: state.providerPackageId,
+      jwtDecodeAttempted: true,
+      jwtParsed: decoded !== null,
+      jwtHadAccountId: !!decoded?.chatgpt_account_id,
+      accessTokenStartsWithJwtHeader: state.creds.access_token.startsWith("eyJ"),
+      accessTokenSegments: state.creds.access_token.split(".").length,
+    });
+  }
   return {
-    accessToken,
-    expiresAt: expiresAt ? expiresAt.getTime() : null,
-    apiShape: state.config.api.apiShape,
-    baseUrl: state.config.api.baseUrl,
-    rewriteUrlPath: state.config.api.rewriteUrlPath,
-    forceStream: state.config.api.forceStream,
-    forceStore: state.config.api.forceStore,
+    accessToken: state.creds.access_token,
+    expiresAt: state.expiresAt ? state.expiresAt.getTime() : null,
+    apiShape: state.config.apiShape,
+    baseUrl: state.config.defaultBaseUrl,
+    rewriteUrlPath: state.config.rewriteUrlPath,
+    forceStream: state.config.forceStream,
+    forceStore: state.config.forceStore,
     accountId,
     providerPackageId: state.providerPackageId,
   };
-}
-
-/**
- * Resolve `chatgpt_account_id` for a Codex connection, with JWT fallback.
- *
- * Connections imported before the CLI started forwarding pi-ai's
- * `accountId` may have `chatgpt_account_id = null` in storage — try a
- * JWT decode as defense in depth so existing connections don't need a
- * reconnect to keep working. Returns `undefined` for non-Codex providers.
- */
-function resolveCodexAccountId(
-  providerPackageId: string,
-  accessToken: string,
-  stored: string | undefined,
-  connectionId: string,
-): string | undefined {
-  if (providerPackageId !== CODEX_PACKAGE_ID) return stored;
-  if (stored) return stored;
-  const decoded = decodeCodexJwtPayload(accessToken);
-  if (!decoded?.chatgpt_account_id) {
-    logger.debug("oauth model provider: chatgpt_account_id missing in stored creds", {
-      connectionId,
-      providerPackageId,
-      jwtParsed: decoded !== null,
-    });
-  }
-  return decoded?.chatgpt_account_id;
 }
 
 /**
@@ -194,13 +175,7 @@ export async function resolveOAuthTokenForSidecar(connectionId: string): Promise
 
   const expiresInMs = state.expiresAt ? state.expiresAt.getTime() - Date.now() : 0;
   if (state.expiresAt && expiresInMs > REFRESH_LEAD_MS) {
-    const accountId = resolveCodexAccountId(
-      state.providerPackageId,
-      state.creds.access_token,
-      state.creds.chatgpt_account_id,
-      state.connectionId,
-    );
-    return toResolvedToken(state, state.creds.access_token, state.expiresAt, accountId);
+    return buildResolvedToken(state);
   }
 
   // Trigger refresh
@@ -255,14 +230,14 @@ async function doRefresh(connectionId: string): Promise<ResolvedToken> {
   const tokenParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: state.creds.refresh_token,
-    client_id: state.config.clientId,
+    client_id: state.config.oauth.clientId,
   };
 
   let response: Response;
   try {
     response = await fetch(tokenUrl, {
       method: "POST",
-      headers: buildTokenHeaders(undefined, state.config.clientId, "", undefined),
+      headers: buildTokenHeaders(undefined, state.config.oauth.clientId, "", undefined),
       body: buildTokenBody(tokenParams),
       signal: AbortSignal.timeout(30_000),
     });
@@ -304,14 +279,12 @@ async function doRefresh(connectionId: string): Promise<ResolvedToken> {
   // (Anthropic does, OpenAI rotates them too, but be defensive).
   const parsed = parseTokenResponse(data, undefined, state.creds.refresh_token);
 
-  // Re-extract account_id on Codex in case of token rotation. Prefer the
-  // freshly-decoded JWT, fall back to the stored value.
-  const accountId = resolveCodexAccountId(
-    state.providerPackageId,
-    parsed.accessToken,
-    state.creds.chatgpt_account_id,
-    connectionId,
-  );
+  // Re-extract account_id on Codex in case of token rotation
+  let accountId = state.creds.chatgpt_account_id;
+  if (state.providerPackageId === "@appstrate/provider-codex") {
+    const claims = decodeCodexJwtPayload(parsed.accessToken);
+    accountId = claims?.chatgpt_account_id ?? accountId;
+  }
 
   const newCreds: OAuthModelProviderCredentials = {
     ...state.creds,
@@ -331,7 +304,17 @@ async function doRefresh(connectionId: string): Promise<ResolvedToken> {
     })
     .where(eq(userProviderConnections.id, connectionId));
 
-  return toResolvedToken(state, parsed.accessToken, expiresAt, accountId);
+  return {
+    accessToken: parsed.accessToken,
+    expiresAt: expiresAt ? expiresAt.getTime() : null,
+    apiShape: state.config.apiShape,
+    baseUrl: state.config.defaultBaseUrl,
+    rewriteUrlPath: state.config.rewriteUrlPath,
+    forceStream: state.config.forceStream,
+    forceStore: state.config.forceStore,
+    accountId,
+    providerPackageId: state.providerPackageId,
+  };
 }
 
 async function markNeedsReconnection(connectionId: string): Promise<void> {

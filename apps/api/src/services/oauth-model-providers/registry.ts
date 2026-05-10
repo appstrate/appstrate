@@ -1,43 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth Model Providers — runtime execution registry.
+ * Model Providers — runtime execution registry.
  *
- * AFPS describes the *packaging* of a provider (identity, OAuth endpoints,
- * authorized URIs, scopes). It does NOT describe how the runtime executes
- * LLM calls against that provider — that's Appstrate-specific behavior.
+ * Single source of truth for every LLM model provider Appstrate knows how
+ * to talk to (API-key + OAuth alike). Each entry pins:
+ *   - identity & branding (provider id, display name, icon, docs)
+ *   - inference wire format (apiShape, base URL, force-stream/store, URL rewriting)
+ *   - auth metadata (api_key form OR OAuth2 client config)
+ *   - selectable models (id, context window, capabilities, optional cost)
  *
- * This file is the single source of truth for that runtime config:
- *   - Public OAuth client_id (decision Q3 — shared with the official CLI)
- *   - Scopes requested at /authorize (in addition to manifest.availableScopes)
- *   - LLM API shape, base URL, force-stream/store knobs, URL rewriting
- *   - List of selectable models (decision Q9 — refreshed per Appstrate release)
- *
- * Whitelist (decision Q4): only packages registered here can be used as
- * OAuth model providers. The lookup is keyed by the AFPS package `name`.
+ * Why in code rather than as AFPS packages: the wire format is provider-
+ * specific (Anthropic stealth-mode headers, Codex Responses path rewriting,
+ * forced stream/store on ChatGPT-account mode) and changes when upstreams
+ * change enforcement — that risk belongs in CI, not in a remote package.
+ * The non-LLM provider mechanism (gmail/slack/…) remains AFPS-packaged
+ * because its surface IS generic (`provider_call` MCP tool).
  *
  * See docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §3.3 for rationale.
  */
 
-/** Canonical package ids — single source of truth for platform-side branching. */
-export const CODEX_PACKAGE_ID = "@appstrate/provider-codex";
-export const CLAUDE_CODE_PACKAGE_ID = "@appstrate/provider-claude-code";
-
-export type ModelApiShape = "anthropic-messages" | "openai-responses";
+export type ModelApiShape = "anthropic-messages" | "openai-chat" | "openai-responses";
 
 export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
 
-export interface ModelProviderApiConfig {
-  /** Canonical base URL the sidecar forwards LLM traffic to. */
-  baseUrl: string;
-  /** Wire format the runtime serializes against. */
-  apiShape: ModelApiShape;
-  /** Force `stream: true` on outbound bodies. Required for Codex ChatGPT-account mode. */
-  forceStream?: boolean;
-  /** Force `store: false` on outbound bodies. Required for Codex ChatGPT-account mode. */
-  forceStore?: false;
-  /** Path rewriting applied at the proxy boundary. Both fields required when present. */
-  rewriteUrlPath?: { from: string; to: string };
+export type AuthMode = "api_key" | "oauth2";
+
+export interface ModelCost {
+  /** USD per 1M input tokens. */
+  input: number;
+  /** USD per 1M output tokens. */
+  output: number;
+  /** USD per 1M cache-read tokens (provider-specific). */
+  cacheRead?: number;
+  /** USD per 1M cache-write tokens (provider-specific). */
+  cacheWrite?: number;
 }
 
 export interface ModelEntry {
@@ -49,34 +46,78 @@ export interface ModelEntry {
   maxTokens?: number;
   /** Surfaced capabilities for selection UIs. */
   capabilities: readonly ModelCapability[];
+  /** Default per-token cost. Self-hosters can override via SYSTEM_PROVIDER_KEYS env. */
+  cost?: ModelCost;
 }
 
-export interface OAuthModelProviderConfig {
-  /** Match the AFPS package `name` (registry lookup key). */
-  packageId: string;
-  /** Public client_id. Hardcoded — Q3/Q4. */
+export interface OAuthConfig {
+  /** Public OAuth client_id — shared with the official CLI. */
   clientId: string;
-  /** PKCE code challenge method. All current providers require S256. */
-  pkce: "S256";
+  /** /authorize endpoint. */
+  authorizationUrl: string;
+  /** Token exchange endpoint. */
+  tokenUrl: string;
+  /** Token refresh endpoint (often equal to tokenUrl). */
+  refreshUrl: string;
   /** Scopes requested at /authorize. */
   scopes: readonly string[];
-  /** LLM API endpoint config — drives sidecar behavior. */
-  api: ModelProviderApiConfig;
-  /** Selectable models. Updated per Appstrate release (Q9). */
+  /** PKCE code challenge method. All current providers require S256. */
+  pkce: "S256";
+}
+
+export interface ModelProviderConfig {
+  /** Stable id used as `provider_id` in DB rows and as registry lookup key. */
+  providerId: string;
+  displayName: string;
+  /** Icon hint consumed by the UI (matches the existing AFPS provider iconUrl format). */
+  iconUrl: string;
+  description?: string;
+  docsUrl?: string;
+
+  // — Inference —
+  /** Wire format the runtime serializes against. */
+  apiShape: ModelApiShape;
+  /** Default base URL the sidecar forwards LLM traffic to. */
+  defaultBaseUrl: string;
+  /** Whether the user can override `defaultBaseUrl` per credential row. */
+  baseUrlOverridable: boolean;
+  /** Force `stream: true` on outbound bodies (Codex ChatGPT-account mode). */
+  forceStream?: true;
+  /** Force `store: false` on outbound bodies (Codex ChatGPT-account mode). */
+  forceStore?: false;
+  /** Path rewriting applied at the proxy boundary. */
+  rewriteUrlPath?: { from: string; to: string };
+
+  // — Auth —
+  authMode: AuthMode;
+  /** Required iff authMode === "oauth2". */
+  oauth?: OAuthConfig;
+
+  // — Catalog —
+  /** Selectable models. May be empty for providers whose model list is user-supplied. */
   models: readonly ModelEntry[];
 }
 
-const codexConfig: OAuthModelProviderConfig = {
-  packageId: CODEX_PACKAGE_ID,
-  clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
-  pkce: "S256",
-  scopes: ["openid", "profile", "email"],
-  api: {
-    baseUrl: "https://chatgpt.com/backend-api",
-    apiShape: "openai-responses",
-    forceStream: true,
-    forceStore: false,
-    rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
+const codexConfig: ModelProviderConfig = {
+  providerId: "codex",
+  displayName: "Codex (ChatGPT)",
+  iconUrl: "openai",
+  description: "Run agents against your ChatGPT Plus / Pro / Business subscription via Codex.",
+  docsUrl: "https://platform.openai.com/docs/guides/codex",
+  apiShape: "openai-responses",
+  defaultBaseUrl: "https://chatgpt.com/backend-api",
+  baseUrlOverridable: false,
+  forceStream: true,
+  forceStore: false,
+  rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
+  authMode: "oauth2",
+  oauth: {
+    clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
+    authorizationUrl: "https://auth.openai.com/oauth/authorize",
+    tokenUrl: "https://auth.openai.com/oauth/token",
+    refreshUrl: "https://auth.openai.com/oauth/token",
+    scopes: ["openid", "profile", "email"],
+    pkce: "S256",
   },
   models: [
     { id: "gpt-5.5", contextWindow: 200000, capabilities: ["text", "image", "reasoning"] },
@@ -87,14 +128,30 @@ const codexConfig: OAuthModelProviderConfig = {
   ],
 };
 
-const claudeCodeConfig: OAuthModelProviderConfig = {
-  packageId: CLAUDE_CODE_PACKAGE_ID,
-  clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-  pkce: "S256",
-  scopes: ["org:create_api_key", "user:profile", "user:inference"],
-  api: {
-    baseUrl: "https://api.anthropic.com",
-    apiShape: "anthropic-messages",
+/**
+ * Claude: `platform.claude.com` is the canonical token host
+ * (cf. @mariozechner/pi-ai/utils/oauth/anthropic.js). The first iteration
+ * shipped `claude.ai/v1/oauth/token` which appears reachable but returns
+ * a non-canonical schema and was the root cause of refresh failures.
+ */
+const claudeCodeConfig: ModelProviderConfig = {
+  providerId: "claude-code",
+  displayName: "Claude Code (Anthropic)",
+  iconUrl: "anthropic",
+  description:
+    "Run agents against your Claude Pro / Max / Team subscription via the Claude Code OAuth client.",
+  docsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
+  apiShape: "anthropic-messages",
+  defaultBaseUrl: "https://api.anthropic.com",
+  baseUrlOverridable: false,
+  authMode: "oauth2",
+  oauth: {
+    clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    authorizationUrl: "https://claude.ai/oauth/authorize",
+    tokenUrl: "https://platform.claude.com/v1/oauth/token",
+    refreshUrl: "https://platform.claude.com/v1/oauth/token",
+    scopes: ["org:create_api_key", "user:profile", "user:inference"],
+    pkce: "S256",
   },
   models: [
     {
@@ -115,40 +172,118 @@ const claudeCodeConfig: OAuthModelProviderConfig = {
   ],
 };
 
-/**
- * Provider token endpoints — used by both the platform-side refresh
- * worker and (historically) the now-removed authorization-code callback.
- * Kept here as the single source of truth so the CLI helper that does
- * the loopback OAuth dance and the platform-side refresh never drift.
- *
- * Claude: `platform.claude.com` is the canonical token host
- * (cf. @mariozechner/pi-ai/utils/oauth/anthropic.js). The first iteration
- * shipped `claude.ai/v1/oauth/token` which appears reachable but returns
- * a non-canonical schema and was the root cause of refresh failures in
- * the smoke tests.
- */
-export const OAUTH_MODEL_PROVIDER_TOKEN_URLS: Readonly<Record<string, string>> = Object.freeze({
-  [CODEX_PACKAGE_ID]: "https://auth.openai.com/oauth/token",
-  [CLAUDE_CODE_PACKAGE_ID]: "https://platform.claude.com/v1/oauth/token",
+const openaiConfig: ModelProviderConfig = {
+  providerId: "openai",
+  displayName: "OpenAI",
+  iconUrl: "openai",
+  description: "Bring your own OpenAI API key.",
+  docsUrl: "https://platform.openai.com/docs/api-reference",
+  apiShape: "openai-chat",
+  defaultBaseUrl: "https://api.openai.com",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  models: [],
+};
+
+const anthropicConfig: ModelProviderConfig = {
+  providerId: "anthropic",
+  displayName: "Anthropic",
+  iconUrl: "anthropic",
+  description: "Bring your own Anthropic API key.",
+  docsUrl: "https://docs.anthropic.com/en/api",
+  apiShape: "anthropic-messages",
+  defaultBaseUrl: "https://api.anthropic.com",
+  baseUrlOverridable: false,
+  authMode: "api_key",
+  models: [],
+};
+
+const openaiCompatibleConfig: ModelProviderConfig = {
+  providerId: "openai-compatible",
+  displayName: "OpenAI-compatible (custom)",
+  iconUrl: "openai",
+  description:
+    "Self-hosted or third-party endpoint exposing the OpenAI chat-completions API (Ollama, vLLM, LiteLLM, …).",
+  apiShape: "openai-chat",
+  defaultBaseUrl: "http://localhost:11434",
+  baseUrlOverridable: true,
+  authMode: "api_key",
+  models: [],
+};
+
+export const MODEL_PROVIDERS: Readonly<Record<string, ModelProviderConfig>> = Object.freeze({
+  [codexConfig.providerId]: codexConfig,
+  [claudeCodeConfig.providerId]: claudeCodeConfig,
+  [openaiConfig.providerId]: openaiConfig,
+  [anthropicConfig.providerId]: anthropicConfig,
+  [openaiCompatibleConfig.providerId]: openaiCompatibleConfig,
 });
 
+/**
+ * Backward-compat alias: legacy AFPS package id → new providerId.
+ * Removed in Phase 8 once every call site uses the canonical providerId.
+ */
+const LEGACY_PACKAGE_ID_TO_PROVIDER_ID: Readonly<Record<string, string>> = Object.freeze({
+  "@appstrate/provider-codex": "codex",
+  "@appstrate/provider-claude-code": "claude-code",
+});
+
+/** Resolves a legacy AFPS package id or a canonical providerId to a providerId. */
+function normalizeProviderId(idOrPackageId: string): string {
+  return LEGACY_PACKAGE_ID_TO_PROVIDER_ID[idOrPackageId] ?? idOrPackageId;
+}
+
+/** Returns the runtime config for a model provider, or null if unknown. */
+export function getModelProviderConfig(idOrPackageId: string): ModelProviderConfig | null {
+  return MODEL_PROVIDERS[normalizeProviderId(idOrPackageId)] ?? null;
+}
+
+/** Whitelist check — true iff the id resolves to an OAuth model provider. */
+export function isOAuthModelProvider(idOrPackageId: string): boolean {
+  const config = getModelProviderConfig(idOrPackageId);
+  return config?.authMode === "oauth2";
+}
+
+/** Iterate all registered model providers (insertion order). */
+export function listModelProviders(): readonly ModelProviderConfig[] {
+  return Object.values(MODEL_PROVIDERS);
+}
+
+// ─── Backward-compat exports (removed in Phase 8) ─────────────────────────
+
+/** @deprecated Use providerId "codex". */
+export const CODEX_PACKAGE_ID = "@appstrate/provider-codex";
+/** @deprecated Use providerId "claude-code". */
+export const CLAUDE_CODE_PACKAGE_ID = "@appstrate/provider-claude-code";
+
+/** @deprecated Use {@link ModelProviderConfig}. */
+export type OAuthModelProviderConfig = ModelProviderConfig & {
+  authMode: "oauth2";
+  oauth: OAuthConfig;
+};
+
+/** @deprecated Use {@link getModelProviderConfig} and check `authMode === "oauth2"`. */
+export function getOAuthModelProviderConfig(
+  idOrPackageId: string,
+): OAuthModelProviderConfig | null {
+  const config = getModelProviderConfig(idOrPackageId);
+  return config?.authMode === "oauth2" ? (config as OAuthModelProviderConfig) : null;
+}
+
+/** @deprecated Use {@link listModelProviders} and filter on `authMode === "oauth2"`. */
+export function listOAuthModelProviders(): readonly OAuthModelProviderConfig[] {
+  return listModelProviders().filter((p): p is OAuthModelProviderConfig => p.authMode === "oauth2");
+}
+
+/** @deprecated Token URL is now in {@link ModelProviderConfig.oauth.tokenUrl}. */
+export const OAUTH_MODEL_PROVIDER_TOKEN_URLS: Readonly<Record<string, string>> = Object.freeze({
+  [CODEX_PACKAGE_ID]: codexConfig.oauth!.tokenUrl,
+  [CLAUDE_CODE_PACKAGE_ID]: claudeCodeConfig.oauth!.tokenUrl,
+});
+
+/** @deprecated Use {@link MODEL_PROVIDERS} and filter on `authMode === "oauth2"`. */
 export const OAUTH_MODEL_PROVIDERS: Readonly<Record<string, OAuthModelProviderConfig>> =
   Object.freeze({
-    [codexConfig.packageId]: codexConfig,
-    [claudeCodeConfig.packageId]: claudeCodeConfig,
+    [CODEX_PACKAGE_ID]: codexConfig as OAuthModelProviderConfig,
+    [CLAUDE_CODE_PACKAGE_ID]: claudeCodeConfig as OAuthModelProviderConfig,
   });
-
-/** Returns the runtime config for an OAuth model provider, or null if unknown. */
-export function getOAuthModelProviderConfig(packageId: string): OAuthModelProviderConfig | null {
-  return OAUTH_MODEL_PROVIDERS[packageId] ?? null;
-}
-
-/** Whitelist check — true iff the package is registered as an OAuth model provider. */
-export function isOAuthModelProvider(packageId: string): boolean {
-  return packageId in OAUTH_MODEL_PROVIDERS;
-}
-
-/** Iterate all registered OAuth model providers (insertion order). */
-export function listOAuthModelProviders(): readonly OAuthModelProviderConfig[] {
-  return Object.values(OAUTH_MODEL_PROVIDERS);
-}
