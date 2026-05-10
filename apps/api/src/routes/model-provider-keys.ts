@@ -19,6 +19,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
+  ApiError,
   invalidRequest,
   notFound,
   internalError,
@@ -130,6 +131,10 @@ export function createModelProviderKeysRouter() {
         }
         return c.json(result);
       } catch (err) {
+        // Don't swallow our own structured errors — `notFound()` thrown
+        // above must reach the global error handler as 404, not get
+        // remapped to 500.
+        if (err instanceof ApiError) throw err;
         logger.error("Model provider key test failed", {
           id,
           error: getErrorMessage(err),
