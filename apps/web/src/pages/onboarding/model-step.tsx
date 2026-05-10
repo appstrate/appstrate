@@ -12,7 +12,7 @@ import {
 } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { BrainCircuit } from "lucide-react";
 import { EmptyState } from "../../components/page-states";
@@ -45,7 +45,7 @@ export function OnboardingModelStep() {
       {hasModels ? (
         <div className="flex flex-col gap-3">
           {models.map((m) => {
-            const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
+            const provider = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
               <div key={m.id} className="border-border bg-card rounded-lg border p-4">

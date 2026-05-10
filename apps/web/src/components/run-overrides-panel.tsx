@@ -17,7 +17,7 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 import { usePackageVersions } from "../hooks/use-packages";
-import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
 
 const INHERIT = "__inherit__";
@@ -161,7 +161,7 @@ export function RunOverridesPanel({
                   : t("run.overrides.modelInherit", { ns: "agents" })}
               </SelectItem>
               {orgModels.map((m) => {
-                const mp = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
+                const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
                 const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
                 return (
                   <SelectItem key={m.id} value={m.id}>

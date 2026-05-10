@@ -113,7 +113,7 @@ export const modelProviderCredentialsPaths = {
                   {
                     id: "cm7stu901",
                     label: "OpenAI Production",
-                    api: "openai-chat",
+                    apiShape: "openai-chat",
                     baseUrl: "https://api.openai.com",
                     source: "custom",
                     createdAt: "2026-01-10T08:00:00Z",
@@ -141,18 +141,18 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "api", "baseUrl", "apiKey"],
+              required: ["label", "apiShape", "baseUrl", "apiKey"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
                   description: "Display name for the model provider credential",
                 },
-                api: {
+                apiShape: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "API wire format (anthropic-messages, openai-chat, openai-responses, openai-completions, …). Combined with baseUrl to reverse-resolve the registry providerId.",
+                    "Wire format / API shape (anthropic-messages, openai-chat, openai-responses, openai-completions, …). Combined with baseUrl to reverse-resolve the registry providerId.",
                 },
                 baseUrl: {
                   type: "string",
@@ -203,9 +203,13 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["api", "baseUrl"],
+              required: ["apiShape", "baseUrl"],
               properties: {
-                api: { type: "string", minLength: 1, description: "API wire format" },
+                apiShape: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Wire format / API shape",
+                },
                 baseUrl: {
                   type: "string",
                   format: "uri",
@@ -250,7 +254,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
-        "Update a model provider credential's mutable fields. The `api` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
+        "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

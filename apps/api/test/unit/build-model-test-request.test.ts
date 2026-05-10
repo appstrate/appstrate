@@ -6,7 +6,7 @@ import { buildModelTestRequest, testModelConfig } from "../../src/services/org-m
 describe("buildModelTestRequest", () => {
   it("anthropic-messages: appends /v1/models, x-api-key for sk-ant- keys", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-key",
     });
@@ -19,7 +19,7 @@ describe("buildModelTestRequest", () => {
 
   it("anthropic-messages: uses Bearer + oauth beta for sk-ant-oat keys", () => {
     const { headers } = buildModelTestRequest({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-oat-token",
     });
@@ -32,7 +32,7 @@ describe("buildModelTestRequest", () => {
   // Regression: https://github.com/appstrate/appstrate/issues/148
   it("mistral-conversations: appends /v1/models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "mistral-conversations",
+      apiShape: "mistral-conversations",
       baseUrl: "https://api.mistral.ai",
       apiKey: "mistral-key",
     });
@@ -42,7 +42,7 @@ describe("buildModelTestRequest", () => {
 
   it("google-generative-ai: passes key as query param, no auth header", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "google-generative-ai",
+      apiShape: "google-generative-ai",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       apiKey: "google key/with+special",
     });
@@ -54,7 +54,7 @@ describe("buildModelTestRequest", () => {
 
   it("google-vertex: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "google-vertex",
+      apiShape: "google-vertex",
       baseUrl: "https://vertex.example.com/v1",
       apiKey: "vertex-token",
     });
@@ -64,7 +64,7 @@ describe("buildModelTestRequest", () => {
 
   it("azure-openai-responses: appends /models with api-key header", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "azure-openai-responses",
+      apiShape: "azure-openai-responses",
       baseUrl: "https://acme.openai.azure.com/openai",
       apiKey: "azure-key",
     });
@@ -75,7 +75,7 @@ describe("buildModelTestRequest", () => {
 
   it("openai-completions: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "openai-completions",
+      apiShape: "openai-completions",
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: "groq-key",
     });
@@ -85,7 +85,7 @@ describe("buildModelTestRequest", () => {
 
   it("openai-responses: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "openai-responses",
+      apiShape: "openai-responses",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "openai-key",
     });
@@ -95,7 +95,7 @@ describe("buildModelTestRequest", () => {
 
   it("bedrock-converse-stream: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "bedrock-converse-stream",
+      apiShape: "bedrock-converse-stream",
       baseUrl: "https://bedrock.example.com",
       apiKey: "bedrock-key",
     });
@@ -105,7 +105,7 @@ describe("buildModelTestRequest", () => {
 
   it("unknown api: falls back to default branch (/models + Bearer)", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "some-future-api",
+      apiShape: "some-future-api",
       baseUrl: "https://example.com/v9",
       apiKey: "k",
     });
@@ -115,7 +115,7 @@ describe("buildModelTestRequest", () => {
 
   it("strips trailing slashes from baseUrl", () => {
     const { url } = buildModelTestRequest({
-      api: "openai-responses",
+      apiShape: "openai-responses",
       baseUrl: "https://api.openai.com/v1///",
       apiKey: "k",
     });
@@ -125,7 +125,7 @@ describe("buildModelTestRequest", () => {
   it("anthropic-messages + claude-code: uses Bearer + oauth beta even without sk-ant-oat prefix", () => {
     // Claude Code OAuth tokens are JWTs, not sk-ant-oat — the provider id is the canonical signal.
     const { headers } = buildModelTestRequest({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       apiKey: "eyJhbGciOiJSUzI1NiJ9.fake.jwt",
       providerId: "claude-code",
@@ -143,7 +143,7 @@ describe("testModelConfig", () => {
   // covers the static request shape via buildModelTestRequest above.
   it("codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
     const result = await testModelConfig({
-      api: "openai-responses",
+      apiShape: "openai-responses",
       baseUrl: "https://chatgpt.com/backend-api",
       modelId: "gpt-5.4-mini",
       apiKey: "not-a-jwt",

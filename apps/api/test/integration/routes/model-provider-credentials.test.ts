@@ -40,7 +40,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test Key",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           apiKey: "sk-test-key-123",
         }),
@@ -61,7 +61,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Original Label",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           apiKey: "sk-test-key-123",
         }),
@@ -90,7 +90,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "To Delete",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           apiKey: "sk-test-key-123",
         }),
@@ -162,7 +162,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Org A key",
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "https://api.openai.com/v1",
           apiKey: "sk-org-a",
         }),
@@ -188,7 +188,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Local",
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           apiKey: "sk-local",
         }),
@@ -212,7 +212,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           apiKey: "sk-x",
         }),
@@ -225,7 +225,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
         }),
       });
@@ -237,7 +237,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           apiKey: "sk-x",
         }),
       });
@@ -249,7 +249,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           apiKey: "sk-inline",
         }),
@@ -270,7 +270,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Inline-existing",
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           apiKey: "sk-stored",
         }),
@@ -281,7 +281,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           existingKeyId: id,
         }),
@@ -299,7 +299,7 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          api: "openai-responses",
+          apiShape: "openai-responses",
           baseUrl: "http://127.0.0.1:9",
           existingKeyId: "00000000-0000-0000-0000-000000000000",
         }),

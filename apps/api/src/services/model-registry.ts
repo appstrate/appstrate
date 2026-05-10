@@ -11,7 +11,7 @@ import type { ModelCost } from "@appstrate/shared-types";
 export interface SystemModelProviderKeyDefinition {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   apiKey: string;
 }
@@ -19,7 +19,7 @@ export interface SystemModelProviderKeyDefinition {
 export interface ModelDefinition {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;
@@ -56,7 +56,7 @@ const rawModelSchema = z.object({
 const rawModelProviderKeySchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  api: z.string().min(1),
+  apiShape: z.string().min(1),
   baseUrl: z.string().min(1),
   apiKey: z.string().min(1),
   models: z.array(rawModelSchema).optional(),
@@ -77,7 +77,7 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  * [{
  *   "id": "anthropic-prod",
  *   "label": "Anthropic",
- *   "api": "anthropic-messages",
+ *   "apiShape": "anthropic-messages",
  *   "baseUrl": "https://api.anthropic.com",
  *   "apiKey": "sk-ant-...",
  *   "models": [
@@ -106,7 +106,7 @@ export function initSystemModelProviderKeys(): void {
     pkMap.set(validPk.id, {
       id: validPk.id,
       label: validPk.label,
-      api: validPk.api,
+      apiShape: validPk.apiShape,
       baseUrl: validPk.baseUrl,
       apiKey: validPk.apiKey,
     });
@@ -129,7 +129,7 @@ export function initSystemModelProviderKeys(): void {
         mdlMap.set(modelId, {
           id: modelId,
           label: validM.label,
-          api: validPk.api,
+          apiShape: validPk.apiShape,
           baseUrl: validPk.baseUrl,
           modelId: validM.modelId,
           apiKey: validPk.apiKey,

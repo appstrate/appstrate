@@ -23,7 +23,7 @@ describe("Models API", () => {
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         label: "Test Model Provider Key",
-        api: "openai",
+        apiShape: "openai",
         baseUrl: "https://api.openai.com",
         apiKey: "sk-test-key-123",
       }),
@@ -58,14 +58,14 @@ describe("Models API", () => {
       // opaque 429 from Anthropic.
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         apiKey: "sk-ant-oat-real-token-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
         providerKeyId: providerKey.id,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
         label: "Sonnet OAuth",
@@ -84,14 +84,14 @@ describe("Models API", () => {
     it("flags Anthropic API-key credentials with keyKind='api-key'", async () => {
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         apiKey: "sk-ant-api03-real-key-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
         providerKeyId: providerKey.id,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
         label: "Sonnet API Key",
@@ -108,14 +108,14 @@ describe("Models API", () => {
     it("returns keyKind=null for non-Anthropic protocols", async () => {
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "openai-completions",
+        apiShape: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
         apiKey: "sk-openai-anything",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
         providerKeyId: providerKey.id,
-        api: "openai-completions",
+        apiShape: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
         modelId: "gpt-4o",
         label: "OpenAI Preset",
@@ -142,7 +142,7 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "GPT-4o",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
           providerKeyId,
@@ -166,7 +166,7 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "To Delete",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o-mini",
           providerKeyId,
@@ -195,7 +195,7 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Default Model",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
           providerKeyId,

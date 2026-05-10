@@ -207,12 +207,12 @@ async function resolvePresetForOrg(
   if (!loaded) {
     throw new LlmProxyUnsupportedModelError(presetId);
   }
-  if (loaded.api !== expectedApi) {
-    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.api);
+  if (loaded.apiShape !== expectedApi) {
+    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
   }
   return {
     presetId,
-    api: loaded.api,
+    api: loaded.apiShape,
     baseUrl: loaded.baseUrl,
     realModelId: loaded.modelId,
     upstreamApiKey: loaded.apiKey,

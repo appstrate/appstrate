@@ -25,8 +25,8 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
  * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
  * protocols and for Anthropic models whose creds are unavailable.
  */
-function detectKeyKind(api: string, apiKey: string): "oauth" | "api-key" | null {
-  if (api !== "anthropic-messages") return null;
+function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
+  if (apiShape !== "anthropic-messages") return null;
   return apiKey.includes("sk-ant-oat") ? "oauth" : "api-key";
 }
 
@@ -40,7 +40,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   // per distinct providerKeyId. System models carry `apiKey` inline, so
   // detection there is free. Other protocols don't expose keyKind at all.
   const anthropicProviderKeyIds = new Set(
-    rows.filter((r) => r.api === "anthropic-messages").map((r) => r.providerKeyId),
+    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.providerKeyId),
   );
   const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
   await Promise.all(
@@ -56,7 +56,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
     mapSystem: (id, def) => ({
       id,
       label: def.label,
-      api: def.api,
+      apiShape: def.apiShape,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       input: def.input ?? null,
@@ -69,7 +69,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       source: "built-in" as const,
       providerKeyId: def.providerKeyId,
       providerKeyLabel: null,
-      keyKind: detectKeyKind(def.api, def.apiKey),
+      keyKind: detectKeyKind(def.apiShape, def.apiKey),
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -77,7 +77,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
     mapRow: (row) => ({
       id: row.id,
       label: row.label,
-      api: row.api,
+      apiShape: row.apiShape,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
       input: row.input as string[] | null,
@@ -91,7 +91,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
       keyKind:
-        row.api === "anthropic-messages" ? (dbKeyKinds.get(row.providerKeyId) ?? null) : null,
+        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.providerKeyId) ?? null) : null,
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
@@ -104,7 +104,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
 export async function createOrgModel(
   orgId: string,
   label: string,
-  api: string,
+  apiShape: string,
   baseUrl: string,
   modelId: string,
   userId: string,
@@ -130,7 +130,7 @@ export async function createOrgModel(
     .values({
       orgId,
       label,
-      api,
+      apiShape,
       baseUrl,
       modelId,
       providerKeyId,
@@ -152,7 +152,7 @@ export async function updateOrgModel(
   modelDbId: string,
   data: {
     label?: string;
-    api?: string;
+    apiShape?: string;
     baseUrl?: string;
     modelId?: string;
     enabled?: boolean;
@@ -206,7 +206,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 // --- Resolution ---
 
 interface ResolvedModel {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;
@@ -226,7 +226,7 @@ interface ResolvedModel {
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   return {
-    api: def.api,
+    apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
@@ -271,7 +271,7 @@ export async function resolveModel(
     const creds = await loadInferenceCredentials(orgId, dbDefault.providerKeyId);
     if (creds) {
       return {
-        api: dbDefault.api,
+        apiShape: dbDefault.apiShape,
         baseUrl: dbDefault.baseUrl,
         modelId: dbDefault.modelId,
         apiKey: creds.apiKey,
@@ -311,7 +311,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   // Check DB
   const [row] = await db
     .select({
-      api: orgModels.api,
+      apiShape: orgModels.apiShape,
       baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
       providerKeyId: orgModels.providerKeyId,
@@ -333,7 +333,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   if (!creds) return null;
 
   return {
-    api: row.api,
+    apiShape: row.apiShape,
     baseUrl: row.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
@@ -353,7 +353,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
 /** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
 export function buildModelTestRequest(config: {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   apiKey: string;
   providerId?: string;
@@ -371,7 +371,7 @@ export function buildModelTestRequest(config: {
   const isAnthropicOAuth =
     config.providerId === "claude-code" || config.apiKey.startsWith("sk-ant-oat");
 
-  switch (config.api) {
+  switch (config.apiShape) {
     case "anthropic-messages":
       url = `${base}/v1/models`;
       if (isAnthropicOAuth) {
@@ -411,7 +411,7 @@ export function buildModelTestRequest(config: {
 
 /** Test a model config directly (no DB lookup). */
 export async function testModelConfig(config: {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;

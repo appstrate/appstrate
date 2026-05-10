@@ -37,13 +37,13 @@ import {
   API_TYPES,
   findPresetMatch,
   getProviderById,
-  findProviderByApiAndBaseUrl,
+  findProviderByApiShapeAndBaseUrl,
 } from "@/lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
 
 export interface ModelFormData {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   providerKeyId: string;
@@ -65,7 +65,7 @@ interface ModelFormModalProps {
 
 interface ModelFormFields {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   providerKeyId: string;
@@ -79,18 +79,18 @@ interface ModelFormFields {
 
 function detectProvider(model: OrgModelInfo | null): string {
   if (!model) return "";
-  const match = findPresetMatch(model.api, model.modelId);
+  const match = findPresetMatch(model.apiShape, model.modelId);
   if (match) return match.provider.id;
-  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl);
   if (byApiAndUrl) return byApiAndUrl.id;
   return CUSTOM_ID;
 }
 
 function detectModel(model: OrgModelInfo | null): string {
   if (!model) return "";
-  const match = findPresetMatch(model.api, model.modelId);
+  const match = findPresetMatch(model.apiShape, model.modelId);
   if (match) return match.model.modelId;
-  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl);
   if (byApiAndUrl) {
     // Providers with no static presets (e.g. OpenRouter) use dynamic model IDs
     if (byApiAndUrl.models.length === 0) return model.modelId;
@@ -230,7 +230,7 @@ function ModelFormBody({
   } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
-      api: model?.api ?? "",
+      apiShape: model?.apiShape ?? "",
       baseUrl: model?.baseUrl ?? "",
       modelId: model?.modelId ?? "",
       providerKeyId: model?.providerKeyId ?? "",
@@ -243,30 +243,38 @@ function ModelFormBody({
     },
   });
 
-  const [api, baseUrl, modelId, providerKeyId, inlineApiKey, inputText, inputImage, reasoning] =
-    useWatch({
-      control,
-      name: [
-        "api",
-        "baseUrl",
-        "modelId",
-        "providerKeyId",
-        "inlineApiKey",
-        "inputText",
-        "inputImage",
-        "reasoning",
-      ],
-    });
+  const [
+    apiShape,
+    baseUrl,
+    modelId,
+    providerKeyId,
+    inlineApiKey,
+    inputText,
+    inputImage,
+    reasoning,
+  ] = useWatch({
+    control,
+    name: [
+      "apiShape",
+      "baseUrl",
+      "modelId",
+      "providerKeyId",
+      "inlineApiKey",
+      "inputText",
+      "inputImage",
+      "reasoning",
+    ],
+  });
 
   const providerKeysQuery = useModelProviderCredentials();
 
   const availableProviderKeys = useMemo(() => {
-    if (!providerKeysQuery.data || !api || !baseUrl) return [];
+    if (!providerKeysQuery.data || !apiShape || !baseUrl) return [];
     const normalizedBase = baseUrl.replace(/\/+$/, "");
     return providerKeysQuery.data.filter(
-      (k) => k.api === api && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
+      (k) => k.apiShape === apiShape && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
-  }, [providerKeysQuery.data, api, baseUrl]);
+  }, [providerKeysQuery.data, apiShape, baseUrl]);
 
   const selectedKey = availableProviderKeys.find((k) => k.id === providerKeyId);
   const inlineKeyMode = !selectedKey && !providerKeyId;
@@ -308,13 +316,13 @@ function ModelFormBody({
 
     if (id === CUSTOM_ID) {
       setSelectedModelId(CUSTOM_ID);
-      setValue("api", "");
+      setValue("apiShape", "");
       setValue("baseUrl", "");
     } else {
       setSelectedModelId("");
       const provider = getProviderById(id);
       if (provider) {
-        setValue("api", provider.api);
+        setValue("apiShape", provider.apiShape);
         setValue("baseUrl", provider.baseUrl);
       }
     }
@@ -353,7 +361,7 @@ function ModelFormBody({
 
     onSubmit({
       label: data.label.trim(),
-      api: data.api.trim(),
+      apiShape: data.apiShape.trim(),
       baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
       providerKeyId: inlineKeyMode ? "" : data.providerKeyId,
@@ -557,15 +565,15 @@ function ModelFormBody({
               <div className="space-y-2">
                 <Label htmlFor="mdl-api">{t("models.form.api")}</Label>
                 <Select
-                  value={api}
+                  value={apiShape}
                   onValueChange={(v) => {
-                    setValue("api", v);
-                    clearErrors("api");
+                    setValue("apiShape", v);
+                    clearErrors("apiShape");
                   }}
                 >
                   <SelectTrigger
                     id="mdl-api"
-                    className={cn(showError("api") && "border-destructive")}
+                    className={cn(showError("apiShape") && "border-destructive")}
                   >
                     <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                   </SelectTrigger>
@@ -577,8 +585,8 @@ function ModelFormBody({
                     ))}
                   </SelectContent>
                 </Select>
-                {showError("api") && errors.api?.message && (
-                  <div className="text-destructive text-sm">{errors.api.message}</div>
+                {showError("apiShape") && errors.apiShape?.message && (
+                  <div className="text-destructive text-sm">{errors.apiShape.message}</div>
                 )}
               </div>
             )}

@@ -446,23 +446,23 @@ export async function loadModelProviderCredentials(
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
 
 /**
- * Resolve `(api, baseUrl)` to a registry providerId. Matches an `api_key`
+ * Resolve `(apiShape, baseUrl)` to a registry providerId. Matches an `api_key`
  * provider whose `apiShape` and `defaultBaseUrl` align; falls back to
  * `openai-compatible` with a `baseUrlOverride` for any unrecognized combo.
  *
  * Kept exported because the POST route still accepts the historic
- * `(api, baseUrl, apiKey)` form and reverse-resolves it to a canonical
+ * `(apiShape, baseUrl, apiKey)` form and reverse-resolves it to a canonical
  * providerId before creating the credential.
  */
 export function resolveProviderIdFromApiKeyForm(
-  api: string,
+  apiShape: string,
   baseUrl: string,
 ): { providerId: string; baseUrlOverride: string | null } {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   for (const cfg of listModelProviders()) {
     if (cfg.authMode !== "api_key") continue;
     if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
-    if (cfg.apiShape === api && cfg.defaultBaseUrl.replace(/\/+$/, "") === normalizedBaseUrl) {
+    if (cfg.apiShape === apiShape && cfg.defaultBaseUrl.replace(/\/+$/, "") === normalizedBaseUrl) {
       return { providerId: cfg.providerId, baseUrlOverride: null };
     }
   }
@@ -477,7 +477,7 @@ export function resolveProviderIdFromApiKeyForm(
  *   2. The unified `model_provider_credentials` table (custom, OAuth + api-key)
  *
  * The return shape is `OrgModelProviderKeyInfo` — a UI aggregation shape that
- * preserves the historic `(api, baseUrl, source)` triple expected by the
+ * preserves the historic `(apiShape, baseUrl, source)` triple expected by the
  * frontend. Distinct from the DB-row shape `ModelProviderCredentialInfo`.
  */
 export async function listOrgModelProviderCredentials(
@@ -493,7 +493,7 @@ export async function listOrgModelProviderCredentials(
     mapSystem: (id, def): OrgModelProviderKeyInfo => ({
       id,
       label: def.label,
-      api: def.api,
+      apiShape: def.apiShape,
       baseUrl: def.baseUrl,
       source: "built-in",
       authMode: "api_key",
@@ -506,7 +506,7 @@ export async function listOrgModelProviderCredentials(
       return {
         id: info.id,
         label: info.label,
-        api: cfg?.apiShape ?? "openai-chat",
+        apiShape: cfg?.apiShape ?? "openai-chat",
         baseUrl: info.baseUrl,
         source: "custom",
         authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
@@ -529,7 +529,7 @@ export async function listOrgModelProviderCredentials(
  *   - DB-stored credentials (api-key or OAuth, decrypted on demand)
  */
 export interface InferenceCredentials {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   apiKey: string;
   /** Populated for OAuth-backed credentials — drives provider-specific request shape. */
@@ -552,7 +552,7 @@ export async function loadInferenceCredentials(
   // 1) System (env-driven) keys.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
-    return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
+    return { apiShape: systemKey.apiShape, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
   }
 
   // 2) Unified credentials table (api-key + OAuth).
@@ -560,7 +560,7 @@ export async function loadInferenceCredentials(
   if (!creds) return null;
   if (creds.needsReconnection) return null;
   return {
-    api: creds.apiShape,
+    apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     apiKey: creds.apiKey,
     providerId: creds.providerId,

@@ -15,7 +15,7 @@ interface ModelPreset {
 interface ProviderPreset {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   models: ModelPreset[];
 }
@@ -26,7 +26,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "anthropic",
     label: "Anthropic",
-    api: "anthropic-messages",
+    apiShape: "anthropic-messages",
     baseUrl: "https://api.anthropic.com",
     models: [
       {
@@ -61,7 +61,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "cerebras",
     label: "Cerebras",
-    api: "openai-completions",
+    apiShape: "openai-completions",
     baseUrl: "https://api.cerebras.ai/v1",
     models: [
       {
@@ -85,7 +85,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "google-ai",
     label: "Google AI",
-    api: "google-generative-ai",
+    apiShape: "google-generative-ai",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     models: [
       {
@@ -120,7 +120,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "groq",
     label: "Groq",
-    api: "openai-completions",
+    apiShape: "openai-completions",
     baseUrl: "https://api.groq.com/openai/v1",
     models: [
       {
@@ -152,7 +152,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "mistral",
     label: "Mistral",
-    api: "mistral-conversations",
+    apiShape: "mistral-conversations",
     baseUrl: "https://api.mistral.ai",
     models: [
       {
@@ -205,7 +205,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "openai",
     label: "OpenAI",
-    api: "openai-responses",
+    apiShape: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     models: [
       {
@@ -240,7 +240,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
-    api: "openai-completions",
+    apiShape: "openai-completions",
     baseUrl: "https://openrouter.ai/api/v1",
     models: [],
   },
@@ -250,7 +250,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "codex",
     label: "Codex (ChatGPT Plus / Pro / Team)",
-    api: "openai-responses",
+    apiShape: "openai-responses",
     baseUrl: "https://chatgpt.com/backend-api",
     models: [
       {
@@ -298,7 +298,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "claude-code",
     label: "Claude Code (Claude Pro / Max / Team)",
-    api: "anthropic-messages",
+    apiShape: "anthropic-messages",
     baseUrl: "https://api.anthropic.com",
     models: [
       {
@@ -330,7 +330,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "xai",
     label: "xAI",
-    api: "openai-completions",
+    apiShape: "openai-completions",
     baseUrl: "https://api.x.ai/v1",
     models: [
       {
@@ -380,11 +380,11 @@ export const API_TYPES = [
 ] as const;
 
 export function findPresetMatch(
-  api: string,
+  apiShape: string,
   modelId: string,
 ): { provider: ProviderPreset; model: ModelPreset } | null {
   for (const provider of PROVIDER_PRESETS) {
-    if (provider.api !== api) continue;
+    if (provider.apiShape !== apiShape) continue;
     const model = provider.models.find((m) => m.modelId === modelId);
     if (model) return { provider, model };
   }
@@ -395,13 +395,13 @@ export function getProviderById(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.id === id);
 }
 
-export function findProviderByApiAndBaseUrl(
-  api: string,
+export function findProviderByApiShapeAndBaseUrl(
+  apiShape: string,
   baseUrl: string | undefined,
 ): ProviderPreset | undefined {
   if (!baseUrl) return undefined;
   const normalized = baseUrl.replace(/\/+$/, "");
   return PROVIDER_PRESETS.find(
-    (p) => p.api === api && normalized.startsWith(p.baseUrl.replace(/\/+$/, "")),
+    (p) => p.apiShape === apiShape && normalized.startsWith(p.baseUrl.replace(/\/+$/, "")),
   );
 }

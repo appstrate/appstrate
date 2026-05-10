@@ -54,7 +54,7 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(owner, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
           providerKeyId: "pk_test",
@@ -70,7 +70,7 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
           providerKeyId: "pk_test",
@@ -85,7 +85,7 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
           providerKeyId: "pk_test",
@@ -100,7 +100,7 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(viewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
           providerKeyId: "pk_test",
@@ -238,7 +238,7 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
           providerKeyId: "pk_test",

@@ -23,13 +23,13 @@ import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
   API_TYPES,
-  findProviderByApiAndBaseUrl,
+  findProviderByApiShapeAndBaseUrl,
 } from "@/lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
 
 interface ProviderKeyFormData {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   apiKey?: string;
 }
@@ -44,14 +44,14 @@ interface ProviderKeyFormModalProps {
 
 interface ProviderKeyFormFields {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   apiKey: string;
 }
 
 function detectProviderFromKey(key: OrgModelProviderKeyInfo | null): string {
   if (!key) return "";
-  const match = findProviderByApiAndBaseUrl(key.api, key.baseUrl);
+  const match = findProviderByApiShapeAndBaseUrl(key.apiShape, key.baseUrl);
   return match ? match.id : CUSTOM_ID;
 }
 
@@ -83,26 +83,26 @@ function ProviderKeyFormBody({
   } = useAppForm<ProviderKeyFormFields>({
     defaultValues: {
       label: providerKey?.label ?? "",
-      api: providerKey?.api ?? "",
+      apiShape: providerKey?.apiShape ?? "",
       baseUrl: providerKey?.baseUrl ?? "",
       apiKey: "",
     },
   });
 
-  const [api, baseUrl, apiKey, label] = useWatch({
+  const [apiShape, baseUrl, apiKey, label] = useWatch({
     control,
-    name: ["api", "baseUrl", "apiKey", "label"],
+    name: ["apiShape", "baseUrl", "apiKey", "label"],
   });
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const canTest = !!api.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!providerKey);
+  const canTest = !!apiShape.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!providerKey);
 
   const handleTest = () => {
     setTestResult(null);
     testMutation.mutate(
       {
-        api: api.trim(),
+        apiShape: apiShape.trim(),
         baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...(providerKey ? { existingKeyId: providerKey.id } : {}),
@@ -124,13 +124,13 @@ function ProviderKeyFormBody({
     setProviderId(id);
     clearErrors();
     if (id === CUSTOM_ID) {
-      setValue("api", "");
+      setValue("apiShape", "");
       setValue("baseUrl", "");
       setValue("label", "");
     } else {
       const provider = PROVIDER_PRESETS.find((p) => p.id === id);
       if (provider) {
-        setValue("api", provider.api);
+        setValue("apiShape", provider.apiShape);
         setValue("baseUrl", provider.baseUrl);
         if (!label.trim()) setValue("label", provider.label);
       }
@@ -140,7 +140,7 @@ function ProviderKeyFormBody({
   const onFormSubmit = handleSubmit((data) => {
     onSubmit({
       label: data.label.trim(),
-      api: data.api.trim(),
+      apiShape: data.apiShape.trim(),
       baseUrl: data.baseUrl.trim(),
       ...(data.apiKey.trim() ? { apiKey: data.apiKey.trim() } : {}),
     });
@@ -230,14 +230,17 @@ function ProviderKeyFormBody({
             <div className="space-y-2">
               <Label htmlFor="pk-api">{t("models.form.api")}</Label>
               <Select
-                value={api}
+                value={apiShape}
                 onValueChange={(v) => {
-                  setValue("api", v);
-                  clearErrors("api");
+                  setValue("apiShape", v);
+                  clearErrors("apiShape");
                 }}
                 disabled={isEditing}
               >
-                <SelectTrigger id="pk-api" className={cn(showError("api") && "border-destructive")}>
+                <SelectTrigger
+                  id="pk-api"
+                  className={cn(showError("apiShape") && "border-destructive")}
+                >
                   <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -248,8 +251,8 @@ function ProviderKeyFormBody({
                   ))}
                 </SelectContent>
               </Select>
-              {showError("api") && errors.api?.message && (
-                <div className="text-destructive text-sm">{errors.api.message}</div>
+              {showError("apiShape") && errors.apiShape?.message && (
+                <div className="text-destructive text-sm">{errors.apiShape.message}</div>
               )}
             </div>
             <div className="space-y-2">

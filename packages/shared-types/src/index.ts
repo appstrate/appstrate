@@ -470,7 +470,7 @@ export interface OrgProxyInfo {
 export interface OrgModelInfo {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   input?: string[] | null;
@@ -504,7 +504,7 @@ export interface OrgModelInfo {
 export interface OrgModelProviderKeyInfo {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential. Defaults to `"api_key"` for OSS rows that predate OAuth model providers. */

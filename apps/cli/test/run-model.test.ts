@@ -182,7 +182,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
   // doesn't silently send credentials to the wrong host.
 
   function makePreset(
-    overrides: Partial<ModelPreset> & Pick<ModelPreset, "id" | "api">,
+    overrides: Partial<ModelPreset> & Pick<ModelPreset, "id" | "apiShape">,
   ): ModelPreset {
     return {
       label: overrides.id,
@@ -198,15 +198,15 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     };
   }
 
-  const PRESET_OPENAI = makePreset({ id: "preset_openai", api: "openai-completions" });
+  const PRESET_OPENAI = makePreset({ id: "preset_openai", apiShape: "openai-completions" });
   const PRESET_ANTHROPIC = makePreset({
     id: "preset_anthropic",
-    api: "anthropic-messages",
+    apiShape: "anthropic-messages",
     isDefault: false,
   });
   const PRESET_MISTRAL = makePreset({
     id: "preset_mistral",
-    api: "mistral-conversations",
+    apiShape: "mistral-conversations",
     isDefault: false,
   });
 
@@ -284,7 +284,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       presetsLoader: async () => [
         makePreset({
           id: "preset_anthropic_oauth",
-          api: "anthropic-messages",
+          apiShape: "anthropic-messages",
           isDefault: false,
           keyKind: "oauth",
         }),
@@ -305,7 +305,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       presetsLoader: async () => [
         makePreset({
           id: "preset_anthropic_apikey",
-          api: "anthropic-messages",
+          apiShape: "anthropic-messages",
           isDefault: false,
           keyKind: "api-key",
         }),
@@ -326,7 +326,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         bearerToken: "ask_test",
         orgId: "org_1",
         presetsLoader: async () => [
-          makePreset({ id: "preset_gemini", api: "google-generative-ai" }),
+          makePreset({ id: "preset_gemini", apiShape: "google-generative-ai" }),
         ],
       }),
     ).rejects.toThrow(/google-generative-ai/);

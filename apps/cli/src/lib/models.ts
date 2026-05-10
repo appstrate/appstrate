@@ -17,13 +17,13 @@ export interface ModelPreset {
   id: string;
   label: string;
   /**
-   * Protocol family the CLI must route through (selects the
-   * `/api/llm-proxy/<api>/…` sub-route). Known values today:
+   * Wire format / API shape the CLI must route through (selects the
+   * `/api/llm-proxy/<apiShape>/…` sub-route). Known values today:
    * `openai-completions`, `anthropic-messages`, `openai-responses`,
    * `google-generative-ai`, `google-vertex`, `azure-openai-responses`,
    * `bedrock-converse-stream`.
    */
-  api: string;
+  apiShape: string;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";

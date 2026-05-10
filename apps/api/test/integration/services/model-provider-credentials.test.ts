@@ -442,7 +442,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(serialized).not.toContain(PLAINTEXT);
       expect(serialized).not.toContain("credentialsEncrypted");
       expect(serialized).not.toContain("apiKey");
-      expect(custom[0]!.api).toBe("anthropic-messages");
+      expect(custom[0]!.apiShape).toBe("anthropic-messages");
       expect(custom[0]!.authMode).toBe("api_key");
     });
 
@@ -491,7 +491,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
       const own = await loadInferenceCredentials(ctxA.orgId, idA);
       expect(own?.apiKey).toBe("secret-a");
-      expect(own?.api).toBe("anthropic-messages");
+      expect(own?.apiShape).toBe("anthropic-messages");
       expect(own?.baseUrl).toBe("https://api.anthropic.com");
     });
 

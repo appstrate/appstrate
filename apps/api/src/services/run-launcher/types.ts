@@ -37,7 +37,7 @@ export interface ProviderSummary extends PlatformPromptProvider {
 }
 
 export interface LlmConfig {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;

@@ -32,7 +32,7 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
-  api: z.string().min(1, "api is required"),
+  apiShape: z.string().min(1, "apiShape is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
   providerKeyId: z.string().min(1, "providerKeyId is required"),
@@ -45,7 +45,7 @@ export const createModelSchema = z.object({
 
 export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
-  api: z.string().min(1).optional(),
+  apiShape: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
   providerKeyId: z.string().optional(),
@@ -62,7 +62,7 @@ export const setDefaultSchema = z.object({
 });
 
 export const testInlineSchema = z.object({
-  api: z.string().min(1),
+  apiShape: z.string().min(1),
   baseUrl: z.url(),
   modelId: z.string().min(1),
   apiKey: z.string().optional(),
@@ -89,7 +89,7 @@ export function createModelsRouter() {
     try {
       const {
         label,
-        api,
+        apiShape,
         baseUrl,
         modelId,
         providerKeyId,
@@ -99,18 +99,27 @@ export function createModelsRouter() {
         reasoning,
         cost,
       } = data;
-      const id = await createOrgModel(orgId, label, api, baseUrl, modelId, user.id, providerKeyId, {
-        input,
-        contextWindow,
-        maxTokens,
-        reasoning,
-        cost,
-      });
+      const id = await createOrgModel(
+        orgId,
+        label,
+        apiShape,
+        baseUrl,
+        modelId,
+        user.id,
+        providerKeyId,
+        {
+          input,
+          contextWindow,
+          maxTokens,
+          reasoning,
+          cost,
+        },
+      );
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
         resourceId: id,
-        after: { label, api, baseUrl, modelId, providerKeyId },
+        after: { label, apiShape, baseUrl, modelId, providerKeyId },
       });
       return c.json({ id }, 201);
     } catch (err) {
@@ -257,7 +266,7 @@ export function createModelsRouter() {
 
     try {
       const result = await testModelConfig({
-        api: data.api,
+        apiShape: data.apiShape,
         baseUrl: data.baseUrl,
         modelId: data.modelId,
         apiKey,

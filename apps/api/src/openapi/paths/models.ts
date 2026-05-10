@@ -36,7 +36,7 @@ export const modelsPaths = {
                   {
                     id: "gpt-4o",
                     label: "GPT-4o",
-                    api: "openai-responses",
+                    apiShape: "openai-responses",
                     baseUrl: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
                     source: "built-in",
@@ -70,14 +70,14 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "api", "baseUrl", "modelId", "providerKeyId"],
+              required: ["label", "apiShape", "baseUrl", "modelId", "providerKeyId"],
               properties: {
                 label: { type: "string", minLength: 1, description: "Display name for the model" },
-                api: {
+                apiShape: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
+                    "Wire format / API shape (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
                 },
                 baseUrl: {
                   type: "string",
@@ -316,9 +316,13 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["api", "baseUrl", "modelId"],
+              required: ["apiShape", "baseUrl", "modelId"],
               properties: {
-                api: { type: "string", minLength: 1, description: "API type" },
+                apiShape: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Wire format / API shape",
+                },
                 baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
                 modelId: { type: "string", minLength: 1, description: "Model identifier" },
                 apiKey: { type: "string", description: "API key (required for new models)" },
@@ -369,7 +373,7 @@ export const modelsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                api: { type: "string", minLength: 1 },
+                apiShape: { type: "string", minLength: 1 },
                 baseUrl: { type: "string", format: "uri" },
                 modelId: { type: "string", minLength: 1 },
                 providerKeyId: {

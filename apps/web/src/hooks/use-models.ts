@@ -11,7 +11,7 @@ import {
   useModelProviderCredentials,
   deduplicateLabel,
 } from "./use-model-provider-credentials";
-import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/model-presets";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -27,7 +27,7 @@ export function useCreateModel() {
   return useMutation({
     mutationFn: async (data: {
       label: string;
-      api: string;
+      apiShape: string;
       baseUrl: string;
       modelId: string;
       providerKeyId: string;
@@ -58,7 +58,7 @@ export function useUpdateModel() {
       id: string;
       data: {
         label?: string;
-        api?: string;
+        apiShape?: string;
         baseUrl?: string;
         modelId?: string;
         providerKeyId?: string;
@@ -182,12 +182,12 @@ export function useModelFormHandler(opts: {
 
   const onSubmit = (data: ModelFormData) => {
     const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
-      const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
+      const provider = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl);
       const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
       createPk.mutate(
         {
           label,
-          api: data.api,
+          apiShape: data.apiShape,
           baseUrl: data.baseUrl,
           apiKey: data.newProviderKey!.apiKey,
         },

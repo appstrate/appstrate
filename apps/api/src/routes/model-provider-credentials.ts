@@ -34,13 +34,13 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
   label: z.string().min(1, "label is required"),
-  api: z.string().min(1, "api is required"),
+  apiShape: z.string().min(1, "apiShape is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   apiKey: z.string().min(1, "apiKey is required"),
 });
 
 /**
- * `api` and `baseUrl` are intentionally absent — they are pinned by the
+ * `apiShape` and `baseUrl` are intentionally absent — they are pinned by the
  * canonical `providerId` selected at create time and cannot be mutated.
  * To switch providers, delete the credential and re-create it.
  */
@@ -50,7 +50,7 @@ export const updateSchema = z.object({
 });
 
 export const testInlineSchema = z.object({
-  api: z.string().min(1),
+  apiShape: z.string().min(1),
   baseUrl: z.url(),
   apiKey: z.string().optional(),
   existingKeyId: z.string().optional(),
@@ -98,11 +98,11 @@ export function createModelProviderCredentialsRouter() {
     const body = await c.req.json();
     const data = parseBody(createSchema, body);
     try {
-      const { label, api, baseUrl, apiKey } = data;
-      // The route still accepts the historic `(api, baseUrl)` form — reverse-
+      const { label, apiShape, baseUrl, apiKey } = data;
+      // The route still accepts the historic `(apiShape, baseUrl)` form — reverse-
       // resolve it to the canonical `providerId` (with `baseUrlOverride` for
       // any unrecognized combo) before persisting.
-      const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(api, baseUrl);
+      const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
       const id = await createApiKeyCredential({
         orgId,
         userId: user.id,
@@ -115,7 +115,7 @@ export function createModelProviderCredentialsRouter() {
         action: "model_provider_credential.created",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: { label, api, baseUrl },
+        after: { label, apiShape, baseUrl },
       });
       return c.json({ id }, 201);
     } catch (err) {
@@ -145,7 +145,7 @@ export function createModelProviderCredentialsRouter() {
       }
       try {
         const result = await testModelConfig({
-          api: data.api,
+          apiShape: data.apiShape,
           baseUrl: data.baseUrl,
           modelId: "_test",
           apiKey,

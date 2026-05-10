@@ -37,7 +37,7 @@ import { ModelProviderKeyFormModal } from "../../components/model-provider-crede
 import { OAuthModelProviderDialog } from "../../components/oauth-model-provider-dialog";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
-import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../../lib/model-presets";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
@@ -148,7 +148,7 @@ function ModelsList({
         <div className="flex flex-col gap-3">
           {models.map((m) => {
             const isBuiltIn = m.source === "built-in";
-            const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
+            const provider = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
               <div key={m.id} className="border-border bg-card rounded-lg border p-5">
@@ -157,7 +157,7 @@ function ModelsList({
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
                     <span className="text-muted-foreground text-sm">
-                      {m.api} / {m.modelId}
+                      {m.apiShape} / {m.modelId}
                     </span>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
@@ -278,7 +278,7 @@ function ProviderKeysSection({
       {providerKeys && providerKeys.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
           {providerKeys.map((pk) => {
-            const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
+            const provider = findProviderByApiShapeAndBaseUrl(pk.apiShape, pk.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             const isOauth = pk.authMode === "oauth";
             return (
@@ -303,7 +303,7 @@ function ProviderKeysSection({
                     )}
                   </div>
                   <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
-                    <span>{pk.api}</span>
+                    <span>{pk.apiShape}</span>
                     {pk.createdAt && (
                       <>
                         <span>&middot;</span>
@@ -533,7 +533,7 @@ export function OrgSettingsModelsPage() {
             createPkMutation.mutate(
               { ...data, label: uniqueLabel } as {
                 label: string;
-                api: string;
+                apiShape: string;
                 baseUrl: string;
                 apiKey: string;
               },

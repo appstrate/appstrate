@@ -48,7 +48,7 @@ interface Harness {
 }
 
 async function buildHarness(overrides?: {
-  api?: string;
+  apiShape?: string;
   baseUrl?: string;
   modelId?: string;
   upstreamKey?: string;
@@ -58,7 +58,7 @@ async function buildHarness(overrides?: {
   const providerKey = await seedOrgModelProviderKey({
     orgId: ctx.orgId,
     label: "Upstream",
-    api: overrides?.api ?? "openai-completions",
+    apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     apiKey: overrides?.upstreamKey ?? "sk-upstream-42",
   });
@@ -66,7 +66,7 @@ async function buildHarness(overrides?: {
     orgId: ctx.orgId,
     providerKeyId: providerKey.id,
     label: "Preset",
-    api: overrides?.api ?? "openai-completions",
+    apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
@@ -208,7 +208,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
   });
 
   it("returns 400 when the preset uses a different protocol family", async () => {
-    const h = await buildHarness({ api: "anthropic-messages" });
+    const h = await buildHarness({ apiShape: "anthropic-messages" });
     mockUpstream(async () => new Response("should not be called", { status: 599 }));
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
@@ -295,7 +295,7 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
 
   it("forwards with x-api-key and merges SSE usage frames", async () => {
     const h = await buildHarness({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.test",
       modelId: "claude-sonnet-4-5-20250929",
       upstreamKey: "sk-ant-42",
@@ -395,7 +395,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
   it("forwards with Authorization: Bearer and substitutes the model id", async () => {
     const h = await buildHarness({
-      api: "mistral-conversations",
+      apiShape: "mistral-conversations",
       baseUrl: "https://api.mistral.test",
       modelId: "mistral-large-latest",
       upstreamKey: "mistral-upstream-99",
@@ -446,7 +446,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
   });
 
   it("returns 400 when the preset uses a different protocol family", async () => {
-    const h = await buildHarness({ api: "openai-completions" });
+    const h = await buildHarness({ apiShape: "openai-completions" });
     const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
       method: "POST",
       headers: authHeaders(h),

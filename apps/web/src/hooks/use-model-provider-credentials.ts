@@ -17,7 +17,12 @@ export function useModelProviderCredentials() {
 export function useCreateModelProviderCredential() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { label: string; api: string; baseUrl: string; apiKey: string }) => {
+    mutationFn: async (data: {
+      label: string;
+      apiShape: string;
+      baseUrl: string;
+      apiKey: string;
+    }) => {
       return api<{ id: string }>("/model-provider-credentials", {
         method: "POST",
         body: JSON.stringify(data),
@@ -37,7 +42,7 @@ export function useUpdateModelProviderCredential() {
       data,
     }: {
       id: string;
-      // `api` / `baseUrl` are pinned by `providerId` at create time and cannot
+      // `apiShape` / `baseUrl` are pinned by `providerId` at create time and cannot
       // be mutated — delete and re-create to switch providers.
       data: {
         label?: string;
@@ -84,7 +89,12 @@ export function deduplicateLabel(label: string, existingKeys: OrgModelProviderKe
 
 export function useTestModelProviderCredentialInline() {
   return useMutation({
-    mutationFn: (data: { api: string; baseUrl: string; apiKey?: string; existingKeyId?: string }) =>
+    mutationFn: (data: {
+      apiShape: string;
+      baseUrl: string;
+      apiKey?: string;
+      existingKeyId?: string;
+    }) =>
       api<TestResult>("/model-provider-credentials/test", {
         method: "POST",
         body: JSON.stringify(data),

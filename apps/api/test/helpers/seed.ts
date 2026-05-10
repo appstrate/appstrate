@@ -246,8 +246,8 @@ interface ModelProviderCredentialSeed {
   orgId: string;
   label?: string;
   /** Wire format the legacy contract expects. Used to derive `providerId` if not given explicitly. */
-  api?: string;
-  /** Base URL — combined with `api` to reverse-resolve `providerId` against the registry. */
+  apiShape?: string;
+  /** Base URL — combined with `apiShape` to reverse-resolve `providerId` against the registry. */
   baseUrl?: string;
   /** Plaintext API key, wrapped into a `kind: "api_key"` blob before encryption. */
   apiKey?: string;
@@ -259,13 +259,13 @@ interface ModelProviderCredentialSeed {
 export async function seedOrgModelProviderKey(
   overrides: ModelProviderCredentialSeed,
 ): Promise<InferSelectModel<typeof modelProviderCredentials>> {
-  const api = overrides.api ?? "anthropic-messages";
+  const apiShape = overrides.apiShape ?? "anthropic-messages";
   const baseUrl = overrides.baseUrl ?? "https://api.anthropic.com";
   const apiKey = overrides.apiKey ?? "sk-test-placeholder";
 
   const resolved = overrides.providerId
     ? { providerId: overrides.providerId, baseUrlOverride: null }
-    : resolveProviderIdFromApiKeyForm(api, baseUrl);
+    : resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
 
   const [row] = await db
     .insert(modelProviderCredentials)
@@ -295,7 +295,7 @@ export async function seedOrgModel(
     .insert(orgModels)
     .values({
       label: "Test Model",
-      api: "anthropic",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,

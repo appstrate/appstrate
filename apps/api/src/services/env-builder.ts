@@ -143,7 +143,7 @@ export async function buildRunContext(params: {
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
   const llmConfig: LlmConfig = {
-    api: modelResult.api,
+    apiShape: modelResult.apiShape,
     baseUrl: modelResult.baseUrl,
     modelId: modelResult.modelId,
     apiKey: modelResult.apiKey,

@@ -176,7 +176,7 @@ export const orgModels = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
-    api: text("api").notNull(),
+    apiShape: text("api_shape").notNull(),
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
     /**

@@ -808,11 +808,11 @@ export const schemas = {
   },
   OrgModelProviderKey: {
     type: "object",
-    required: ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
+    required: ["id", "label", "apiShape", "baseUrl", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      api: { type: "string" },
+      apiShape: { type: "string" },
       baseUrl: { type: "string" },
       source: { type: "string", enum: ["built-in", "custom"] },
       createdBy: { type: ["string", "null"] },
@@ -825,7 +825,7 @@ export const schemas = {
     required: [
       "id",
       "label",
-      "api",
+      "apiShape",
       "baseUrl",
       "modelId",
       "enabled",
@@ -838,7 +838,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      api: { type: "string" },
+      apiShape: { type: "string" },
       baseUrl: { type: "string" },
       modelId: { type: "string" },
       input: { type: ["array", "null"], items: { type: "string" } },

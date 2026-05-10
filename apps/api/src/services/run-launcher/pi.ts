@@ -105,7 +105,7 @@ export async function runPlatformContainer(
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
     const containerEnv = buildRuntimePiEnv({
       model: {
-        api: llmConfig.api,
+        api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
