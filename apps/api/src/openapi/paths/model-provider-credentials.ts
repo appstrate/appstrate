@@ -249,7 +249,8 @@ export const modelProviderCredentialsPaths = {
       operationId: "updateModelProviderCredential",
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
-      description: "Update a model provider credential configuration.",
+      description:
+        "Update a model provider credential's mutable fields. The `api` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -262,8 +263,6 @@ export const modelProviderCredentialsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                api: { type: "string", minLength: 1 },
-                baseUrl: { type: "string", format: "uri" },
                 apiKey: { type: "string", minLength: 1 },
               },
             },

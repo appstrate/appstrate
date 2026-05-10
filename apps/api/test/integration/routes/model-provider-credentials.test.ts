@@ -181,7 +181,7 @@ describe("Model Provider Keys API", () => {
     it("returns 200 + BLOCKED_URL when the saved key targets a private baseUrl (SSRF guard hits before any fetch)", async () => {
       // Use 127.0.0.1 (loopback) → isBlockedUrl returns true →
       // testModelConfig short-circuits with BLOCKED_URL, no network call.
-      // The test still exercises the route → service → loadModelProviderKeyCredentials
+      // The test still exercises the route → service → loadInferenceCredentials
       // → testModelConfig wiring end-to-end; only the upstream call is short-circuited.
       const createRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
@@ -261,7 +261,7 @@ describe("Model Provider Keys API", () => {
 
     it("resolves the saved key's plaintext when only existingKeyId is provided", async () => {
       // Regression for the same wiring that broke as bug 2: the inline
-      // /test route also goes through `loadModelProviderKeyCredentials`.
+      // /test route also goes through `loadInferenceCredentials`.
       // The test verifies the resolution succeeds end-to-end (we hit
       // BLOCKED_URL because the baseUrl is loopback — but to reach
       // BLOCKED_URL the route MUST have decrypted and threaded the key).
@@ -292,7 +292,7 @@ describe("Model Provider Keys API", () => {
     });
 
     it("falls through to 'API key is required' (400) when existingKeyId points to a non-existent key", async () => {
-      // loadModelProviderKeyCredentials returns null → apiKey stays
+      // loadInferenceCredentials returns null → apiKey stays
       // undefined → route throws invalidRequest. Guards against a future
       // refactor that would silently treat an unresolved key as ok.
       const res = await app.request("/api/model-provider-credentials/test", {

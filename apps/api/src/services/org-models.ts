@@ -8,7 +8,7 @@ import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadModelProviderKeyCredentials } from "./org-model-provider-keys.ts";
+import { loadInferenceCredentials } from "./model-provider-credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
@@ -45,7 +45,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
   await Promise.all(
     Array.from(anthropicProviderKeyIds).map(async (id) => {
-      const creds = await loadModelProviderKeyCredentials(orgId, id);
+      const creds = await loadInferenceCredentials(orgId, id);
       dbKeyKinds.set(id, creds ? detectKeyKind("anthropic-messages", creds.apiKey) : null);
     }),
   );
@@ -268,7 +268,7 @@ export async function resolveModel(
     .limit(1);
 
   if (dbDefault) {
-    const creds = await loadModelProviderKeyCredentials(orgId, dbDefault.providerKeyId);
+    const creds = await loadInferenceCredentials(orgId, dbDefault.providerKeyId);
     if (creds) {
       return {
         api: dbDefault.api,
@@ -329,7 +329,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   if (!row || !row.enabled) return null;
 
-  const creds = await loadModelProviderKeyCredentials(orgId, row.providerKeyId);
+  const creds = await loadInferenceCredentials(orgId, row.providerKeyId);
   if (!creds) return null;
 
   return {

@@ -8,14 +8,17 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModelProviderKey } from "../services/model-registry.ts";
 import {
-  listOrgModelProviderKeys,
-  createOrgModelProviderKey,
-  updateOrgModelProviderKey,
-  deleteOrgModelProviderKey,
-  testModelProviderKeyConnection,
-  loadModelProviderKeyCredentials,
-} from "../services/org-model-provider-keys.ts";
-import { listModelProviders } from "../services/oauth-model-providers/registry.ts";
+  createApiKeyCredential,
+  deleteModelProviderCredential,
+  listOrgModelProviderCredentials,
+  loadInferenceCredentials,
+  resolveProviderIdFromApiKeyForm,
+  updateModelProviderCredential,
+} from "../services/model-provider-credentials.ts";
+import {
+  getModelProviderConfig,
+  listModelProviders,
+} from "../services/oauth-model-providers/registry.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
@@ -36,10 +39,13 @@ export const createSchema = z.object({
   apiKey: z.string().min(1, "apiKey is required"),
 });
 
+/**
+ * `api` and `baseUrl` are intentionally absent — they are pinned by the
+ * canonical `providerId` selected at create time and cannot be mutated.
+ * To switch providers, delete the credential and re-create it.
+ */
 export const updateSchema = z.object({
   label: z.string().min(1).optional(),
-  api: z.string().min(1).optional(),
-  baseUrl: z.url().optional(),
   apiKey: z.string().min(1).optional(),
 });
 
@@ -81,7 +87,7 @@ export function createModelProviderCredentialsRouter() {
   // GET /api/model-provider-credentials
   router.get("/", requirePermission("model-provider-credentials", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const keys = await listOrgModelProviderKeys(orgId);
+    const keys = await listOrgModelProviderCredentials(orgId);
     return c.json(listResponse(keys));
   });
 
@@ -93,7 +99,18 @@ export function createModelProviderCredentialsRouter() {
     const data = parseBody(createSchema, body);
     try {
       const { label, api, baseUrl, apiKey } = data;
-      const id = await createOrgModelProviderKey(orgId, label, api, baseUrl, apiKey, user.id);
+      // The route still accepts the historic `(api, baseUrl)` form — reverse-
+      // resolve it to the canonical `providerId` (with `baseUrlOverride` for
+      // any unrecognized combo) before persisting.
+      const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(api, baseUrl);
+      const id = await createApiKeyCredential({
+        orgId,
+        userId: user.id,
+        label,
+        providerId,
+        apiKey,
+        baseUrlOverride,
+      });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.created",
         resourceType: "model_provider_credential",
@@ -120,7 +137,7 @@ export function createModelProviderCredentialsRouter() {
       const data = parseBody(testInlineSchema, body);
       let { apiKey } = data;
       if (!apiKey && data.existingKeyId) {
-        const existing = await loadModelProviderKeyCredentials(orgId, data.existingKeyId);
+        const existing = await loadInferenceCredentials(orgId, data.existingKeyId);
         if (existing) apiKey = existing.apiKey;
       }
       if (!apiKey) {
@@ -152,10 +169,18 @@ export function createModelProviderCredentialsRouter() {
       const orgId = c.get("orgId");
       const id = c.req.param("id")!;
       try {
-        const result = await testModelProviderKeyConnection(orgId, id);
-        if (result.error === "KEY_NOT_FOUND") {
+        const creds = await loadInferenceCredentials(orgId, id);
+        if (!creds) {
           throw notFound("Model provider credential not found");
         }
+        // OAuth providers reject the dummy `_test` model id — fall back to
+        // the registry's first model (sized for a low-cost probe regardless).
+        let modelId = "_test";
+        if (creds.providerPackageId) {
+          const cfg = getModelProviderConfig(creds.providerPackageId);
+          if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
+        }
+        const result = await testModelConfig({ ...creds, modelId });
         return c.json(result);
       } catch (err) {
         // Don't swallow our own structured errors — `notFound()` thrown
@@ -181,7 +206,7 @@ export function createModelProviderCredentialsRouter() {
     const body = await c.req.json();
     const data = parseBody(updateSchema, body);
     try {
-      await updateOrgModelProviderKey(orgId, id, data);
+      await updateModelProviderCredential(orgId, id, data);
       const { apiKey: _apiKey, ...auditData } = data;
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",
@@ -207,7 +232,7 @@ export function createModelProviderCredentialsRouter() {
       throw systemEntityForbidden("model provider credential", id, "delete");
     }
     try {
-      await deleteOrgModelProviderKey(orgId, id);
+      await deleteModelProviderCredential(orgId, id);
       await recordAuditFromContext(c, {
         action: "model_provider_credential.deleted",
         resourceType: "model_provider_credential",

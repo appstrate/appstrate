@@ -37,10 +37,10 @@ export function useUpdateModelProviderCredential() {
       data,
     }: {
       id: string;
+      // `api` / `baseUrl` are pinned by `providerId` at create time and cannot
+      // be mutated — delete and re-create to switch providers.
       data: {
         label?: string;
-        api?: string;
-        baseUrl?: string;
         apiKey?: string;
       };
     }) => {

@@ -22,10 +22,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, scopedWhere } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { getModelProviderConfig, type ModelApiShape } from "./oauth-model-providers/registry.ts";
+import {
+  getModelProviderConfig,
+  listModelProviders,
+  type ModelApiShape,
+} from "./oauth-model-providers/registry.ts";
+import { getSystemModelProviderKeys } from "./model-registry.ts";
 import { logger } from "../lib/logger.ts";
+import type { OrgModelProviderKeyInfo } from "@appstrate/shared-types";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
@@ -434,5 +440,130 @@ export async function loadModelProviderCredentials(
     accountId: blob.accountId,
     needsReconnection: blob.needsReconnection,
     expiresAt: blob.expiresAt,
+  };
+}
+
+// ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
+
+/**
+ * Resolve `(api, baseUrl)` to a registry providerId. Matches an `api_key`
+ * provider whose `apiShape` and `defaultBaseUrl` align; falls back to
+ * `openai-compatible` with a `baseUrlOverride` for any unrecognized combo.
+ *
+ * Kept exported because the POST route still accepts the historic
+ * `(api, baseUrl, apiKey)` form and reverse-resolves it to a canonical
+ * providerId before creating the credential.
+ */
+export function resolveProviderIdFromApiKeyForm(
+  api: string,
+  baseUrl: string,
+): { providerId: string; baseUrlOverride: string | null } {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  for (const cfg of listModelProviders()) {
+    if (cfg.authMode !== "api_key") continue;
+    if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
+    if (cfg.apiShape === api && cfg.defaultBaseUrl.replace(/\/+$/, "") === normalizedBaseUrl) {
+      return { providerId: cfg.providerId, baseUrlOverride: null };
+    }
+  }
+  return { providerId: "openai-compatible", baseUrlOverride: baseUrl };
+}
+
+/**
+ * List the aggregated UI view of an organization's model provider credentials.
+ *
+ * Combines two sources:
+ *   1. `SYSTEM_PROVIDER_KEYS` env-driven keys (built-in, immutable, env-controlled)
+ *   2. The unified `model_provider_credentials` table (custom, OAuth + api-key)
+ *
+ * The return shape is `OrgModelProviderKeyInfo` — a UI aggregation shape that
+ * preserves the historic `(api, baseUrl, source)` triple expected by the
+ * frontend. Distinct from the DB-row shape `ModelProviderCredentialInfo`.
+ */
+export async function listOrgModelProviderCredentials(
+  orgId: string,
+): Promise<OrgModelProviderKeyInfo[]> {
+  const system = getSystemModelProviderKeys();
+  const now = toISORequired(new Date());
+  const rows = await listModelProviderCredentials(orgId);
+
+  return mergeSystemAndDb({
+    system,
+    rows,
+    mapSystem: (id, def): OrgModelProviderKeyInfo => ({
+      id,
+      label: def.label,
+      api: def.api,
+      baseUrl: def.baseUrl,
+      source: "built-in",
+      authMode: "api_key",
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    mapRow: (info): OrgModelProviderKeyInfo => {
+      const cfg = getModelProviderConfig(info.providerId);
+      return {
+        id: info.id,
+        label: info.label,
+        api: cfg?.apiShape ?? "openai-chat",
+        baseUrl: info.baseUrl,
+        source: "custom",
+        authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
+        providerPackageId: info.providerId,
+        oauthConnectionId: info.authMode === "oauth2" ? info.id : null,
+        oauthEmail: info.oauthEmail ?? null,
+        needsReconnection: info.oauthNeedsReconnection ?? false,
+        createdBy: info.createdBy,
+        createdAt: info.createdAt,
+        updatedAt: info.updatedAt,
+      };
+    },
+  });
+}
+
+/**
+ * Decrypted credentials ready for inference (model probe, LLM proxy).
+ * Combines the two read paths:
+ *   - system (env-driven) keys: plaintext from `SYSTEM_PROVIDER_KEYS`
+ *   - DB-stored credentials (api-key or OAuth, decrypted on demand)
+ */
+export interface InferenceCredentials {
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+  /** Populated for OAuth-backed credentials — drives provider-specific request shape. */
+  providerPackageId?: string;
+  /** Codex only: required as `chatgpt-account-id` header on inference. */
+  accountId?: string;
+}
+
+/**
+ * Resolve a credential id to plaintext credentials usable for inference.
+ *
+ * Returns `null` when the id is unknown to either source, or when the OAuth
+ * credential is flagged `needsReconnection` (the credential is dead and the
+ * caller must treat it as missing).
+ */
+export async function loadInferenceCredentials(
+  orgId: string,
+  id: string,
+): Promise<InferenceCredentials | null> {
+  // 1) System (env-driven) keys.
+  const systemKey = getSystemModelProviderKeys().get(id);
+  if (systemKey) {
+    return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
+  }
+
+  // 2) Unified credentials table (api-key + OAuth).
+  const creds = await loadModelProviderCredentials(orgId, id);
+  if (!creds) return null;
+  if (creds.needsReconnection) return null;
+  return {
+    api: creds.apiShape,
+    baseUrl: creds.baseUrl,
+    apiKey: creds.apiKey,
+    providerPackageId: creds.providerId,
+    accountId: creds.accountId,
   };
 }
