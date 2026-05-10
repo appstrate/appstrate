@@ -111,6 +111,23 @@ const claudeCodeConfig: OAuthModelProviderConfig = {
   ],
 };
 
+/**
+ * Provider token endpoints — used by both the platform-side refresh
+ * worker and (historically) the now-removed authorization-code callback.
+ * Kept here as the single source of truth so the CLI helper that does
+ * the loopback OAuth dance and the platform-side refresh never drift.
+ *
+ * Claude: `platform.claude.com` is the canonical token host
+ * (cf. @mariozechner/pi-ai/utils/oauth/anthropic.js). The first iteration
+ * shipped `claude.ai/v1/oauth/token` which appears reachable but returns
+ * a non-canonical schema and was the root cause of refresh failures in
+ * the smoke tests.
+ */
+export const OAUTH_MODEL_PROVIDER_TOKEN_URLS: Readonly<Record<string, string>> = Object.freeze({
+  "@appstrate/provider-codex": "https://auth.openai.com/oauth/token",
+  "@appstrate/provider-claude-code": "https://platform.claude.com/v1/oauth/token",
+});
+
 export const OAUTH_MODEL_PROVIDERS: Readonly<Record<string, OAuthModelProviderConfig>> =
   Object.freeze({
     [codexConfig.packageId]: codexConfig,

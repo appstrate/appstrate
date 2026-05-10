@@ -56,6 +56,7 @@ import {
   connectionsProfileSwitchCommand,
   connectionsProfileCreateCommand,
 } from "./commands/connections.ts";
+import { connectCommand, type ConnectProviderSlug } from "./commands/connect.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -530,6 +531,31 @@ connectionsProfileGroup
     await connectionsProfileCreateCommand({
       profile: globalOpts.profile,
       name: typeof name === "string" ? name : undefined,
+    });
+  });
+
+// ─── `appstrate connect <provider>` — connect a personal Codex/Claude subscription ────
+
+const VALID_CONNECT_SLUGS: readonly ConnectProviderSlug[] = ["codex", "claude"];
+
+program
+  .command("connect <provider>")
+  .description(
+    "Connect a personal Codex/Claude subscription as an OAuth model provider. Runs the loopback OAuth dance locally, then uploads the token to the platform. Provider: codex | claude.",
+  )
+  .option("--label <label>", "Display label for the resulting provider key")
+  .option("--yes", "Skip the legal-risk confirmation prompt (CI/scripted use only)")
+  .action(async (provider: string, opts: { label?: string; yes?: boolean }) => {
+    if (!VALID_CONNECT_SLUGS.includes(provider as ConnectProviderSlug)) {
+      throw new InvalidArgumentError(
+        `Unknown provider "${provider}". Use one of: ${VALID_CONNECT_SLUGS.join(", ")}.`,
+      );
+    }
+    const globalOpts = program.opts<{ profile?: string }>();
+    await connectCommand(provider as ConnectProviderSlug, {
+      profile: globalOpts.profile,
+      label: opts.label,
+      yes: opts.yes,
     });
   });
 
