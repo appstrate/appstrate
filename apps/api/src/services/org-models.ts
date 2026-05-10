@@ -551,10 +551,21 @@ async function testCodexInference(config: {
 
 /**
  * Claude Code (Anthropic subscription) inference probe — single-token
- * `/v1/messages` call with the OAuth headers Anthropic recognizes for
- * Claude-Code-issued tokens. Catches the post-2026-01-09 enforcement that
- * lets `/v1/models` 200 while `/v1/messages` 403s third-party callers.
+ * `/v1/messages` call mirroring pi-ai's "stealth mode" exactly: Anthropic
+ * 429s/403s requests that don't impersonate the official Claude Code CLI
+ * (third-party enforcement since 2026-01-09). The required signals are:
+ *
+ *   - `anthropic-beta: claude-code-20250219,oauth-2025-04-20`
+ *   - `user-agent: claude-cli/<version>`
+ *   - `x-app: cli`
+ *   - `anthropic-dangerous-direct-browser-access: true`
+ *   - First system message: "You are Claude Code, Anthropic's official CLI for Claude."
+ *
+ * cf. node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js (search
+ * for `claudeCodeVersion`). Keep the version in sync with what pi-ai pins.
  */
+const CLAUDE_CODE_CLI_VERSION = "2.1.75";
+
 async function testClaudeCodeInference(config: {
   baseUrl: string;
   modelId: string;
@@ -564,6 +575,7 @@ async function testClaudeCodeInference(config: {
   const body = JSON.stringify({
     model: config.modelId,
     max_tokens: 1,
+    system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
     messages: [{ role: "user", content: "ping" }],
   });
   const start = performance.now();
@@ -572,8 +584,12 @@ async function testClaudeCodeInference(config: {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
-        "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
         "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
+        "x-app": "cli",
+        accept: "application/json",
         "content-type": "application/json",
       },
       body,
@@ -590,7 +606,7 @@ async function testClaudeCodeInference(config: {
       .then((t) => t.slice(0, 1024))
       .catch(() => "");
     if (
-      res.status === 403 &&
+      (res.status === 403 || res.status === 429) &&
       /third.?party|claude code|oauth.{0,40}(not allowed|not permitted|disabled)/i.test(text)
     ) {
       return {
@@ -607,6 +623,20 @@ async function testClaudeCodeInference(config: {
         latency,
         error: "AUTH_FAILED",
         message: "Anthropic rejected the token (auth failed or subscription inactive)",
+      };
+    }
+    if (res.status === 429) {
+      // Anthropic's per-IP / per-account rate limit on Claude Code OAuth is
+      // aggressive (kicks in after a handful of probes from the same IP).
+      // Surface a Retry-After hint when the upstream provides one.
+      const retryAfter = res.headers.get("retry-after");
+      return {
+        ok: false,
+        latency,
+        error: "RATE_LIMITED",
+        message: retryAfter
+          ? `Anthropic rate limit hit — retry in ${retryAfter}s`
+          : "Anthropic rate limit hit on the OAuth tier — try again in a minute",
       };
     }
     return {
