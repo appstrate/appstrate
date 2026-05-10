@@ -1,34 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth model provider refresh worker (SPEC §6, Phase 6.1).
+ * OAuth model provider refresh worker.
  *
  * Two responsibilities:
  *
- *   1. **Recurring scan** (every {@link SCAN_CRON}): finds connections
- *      bound to an `org_system_provider_keys` row in `authMode='oauth'`
- *      whose `expiresAt` falls inside the {@link REFRESH_LEAD_HOURS}
- *      window. Enqueues one refresh job per connection.
+ *   1. **Recurring scan** (every {@link SCAN_CRON}): finds rows in
+ *      `model_provider_credentials` whose blob is `kind: "oauth"`,
+ *      `needsReconnection: false`, and `expiresAt` falls inside the
+ *      {@link REFRESH_LEAD_HOURS} window. Enqueues one refresh job per row.
  *
- *   2. **Per-connection refresh**: calls
+ *   2. **Per-credential refresh**: calls
  *      {@link forceRefreshOAuthModelProviderToken}, which itself flips
  *      `needsReconnection=true` on `invalid_grant` (cf. token-resolver).
  *      Failures are logged structured but do NOT bubble — the worker
  *      treats every refresh as best-effort; the sidecar still has its
  *      reactive 401-retry path.
  *
- * The worker is queue-backed (BullMQ in production, in-memory in dev/
- * test) and shares the same lifecycle conventions as the schedule
- * worker: started in `boot.ts` (parallel init), stopped in `shutdown.ts`.
+ * Filter strategy: the row's `expiresAt` lives inside the encrypted blob
+ * (no separate column to index), so the scan does a coarse SQL filter on
+ * `provider_id IN <oauth registry ids>` and then decrypts each candidate
+ * to check expiry. This is fine — typical orgs have ≤2 OAuth credentials
+ * (one Codex, one Claude) so the per-row decrypt cost is negligible.
  */
 
-import { and, eq, lte, isNotNull, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys, userProviderConnections } from "@appstrate/db/schema";
+import { modelProviderCredentials } from "@appstrate/db/schema";
+import { decryptCredentials } from "@appstrate/connect";
 import { createQueue, type JobQueue, type QueueJob } from "../../infra/queue/index.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError } from "../../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { listModelProviders } from "./registry.ts";
+import { type OAuthBlob } from "../model-provider-credentials.ts";
 import { forceRefreshOAuthModelProviderToken } from "./token-resolver.ts";
 
 const SCAN_QUEUE_NAME = "oauth-model-refresh-scan";
@@ -42,8 +47,8 @@ const SCAN_SCHEDULER_ID = "oauth-model-refresh-scan";
 const REFRESH_LEAD_HOURS = 24;
 
 interface RefreshJobData {
-  connectionId: string;
-  providerPackageId: string;
+  credentialId: string;
+  providerId: string;
 }
 
 /** Empty payload — the scan job carries no data. */
@@ -63,57 +68,67 @@ async function getRefreshQueue(): Promise<JobQueue<RefreshJobData>> {
 }
 
 /**
- * Scan the DB for OAuth model provider connections that need a refresh.
+ * Scan the DB for OAuth model provider credentials that need a refresh.
  * Exported for tests + manual triggering (e.g. on-demand admin action).
  */
 export async function scanAndEnqueueRefreshes(): Promise<{
   scanned: number;
   enqueued: number;
 }> {
-  const rows = await db
-    .select({
-      connectionId: userProviderConnections.id,
-      providerPackageId: userProviderConnections.providerId,
-    })
-    .from(userProviderConnections)
-    .innerJoin(
-      orgSystemProviderKeys,
-      eq(orgSystemProviderKeys.oauthConnectionId, userProviderConnections.id),
-    )
-    .where(
-      and(
-        eq(orgSystemProviderKeys.authMode, "oauth"),
-        eq(userProviderConnections.needsReconnection, false),
-        isNotNull(userProviderConnections.expiresAt),
-        lte(
-          userProviderConnections.expiresAt,
-          sql`now() + (${REFRESH_LEAD_HOURS} * interval '1 hour')`,
-        ),
-      ),
-    );
+  const oauthProviderIds = listModelProviders()
+    .filter((p) => p.authMode === "oauth2")
+    .map((p) => p.providerId);
+  if (oauthProviderIds.length === 0) return { scanned: 0, enqueued: 0 };
 
-  if (rows.length === 0) {
-    return { scanned: 0, enqueued: 0 };
+  const candidates = await db
+    .select({
+      id: modelProviderCredentials.id,
+      providerId: modelProviderCredentials.providerId,
+      credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
+    })
+    .from(modelProviderCredentials)
+    .where(inArray(modelProviderCredentials.providerId, oauthProviderIds));
+
+  if (candidates.length === 0) return { scanned: 0, enqueued: 0 };
+
+  const cutoff = Date.now() + REFRESH_LEAD_HOURS * 60 * 60 * 1000;
+  const dueRows: { id: string; providerId: string }[] = [];
+  for (const row of candidates) {
+    let blob: OAuthBlob;
+    try {
+      const decrypted = decryptCredentials<OAuthBlob>(row.credentialsEncrypted);
+      if (decrypted.kind !== "oauth") continue;
+      blob = decrypted;
+    } catch (err) {
+      logger.warn("oauth_model_refresh_scan_decrypt_failed", {
+        credentialId: row.id,
+        error: getErrorMessage(err),
+      });
+      continue;
+    }
+    if (blob.needsReconnection) continue;
+    if (blob.expiresAt === null) continue;
+    if (blob.expiresAt > cutoff) continue;
+    dueRows.push({ id: row.id, providerId: row.providerId });
   }
+
+  if (dueRows.length === 0) return { scanned: candidates.length, enqueued: 0 };
 
   const queue = await getRefreshQueue();
   let enqueued = 0;
-  for (const row of rows) {
+  for (const row of dueRows) {
     try {
-      await queue.add("refresh-token", {
-        connectionId: row.connectionId,
-        providerPackageId: row.providerPackageId,
-      });
+      await queue.add("refresh-token", { credentialId: row.id, providerId: row.providerId });
       enqueued++;
     } catch (err) {
       logger.warn("oauth_model_refresh_enqueue_failed", {
-        connectionId: row.connectionId,
+        credentialId: row.id,
         error: getErrorMessage(err),
       });
     }
   }
 
-  return { scanned: rows.length, enqueued };
+  return { scanned: candidates.length, enqueued };
 }
 
 async function handleScanJob(_job: QueueJob<ScanJobData>): Promise<void> {
@@ -134,35 +149,35 @@ async function handleScanJob(_job: QueueJob<ScanJobData>): Promise<void> {
 }
 
 async function handleRefreshJob(job: QueueJob<RefreshJobData>): Promise<void> {
-  const { connectionId, providerPackageId } = job.data;
+  const { credentialId, providerId } = job.data;
   const startedAt = Date.now();
   try {
-    await forceRefreshOAuthModelProviderToken(connectionId);
+    await forceRefreshOAuthModelProviderToken(credentialId);
     logger.info("oauth_model_refresh_ok", {
-      connectionId,
-      providerPackageId,
+      credentialId,
+      providerId,
       durationMs: Date.now() - startedAt,
     });
   } catch (err) {
     if (err instanceof ApiError && err.code === "OAUTH_REFRESH_REVOKED") {
       // token-resolver already flipped needsReconnection=true.
       logger.warn("oauth_model_refresh_revoked", {
-        connectionId,
-        providerPackageId,
+        credentialId,
+        providerId,
         durationMs: Date.now() - startedAt,
       });
       return;
     }
     if (err instanceof ApiError && err.code === "OAUTH_CONNECTION_NEEDS_RECONNECTION") {
       logger.warn("oauth_model_refresh_skipped_already_flagged", {
-        connectionId,
-        providerPackageId,
+        credentialId,
+        providerId,
       });
       return;
     }
     logger.error("oauth_model_refresh_failed", {
-      connectionId,
-      providerPackageId,
+      credentialId,
+      providerId,
       error: getErrorMessage(err),
       durationMs: Date.now() - startedAt,
     });

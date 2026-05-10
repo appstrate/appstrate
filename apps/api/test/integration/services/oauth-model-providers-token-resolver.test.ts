@@ -1,37 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 8 hardening — OAuth model providers token-resolver edge cases
- * (cf. SPEC §10).
+ * OAuth model providers token-resolver hardening (cf. SPEC §10).
  *
  * Covers the platform-side service that the sidecar's `/internal/oauth-token/*`
- * routes proxy to. The PROVIDER_TOKEN_URL host (claude.ai / auth.openai.com)
- * is intercepted via `globalThis.fetch` swap — the same pattern used by
- * `llm-proxy.test.ts` — so no real network call leaves the test process.
+ * routes proxy to. The PROVIDER refresh URL is intercepted via `globalThis.fetch`
+ * swap — same pattern as `llm-proxy.test.ts` — so no real network call leaves
+ * the test process.
+ *
+ * Persistence model (Phase 4+): a single row in `model_provider_credentials`
+ * carrying a `kind: "oauth"` blob. The resolver reads & writes there directly.
  *
  * Edge cases under test:
- *   - `invalid_grant` from the provider → connection flagged
- *     `needsReconnection=true` AND `OAUTH_REFRESH_REVOKED` raised
- *     (so the worker's structured-warn path triggers, cf. SPEC §6).
- *   - Connection already flagged → `OAUTH_CONNECTION_NEEDS_RECONNECTION`
- *     short-circuit (no provider call).
- *   - Missing `refresh_token` in stored credentials → flagged + structured
- *     `OAUTH_REFRESH_TOKEN_MISSING`.
- *   - Successful refresh rotates `access_token` + `refresh_token` + `expiresAt`
- *     in DB and returns the new token.
- *   - Network error (fetch throws) surfaces as a non-fatal Error with a
- *     descriptive message (no sidecar crash).
- *   - `resolveOAuthTokenForSidecar` returns the cached token when it's far
- *     from expiry (no refresh).
+ *   - `invalid_grant` from the provider → blob flagged `needsReconnection=true`
+ *     AND `OAUTH_REFRESH_REVOKED` raised (worker's structured-warn path).
+ *   - Already-flagged blob → `OAUTH_CONNECTION_NEEDS_RECONNECTION` short-circuit
+ *     (no provider call).
+ *   - Missing `refreshToken` in stored blob → flagged + `OAUTH_REFRESH_TOKEN_MISSING`.
+ *   - Successful refresh rotates `accessToken`+`refreshToken`+`expiresAt` in DB.
+ *   - Network error surfaces as a non-fatal Error (no sidecar crash).
+ *   - `resolveOAuthTokenForSidecar` returns the cached token when far from expiry.
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedProviderCredentials, seedPackage } from "../../helpers/seed.ts";
-import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
-import { userProviderConnections, orgSystemProviderKeys } from "@appstrate/db/schema";
+import { decryptCredentials } from "@appstrate/connect";
+import { modelProviderCredentials } from "@appstrate/db/schema";
+import {
+  createOAuthCredential,
+  type OAuthBlob,
+} from "../../../src/services/model-provider-credentials.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
@@ -52,61 +52,60 @@ function restoreFetch(): void {
 
 afterAll(() => restoreFetch());
 
-// ─── Seed helpers ────────────────────────────────────────────
+// ─── Seed helper ────────────────────────────────────────────
 
-const CLAUDE_PROVIDER = "@appstrate/provider-claude-code";
-
-async function seedOAuthModelProviderConnection(opts: {
+async function seedOAuthCredential(opts: {
   orgId: string;
-  applicationId: string;
-  connectionProfileId: string;
-  providerId: string;
-  credentials: Record<string, unknown>;
-  expiresAt?: Date | null;
+  userId: string;
+  providerId: "codex" | "claude-code";
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAtMs?: number | null;
   needsReconnection?: boolean;
-  /** When true, also create the orgSystemProviderKeys row referencing this connection. */
-  withSystemProviderKey?: boolean;
-}): Promise<{ connectionId: string; systemProviderKeyId: string | null }> {
-  // FK target: applicationProviderCredentials.providerId references packages.id
-  await seedPackage({
-    orgId: null,
-    id: opts.providerId,
-    type: "provider",
-    source: "system",
-  }).catch(() => {});
-  const cred = await seedProviderCredentials({
-    applicationId: opts.applicationId,
+}): Promise<string> {
+  const id = await createOAuthCredential({
+    orgId: opts.orgId,
+    userId: opts.userId,
+    label: `Test ${opts.providerId}`,
     providerId: opts.providerId,
+    accessToken: opts.accessToken ?? "stale-access",
+    refreshToken: opts.refreshToken ?? "stale-refresh",
+    expiresAt: opts.expiresAtMs === undefined ? null : opts.expiresAtMs,
+    scopesGranted: ["user:inference"],
   });
-  const [connection] = await db
-    .insert(userProviderConnections)
-    .values({
-      connectionProfileId: opts.connectionProfileId,
-      providerId: opts.providerId,
-      orgId: opts.orgId,
-      providerCredentialId: cred.id,
-      credentialsEncrypted: encryptCredentials(opts.credentials),
-      expiresAt: opts.expiresAt ?? null,
-      needsReconnection: opts.needsReconnection ?? false,
-    })
-    .returning();
-  let systemProviderKeyId: string | null = null;
-  if (opts.withSystemProviderKey) {
+  if (opts.needsReconnection || opts.refreshToken === "") {
+    // Force-rewrite the blob to mirror the requested edge-case shape (the
+    // service layer doesn't expose a "create flagged" or "create with empty
+    // refresh" path — write directly here for test setup only).
     const [row] = await db
-      .insert(orgSystemProviderKeys)
-      .values({
-        orgId: opts.orgId,
-        label: "Test Claude OAuth",
-        api: "anthropic-messages",
-        baseUrl: "https://api.anthropic.com",
-        authMode: "oauth",
-        oauthConnectionId: connection!.id,
-        providerPackageId: opts.providerId,
+      .select({ blob: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    const decrypted = decryptCredentials<OAuthBlob>(row!.blob);
+    const next: OAuthBlob = {
+      ...decrypted,
+      ...(opts.needsReconnection !== undefined
+        ? { needsReconnection: opts.needsReconnection }
+        : {}),
+      ...(opts.refreshToken === "" ? { refreshToken: "" } : {}),
+    };
+    const { encryptCredentials } = await import("@appstrate/connect");
+    await db
+      .update(modelProviderCredentials)
+      .set({
+        credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
       })
-      .returning();
-    systemProviderKeyId = row!.id;
+      .where(eq(modelProviderCredentials.id, id));
   }
-  return { connectionId: connection!.id, systemProviderKeyId };
+  return id;
+}
+
+async function readBlob(credentialId: string): Promise<OAuthBlob> {
+  const [row] = await db
+    .select({ blob: modelProviderCredentials.credentialsEncrypted })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId));
+  return decryptCredentials<OAuthBlob>(row!.blob);
 }
 
 // ─── Tests ───────────────────────────────────────────────────
@@ -114,31 +113,26 @@ async function seedOAuthModelProviderConnection(opts: {
 describe("OAuth model providers — token-resolver hardening", () => {
   let userId: string;
   let orgId: string;
-  let applicationId: string;
-  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const user = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    applicationId = defaultAppId;
-    const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
-    connectionProfileId = profile.id;
   });
 
   afterEach(() => restoreFetch());
 
   describe("forceRefreshOAuthModelProviderToken", () => {
     it("on invalid_grant: flags needsReconnection=true and throws OAUTH_REFRESH_REVOKED", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "stale", refresh_token: "rt-revoked" },
-        expiresAt: new Date(Date.now() - 10_000),
+        userId,
+        providerId: "claude-code",
+        accessToken: "stale",
+        refreshToken: "rt-revoked",
+        expiresAtMs: Date.now() - 10_000,
       });
 
       mockFetch(
@@ -151,7 +145,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       let caught: unknown;
       try {
-        await forceRefreshOAuthModelProviderToken(connectionId);
+        await forceRefreshOAuthModelProviderToken(id);
       } catch (e) {
         caught = e;
       }
@@ -159,21 +153,17 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
       expect((caught as ApiError).status).toBe(410);
 
-      const [row] = await db
-        .select({ needsReconnection: userProviderConnections.needsReconnection })
-        .from(userProviderConnections)
-        .where(eq(userProviderConnections.id, connectionId))
-        .limit(1);
-      expect(row?.needsReconnection).toBe(true);
+      const blob = await readBlob(id);
+      expect(blob.needsReconnection).toBe(true);
     });
 
-    it("on already-flagged connection: short-circuits with OAUTH_CONNECTION_NEEDS_RECONNECTION (no fetch)", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+    it("on already-flagged credential: short-circuits with OAUTH_CONNECTION_NEEDS_RECONNECTION (no fetch)", async () => {
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "stale", refresh_token: "rt-1" },
+        userId,
+        providerId: "claude-code",
+        accessToken: "stale",
+        refreshToken: "rt-1",
         needsReconnection: true,
       });
 
@@ -185,7 +175,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       let caught: unknown;
       try {
-        await forceRefreshOAuthModelProviderToken(connectionId);
+        await forceRefreshOAuthModelProviderToken(id);
       } catch (e) {
         caught = e;
       }
@@ -195,13 +185,12 @@ describe("OAuth model providers — token-resolver hardening", () => {
     });
 
     it("on missing refresh_token: flags needsReconnection and throws OAUTH_REFRESH_TOKEN_MISSING", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        // No refresh_token in credentials
-        credentials: { access_token: "only-access-token" },
+        userId,
+        providerId: "claude-code",
+        accessToken: "only-access-token",
+        refreshToken: "",
       });
 
       let fetchCalled = false;
@@ -212,7 +201,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       let caught: unknown;
       try {
-        await forceRefreshOAuthModelProviderToken(connectionId);
+        await forceRefreshOAuthModelProviderToken(id);
       } catch (e) {
         caught = e;
       }
@@ -220,22 +209,18 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect((caught as ApiError).code).toBe("OAUTH_REFRESH_TOKEN_MISSING");
       expect(fetchCalled).toBe(false);
 
-      const [row] = await db
-        .select({ needsReconnection: userProviderConnections.needsReconnection })
-        .from(userProviderConnections)
-        .where(eq(userProviderConnections.id, connectionId))
-        .limit(1);
-      expect(row?.needsReconnection).toBe(true);
+      const blob = await readBlob(id);
+      expect(blob.needsReconnection).toBe(true);
     });
 
-    it("on success: rotates access_token + refresh_token + expiresAt in DB", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+    it("on success: rotates accessToken + refreshToken + expiresAt in DB", async () => {
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "old-access", refresh_token: "old-refresh" },
-        expiresAt: new Date(Date.now() - 10_000),
+        userId,
+        providerId: "claude-code",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        expiresAtMs: Date.now() - 10_000,
       });
 
       mockFetch(
@@ -251,37 +236,26 @@ describe("OAuth model providers — token-resolver hardening", () => {
           ),
       );
 
-      const result = await forceRefreshOAuthModelProviderToken(connectionId);
+      const result = await forceRefreshOAuthModelProviderToken(id);
       expect(result.accessToken).toBe("new-access");
       expect(result.expiresAt).not.toBeNull();
-      expect(result.expiresAt).toBeGreaterThan(Date.now());
+      expect(result.expiresAt!).toBeGreaterThan(Date.now());
 
-      const [row] = await db
-        .select({
-          credentialsEncrypted: userProviderConnections.credentialsEncrypted,
-          expiresAt: userProviderConnections.expiresAt,
-          needsReconnection: userProviderConnections.needsReconnection,
-        })
-        .from(userProviderConnections)
-        .where(eq(userProviderConnections.id, connectionId))
-        .limit(1);
-      const decrypted = decryptCredentials<{ access_token: string; refresh_token: string }>(
-        row!.credentialsEncrypted,
-      );
-      expect(decrypted.access_token).toBe("new-access");
-      expect(decrypted.refresh_token).toBe("new-refresh");
-      expect(row?.expiresAt).not.toBeNull();
-      expect(row?.needsReconnection).toBe(false);
+      const blob = await readBlob(id);
+      expect(blob.accessToken).toBe("new-access");
+      expect(blob.refreshToken).toBe("new-refresh");
+      expect(blob.expiresAt).not.toBeNull();
+      expect(blob.needsReconnection).toBe(false);
     });
 
     it("preserves the existing refresh_token if the provider didn't return a new one", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "old-access", refresh_token: "kept-refresh" },
-        expiresAt: new Date(Date.now() - 1_000),
+        userId,
+        providerId: "claude-code",
+        accessToken: "old-access",
+        refreshToken: "kept-refresh",
+        expiresAtMs: Date.now() - 1_000,
       });
 
       mockFetch(
@@ -291,31 +265,26 @@ describe("OAuth model providers — token-resolver hardening", () => {
               access_token: "rotated-access",
               token_type: "Bearer",
               expires_in: 3600,
-              // No refresh_token field — defensive against partial provider responses
+              // No refresh_token field — defensive against partial provider responses.
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
       );
 
-      await forceRefreshOAuthModelProviderToken(connectionId);
+      await forceRefreshOAuthModelProviderToken(id);
 
-      const [row] = await db
-        .select({ credentialsEncrypted: userProviderConnections.credentialsEncrypted })
-        .from(userProviderConnections)
-        .where(eq(userProviderConnections.id, connectionId))
-        .limit(1);
-      const decrypted = decryptCredentials<{ refresh_token: string }>(row!.credentialsEncrypted);
-      expect(decrypted.refresh_token).toBe("kept-refresh");
+      const blob = await readBlob(id);
+      expect(blob.refreshToken).toBe("kept-refresh");
     });
 
-    it("network error: surfaces as a non-fatal Error with descriptive message (does not flag connection)", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+    it("network error: surfaces as a non-fatal Error with descriptive message (does not flag credential)", async () => {
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "stale", refresh_token: "rt" },
-        expiresAt: new Date(Date.now() - 1_000),
+        userId,
+        providerId: "claude-code",
+        accessToken: "stale",
+        refreshToken: "rt",
+        expiresAtMs: Date.now() - 1_000,
       });
 
       mockFetch(async () => {
@@ -324,31 +293,26 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       let caught: unknown;
       try {
-        await forceRefreshOAuthModelProviderToken(connectionId);
+        await forceRefreshOAuthModelProviderToken(id);
       } catch (e) {
         caught = e;
       }
       expect(caught).toBeInstanceOf(Error);
       expect((caught as Error).message).toContain("ECONNREFUSED");
-      // Network errors must NOT be classified as "revoked" — preserve retry-ability
-      const [row] = await db
-        .select({ needsReconnection: userProviderConnections.needsReconnection })
-        .from(userProviderConnections)
-        .where(eq(userProviderConnections.id, connectionId))
-        .limit(1);
-      expect(row?.needsReconnection).toBe(false);
+      const blob = await readBlob(id);
+      expect(blob.needsReconnection).toBe(false);
     });
   });
 
   describe("resolveOAuthTokenForSidecar", () => {
     it("returns the cached token when expiry is far from now (no refresh fetch)", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "cached-access", refresh_token: "rt" },
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1h from now
+        userId,
+        providerId: "claude-code",
+        accessToken: "cached-access",
+        refreshToken: "rt",
+        expiresAtMs: Date.now() + 60 * 60 * 1000,
       });
 
       let fetchCalled = false;
@@ -357,21 +321,20 @@ describe("OAuth model providers — token-resolver hardening", () => {
         return new Response("{}", { status: 200 });
       });
 
-      const result = await resolveOAuthTokenForSidecar(connectionId);
+      const result = await resolveOAuthTokenForSidecar(id);
       expect(result.accessToken).toBe("cached-access");
-      expect(result.providerPackageId).toBe(CLAUDE_PROVIDER);
+      expect(result.providerId).toBe("claude-code");
       expect(fetchCalled).toBe(false);
     });
 
     it("triggers refresh when within REFRESH_LEAD_MS of expiry", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "near-expiry", refresh_token: "rt" },
-        // Within REFRESH_LEAD_MS (5 min) — should refresh proactively
-        expiresAt: new Date(Date.now() + 60 * 1000),
+        userId,
+        providerId: "claude-code",
+        accessToken: "near-expiry",
+        refreshToken: "rt",
+        expiresAtMs: Date.now() + 60 * 1000,
       });
 
       mockFetch(
@@ -387,17 +350,17 @@ describe("OAuth model providers — token-resolver hardening", () => {
           ),
       );
 
-      const result = await resolveOAuthTokenForSidecar(connectionId);
+      const result = await resolveOAuthTokenForSidecar(id);
       expect(result.accessToken).toBe("rotated-eagerly");
     });
 
     it("on needsReconnection=true: throws OAUTH_CONNECTION_NEEDS_RECONNECTION (no provider call)", async () => {
-      const { connectionId } = await seedOAuthModelProviderConnection({
+      const id = await seedOAuthCredential({
         orgId,
-        applicationId,
-        connectionProfileId,
-        providerId: CLAUDE_PROVIDER,
-        credentials: { access_token: "stale", refresh_token: "rt" },
+        userId,
+        providerId: "claude-code",
+        accessToken: "stale",
+        refreshToken: "rt",
         needsReconnection: true,
       });
 
@@ -409,7 +372,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       let caught: unknown;
       try {
-        await resolveOAuthTokenForSidecar(connectionId);
+        await resolveOAuthTokenForSidecar(id);
       } catch (e) {
         caught = e;
       }
@@ -418,7 +381,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(fetchCalled).toBe(false);
     });
 
-    it("on unknown connection: throws notFound (404, not a 5xx crash)", async () => {
+    it("on unknown credential: throws notFound (404, not a 5xx crash)", async () => {
       let caught: unknown;
       try {
         await resolveOAuthTokenForSidecar("00000000-0000-0000-0000-000000000000");

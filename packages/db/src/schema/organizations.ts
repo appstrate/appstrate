@@ -215,11 +215,14 @@ export const orgModels = pgTable(
     api: text("api").notNull(),
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
-    providerKeyId: uuid("provider_key_id")
-      .notNull()
-      .references(() => orgSystemProviderKeys.id, {
-        onDelete: "cascade",
-      }),
+    /**
+     * UUID of either an `org_system_provider_keys` row (legacy, api-key path)
+     * or a `model_provider_credentials` row (new, both paths). The FK is
+     * deliberately dropped during the Phase 4 transition — Phase 5 re-adds
+     * a strict FK to `model_provider_credentials.id` after the legacy
+     * table is fully retired.
+     */
+    providerKeyId: uuid("provider_key_id").notNull(),
     input: jsonb("input"), // ["text", "image"] | null
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null

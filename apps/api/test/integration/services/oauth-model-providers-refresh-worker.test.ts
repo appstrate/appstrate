@@ -1,110 +1,66 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 8 hardening — `scanAndEnqueueRefreshes` filter behavior
- * (cf. SPEC §6, PLAN §Phase 6.1).
+ * `scanAndEnqueueRefreshes` filter behavior (cf. SPEC §6).
  *
- * The scan SQL is the production gate that decides which connections get
+ * The scan is the production gate that decides which credentials get
  * refreshed proactively. A bug in the predicate could either flood the
  * platform with refresh jobs or silently let tokens expire. These tests
- * lock in the predicate by exercising every WHERE clause:
+ * lock in the predicate by exercising every gate:
  *
- *   - `authMode='oauth'` filter — api_key rows MUST NOT be picked up.
- *   - `needsReconnection=false` filter — already-flagged connections
- *     are excluded (the worker would just hit the short-circuit anyway).
- *   - `expiresAt < now() + REFRESH_LEAD_HOURS` filter — far-future
- *     tokens skipped, near-expiry ones picked up.
- *   - `expiresAt IS NOT NULL` — connections without a known expiry are
- *     skipped (the sidecar's "always refresh" path handles them
- *     reactively).
- *
- * Each test asserts both the count returned by the function AND that
- * the right rows were considered. Enqueue uses an in-memory queue
- * adapter when `REDIS_URL` is unset (the default in test).
+ *   - `provider_id IN <oauth registry ids>` — api-key rows are filtered
+ *     out at the SQL level (and api-key blobs would be `kind: "api_key"`
+ *     even if a provider id leaked, which the post-decrypt filter catches).
+ *   - blob `needsReconnection=false` — already-flagged credentials skipped.
+ *   - blob `expiresAt < now + REFRESH_LEAD_HOURS` — far-future tokens
+ *     skipped, near-expiry ones picked up.
+ *   - blob `expiresAt !== null` — credentials without a known expiry are
+ *     skipped (the sidecar's reactive 401-retry handles them).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedProviderCredentials, seedPackage } from "../../helpers/seed.ts";
-import { encryptCredentials } from "@appstrate/connect";
-import { userProviderConnections, orgSystemProviderKeys } from "@appstrate/db/schema";
+import {
+  createApiKeyCredential,
+  createOAuthCredential,
+  markCredentialNeedsReconnection,
+} from "../../../src/services/model-provider-credentials.ts";
 import { scanAndEnqueueRefreshes } from "../../../src/services/oauth-model-providers/refresh-worker.ts";
-
-const CLAUDE_PROVIDER = "@appstrate/provider-claude-code";
-const CODEX_PROVIDER = "@appstrate/provider-codex";
 
 interface SeedFixture {
   orgId: string;
-  applicationId: string;
-  connectionProfileId: string;
+  userId: string;
 }
 
 async function setupOrg(): Promise<SeedFixture> {
   const user = await createTestUser();
-  const { org, defaultAppId } = await createTestOrg(user.id, { slug: "testorg" });
-  const profile = await seedConnectionProfile({
-    userId: user.id,
-    name: "Default",
-    isDefault: true,
-  });
-  return {
-    orgId: org.id,
-    applicationId: defaultAppId,
-    connectionProfileId: profile.id,
-  };
+  const { org } = await createTestOrg(user.id, { slug: "testorg" });
+  return { orgId: org.id, userId: user.id };
 }
 
-async function seedConnectionAndKey(
+async function seedOauthCred(
   fx: SeedFixture,
-  providerId: string,
-  opts: {
-    expiresAt: Date | null;
-    needsReconnection?: boolean;
-    /** When false, creates an api_key system provider key (not oauth). */
-    withOauthKey?: boolean;
-  },
+  providerId: "codex" | "claude-code",
+  opts: { expiresAtMs: number | null; needsReconnection?: boolean },
 ): Promise<string> {
-  await seedPackage({
-    orgId: null,
-    id: providerId,
-    type: "provider",
-    source: "system",
-  }).catch(() => {});
-  const cred = await seedProviderCredentials({
-    applicationId: fx.applicationId,
+  const id = await createOAuthCredential({
+    orgId: fx.orgId,
+    userId: fx.userId,
+    label: `Test ${providerId}`,
     providerId,
+    accessToken: "tok",
+    refreshToken: "rt",
+    expiresAt: opts.expiresAtMs,
+    scopesGranted: ["user:inference"],
   });
-  const [connection] = await db
-    .insert(userProviderConnections)
-    .values({
-      connectionProfileId: fx.connectionProfileId,
-      providerId,
-      orgId: fx.orgId,
-      providerCredentialId: cred.id,
-      credentialsEncrypted: encryptCredentials({
-        access_token: "tok",
-        refresh_token: "rt",
-      }),
-      expiresAt: opts.expiresAt,
-      needsReconnection: opts.needsReconnection ?? false,
-    })
-    .returning();
-  if (opts.withOauthKey ?? true) {
-    await db.insert(orgSystemProviderKeys).values({
-      orgId: fx.orgId,
-      label: `Test ${providerId}`,
-      api: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
-      authMode: "oauth",
-      oauthConnectionId: connection!.id,
-      providerPackageId: providerId,
-    });
+  if (opts.needsReconnection) {
+    await markCredentialNeedsReconnection(fx.orgId, id);
   }
-  return connection!.id;
+  return id;
 }
 
-describe("scanAndEnqueueRefreshes — filter behavior (Phase 8)", () => {
+describe("scanAndEnqueueRefreshes — filter behavior", () => {
   let fx: SeedFixture;
 
   beforeEach(async () => {
@@ -112,15 +68,14 @@ describe("scanAndEnqueueRefreshes — filter behavior (Phase 8)", () => {
     fx = await setupOrg();
   });
 
-  it("returns 0/0 when there are no OAuth model provider connections", async () => {
+  it("returns 0/0 when there are no OAuth model provider credentials", async () => {
     const result = await scanAndEnqueueRefreshes();
     expect(result).toEqual({ scanned: 0, enqueued: 0 });
   });
 
-  it("picks up a connection expiring within the 24h lead window", async () => {
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      // 1h from now — within the 24h lead window
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  it("picks up a credential expiring within the 24h lead window", async () => {
+    await seedOauthCred(fx, "claude-code", {
+      expiresAtMs: Date.now() + 60 * 60 * 1000, // 1h from now
     });
 
     const result = await scanAndEnqueueRefreshes();
@@ -128,56 +83,54 @@ describe("scanAndEnqueueRefreshes — filter behavior (Phase 8)", () => {
     expect(result.enqueued).toBe(1);
   });
 
-  it("ignores a connection whose expiry is far beyond the lead window", async () => {
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      // 7 days from now — far beyond the 24h lead window
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  it("ignores a credential whose expiry is far beyond the lead window", async () => {
+    await seedOauthCred(fx, "claude-code", {
+      expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     const result = await scanAndEnqueueRefreshes();
-    expect(result).toEqual({ scanned: 0, enqueued: 0 });
+    expect(result.scanned).toBe(1); // SQL filter passes; in-memory expiry filter rejects
+    expect(result.enqueued).toBe(0);
   });
 
-  it("ignores a connection with `needsReconnection=true`", async () => {
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  it("ignores a credential flagged needsReconnection=true", async () => {
+    await seedOauthCred(fx, "claude-code", {
+      expiresAtMs: Date.now() + 60 * 60 * 1000,
       needsReconnection: true,
     });
 
     const result = await scanAndEnqueueRefreshes();
-    expect(result).toEqual({ scanned: 0, enqueued: 0 });
+    expect(result.scanned).toBe(1);
+    expect(result.enqueued).toBe(0);
   });
 
-  it("ignores a connection not bound to any orgSystemProviderKey", async () => {
-    // Connection exists but no orgSystemProviderKeys row references it
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      withOauthKey: false,
+  it("ignores a credential with expiresAt=null (sidecar handles those reactively)", async () => {
+    await seedOauthCred(fx, "claude-code", { expiresAtMs: null });
+
+    const result = await scanAndEnqueueRefreshes();
+    expect(result.scanned).toBe(1);
+    expect(result.enqueued).toBe(0);
+  });
+
+  it("ignores api-key credentials (only OAuth providerIds are scanned)", async () => {
+    await createApiKeyCredential({
+      orgId: fx.orgId,
+      userId: fx.userId,
+      label: "openai key",
+      providerId: "openai",
+      apiKey: "sk-test",
     });
 
     const result = await scanAndEnqueueRefreshes();
     expect(result).toEqual({ scanned: 0, enqueued: 0 });
   });
 
-  it("ignores a connection with `expiresAt IS NULL` (sidecar handles those reactively)", async () => {
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      expiresAt: null,
+  it("processes multiple eligible credentials in a single scan (Codex + Claude)", async () => {
+    await seedOauthCred(fx, "claude-code", {
+      expiresAtMs: Date.now() + 30 * 60 * 1000,
     });
-
-    const result = await scanAndEnqueueRefreshes();
-    expect(result).toEqual({ scanned: 0, enqueued: 0 });
-  });
-
-  it("processes multiple eligible connections in a single scan (Codex + Claude)", async () => {
-    await seedConnectionAndKey(fx, CLAUDE_PROVIDER, {
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-    });
-    await seedConnectionAndKey(fx, CODEX_PROVIDER, {
-      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    });
-    // Plus a far-future one — should NOT be enqueued
-    await seedConnectionAndKey(fx, "@example/other-provider", {
-      expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+    await seedOauthCred(fx, "codex", {
+      expiresAtMs: Date.now() + 2 * 60 * 60 * 1000,
     });
 
     const result = await scanAndEnqueueRefreshes();

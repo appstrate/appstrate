@@ -1,59 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, inArray } from "drizzle-orm";
+/**
+ * Legacy org-scoped model-provider-keys service.
+ *
+ * Phase 4-transition shim. The API-key creation/update path still writes
+ * to `org_system_provider_keys` to keep the existing routes working
+ * unchanged; the OAuth path has fully moved to `model_provider_credentials`
+ * via {@link createOAuthCredential}.
+ *
+ * The read path is polymorphic — `listOrgModelProviderKeys` and
+ * `loadModelProviderKeyCredentials` consult both tables and merge their
+ * results so a `providerKeyId` referenced from `org_models.providerKeyId`
+ * resolves regardless of which table holds it. Phase 5 retires the legacy
+ * table and re-adds a strict FK to `model_provider_credentials`.
+ */
+
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys, userProviderConnections } from "@appstrate/db/schema";
-import { encrypt, decrypt, decryptCredentials } from "@appstrate/connect";
+import { orgSystemProviderKeys } from "@appstrate/db/schema";
+import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemModelProviderKeys } from "./model-registry.ts";
 import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
-import type { OAuthModelProviderCredentials } from "./oauth-model-providers/credentials.ts";
-import { resolveOAuthTokenForSidecar } from "./oauth-model-providers/token-resolver.ts";
-import { getOAuthModelProviderConfig } from "./oauth-model-providers/registry.ts";
-import { logger } from "../lib/logger.ts";
+import { getModelProviderConfig } from "./oauth-model-providers/registry.ts";
+import {
+  listModelProviderCredentials,
+  loadModelProviderCredentials,
+  type ModelProviderCredentialInfo,
+} from "./model-provider-credentials.ts";
 
-// --- List (system + DB) ---
+// --- List (system + legacy DB rows + new credentials table) ---
+
+function adaptCredentialInfoToLegacyShape(
+  info: ModelProviderCredentialInfo,
+): OrgModelProviderKeyInfo {
+  const cfg = getModelProviderConfig(info.providerId);
+  return {
+    id: info.id,
+    label: info.label,
+    api: cfg?.apiShape ?? "openai-chat",
+    baseUrl: info.baseUrl,
+    source: "custom",
+    authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
+    providerPackageId: info.providerId,
+    oauthConnectionId: info.authMode === "oauth2" ? info.id : null,
+    oauthEmail: info.oauthEmail ?? null,
+    needsReconnection: info.oauthNeedsReconnection ?? false,
+    createdBy: info.createdBy,
+    createdAt: info.createdAt,
+    updatedAt: info.updatedAt,
+  };
+}
 
 export async function listOrgModelProviderKeys(orgId: string): Promise<OrgModelProviderKeyInfo[]> {
   const system = getSystemModelProviderKeys();
-  const rows = await db
+  const legacyRows = await db
     .select()
     .from(orgSystemProviderKeys)
     .where(scopedWhere(orgSystemProviderKeys, { orgId }));
   const now = toISORequired(new Date());
 
-  // Batch-load OAuth connection state (email, needsReconnection) for the rows
-  // bound to OAuth connections — single query, in-memory join below.
-  const oauthIds = rows
-    .filter((r) => r.authMode === "oauth" && r.oauthConnectionId)
-    .map((r) => r.oauthConnectionId!);
-  const oauthState = new Map<string, { email: string | null; needsReconnection: boolean }>();
-  if (oauthIds.length > 0) {
-    const conns = await db
-      .select({
-        id: userProviderConnections.id,
-        credentialsEncrypted: userProviderConnections.credentialsEncrypted,
-        needsReconnection: userProviderConnections.needsReconnection,
-      })
-      .from(userProviderConnections)
-      .where(inArray(userProviderConnections.id, oauthIds));
-    for (const c of conns) {
-      let email: string | null = null;
-      try {
-        const creds = decryptCredentials<OAuthModelProviderCredentials>(c.credentialsEncrypted);
-        email = creds.email ?? null;
-      } catch {
-        // Stale ciphertext after key rotation — surface as "no email" rather than failing the whole list.
-      }
-      oauthState.set(c.id, { email, needsReconnection: c.needsReconnection });
-    }
-  }
-
-  return mergeSystemAndDb({
+  const legacyAsLegacyShape = mergeSystemAndDb({
     system,
-    rows,
+    rows: legacyRows,
     mapSystem: (id, def): OrgModelProviderKeyInfo => ({
       id,
       label: def.label,
@@ -65,29 +76,28 @@ export async function listOrgModelProviderKeys(orgId: string): Promise<OrgModelP
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (r): OrgModelProviderKeyInfo => {
-      const isOauth = r.authMode === "oauth";
-      const state = isOauth && r.oauthConnectionId ? oauthState.get(r.oauthConnectionId) : null;
-      return {
-        id: r.id,
-        label: r.label,
-        api: r.api,
-        baseUrl: r.baseUrl,
-        source: "custom",
-        authMode: r.authMode,
-        providerPackageId: r.providerPackageId ?? null,
-        oauthConnectionId: r.oauthConnectionId ?? null,
-        oauthEmail: state?.email ?? null,
-        needsReconnection: state?.needsReconnection ?? false,
-        createdBy: r.createdBy,
-        createdAt: toISO(r.createdAt) ?? now,
-        updatedAt: toISO(r.updatedAt) ?? now,
-      };
-    },
+    mapRow: (r): OrgModelProviderKeyInfo => ({
+      id: r.id,
+      label: r.label,
+      api: r.api,
+      baseUrl: r.baseUrl,
+      source: "custom",
+      authMode: r.authMode,
+      providerPackageId: r.providerPackageId ?? null,
+      oauthConnectionId: r.oauthConnectionId ?? null,
+      oauthEmail: null,
+      needsReconnection: false,
+      createdBy: r.createdBy,
+      createdAt: toISO(r.createdAt) ?? now,
+      updatedAt: toISO(r.updatedAt) ?? now,
+    }),
   });
+
+  const newRows = await listModelProviderCredentials(orgId);
+  return [...legacyAsLegacyShape, ...newRows.map(adaptCredentialInfoToLegacyShape)];
 }
 
-// --- CRUD ---
+// --- CRUD (legacy api-key path, still on `org_system_provider_keys`) ---
 
 export async function createOrgModelProviderKey(
   orgId: string,
@@ -135,14 +145,12 @@ export async function deleteOrgModelProviderKey(orgId: string, id: string): Prom
     );
 }
 
-// --- Credential loading ---
+// --- Credential loading (polymorphic across both tables) ---
 
 /**
- * `providerPackageId` is populated for OAuth-backed keys (and only for those).
- * Downstream consumers branch on it to apply provider-specific request shapes
- * — e.g. Codex tokens need `chatgpt-account-id` headers and a special probe,
- * Claude Code tokens need `anthropic-beta: oauth-2025-04-20`. API-key rows
- * leave it undefined.
+ * Returned shape preserved for back-compat. `providerPackageId` is populated
+ * for OAuth-backed keys (legacy AFPS form OR new short-form) and `accountId`
+ * for Codex.
  */
 export interface ModelProviderKeyCredentials {
   api: string;
@@ -157,19 +165,32 @@ export async function loadModelProviderKeyCredentials(
   orgId: string,
   id: string,
 ): Promise<ModelProviderKeyCredentials | null> {
-  // Check system model provider keys first (same pattern as loadModel checks system models)
+  // 1) System model provider keys (env-driven, platform-wide).
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
   }
 
+  // 2) New unified table (covers both api-key and OAuth credentials).
+  const fromNew = await loadModelProviderCredentials(orgId, id);
+  if (fromNew) {
+    if (fromNew.needsReconnection) return null;
+    return {
+      api: fromNew.apiShape,
+      baseUrl: fromNew.baseUrl,
+      apiKey: fromNew.apiKey,
+      providerPackageId: fromNew.providerId,
+      accountId: fromNew.accountId,
+    };
+  }
+
+  // 3) Legacy `org_system_provider_keys` table (api-key writes still land here).
   const [row] = await db
     .select({
       api: orgSystemProviderKeys.api,
       baseUrl: orgSystemProviderKeys.baseUrl,
       apiKeyEncrypted: orgSystemProviderKeys.apiKeyEncrypted,
       authMode: orgSystemProviderKeys.authMode,
-      oauthConnectionId: orgSystemProviderKeys.oauthConnectionId,
       providerPackageId: orgSystemProviderKeys.providerPackageId,
     })
     .from(orgSystemProviderKeys)
@@ -177,31 +198,10 @@ export async function loadModelProviderKeyCredentials(
     .limit(1);
   if (!row) return null;
 
-  // OAuth path: resolve a fresh access token via the resolver (auto-refreshes
-  // when expired). Throws `gone(needsReconnection)` when the connection is
-  // dead — surface that as `null` so callers fall through to their own
-  // "key not found / unusable" handling.
-  if (row.authMode === "oauth" && row.oauthConnectionId) {
-    try {
-      const token = await resolveOAuthTokenForSidecar(row.oauthConnectionId);
-      return {
-        api: row.api,
-        baseUrl: row.baseUrl,
-        apiKey: token.accessToken,
-        providerPackageId: row.providerPackageId ?? undefined,
-        accountId: token.accountId,
-      };
-    } catch (err) {
-      logger.warn("OAuth model provider token resolution failed", {
-        keyId: id,
-        connectionId: row.oauthConnectionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
-  }
-
-  if (row.apiKeyEncrypted === null) return null;
+  // Defensive: a legacy row with `authMode='oauth'` has no longer any
+  // companion `userProviderConnections` row to refresh against (Phase 4
+  // moved the OAuth flow off this table). Treat as not loadable.
+  if (row.authMode === "oauth" || row.apiKeyEncrypted === null) return null;
   try {
     return { api: row.api, baseUrl: row.baseUrl, apiKey: decrypt(row.apiKeyEncrypted) };
   } catch {
@@ -224,12 +224,12 @@ export async function testModelProviderKeyConnection(
       message: "Model provider key not found",
     };
 
-  // For OAuth keys the inference probe needs a real model id (the upstream
-  // rejects `_test`). Fall back to the registry's first model — sized to be
-  // a low-cost probe (single token in/out) regardless of which one we pick.
+  // For OAuth-backed credentials the inference probe needs a real model id
+  // (the upstream rejects `_test`). Fall back to the registry's first model
+  // — sized to be a low-cost probe (single token in/out) regardless.
   let modelId = "_test";
   if (creds.providerPackageId) {
-    const cfg = getOAuthModelProviderConfig(creds.providerPackageId);
+    const cfg = getModelProviderConfig(creds.providerPackageId);
     if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
   }
   return testModelConfig({ ...creds, modelId });

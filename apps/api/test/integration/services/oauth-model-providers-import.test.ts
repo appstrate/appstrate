@@ -10,39 +10,39 @@
  * service function — most of the persistence + claim-derivation logic
  * lives here, so we exercise the function directly.
  *
+ * Persistence model (Phase 4+): a single row in `model_provider_credentials`
+ * carrying a `kind: "oauth"` blob — no more triple-table dance with
+ * `userProviderConnections` + `applicationProviderCredentials`.
+ *
  * Edge cases under test:
- *   - Happy path Codex: persists row, surfaces availableModelIds.
+ *   - Happy path Codex: persists row + decoded chatgpt_account_id.
  *   - Happy path Claude: passes `subscriptionType` + `email` through verbatim.
  *   - Codex JWT defensive decoding extracts `chatgpt_account_id` server-side
- *     even when the request body did not provide it (the CLI sends raw
- *     tokens; the platform doesn't trust client-supplied claims).
+ *     even when the request body did not provide it.
+ *   - Legacy AFPS package id ("@appstrate/provider-codex") still resolves.
  *   - Unknown providerPackageId → 404 (`notFound`).
  *   - Empty label → 400 (`invalidRequest`).
  *   - Missing accessToken/refreshToken → 400.
- *   - Auto-creates a default connection profile when none is provided.
- *   - Re-import on the same provider/profile upserts the connection in place
- *     (no orphan rows).
+ *   - Re-import creates a fresh row (the new model does not de-dupe).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
 import { decryptCredentials } from "@appstrate/connect";
-import { userProviderConnections, orgSystemProviderKeys } from "@appstrate/db/schema";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
+import { type OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 
-const CODEX = "@appstrate/provider-codex";
-const CLAUDE = "@appstrate/provider-claude-code";
+const CODEX_LEGACY = "@appstrate/provider-codex";
+const CLAUDE_LEGACY = "@appstrate/provider-claude-code";
 
 /**
  * Build a synthetic Codex-shaped JWT (RS256 alg header but unsigned — the
  * platform reads the payload defensively, never verifies the signature, so
- * "x" as fake signature suffices). The payload carries the canonical
- * Codex claims we care about: `chatgpt_account_id` under
- * `https://api.openai.com/auth` and `email`.
+ * "x" as fake signature suffices).
  */
 function makeFakeCodexJwt(payload: {
   chatgpt_account_id?: string;
@@ -76,14 +76,9 @@ describe("importOAuthModelProviderConnection", () => {
     const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     applicationId = defaultAppId;
-    // FK target: applicationProviderCredentials.providerId references packages.id.
-    // Seed both system providers so the helper's auto-row creation can succeed.
-    for (const id of [CODEX, CLAUDE]) {
-      await seedPackage({ orgId: null, id, type: "provider", source: "system" }).catch(() => {});
-    }
   });
 
-  it("happy path Codex: persists connection + provider key + decodes account_id from JWT", async () => {
+  it("happy path Codex: persists row + decodes account_id from JWT", async () => {
     const accessJwt = makeFakeCodexJwt({
       chatgpt_account_id: "acc-123",
       email: "user@example.com",
@@ -93,42 +88,50 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      providerPackageId: CODEX,
+      providerPackageId: CODEX_LEGACY,
       label: "ChatGPT Pro",
       accessToken: accessJwt,
       refreshToken: "rt-codex",
       expiresAt: Date.now() + 3600 * 1000,
     });
 
-    expect(result.providerPackageId).toBe(CODEX);
+    expect(result.providerPackageId).toBe(CODEX_LEGACY);
     expect(result.providerKeyId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.connectionId).toMatch(/^[0-9a-f-]{36}$/);
-    // Email recovered from the JWT even though the request body omitted it
+    expect(result.connectionId).toBe(result.providerKeyId);
     expect(result.email).toBe("user@example.com");
     expect(result.availableModelIds.length).toBeGreaterThan(0);
 
-    const [conn] = await db
+    const [row] = await db
       .select()
-      .from(userProviderConnections)
-      .where(eq(userProviderConnections.id, result.connectionId));
-    expect(conn?.needsReconnection).toBe(false);
-    expect(conn?.providerId).toBe(CODEX);
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, result.providerKeyId));
+    expect(row?.providerId).toBe("codex");
+    expect(row?.label).toBe("ChatGPT Pro");
 
-    // Server-side defensive decode of chatgpt_account_id is persisted
-    const decrypted = decryptCredentials(conn!.credentialsEncrypted) as Record<string, unknown>;
-    expect(decrypted.access_token).toBe(accessJwt);
-    expect(decrypted.refresh_token).toBe("rt-codex");
-    expect(decrypted.chatgpt_account_id).toBe("acc-123");
-    expect(decrypted.email).toBe("user@example.com");
+    const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
+    expect(blob.kind).toBe("oauth");
+    expect(blob.accessToken).toBe(accessJwt);
+    expect(blob.refreshToken).toBe("rt-codex");
+    expect(blob.accountId).toBe("acc-123");
+    expect(blob.email).toBe("user@example.com");
+    expect(blob.needsReconnection).toBe(false);
+  });
 
-    const [key] = await db
-      .select()
-      .from(orgSystemProviderKeys)
-      .where(eq(orgSystemProviderKeys.id, result.providerKeyId));
-    expect(key?.label).toBe("ChatGPT Pro");
-    expect(key?.authMode).toBe("oauth");
-    expect(key?.oauthConnectionId).toBe(result.connectionId);
-    expect(key?.providerPackageId).toBe(CODEX);
+  it("accepts the canonical short providerId form ('codex')", async () => {
+    const result = await importOAuthModelProviderConnection({
+      orgId,
+      applicationId,
+      userId,
+      providerPackageId: "codex",
+      label: "ChatGPT",
+      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-short" }),
+      refreshToken: "rt",
+    });
+    const [row] = await db
+      .select({ providerId: modelProviderCredentials.providerId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, result.providerKeyId));
+    expect(row?.providerId).toBe("codex");
   });
 
   it("happy path Claude: passes subscriptionType + email through verbatim", async () => {
@@ -136,7 +139,7 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      providerPackageId: CLAUDE,
+      providerPackageId: CLAUDE_LEGACY,
       label: "Claude Max",
       accessToken: "sk-ant-oat01-fake",
       refreshToken: "sk-ant-ort01-fake",
@@ -145,18 +148,19 @@ describe("importOAuthModelProviderConnection", () => {
       email: "user@anthropic-test.com",
     });
 
-    expect(result.providerPackageId).toBe(CLAUDE);
+    expect(result.providerPackageId).toBe(CLAUDE_LEGACY);
     expect(result.subscriptionType).toBe("max");
     expect(result.email).toBe("user@anthropic-test.com");
 
-    const [conn] = await db
+    const [row] = await db
       .select()
-      .from(userProviderConnections)
-      .where(eq(userProviderConnections.id, result.connectionId));
-    const decrypted = decryptCredentials(conn!.credentialsEncrypted) as Record<string, unknown>;
-    expect(decrypted.subscription_type).toBe("max");
-    expect(decrypted.email).toBe("user@anthropic-test.com");
-    expect(decrypted.chatgpt_account_id).toBeUndefined();
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, result.providerKeyId));
+    expect(row?.providerId).toBe("claude-code");
+    const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
+    expect(blob.subscriptionType).toBe("max");
+    expect(blob.email).toBe("user@anthropic-test.com");
+    expect(blob.accountId).toBeUndefined();
   });
 
   it("unknown providerPackageId → notFound (404)", async () => {
@@ -173,13 +177,27 @@ describe("importOAuthModelProviderConnection", () => {
     ).rejects.toMatchObject({ status: 404 } as Partial<ApiError>);
   });
 
+  it("api-key provider rejected — only OAuth providers route through this flow", async () => {
+    await expect(
+      importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: "openai",
+        label: "x",
+        accessToken: "a",
+        refreshToken: "r",
+      }),
+    ).rejects.toMatchObject({ status: 404 } as Partial<ApiError>);
+  });
+
   it("empty label → invalidRequest (400)", async () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
         applicationId,
         userId,
-        providerPackageId: CODEX,
+        providerPackageId: CODEX_LEGACY,
         label: "   ",
         accessToken: makeFakeCodexJwt({ chatgpt_account_id: "x" }),
         refreshToken: "rt",
@@ -193,7 +211,7 @@ describe("importOAuthModelProviderConnection", () => {
         orgId,
         applicationId,
         userId,
-        providerPackageId: CODEX,
+        providerPackageId: CODEX_LEGACY,
         label: "x",
         accessToken: "",
         refreshToken: "rt",
@@ -201,38 +219,28 @@ describe("importOAuthModelProviderConnection", () => {
     ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
   });
 
-  it("auto-creates a default connection profile when none is provided", async () => {
-    // No seedConnectionProfile() — first invocation should create the default.
-    const result = await importOAuthModelProviderConnection({
-      orgId,
-      applicationId,
-      userId,
-      providerPackageId: CODEX,
-      label: "ChatGPT",
-      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-auto" }),
-      refreshToken: "rt-auto",
-    });
-
-    const [conn] = await db
-      .select()
-      .from(userProviderConnections)
-      .where(eq(userProviderConnections.id, result.connectionId));
-    expect(conn?.connectionProfileId).toBeTruthy();
+  it("Codex import without recoverable accountId → invalidRequest (400)", async () => {
+    // JWT without the chatgpt_account_id claim, and no body-level accountId.
+    const noAccountJwt = makeFakeCodexJwt({ email: "x@example.com" });
+    await expect(
+      importOAuthModelProviderConnection({
+        orgId,
+        applicationId,
+        userId,
+        providerPackageId: CODEX_LEGACY,
+        label: "ChatGPT",
+        accessToken: noAccountJwt,
+        refreshToken: "rt",
+      }),
+    ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
   });
 
-  it("re-import upserts in place (no orphan rows on the same profile/provider)", async () => {
-    const profile = await seedConnectionProfile({
-      userId,
-      name: "Default",
-      isDefault: true,
-    });
-
+  it("re-import creates a fresh row (no upsert across imports)", async () => {
     const first = await importOAuthModelProviderConnection({
       orgId,
       applicationId,
       userId,
-      connectionProfileId: profile.id,
-      providerPackageId: CLAUDE,
+      providerPackageId: CLAUDE_LEGACY,
       label: "Claude v1",
       accessToken: "access-v1",
       refreshToken: "refresh-v1",
@@ -243,33 +251,23 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      connectionProfileId: profile.id,
-      providerPackageId: CLAUDE,
+      providerPackageId: CLAUDE_LEGACY,
       label: "Claude v2",
       accessToken: "access-v2",
       refreshToken: "refresh-v2",
       expiresAt: Date.now() + 7200 * 1000,
     });
 
-    // Same connection upserted (new credentials), but a NEW provider key row
-    // is created each time — that mirrors how the legacy callback behaved
-    // and is fine: stale keys can be deleted by the user. Only
-    // userProviderConnections has the unique constraint.
-    expect(second.connectionId).toBe(first.connectionId);
+    expect(second.providerKeyId).not.toBe(first.providerKeyId);
 
-    const conns = await db
+    const rows = await db
       .select()
-      .from(userProviderConnections)
-      .where(
-        and(
-          eq(userProviderConnections.connectionProfileId, profile.id),
-          eq(userProviderConnections.providerId, CLAUDE),
-        ),
-      );
-    expect(conns.length).toBe(1);
-
-    const decrypted = decryptCredentials(conns[0]!.credentialsEncrypted) as Record<string, unknown>;
-    expect(decrypted.access_token).toBe("access-v2");
-    expect(decrypted.refresh_token).toBe("refresh-v2");
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.orgId, orgId));
+    expect(rows).toHaveLength(2);
+    const blob2 = decryptCredentials<OAuthBlob>(
+      rows.find((r) => r.id === second.providerKeyId)!.credentialsEncrypted,
+    );
+    expect(blob2.accessToken).toBe("access-v2");
   });
 });

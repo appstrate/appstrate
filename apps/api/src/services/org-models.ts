@@ -370,6 +370,7 @@ export function buildModelTestRequest(config: {
   // is the canonical signal — sk-ant-oat prefix is the legacy fallback.
   const isAnthropicOAuth =
     config.providerPackageId === "@appstrate/provider-claude-code" ||
+    config.providerPackageId === "claude-code" ||
     config.apiKey.startsWith("sk-ant-oat");
 
   switch (config.api) {
@@ -434,10 +435,16 @@ export async function testModelConfig(config: {
   // /v1/messages is blocked by the third-party OAuth ban). Issue a real
   // single-token inference probe so the test reflects whether the key can
   // actually serve traffic.
-  if (config.providerPackageId === "@appstrate/provider-codex") {
+  if (
+    config.providerPackageId === "@appstrate/provider-codex" ||
+    config.providerPackageId === "codex"
+  ) {
     return testCodexInference(config);
   }
-  if (config.providerPackageId === "@appstrate/provider-claude-code") {
+  if (
+    config.providerPackageId === "@appstrate/provider-claude-code" ||
+    config.providerPackageId === "claude-code"
+  ) {
     return testClaudeCodeInference(config);
   }
 

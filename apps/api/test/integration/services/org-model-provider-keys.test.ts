@@ -13,11 +13,10 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys, userProviderConnections } from "@appstrate/db/schema";
+import { orgSystemProviderKeys } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
 import {
   createOrgModelProviderKey,
   deleteOrgModelProviderKey,
@@ -26,6 +25,7 @@ import {
   updateOrgModelProviderKey,
 } from "../../../src/services/org-model-provider-keys.ts";
 import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
+import { markCredentialNeedsReconnection } from "../../../src/services/model-provider-credentials.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 
@@ -269,12 +269,8 @@ describe("org-model-provider-keys service", () => {
       const { org, defaultAppId } = await createTestOrg(userId, { slug: "vault-oauth" });
       orgId = org.id;
       applicationId = defaultAppId;
-      // applicationProviderCredentials.providerId references packages.id —
-      // seed both system providers so the import helper's auto-row creation
-      // can succeed.
-      for (const id of [CODEX, CLAUDE]) {
-        await seedPackage({ orgId: null, id, type: "provider", source: "system" }).catch(() => {});
-      }
+      // No FK seeding required since Phase 4 — OAuth credentials live in
+      // `model_provider_credentials` which has no FK to `packages`.
     });
 
     it("Codex: returns access token + providerPackageId + accountId from connection", async () => {
@@ -303,8 +299,9 @@ describe("org-model-provider-keys service", () => {
       expect(creds!.accountId).toBe("acc-codex-123");
       // providerPackageId is what the inference probe branches on to apply
       // the Codex-specific request shape (`/codex/responses` + the account
-      // header). Drop it and tests fall back to the generic OpenAI path.
-      expect(creds!.providerPackageId).toBe(CODEX);
+      // header). Phase 4 normalizes to the canonical short providerId form;
+      // org-models accepts both legacy + canonical for backward compat.
+      expect(creds!.providerPackageId).toBe("codex");
     });
 
     it("Claude: returns access token + providerPackageId; accountId stays undefined (Codex-only field)", async () => {
@@ -324,7 +321,7 @@ describe("org-model-provider-keys service", () => {
       const creds = await loadModelProviderKeyCredentials(orgId, imported.providerKeyId);
       expect(creds).not.toBeNull();
       expect(creds!.apiKey).toBe("sk-ant-oat01-fake");
-      expect(creds!.providerPackageId).toBe(CLAUDE);
+      expect(creds!.providerPackageId).toBe("claude-code");
       // Anthropic OAuth carries no account-scoping claim — `accountId`
       // staying undefined is the contract (lets the inference probe skip
       // the `chatgpt-account-id` header it would otherwise require).
@@ -343,16 +340,13 @@ describe("org-model-provider-keys service", () => {
         expiresAt: Date.now() + 3600 * 1000,
       });
 
-      // Simulate the refresh worker flagging the connection after a
+      // Simulate the refresh worker flagging the credential after a
       // 400 invalid_grant from the upstream provider.
-      await db
-        .update(userProviderConnections)
-        .set({ needsReconnection: true })
-        .where(eq(userProviderConnections.id, imported.connectionId));
+      await markCredentialNeedsReconnection(orgId, imported.providerKeyId);
 
-      // The resolver throws `gone(...)`; the service swallows it and
-      // returns null so callers fall through to their own
-      // "key unusable" handling (route returns KEY_NOT_FOUND).
+      // The legacy load helper returns null when the OAuth blob's
+      // needsReconnection flag is set, so callers fall through to their
+      // own "key unusable" handling (route returns KEY_NOT_FOUND).
       const creds = await loadModelProviderKeyCredentials(orgId, imported.providerKeyId);
       expect(creds).toBeNull();
     });
