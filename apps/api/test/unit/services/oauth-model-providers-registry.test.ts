@@ -6,8 +6,6 @@
  *   - the OAuth providers (codex, claude-code) keep their stealth-mode quirks
  *     (Codex `forceStream`+path rewrite to /codex/responses, Claude Code
  *     uses plain `/v1/messages` against api.anthropic.com)
- *   - the legacy AFPS package id alias still resolves (kept for backward
- *     compatibility on inputs; the deprecated typed exports have been removed)
  */
 
 import { describe, it, expect } from "bun:test";
@@ -114,25 +112,16 @@ describe("getModelProviderConfig()", () => {
     }
   });
 
-  it("legacy AFPS package ids still resolve (backward-compat)", () => {
-    expect(getModelProviderConfig("@appstrate/provider-codex")?.providerId).toBe("codex");
-    expect(getModelProviderConfig("@appstrate/provider-claude-code")?.providerId).toBe(
-      "claude-code",
-    );
-  });
-
   it("returns null for unknown ids", () => {
     expect(getModelProviderConfig("@unknown/provider")).toBeNull();
     expect(getModelProviderConfig("")).toBeNull();
   });
 });
 
-describe("isOAuthModelProvider() (legacy)", () => {
-  it("accepts canonical OAuth ids and their legacy aliases", () => {
+describe("isOAuthModelProvider()", () => {
+  it("accepts canonical OAuth ids", () => {
     expect(isOAuthModelProvider("codex")).toBe(true);
     expect(isOAuthModelProvider("claude-code")).toBe(true);
-    expect(isOAuthModelProvider("@appstrate/provider-codex")).toBe(true);
-    expect(isOAuthModelProvider("@appstrate/provider-claude-code")).toBe(true);
   });
 
   it("rejects api-key providers and anything unknown", () => {

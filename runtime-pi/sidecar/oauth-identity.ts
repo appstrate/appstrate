@@ -27,18 +27,18 @@ const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for 
  * downstream `filterHeaders()` calls.
  */
 export function buildIdentityHeaders(
-  providerPackageId: string,
+  providerId: string,
   token: CachedToken,
 ): Record<string, string> {
-  switch (providerPackageId) {
-    case "@appstrate/provider-claude-code":
+  switch (providerId) {
+    case "claude-code":
       return {
         accept: "application/json",
         "anthropic-dangerous-direct-browser-access": "true",
         "x-app": "cli",
       };
 
-    case "@appstrate/provider-codex": {
+    case "codex": {
       const headers: Record<string, string> = {
         originator: "codex_cli_rs",
         "openai-beta": "responses=experimental",
@@ -60,7 +60,7 @@ export function buildIdentityHeaders(
  * Returns the same input unchanged when no transform is needed.
  */
 export function transformBody(
-  providerPackageId: string,
+  providerId: string,
   bodyText: string,
   options: { forceStream?: boolean; forceStore?: boolean } = {},
 ): string {
@@ -75,10 +75,10 @@ export function transformBody(
   }
   if (!isPlainObject(json)) return bodyText;
 
-  switch (providerPackageId) {
-    case "@appstrate/provider-claude-code":
+  switch (providerId) {
+    case "claude-code":
       return JSON.stringify(applyClaudeIdentityPrepend(json));
-    case "@appstrate/provider-codex":
+    case "codex":
       return JSON.stringify(applyCodexCoercion(json, options));
     default:
       return bodyText;

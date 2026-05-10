@@ -32,12 +32,12 @@ import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
 import { askText, confirm, exitWithError, intro, outro, spinner } from "../lib/ui.ts";
 
-/** Slugs accepted on the CLI; mapped to AFPS package ids server-side. */
+/** Slugs accepted on the CLI; mapped to canonical providerIds server-side. */
 export type ConnectProviderSlug = "codex" | "claude";
 
-const SLUG_TO_PACKAGE_ID: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "@appstrate/provider-codex",
-  claude: "@appstrate/provider-claude-code",
+const SLUG_TO_PROVIDER_ID: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
+  codex: "codex",
+  claude: "claude-code",
 });
 
 const DISPLAY_NAME: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
@@ -70,7 +70,7 @@ export interface ConnectCommandOptions {
 interface ImportResponse {
   providerKeyId: string;
   connectionId: string;
-  providerPackageId: string;
+  providerId: string;
   email?: string;
   subscriptionType?: string;
   availableModelIds: string[];
@@ -223,8 +223,8 @@ export async function connectCommand(
   slug: ConnectProviderSlug,
   opts: ConnectCommandOptions,
 ): Promise<void> {
-  const providerPackageId = SLUG_TO_PACKAGE_ID[slug];
-  if (!providerPackageId) {
+  const providerId = SLUG_TO_PROVIDER_ID[slug];
+  if (!providerId) {
     process.stderr.write(`Unknown provider: ${slug}. Use 'codex' or 'claude'.\n`);
     process.exit(1);
   }
@@ -273,7 +273,7 @@ export async function connectCommand(
       {
         method: "POST",
         body: JSON.stringify({
-          providerPackageId,
+          providerId,
           label,
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,

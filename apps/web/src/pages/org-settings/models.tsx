@@ -241,7 +241,7 @@ function ProviderKeysSection({
   onEdit: (pk: OrgModelProviderKeyInfo) => void;
   onDelete: (pk: OrgModelProviderKeyInfo) => void;
   onRename: (pk: OrgModelProviderKeyInfo, newLabel: string) => void;
-  onConnectOAuth: (providerPackageId: string) => void;
+  onConnectOAuth: (providerId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -261,10 +261,10 @@ function ProviderKeysSection({
         <DropdownMenuItem onSelect={onCreate}>
           <KeyRound className="size-4" /> {t("providerKeys.add")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onConnectOAuth("@appstrate/provider-codex")}>
+        <DropdownMenuItem onSelect={() => onConnectOAuth("codex")}>
           {t("providerKeys.oauth.connectCodex")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onConnectOAuth("@appstrate/provider-claude-code")}>
+        <DropdownMenuItem onSelect={() => onConnectOAuth("claude-code")}>
           {t("providerKeys.oauth.connectClaude")}
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -348,11 +348,11 @@ function ProviderKeysSection({
                   )}
                   {isOauth && (
                     <>
-                      {pk.needsReconnection && pk.providerPackageId && (
+                      {pk.needsReconnection && pk.providerId && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => onConnectOAuth(pk.providerPackageId!)}
+                          onClick={() => onConnectOAuth(pk.providerId!)}
                         >
                           {t("providerKeys.oauth.reconnect")}
                         </Button>
@@ -485,18 +485,18 @@ export function OrgSettingsModelsPage() {
           onRename={(pk, newLabel) => {
             updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
           }}
-          onConnectOAuth={(providerPackageId) => setOauthDialogProviderId(providerPackageId)}
+          onConnectOAuth={(providerId) => setOauthDialogProviderId(providerId)}
         />
       )}
 
       {oauthDialogProviderId && (
         <OAuthModelProviderDialog
           open
-          providerPackageId={oauthDialogProviderId}
+          providerId={oauthDialogProviderId}
           defaultLabel={
-            oauthDialogProviderId === "@appstrate/provider-codex"
+            oauthDialogProviderId === "codex"
               ? "ChatGPT"
-              : oauthDialogProviderId === "@appstrate/provider-claude-code"
+              : oauthDialogProviderId === "claude-code"
                 ? "Claude"
                 : "OAuth provider"
           }

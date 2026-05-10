@@ -37,7 +37,7 @@ export interface CachedToken {
   forceStore?: boolean;
   /** Codex only — surfaced as `chatgpt-account-id` header on upstream. */
   accountId?: string;
-  providerPackageId: string;
+  providerId: string;
 }
 
 /** Wire shape returned by the platform's `/internal/oauth-token/:id` endpoint. */
@@ -50,7 +50,7 @@ export interface PlatformTokenResponse {
   forceStream?: boolean;
   forceStore?: boolean;
   accountId?: string;
-  providerPackageId: string;
+  providerId: string;
 }
 
 /** Signaled when the platform returns 410 (`needsReconnection=true`). */

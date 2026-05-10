@@ -19,8 +19,7 @@
  *   - Happy path Claude: passes `subscriptionType` + `email` through verbatim.
  *   - Codex JWT defensive decoding extracts `chatgpt_account_id` server-side
  *     even when the request body did not provide it.
- *   - Legacy AFPS package id ("@appstrate/provider-codex") still resolves.
- *   - Unknown providerPackageId → 404 (`notFound`).
+ *   - Unknown providerId → 404 (`notFound`).
  *   - Empty label → 400 (`invalidRequest`).
  *   - Missing accessToken/refreshToken → 400.
  *   - Re-import creates a fresh row (the new model does not de-dupe).
@@ -36,8 +35,8 @@ import { importOAuthModelProviderConnection } from "../../../src/services/oauth-
 import { type OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 
-const CODEX_LEGACY = "@appstrate/provider-codex";
-const CLAUDE_LEGACY = "@appstrate/provider-claude-code";
+const CODEX = "codex";
+const CLAUDE = "claude-code";
 
 /**
  * Build a synthetic Codex-shaped JWT (RS256 alg header but unsigned — the
@@ -88,14 +87,14 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      providerPackageId: CODEX_LEGACY,
+      providerId: CODEX,
       label: "ChatGPT Pro",
       accessToken: accessJwt,
       refreshToken: "rt-codex",
       expiresAt: Date.now() + 3600 * 1000,
     });
 
-    expect(result.providerPackageId).toBe(CODEX_LEGACY);
+    expect(result.providerId).toBe(CODEX);
     expect(result.providerKeyId).toMatch(/^[0-9a-f-]{36}$/);
     expect(result.connectionId).toBe(result.providerKeyId);
     expect(result.email).toBe("user@example.com");
@@ -117,29 +116,12 @@ describe("importOAuthModelProviderConnection", () => {
     expect(blob.needsReconnection).toBe(false);
   });
 
-  it("accepts the canonical short providerId form ('codex')", async () => {
-    const result = await importOAuthModelProviderConnection({
-      orgId,
-      applicationId,
-      userId,
-      providerPackageId: "codex",
-      label: "ChatGPT",
-      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-short" }),
-      refreshToken: "rt",
-    });
-    const [row] = await db
-      .select({ providerId: modelProviderCredentials.providerId })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, result.providerKeyId));
-    expect(row?.providerId).toBe("codex");
-  });
-
   it("happy path Claude: passes subscriptionType + email through verbatim", async () => {
     const result = await importOAuthModelProviderConnection({
       orgId,
       applicationId,
       userId,
-      providerPackageId: CLAUDE_LEGACY,
+      providerId: CLAUDE,
       label: "Claude Max",
       accessToken: "sk-ant-oat01-fake",
       refreshToken: "sk-ant-ort01-fake",
@@ -148,7 +130,7 @@ describe("importOAuthModelProviderConnection", () => {
       email: "user@anthropic-test.com",
     });
 
-    expect(result.providerPackageId).toBe(CLAUDE_LEGACY);
+    expect(result.providerId).toBe(CLAUDE);
     expect(result.subscriptionType).toBe("max");
     expect(result.email).toBe("user@anthropic-test.com");
 
@@ -163,13 +145,13 @@ describe("importOAuthModelProviderConnection", () => {
     expect(blob.accountId).toBeUndefined();
   });
 
-  it("unknown providerPackageId → notFound (404)", async () => {
+  it("unknown providerId → notFound (404)", async () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
         applicationId,
         userId,
-        providerPackageId: "@example/not-a-real-provider",
+        providerId: "@example/not-a-real-provider",
         label: "x",
         accessToken: "a",
         refreshToken: "r",
@@ -183,7 +165,7 @@ describe("importOAuthModelProviderConnection", () => {
         orgId,
         applicationId,
         userId,
-        providerPackageId: "openai",
+        providerId: "openai",
         label: "x",
         accessToken: "a",
         refreshToken: "r",
@@ -197,7 +179,7 @@ describe("importOAuthModelProviderConnection", () => {
         orgId,
         applicationId,
         userId,
-        providerPackageId: CODEX_LEGACY,
+        providerId: CODEX,
         label: "   ",
         accessToken: makeFakeCodexJwt({ chatgpt_account_id: "x" }),
         refreshToken: "rt",
@@ -211,7 +193,7 @@ describe("importOAuthModelProviderConnection", () => {
         orgId,
         applicationId,
         userId,
-        providerPackageId: CODEX_LEGACY,
+        providerId: CODEX,
         label: "x",
         accessToken: "",
         refreshToken: "rt",
@@ -227,7 +209,7 @@ describe("importOAuthModelProviderConnection", () => {
         orgId,
         applicationId,
         userId,
-        providerPackageId: CODEX_LEGACY,
+        providerId: CODEX,
         label: "ChatGPT",
         accessToken: noAccountJwt,
         refreshToken: "rt",
@@ -240,7 +222,7 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      providerPackageId: CLAUDE_LEGACY,
+      providerId: CLAUDE,
       label: "Claude v1",
       accessToken: "access-v1",
       refreshToken: "refresh-v1",
@@ -251,7 +233,7 @@ describe("importOAuthModelProviderConnection", () => {
       orgId,
       applicationId,
       userId,
-      providerPackageId: CLAUDE_LEGACY,
+      providerId: CLAUDE,
       label: "Claude v2",
       accessToken: "access-v2",
       refreshToken: "refresh-v2",

@@ -18,11 +18,11 @@ export const modelProvidersOAuthPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerPackageId", "label", "accessToken", "refreshToken"],
+              required: ["providerId", "label", "accessToken", "refreshToken"],
               properties: {
-                providerPackageId: {
+                providerId: {
                   type: "string",
-                  enum: ["@appstrate/provider-codex", "@appstrate/provider-claude-code"],
+                  enum: ["codex", "claude-code"],
                 },
                 label: { type: "string", minLength: 1, maxLength: 120 },
                 accessToken: { type: "string", minLength: 1 },
@@ -69,16 +69,11 @@ export const modelProvidersOAuthPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: [
-                  "providerKeyId",
-                  "connectionId",
-                  "providerPackageId",
-                  "availableModelIds",
-                ],
+                required: ["providerKeyId", "connectionId", "providerId", "availableModelIds"],
                 properties: {
                   providerKeyId: { type: "string", format: "uuid" },
                   connectionId: { type: "string", format: "uuid" },
-                  providerPackageId: { type: "string" },
+                  providerId: { type: "string" },
                   email: { type: "string", format: "email" },
                   subscriptionType: { type: "string" },
                   availableModelIds: { type: "array", items: { type: "string" } },

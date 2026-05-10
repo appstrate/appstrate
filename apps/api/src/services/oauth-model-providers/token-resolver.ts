@@ -57,8 +57,6 @@ export interface ResolvedToken {
   accountId?: string;
   /** Canonical providerId, e.g. "codex" or "claude-code". */
   providerId: string;
-  /** @deprecated alias for {@link providerId} — removed in Phase 8. */
-  providerPackageId: string;
 }
 
 /** Credential row + decrypted blob + registry overlay. Internal helper return shape. */
@@ -136,7 +134,6 @@ function buildResolvedToken(state: CredentialState): ResolvedToken {
     forceStore: state.config.forceStore,
     accountId,
     providerId: state.config.providerId,
-    providerPackageId: state.config.providerId,
   };
 }
 
@@ -282,7 +279,6 @@ async function doRefresh(credentialId: string): Promise<ResolvedToken> {
     forceStore: state.config.forceStore,
     accountId,
     providerId: state.config.providerId,
-    providerPackageId: state.config.providerId,
   };
 }
 

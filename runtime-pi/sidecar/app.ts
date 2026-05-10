@@ -312,7 +312,7 @@ export function createApp(deps: AppDeps): Hono {
     delete baseHeaders["authorization"];
     delete baseHeaders["x-api-key"];
 
-    const identityHeaders = buildIdentityHeaders(llmConfig.providerPackageId, token);
+    const identityHeaders = buildIdentityHeaders(llmConfig.providerId, token);
     let forwardedHeaders: Record<string, string> = {
       ...baseHeaders,
       ...identityHeaders,
@@ -323,7 +323,7 @@ export function createApp(deps: AppDeps): Hono {
     if (method !== "GET" && method !== "HEAD") {
       bodyText = await c.req.raw.text();
       if (bodyText) {
-        bodyText = transformBody(llmConfig.providerPackageId, bodyText, {
+        bodyText = transformBody(llmConfig.providerId, bodyText, {
           forceStream: token.forceStream ?? llmConfig.forceStream,
           forceStore: token.forceStore ?? llmConfig.forceStore,
         });
@@ -370,7 +370,7 @@ export function createApp(deps: AppDeps): Hono {
       }
       forwardedHeaders = {
         ...forwardedHeaders,
-        ...buildIdentityHeaders(llmConfig.providerPackageId, refreshed),
+        ...buildIdentityHeaders(llmConfig.providerId, refreshed),
         authorization: `Bearer ${refreshed.accessToken}`,
       };
       try {
@@ -383,10 +383,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // Adaptive Anthropic beta exclusion: best-effort retry once after
     // stripping `context-1m-2025-08-07` from `anthropic-beta`.
-    if (
-      upstream.status === 400 &&
-      llmConfig.providerPackageId === "@appstrate/provider-claude-code"
-    ) {
+    if (upstream.status === 400 && llmConfig.providerId === "claude-code") {
       const text = await upstream.clone().text();
       const adapted = adaptBetaHeaderForRetry(upstream.status, text, forwardedHeaders);
       if (adapted) {

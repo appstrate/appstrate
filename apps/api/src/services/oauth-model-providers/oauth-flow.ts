@@ -36,11 +36,8 @@ export interface ImportOAuthModelProviderInput {
   userId: string;
   /** Kept for backward compat with the CLI body shape; unused by this service. */
   connectionProfileId?: string;
-  /**
-   * Either the canonical providerId ("codex") or the legacy AFPS package id
-   * ("@appstrate/provider-codex"). The registry alias map normalizes both.
-   */
-  providerPackageId: string;
+  /** Canonical providerId ("codex", "claude-code"). */
+  providerId: string;
   label: string;
   accessToken: string;
   refreshToken: string;
@@ -64,7 +61,7 @@ export interface ImportOAuthModelProviderResult {
   providerKeyId: string;
   /** Same UUID — kept as an alias in the response for backward compat. */
   connectionId: string;
-  providerPackageId: string;
+  providerId: string;
   email?: string;
   subscriptionType?: string;
   availableModelIds: string[];
@@ -86,9 +83,9 @@ export interface ImportOAuthModelProviderResult {
 export async function importOAuthModelProviderConnection(
   input: ImportOAuthModelProviderInput,
 ): Promise<ImportOAuthModelProviderResult> {
-  const config = getModelProviderConfig(input.providerPackageId);
+  const config = getModelProviderConfig(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
-    throw notFound(`Unknown OAuth model provider: ${input.providerPackageId} (not in registry)`);
+    throw notFound(`Unknown OAuth model provider: ${input.providerId} (not in registry)`);
   }
   if (!input.label.trim()) {
     throw invalidRequest("`label` is required", "label");
@@ -145,7 +142,7 @@ export async function importOAuthModelProviderConnection(
   return {
     providerKeyId: credentialId,
     connectionId: credentialId,
-    providerPackageId: input.providerPackageId,
+    providerId: input.providerId,
     email,
     subscriptionType: input.subscriptionType,
     availableModelIds: config.models.map((m) => m.id),

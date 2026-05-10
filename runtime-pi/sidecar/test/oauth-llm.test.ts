@@ -40,7 +40,7 @@ function buildPlatformTokenResponse(
     expiresAt: Date.now() + 60 * 60_000,
     apiShape: "anthropic-messages",
     baseUrl: "https://api.anthropic.com",
-    providerPackageId: "@appstrate/provider-claude-code",
+    providerId: "claude-code",
     ...overrides,
   };
 }
@@ -94,7 +94,7 @@ const CLAUDE_OAUTH: LlmProxyOauthConfig = {
   baseUrl: "https://api.anthropic.com",
   oauthConnectionId: "conn-abc",
   apiShape: "anthropic-messages",
-  providerPackageId: "@appstrate/provider-claude-code",
+  providerId: "claude-code",
 };
 
 const CODEX_OAUTH: LlmProxyOauthConfig = {
@@ -102,7 +102,7 @@ const CODEX_OAUTH: LlmProxyOauthConfig = {
   baseUrl: "https://chatgpt.com/backend-api",
   oauthConnectionId: "conn-codex",
   apiShape: "openai-responses",
-  providerPackageId: "@appstrate/provider-codex",
+  providerId: "codex",
   forceStream: true,
   forceStore: false,
   rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
@@ -301,7 +301,7 @@ describe("/llm/* OAuth — Codex path", () => {
         return new Response(
           JSON.stringify(
             buildPlatformTokenResponse({
-              providerPackageId: "@appstrate/provider-codex",
+              providerId: "codex",
               apiShape: "openai-responses",
               baseUrl: "https://chatgpt.com/backend-api",
               rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },

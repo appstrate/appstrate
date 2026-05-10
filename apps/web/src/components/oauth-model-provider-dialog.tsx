@@ -22,7 +22,7 @@
  *   2. **CLI command + poller**: shows the exact `appstrate connect …`
  *      command to copy/paste, with a clipboard button + a spinner that
  *      polls `/api/model-provider-credentials` every 2.5s. When a new row matching
- *      this providerPackageId appears, fires a success toast and closes.
+ *      this providerId appears, fires a success toast and closes.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -40,15 +40,15 @@ import type { OrgModelProviderKeyInfo } from "@appstrate/shared-types";
 
 interface Props {
   open: boolean;
-  providerPackageId: string;
+  providerId: string;
   /** Pre-fill suggestion shown in the label input. */
   defaultLabel: string;
   onClose: () => void;
 }
 
-const SLUG_BY_PACKAGE_ID: Readonly<Record<string, "codex" | "claude">> = Object.freeze({
-  "@appstrate/provider-codex": "codex",
-  "@appstrate/provider-claude-code": "claude",
+const SLUG_BY_PROVIDER_ID: Readonly<Record<string, "codex" | "claude">> = Object.freeze({
+  codex: "codex",
+  "claude-code": "claude",
 });
 
 /**
@@ -62,23 +62,18 @@ function buildConnectCommand(slug: "codex" | "claude", label: string): string {
   return `bunx @appstrate/cli@latest connect ${slug} --label='${escapedLabel}'`;
 }
 
-export function OAuthModelProviderDialog({
-  open,
-  providerPackageId,
-  defaultLabel,
-  onClose,
-}: Props) {
+export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const [stage, setStage] = useState<"tos" | "cli">("tos");
   const [label, setLabel] = useState(defaultLabel);
   const [tosAccepted, setTosAccepted] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const slug = SLUG_BY_PACKAGE_ID[providerPackageId] ?? "codex";
+  const slug = SLUG_BY_PROVIDER_ID[providerId] ?? "codex";
 
   // Snapshot the set of provider-key ids that already existed at the moment
   // we entered the CLI stage. The poller treats any new id matching this
-  // providerPackageId as the connection completing. Without the snapshot we'd
+  // providerId as the connection completing. Without the snapshot we'd
   // false-positive on whatever was already on the org.
   const baselineRef = useRef<Set<string> | null>(null);
 
@@ -99,21 +94,20 @@ export function OAuthModelProviderDialog({
     return () => clearInterval(id);
   }, [open, stage]);
 
-  // Fire success when a fresh row matching this providerPackageId appears.
+  // Fire success when a fresh row matching this providerId appears.
   useEffect(() => {
     if (!open || stage !== "cli") return;
     if (baselineRef.current === null) return;
     const baseline = baselineRef.current;
     const fresh = (keysQuery.data ?? []).find(
-      (k: OrgModelProviderKeyInfo) =>
-        !baseline.has(k.id) && k.providerPackageId === providerPackageId,
+      (k: OrgModelProviderKeyInfo) => !baseline.has(k.id) && k.providerId === providerId,
     );
     if (fresh) {
       toast.success(t("providerKeys.oauth.callbackSuccess"));
       handleClose();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keysQuery.data, open, stage, providerPackageId]);
+  }, [keysQuery.data, open, stage, providerId]);
 
   const command = useMemo(
     () => buildConnectCommand(slug, label.trim() || defaultLabel),

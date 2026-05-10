@@ -31,7 +31,7 @@ function makeTokenResponse(overrides: Partial<PlatformTokenResponse> = {}): Plat
     expiresAt: Date.now() + 60 * 60_000, // 1h
     apiShape: "anthropic-messages",
     baseUrl: "https://api.anthropic.com",
-    providerPackageId: "@appstrate/provider-claude-code",
+    providerId: "claude-code",
     ...overrides,
   };
 }

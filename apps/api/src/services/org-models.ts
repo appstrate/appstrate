@@ -219,7 +219,7 @@ interface ResolvedModel {
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
   /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
-  providerPackageId?: string;
+  providerId?: string;
   /** Codex only: required as `chatgpt-account-id` header on inference probes/runs. */
   accountId?: string;
 }
@@ -282,7 +282,7 @@ export async function resolveModel(
         reasoning: dbDefault.reasoning,
         cost: dbDefault.cost as ModelCost | null,
         isSystemModel: false,
-        providerPackageId: creds.providerPackageId,
+        providerId: creds.providerId,
         accountId: creds.accountId,
       };
     }
@@ -344,7 +344,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     reasoning: row.reasoning,
     cost: row.cost as ModelCost | null,
     isSystemModel: false,
-    providerPackageId: creds.providerPackageId,
+    providerId: creds.providerId,
     accountId: creds.accountId,
   };
 }
@@ -356,7 +356,7 @@ export function buildModelTestRequest(config: {
   api: string;
   baseUrl: string;
   apiKey: string;
-  providerPackageId?: string;
+  providerId?: string;
 }): {
   url: string;
   headers: Record<string, string>;
@@ -366,12 +366,10 @@ export function buildModelTestRequest(config: {
   let url: string;
 
   // OAuth-backed Anthropic flows (sk-ant-oat API tokens or Claude Code OAuth
-  // access tokens) probe `/v1/models` with the OAuth headers; the package id
+  // access tokens) probe `/v1/models` with the OAuth headers; the provider id
   // is the canonical signal — sk-ant-oat prefix is the legacy fallback.
   const isAnthropicOAuth =
-    config.providerPackageId === "@appstrate/provider-claude-code" ||
-    config.providerPackageId === "claude-code" ||
-    config.apiKey.startsWith("sk-ant-oat");
+    config.providerId === "claude-code" || config.apiKey.startsWith("sk-ant-oat");
 
   switch (config.api) {
     case "anthropic-messages":
@@ -417,7 +415,7 @@ export async function testModelConfig(config: {
   baseUrl: string;
   modelId: string;
   apiKey: string;
-  providerPackageId?: string;
+  providerId?: string;
   accountId?: string;
 }): Promise<TestResult> {
   if (isBlockedUrl(config.baseUrl)) {
@@ -435,16 +433,10 @@ export async function testModelConfig(config: {
   // /v1/messages is blocked by the third-party OAuth ban). Issue a real
   // single-token inference probe so the test reflects whether the key can
   // actually serve traffic.
-  if (
-    config.providerPackageId === "@appstrate/provider-codex" ||
-    config.providerPackageId === "codex"
-  ) {
+  if (config.providerId === "codex") {
     return testCodexInference(config);
   }
-  if (
-    config.providerPackageId === "@appstrate/provider-claude-code" ||
-    config.providerPackageId === "claude-code"
-  ) {
+  if (config.providerId === "claude-code") {
     return testClaudeCodeInference(config);
   }
 

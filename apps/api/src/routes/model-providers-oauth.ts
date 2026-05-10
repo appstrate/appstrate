@@ -23,12 +23,12 @@ import { recordAuditFromContext } from "../services/audit.ts";
  * redirect_uris, so any platform-hosted callback URL is rejected.
  */
 const importBody = z.object({
-  providerPackageId: z
+  providerId: z
     .string()
     .min(1)
     .refine(
       (id) => isOAuthModelProvider(id),
-      "providerPackageId must be a registered OAuth model provider",
+      "providerId must be a registered OAuth model provider",
     ),
   label: z.string().min(1, "label is required").max(120),
   accessToken: z.string().min(1, "accessToken is required"),
@@ -80,7 +80,7 @@ export function createModelProvidersOAuthRouter() {
         applicationId,
         userId: user.id,
         connectionProfileId: input.connectionProfileId,
-        providerPackageId: input.providerPackageId,
+        providerId: input.providerId,
         label: input.label,
         accessToken: input.accessToken,
         refreshToken: input.refreshToken,
@@ -95,7 +95,7 @@ export function createModelProvidersOAuthRouter() {
         resourceType: "oauth_model_provider",
         resourceId: result.providerKeyId,
         after: {
-          providerPackageId: result.providerPackageId,
+          providerId: result.providerId,
           connectionId: result.connectionId,
           availableModelIds: result.availableModelIds,
           // No raw token / email — audit log MUST NOT carry secrets

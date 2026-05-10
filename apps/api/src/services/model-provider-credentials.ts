@@ -510,7 +510,7 @@ export async function listOrgModelProviderCredentials(
         baseUrl: info.baseUrl,
         source: "custom",
         authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
-        providerPackageId: info.providerId,
+        providerId: info.providerId,
         oauthConnectionId: info.authMode === "oauth2" ? info.id : null,
         oauthEmail: info.oauthEmail ?? null,
         needsReconnection: info.oauthNeedsReconnection ?? false,
@@ -533,7 +533,7 @@ export interface InferenceCredentials {
   baseUrl: string;
   apiKey: string;
   /** Populated for OAuth-backed credentials — drives provider-specific request shape. */
-  providerPackageId?: string;
+  providerId?: string;
   /** Codex only: required as `chatgpt-account-id` header on inference. */
   accountId?: string;
 }
@@ -563,7 +563,7 @@ export async function loadInferenceCredentials(
     api: creds.apiShape,
     baseUrl: creds.baseUrl,
     apiKey: creds.apiKey,
-    providerPackageId: creds.providerId,
+    providerId: creds.providerId,
     accountId: creds.accountId,
   };
 }

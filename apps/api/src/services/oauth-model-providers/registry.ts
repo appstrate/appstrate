@@ -219,28 +219,14 @@ export const MODEL_PROVIDERS: Readonly<Record<string, ModelProviderConfig>> = Ob
   [openaiCompatibleConfig.providerId]: openaiCompatibleConfig,
 });
 
-/**
- * Backward-compat alias: legacy AFPS package id → new providerId.
- * Removed in Phase 8 once every call site uses the canonical providerId.
- */
-const LEGACY_PACKAGE_ID_TO_PROVIDER_ID: Readonly<Record<string, string>> = Object.freeze({
-  "@appstrate/provider-codex": "codex",
-  "@appstrate/provider-claude-code": "claude-code",
-});
-
-/** Resolves a legacy AFPS package id or a canonical providerId to a providerId. */
-function normalizeProviderId(idOrPackageId: string): string {
-  return LEGACY_PACKAGE_ID_TO_PROVIDER_ID[idOrPackageId] ?? idOrPackageId;
-}
-
 /** Returns the runtime config for a model provider, or null if unknown. */
-export function getModelProviderConfig(idOrPackageId: string): ModelProviderConfig | null {
-  return MODEL_PROVIDERS[normalizeProviderId(idOrPackageId)] ?? null;
+export function getModelProviderConfig(providerId: string): ModelProviderConfig | null {
+  return MODEL_PROVIDERS[providerId] ?? null;
 }
 
 /** Whitelist check — true iff the id resolves to an OAuth model provider. */
-export function isOAuthModelProvider(idOrPackageId: string): boolean {
-  const config = getModelProviderConfig(idOrPackageId);
+export function isOAuthModelProvider(providerId: string): boolean {
+  const config = getModelProviderConfig(providerId);
   return config?.authMode === "oauth2";
 }
 

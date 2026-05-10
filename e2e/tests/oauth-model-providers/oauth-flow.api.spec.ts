@@ -22,12 +22,12 @@
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
 
-const CODEX = "@appstrate/provider-codex";
+const CODEX = "codex";
 
 test.describe("OAuth Model Providers — API smoke", () => {
-  test("import rejects an unknown providerPackageId @smoke", async ({ apiClient }) => {
+  test("import rejects an unknown providerId @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerPackageId: "@example/not-a-real-provider",
+      providerId: "@example/not-a-real-provider",
       label: "Should fail",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
@@ -37,7 +37,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
 
   test("import rejects an empty label @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerPackageId: CODEX,
+      providerId: CODEX,
       label: "",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
@@ -47,7 +47,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
 
   test("import rejects missing accessToken @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerPackageId: CODEX,
+      providerId: CODEX,
       label: "Pro",
       refreshToken: "fake-refresh",
     });

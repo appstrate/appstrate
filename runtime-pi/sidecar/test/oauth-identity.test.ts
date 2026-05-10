@@ -22,14 +22,14 @@ function makeToken(overrides: Partial<CachedToken> = {}): CachedToken {
     fetchedAt: Date.now(),
     apiShape: "anthropic-messages",
     baseUrl: "https://api.anthropic.com",
-    providerPackageId: "@appstrate/provider-claude-code",
+    providerId: "claude-code",
     ...overrides,
   };
 }
 
 describe("buildIdentityHeaders", () => {
   it("returns Claude headers for the Claude Code provider", () => {
-    const h = buildIdentityHeaders("@appstrate/provider-claude-code", makeToken());
+    const h = buildIdentityHeaders("claude-code", makeToken());
     expect(h["accept"]).toBe("application/json");
     expect(h["anthropic-dangerous-direct-browser-access"]).toBe("true");
     expect(h["x-app"]).toBe("cli");
@@ -37,9 +37,9 @@ describe("buildIdentityHeaders", () => {
 
   it("returns Codex headers + chatgpt-account-id when accountId is set", () => {
     const h = buildIdentityHeaders(
-      "@appstrate/provider-codex",
+      "codex",
       makeToken({
-        providerPackageId: "@appstrate/provider-codex",
+        providerId: "codex",
         apiShape: "openai-responses",
         accountId: "acc_xyz",
       }),
@@ -50,21 +50,18 @@ describe("buildIdentityHeaders", () => {
   });
 
   it("omits chatgpt-account-id when accountId is missing", () => {
-    const h = buildIdentityHeaders(
-      "@appstrate/provider-codex",
-      makeToken({ providerPackageId: "@appstrate/provider-codex" }),
-    );
+    const h = buildIdentityHeaders("codex", makeToken({ providerId: "codex" }));
     expect(h["chatgpt-account-id"]).toBeUndefined();
   });
 
   it("returns an empty object for unknown providers", () => {
-    const h = buildIdentityHeaders("@appstrate/provider-unknown", makeToken());
+    const h = buildIdentityHeaders("unknown-provider", makeToken());
     expect(h).toEqual({});
   });
 });
 
 describe("transformBody — Claude identity prepend", () => {
-  const PID = "@appstrate/provider-claude-code";
+  const PID = "claude-code";
   const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
   it("prepends identity when system is absent", () => {
@@ -115,7 +112,7 @@ describe("transformBody — Claude identity prepend", () => {
 });
 
 describe("transformBody — Codex coercion", () => {
-  const PID = "@appstrate/provider-codex";
+  const PID = "codex";
 
   it("forces stream and store flags when set", () => {
     const body = JSON.stringify({ model: "gpt-5", stream: false, store: true });
@@ -134,16 +131,16 @@ describe("transformBody — Codex coercion", () => {
 
 describe("transformBody — defensive paths", () => {
   it("returns input unchanged for empty body", () => {
-    expect(transformBody("@appstrate/provider-claude-code", "")).toBe("");
+    expect(transformBody("claude-code", "")).toBe("");
   });
 
   it("returns input unchanged when body is not JSON", () => {
-    expect(transformBody("@appstrate/provider-claude-code", "not-json")).toBe("not-json");
+    expect(transformBody("claude-code", "not-json")).toBe("not-json");
   });
 
   it("returns input unchanged for unknown providers", () => {
     const body = JSON.stringify({ system: "x" });
-    expect(transformBody("@appstrate/provider-unknown", body)).toBe(body);
+    expect(transformBody("unknown-provider", body)).toBe(body);
   });
 });
 

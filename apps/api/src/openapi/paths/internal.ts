@@ -273,7 +273,7 @@ export const internalPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["accessToken", "apiShape", "baseUrl", "providerPackageId"],
+                required: ["accessToken", "apiShape", "baseUrl", "providerId"],
                 properties: {
                   accessToken: { type: "string" },
                   expiresAt: {
@@ -299,7 +299,7 @@ export const internalPaths = {
                     type: "string",
                     description: "Codex only — used as `chatgpt-account-id` header.",
                   },
-                  providerPackageId: { type: "string" },
+                  providerId: { type: "string" },
                 },
               },
             },
@@ -343,7 +343,7 @@ export const internalPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["accessToken", "apiShape", "baseUrl", "providerPackageId"],
+                required: ["accessToken", "apiShape", "baseUrl", "providerId"],
                 properties: {
                   accessToken: { type: "string" },
                   expiresAt: { type: ["integer", "null"] },
@@ -363,7 +363,7 @@ export const internalPaths = {
                   forceStream: { type: "boolean" },
                   forceStore: { type: "boolean" },
                   accountId: { type: "string" },
-                  providerPackageId: { type: "string" },
+                  providerId: { type: "string" },
                 },
               },
             },

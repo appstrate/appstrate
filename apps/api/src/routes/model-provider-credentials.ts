@@ -176,8 +176,8 @@ export function createModelProviderCredentialsRouter() {
         // OAuth providers reject the dummy `_test` model id — fall back to
         // the registry's first model (sized for a low-cost probe regardless).
         let modelId = "_test";
-        if (creds.providerPackageId) {
-          const cfg = getModelProviderConfig(creds.providerPackageId);
+        if (creds.providerId) {
+          const cfg = getModelProviderConfig(creds.providerId);
           if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
         }
         const result = await testModelConfig({ ...creds, modelId });

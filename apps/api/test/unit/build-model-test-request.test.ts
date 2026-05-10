@@ -122,13 +122,13 @@ describe("buildModelTestRequest", () => {
     expect(url).toBe("https://api.openai.com/v1/models");
   });
 
-  it("anthropic-messages + provider-claude-code: uses Bearer + oauth beta even without sk-ant-oat prefix", () => {
+  it("anthropic-messages + claude-code: uses Bearer + oauth beta even without sk-ant-oat prefix", () => {
     // Claude Code OAuth tokens are JWTs, not sk-ant-oat — the provider id is the canonical signal.
     const { headers } = buildModelTestRequest({
       api: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       apiKey: "eyJhbGciOiJSUzI1NiJ9.fake.jwt",
-      providerPackageId: "@appstrate/provider-claude-code",
+      providerId: "claude-code",
     });
     expect(headers["Authorization"]).toBe("Bearer eyJhbGciOiJSUzI1NiJ9.fake.jwt");
     expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
@@ -141,13 +141,13 @@ describe("testModelConfig", () => {
   // probe and need an outbound fetch — covered in the integration test
   // suite where we can intercept the upstream call. This unit suite only
   // covers the static request shape via buildModelTestRequest above.
-  it("provider-codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
+  it("codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
     const result = await testModelConfig({
       api: "openai-responses",
       baseUrl: "https://chatgpt.com/backend-api",
       modelId: "gpt-5.4-mini",
       apiKey: "not-a-jwt",
-      providerPackageId: "@appstrate/provider-codex",
+      providerId: "codex",
       // intentionally no accountId — simulates a malformed token
     });
     expect(result.ok).toBe(false);
