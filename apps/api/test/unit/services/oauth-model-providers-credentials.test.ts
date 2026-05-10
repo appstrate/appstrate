@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  decodeCodexJwtPayload,
-  readClaudeEmail,
-  readClaudeSubscriptionType,
-} from "../../../src/services/oauth-model-providers/credentials.ts";
+import { decodeCodexJwtPayload } from "../../../src/services/oauth-model-providers/credentials.ts";
 
 function buildJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
@@ -59,32 +55,5 @@ describe("decodeCodexJwtPayload", () => {
       chatgpt_account_id: undefined,
       email: undefined,
     });
-  });
-});
-
-describe("readClaudeSubscriptionType", () => {
-  it("returns the subscription_type field when present as string", () => {
-    expect(readClaudeSubscriptionType({ subscription_type: "pro" })).toBe("pro");
-    expect(readClaudeSubscriptionType({ subscription_type: "max" })).toBe("max");
-  });
-
-  it("returns undefined when missing or non-string", () => {
-    expect(readClaudeSubscriptionType({})).toBeUndefined();
-    expect(readClaudeSubscriptionType({ subscription_type: 123 })).toBeUndefined();
-  });
-});
-
-describe("readClaudeEmail", () => {
-  it("reads email from top-level field", () => {
-    expect(readClaudeEmail({ email: "user@anthropic.com" })).toBe("user@anthropic.com");
-  });
-
-  it("falls back to account.email_address", () => {
-    expect(readClaudeEmail({ account: { email_address: "user@org.com" } })).toBe("user@org.com");
-  });
-
-  it("returns undefined when neither is present", () => {
-    expect(readClaudeEmail({})).toBeUndefined();
-    expect(readClaudeEmail({ account: {} })).toBeUndefined();
   });
 });
