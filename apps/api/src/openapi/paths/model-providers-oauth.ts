@@ -4,7 +4,7 @@ export const modelProvidersOAuthPaths = {
   "/api/model-providers-oauth/import": {
     post: {
       operationId: "importOAuthModelProviderConnection",
-      tags: ["Model Provider Keys"],
+      tags: ["Model Provider Credentials"],
       summary: "Import an OAuth model provider token bundle from the CLI",
       description:
         "Persists an OAuth token bundle obtained on the user's machine via `appstrate connect <provider>`. The CLI runs the loopback OAuth dance against the provider's authorization server because the public CLI client_ids only allowlist `http://localhost:PORT/...` redirect_uris. Server-side this re-derives provider claims (Codex JWT account_id) defensively, then persists via the same shared helper the legacy callback used.",

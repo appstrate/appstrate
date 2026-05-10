@@ -156,13 +156,14 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
 
-  // Model Provider Keys
-  "GET /api/model-provider-keys",
-  "POST /api/model-provider-keys",
-  "POST /api/model-provider-keys/test",
-  "PUT /api/model-provider-keys/{id}",
-  "DELETE /api/model-provider-keys/{id}",
-  "POST /api/model-provider-keys/{id}/test",
+  // Model Provider Credentials
+  "GET /api/model-provider-credentials/registry",
+  "GET /api/model-provider-credentials",
+  "POST /api/model-provider-credentials",
+  "POST /api/model-provider-credentials/test",
+  "PUT /api/model-provider-credentials/{id}",
+  "DELETE /api/model-provider-credentials/{id}",
+  "POST /api/model-provider-credentials/{id}/test",
   // OAuth Model Providers (subscription billing)
   "POST /api/model-providers-oauth/import",
 

@@ -5767,10 +5767,10 @@
         }
       }
     },
-    "/api/model-provider-keys": {
+    "/api/model-provider-credentials": {
       "get": {
         "operationId": "listModelProviderKeys",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "List organization model provider keys",
         "description": "Returns all LLM model provider keys (Anthropic, OpenAI, etc.) for the current organization. API keys are never exposed.",
         "parameters": [
@@ -5838,7 +5838,7 @@
       },
       "post": {
         "operationId": "createModelProviderKey",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "Create a model provider key",
         "description": "Create a new LLM model provider key for the organization. The API key is encrypted at rest.",
         "parameters": [
@@ -5915,10 +5915,10 @@
         }
       }
     },
-    "/api/model-provider-keys/test": {
+    "/api/model-provider-credentials/test": {
       "post": {
         "operationId": "testModelProviderKeyInline",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "Test model provider key configuration inline",
         "description": "Test a model provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
         "parameters": [
@@ -5991,10 +5991,10 @@
         }
       }
     },
-    "/api/model-provider-keys/{id}": {
+    "/api/model-provider-credentials/{id}": {
       "put": {
         "operationId": "updateModelProviderKey",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "Update a model provider key",
         "description": "Update a model provider key configuration.",
         "parameters": [
@@ -6075,7 +6075,7 @@
       },
       "delete": {
         "operationId": "deleteModelProviderKey",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "Delete a model provider key",
         "description": "Delete a model provider key. Models using this key will have their providerKeyId set to null.",
         "parameters": [
@@ -6109,10 +6109,10 @@
         }
       }
     },
-    "/api/model-provider-keys/{id}/test": {
+    "/api/model-provider-credentials/{id}/test": {
       "post": {
         "operationId": "testModelProviderKey",
-        "tags": ["Model Provider Keys"],
+        "tags": ["Model Provider Credentials"],
         "summary": "Test model provider key connection",
         "description": "Test that the model provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
         "parameters": [

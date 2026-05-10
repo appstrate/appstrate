@@ -49,7 +49,7 @@ import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
-import { createModelProviderKeysRouter } from "../../src/routes/model-provider-keys.ts";
+import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
@@ -233,7 +233,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
-  app.route("/api/model-provider-keys", createModelProviderKeysRouter());
+  app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api/app-profiles", createAppProfilesRouter());

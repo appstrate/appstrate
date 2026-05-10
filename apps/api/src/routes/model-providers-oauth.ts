@@ -67,7 +67,7 @@ export function createModelProvidersOAuthRouter() {
   router.post(
     "/import",
     requireAppContext(),
-    requirePermission("model-provider-keys", "write"),
+    requirePermission("model-provider-credentials", "write"),
     async (c) => {
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId");

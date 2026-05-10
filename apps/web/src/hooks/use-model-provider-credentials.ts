@@ -5,31 +5,31 @@ import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 
-export function useModelProviderKeys() {
+export function useModelProviderCredentials() {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["model-provider-keys", orgId],
-    queryFn: () => apiList<OrgModelProviderKeyInfo>("/model-provider-keys"),
+    queryKey: ["model-provider-credentials", orgId],
+    queryFn: () => apiList<OrgModelProviderKeyInfo>("/model-provider-credentials"),
     enabled: !!orgId,
   });
 }
 
-export function useCreateModelProviderKey() {
+export function useCreateModelProviderCredential() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: { label: string; api: string; baseUrl: string; apiKey: string }) => {
-      return api<{ id: string }>("/model-provider-keys", {
+      return api<{ id: string }>("/model-provider-credentials", {
         method: "POST",
         body: JSON.stringify(data),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-keys"] });
+      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
     },
   });
 }
 
-export function useUpdateModelProviderKey() {
+export function useUpdateModelProviderCredential() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -44,33 +44,33 @@ export function useUpdateModelProviderKey() {
         apiKey?: string;
       };
     }) => {
-      return api(`/model-provider-keys/${id}`, {
+      return api(`/model-provider-credentials/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-keys"] });
+      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
     },
   });
 }
 
-export function useDeleteModelProviderKey() {
+export function useDeleteModelProviderCredential() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      return api(`/model-provider-keys/${id}`, { method: "DELETE" });
+      return api(`/model-provider-credentials/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-provider-keys"] });
+      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
     },
   });
 }
 
-export function useTestModelProviderKey() {
+export function useTestModelProviderCredential() {
   return useMutation({
     mutationFn: (id: string) =>
-      api<TestResult>(`/model-provider-keys/${id}/test`, { method: "POST" }),
+      api<TestResult>(`/model-provider-credentials/${id}/test`, { method: "POST" }),
   });
 }
 
@@ -82,10 +82,10 @@ export function deduplicateLabel(label: string, existingKeys: OrgModelProviderKe
   return `${label} (${counter})`;
 }
 
-export function useTestModelProviderKeyInline() {
+export function useTestModelProviderCredentialInline() {
   return useMutation({
     mutationFn: (data: { api: string; baseUrl: string; apiKey?: string; existingKeyId?: string }) =>
-      api<TestResult>("/model-provider-keys/test", {
+      api<TestResult>("/model-provider-credentials/test", {
         method: "POST",
         body: JSON.stringify(data),
       }),

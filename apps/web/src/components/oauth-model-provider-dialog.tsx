@@ -21,7 +21,7 @@
  *      moving on.
  *   2. **CLI command + poller**: shows the exact `appstrate connect …`
  *      command to copy/paste, with a clipboard button + a spinner that
- *      polls `/api/model-provider-keys` every 2.5s. When a new row matching
+ *      polls `/api/model-provider-credentials` every 2.5s. When a new row matching
  *      this providerPackageId appears, fires a success toast and closes.
  */
 
@@ -35,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
-import { useModelProviderKeys } from "../hooks/use-model-provider-keys";
+import { useModelProviderCredentials } from "../hooks/use-model-provider-credentials";
 import type { OrgModelProviderKeyInfo } from "@appstrate/shared-types";
 
 interface Props {
@@ -82,12 +82,12 @@ export function OAuthModelProviderDialog({
   // false-positive on whatever was already on the org.
   const baselineRef = useRef<Set<string> | null>(null);
 
-  // Poll model-provider-keys every 2.5s while we're on the CLI stage. We
+  // Poll model-provider-credentials every 2.5s while we're on the CLI stage. We
   // funnel the unstable `keysQuery.refetch` through a ref so the polling
   // effect's dependency array stays primitive — without this, the React-Query
   // hook returns a new object every render and the interval was being
   // shredded + recreated on every refetch, causing a tight request loop.
-  const keysQuery = useModelProviderKeys();
+  const keysQuery = useModelProviderCredentials();
   const refetchRef = useRef(keysQuery.refetch);
   refetchRef.current = keysQuery.refetch;
 

@@ -1,17 +1,93 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const modelProviderKeysPaths = {
-  "/api/model-provider-keys": {
+export const modelProviderCredentialsPaths = {
+  "/api/model-provider-credentials/registry": {
     get: {
-      operationId: "listModelProviderKeys",
-      tags: ["Model Provider Keys"],
-      summary: "List organization model provider keys",
+      operationId: "listModelProviderRegistry",
+      tags: ["Model Provider Credentials"],
+      summary: "List the in-code model provider registry",
       description:
-        "Returns all LLM model provider keys (Anthropic, OpenAI, etc.) for the current organization. API keys are never exposed.",
+        "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, Claude Code, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
-          description: "Model provider key list",
+          description: "Model provider registry list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "providerId",
+                        "displayName",
+                        "iconUrl",
+                        "apiShape",
+                        "defaultBaseUrl",
+                        "baseUrlOverridable",
+                        "authMode",
+                        "models",
+                      ],
+                      properties: {
+                        providerId: { type: "string" },
+                        displayName: { type: "string" },
+                        iconUrl: { type: "string" },
+                        description: { type: ["string", "null"] },
+                        docsUrl: { type: ["string", "null"] },
+                        apiShape: {
+                          type: "string",
+                          enum: ["anthropic-messages", "openai-chat", "openai-responses"],
+                        },
+                        defaultBaseUrl: { type: "string" },
+                        baseUrlOverridable: { type: "boolean" },
+                        authMode: { type: "string", enum: ["api_key", "oauth2"] },
+                        models: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            required: ["id", "contextWindow", "capabilities"],
+                            properties: {
+                              id: { type: "string" },
+                              contextWindow: { type: "integer" },
+                              maxTokens: { type: ["integer", "null"] },
+                              capabilities: { type: "array", items: { type: "string" } },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/model-provider-credentials": {
+    get: {
+      operationId: "listModelProviderCredentials",
+      tags: ["Model Provider Credentials"],
+      summary: "List organization model provider credentials",
+      description:
+        "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, Claude Code, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Model provider credentials list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -37,8 +113,8 @@ export const modelProviderKeysPaths = {
                   {
                     id: "cm7stu901",
                     label: "OpenAI Production",
-                    api: "openai-responses",
-                    baseUrl: "https://api.openai.com/v1",
+                    api: "openai-chat",
+                    baseUrl: "https://api.openai.com",
                     source: "custom",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
@@ -53,11 +129,11 @@ export const modelProviderKeysPaths = {
       },
     },
     post: {
-      operationId: "createModelProviderKey",
-      tags: ["Model Provider Keys"],
-      summary: "Create a model provider key",
+      operationId: "createModelProviderCredential",
+      tags: ["Model Provider Credentials"],
+      summary: "Create a model provider credential",
       description:
-        "Create a new LLM model provider key for the organization. The API key is encrypted at rest.",
+        "Create a new LLM model provider credential for the organization. The plaintext API key is encrypted at rest under a versioned envelope.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -70,13 +146,13 @@ export const modelProviderKeysPaths = {
                 label: {
                   type: "string",
                   minLength: 1,
-                  description: "Display name for the model provider key",
+                  description: "Display name for the model provider credential",
                 },
                 api: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
+                    "API wire format (anthropic-messages, openai-chat, openai-responses, openai-completions, …). Combined with baseUrl to reverse-resolve the registry providerId.",
                 },
                 baseUrl: {
                   type: "string",
@@ -91,7 +167,7 @@ export const modelProviderKeysPaths = {
       },
       responses: {
         "201": {
-          description: "Model provider key created",
+          description: "Model provider credential created",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -113,13 +189,13 @@ export const modelProviderKeysPaths = {
       },
     },
   },
-  "/api/model-provider-keys/test": {
+  "/api/model-provider-credentials/test": {
     post: {
-      operationId: "testModelProviderKeyInline",
-      tags: ["Model Provider Keys"],
-      summary: "Test model provider key configuration inline",
+      operationId: "testModelProviderCredentialInline",
+      tags: ["Model Provider Credentials"],
+      summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -129,7 +205,7 @@ export const modelProviderKeysPaths = {
               type: "object",
               required: ["api", "baseUrl"],
               properties: {
-                api: { type: "string", minLength: 1, description: "API type" },
+                api: { type: "string", minLength: 1, description: "API wire format" },
                 baseUrl: {
                   type: "string",
                   format: "uri",
@@ -137,11 +213,11 @@ export const modelProviderKeysPaths = {
                 },
                 apiKey: {
                   type: "string",
-                  description: "API key (required for new keys)",
+                  description: "API key (required for new credentials)",
                 },
                 existingKeyId: {
                   type: "string",
-                  description: "Existing model provider key ID to fall back to for stored API key",
+                  description: "Existing credential ID to fall back to for stored API key",
                 },
               },
             },
@@ -168,12 +244,12 @@ export const modelProviderKeysPaths = {
       },
     },
   },
-  "/api/model-provider-keys/{id}": {
+  "/api/model-provider-credentials/{id}": {
     put: {
-      operationId: "updateModelProviderKey",
-      tags: ["Model Provider Keys"],
-      summary: "Update a model provider key",
-      description: "Update a model provider key configuration.",
+      operationId: "updateModelProviderCredential",
+      tags: ["Model Provider Credentials"],
+      summary: "Update a model provider credential",
+      description: "Update a model provider credential configuration.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -196,7 +272,7 @@ export const modelProviderKeysPaths = {
       },
       responses: {
         "200": {
-          description: "Model provider key updated",
+          description: "Model provider credential updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -213,18 +289,18 @@ export const modelProviderKeysPaths = {
       },
     },
     delete: {
-      operationId: "deleteModelProviderKey",
-      tags: ["Model Provider Keys"],
-      summary: "Delete a model provider key",
+      operationId: "deleteModelProviderCredential",
+      tags: ["Model Provider Credentials"],
+      summary: "Delete a model provider credential",
       description:
-        "Delete a model provider key. Models using this key will have their providerKeyId set to null.",
+        "Delete a model provider credential. Rejected with 409/500 if any org_models row still references it (FK ON DELETE RESTRICT) — detach the model first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
-          description: "Model provider key deleted",
+          description: "Model provider credential deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
@@ -234,13 +310,13 @@ export const modelProviderKeysPaths = {
       },
     },
   },
-  "/api/model-provider-keys/{id}/test": {
+  "/api/model-provider-credentials/{id}/test": {
     post: {
-      operationId: "testModelProviderKey",
-      tags: ["Model Provider Keys"],
-      summary: "Test model provider key connection",
+      operationId: "testModelProviderCredential",
+      tags: ["Model Provider Credentials"],
+      summary: "Test model provider credential connection",
       description:
-        "Test that the model provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "Test that the credential's API key (or OAuth token) and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -259,7 +335,7 @@ export const modelProviderKeysPaths = {
           },
         },
         "404": {
-          description: "Model provider key not found",
+          description: "Model provider credential not found",
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

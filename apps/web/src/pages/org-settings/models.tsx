@@ -24,16 +24,16 @@ import {
   useModelFormHandler,
 } from "../../hooks/use-models";
 import {
-  useModelProviderKeys,
-  useCreateModelProviderKey,
-  useUpdateModelProviderKey,
-  useDeleteModelProviderKey,
-  useTestModelProviderKey,
+  useModelProviderCredentials,
+  useCreateModelProviderCredential,
+  useUpdateModelProviderCredential,
+  useDeleteModelProviderCredential,
+  useTestModelProviderCredential,
   deduplicateLabel,
-} from "../../hooks/use-model-provider-keys";
+} from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { ModelProviderKeyFormModal } from "../../components/model-provider-key-form-modal";
+import { ModelProviderKeyFormModal } from "../../components/model-provider-credential-form-modal";
 import { OAuthModelProviderDialog } from "../../components/oauth-model-provider-dialog";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
@@ -244,7 +244,7 @@ function ProviderKeysSection({
   onConnectOAuth: (providerPackageId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModelProviderKey();
+  const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
@@ -407,10 +407,14 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<OrgModelProviderKeyInfo | null>(null);
-  const { data: providerKeys, isLoading: pkLoading, error: pkError } = useModelProviderKeys();
-  const createPkMutation = useCreateModelProviderKey();
-  const updatePkMutation = useUpdateModelProviderKey();
-  const deletePkMutation = useDeleteModelProviderKey();
+  const {
+    data: providerKeys,
+    isLoading: pkLoading,
+    error: pkError,
+  } = useModelProviderCredentials();
+  const createPkMutation = useCreateModelProviderCredential();
+  const updatePkMutation = useUpdateModelProviderCredential();
+  const deletePkMutation = useDeleteModelProviderCredential();
 
   const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
 

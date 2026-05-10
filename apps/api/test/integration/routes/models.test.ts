@@ -18,7 +18,7 @@ describe("Models API", () => {
 
   /** Helper: create a model provider key and return its ID (required for model creation). */
   async function createProviderKey(): Promise<string> {
-    const res = await app.request("/api/model-provider-keys", {
+    const res = await app.request("/api/model-provider-credentials", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({

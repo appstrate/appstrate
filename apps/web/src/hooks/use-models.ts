@@ -7,10 +7,10 @@ import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
 import type { ModelFormData } from "../components/model-form-modal";
 import {
-  useCreateModelProviderKey,
-  useModelProviderKeys,
+  useCreateModelProviderCredential,
+  useModelProviderCredentials,
   deduplicateLabel,
-} from "./use-model-provider-keys";
+} from "./use-model-provider-credentials";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 export function useModels() {
@@ -175,8 +175,8 @@ export function useModelFormHandler(opts: {
 }) {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
-  const createPk = useCreateModelProviderKey();
-  const { data: providerKeys } = useModelProviderKeys();
+  const createPk = useCreateModelProviderCredential();
+  const { data: providerKeys } = useModelProviderCredentials();
 
   const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
 

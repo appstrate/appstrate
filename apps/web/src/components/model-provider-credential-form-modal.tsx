@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useTestModelProviderKeyInline } from "../hooks/use-model-provider-keys";
+import { useTestModelProviderCredentialInline } from "../hooks/use-model-provider-credentials";
 import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -94,7 +94,7 @@ function ProviderKeyFormBody({
     name: ["api", "baseUrl", "apiKey", "label"],
   });
 
-  const testMutation = useTestModelProviderKeyInline();
+  const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const canTest = !!api.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!providerKey);
 

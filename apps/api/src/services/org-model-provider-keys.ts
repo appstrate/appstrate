@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Legacy facade over `model_provider_credentials`.
+ * Legacy `(api, baseUrl, apiKey)`-shaped facade over the unified
+ * `model_provider_credentials` table. Consumed by the route layer
+ * (`/api/model-provider-credentials`) which still accepts the historic
+ * input shape: `(api, baseUrl)` is reverse-resolved against the platform
+ * registry to a canonical `providerId`; unknown combinations fall back to
+ * `openai-compatible` with a `baseUrlOverride`.
  *
- * The route contract (`/api/model-provider-keys`) is preserved verbatim — it
- * takes `(api, baseUrl, apiKey)` — but every CRUD operation now reads/writes
- * the unified `model_provider_credentials` table. The `(api, baseUrl)` pair
- * is reverse-resolved against the platform registry to a canonical
- * `providerId`; unknown combinations fall back to `openai-compatible` with a
- * `baseUrlOverride`.
- *
- * Phase 6 will rename the routes and require explicit `providerId`, retiring
- * this shim.
+ * The file kept its name to minimise churn — `org-model-provider-keys`
+ * is shorthand for "the org-scoped, key-or-token credential store",
+ * not for the legacy DB table (which is gone).
  */
 
 import { listModelProviders, getModelProviderConfig } from "./oauth-model-providers/registry.ts";
