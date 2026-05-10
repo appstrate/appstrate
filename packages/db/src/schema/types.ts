@@ -26,7 +26,7 @@ import type {
   apiKeys,
   orgInvitations,
   orgProxies,
-  orgSystemProviderKeys,
+  modelProviderCredentials,
   orgModels,
 } from "./organizations.ts";
 
@@ -70,7 +70,7 @@ export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
 
 export type OrgProxy = InferSelectModel<typeof orgProxies>;
 
-export type OrgSystemProviderKey = InferSelectModel<typeof orgSystemProviderKeys>;
+export type ModelProviderCredential = InferSelectModel<typeof modelProviderCredentials>;
 
 export type OrgModel = InferSelectModel<typeof orgModels>;
 

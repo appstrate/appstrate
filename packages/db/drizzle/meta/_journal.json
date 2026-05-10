@@ -162,6 +162,20 @@
       "when": 1789171200000,
       "tag": "0022_drop_org_models_provider_key_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789257600000,
+      "tag": "0023_drop_org_system_provider_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789344000000,
+      "tag": "0024_org_models_fk_to_credentials",
+      "breakpoints": true
     }
   ]
 }

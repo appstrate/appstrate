@@ -2,18 +2,21 @@
 
 /**
  * Integration tests for `services/org-model-provider-keys` — the org-scoped
- * LLM API key vault. Pins the security-critical contract:
+ * LLM credential vault, now backed by `model_provider_credentials` (Phase 5).
+ * Pins the security-critical contract:
  *
  *   - the `apiKey` plaintext is never returned outside `loadModelProviderKeyCredentials`
- *   - the row's `apiKeyEncrypted` column is opaque (versioned envelope, never plaintext)
+ *   - the row's `credentials_encrypted` column is opaque (versioned envelope, never plaintext)
  *   - cross-org reads / updates / deletes are scoped — org A cannot touch org B's row
  *   - decryption round-trips for the org that owns the key
  *   - update with a new `apiKey` re-encrypts and the old plaintext stops decrypting
+ *   - OAuth credentials route through the same `loadModelProviderKeyCredentials`
+ *     read path with `providerPackageId` + (Codex) `accountId` propagation
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys } from "@appstrate/db/schema";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -60,7 +63,7 @@ describe("org-model-provider-keys service", () => {
   });
 
   describe("createOrgModelProviderKey", () => {
-    it("stores an opaque envelope, never the plaintext, in apiKeyEncrypted", async () => {
+    it("stores an opaque envelope, never the plaintext, in credentials_encrypted", async () => {
       const ctx = await createTestContext({ orgSlug: "vault-create" });
       const id = await createOrgModelProviderKey(
         ctx.orgId,
@@ -73,14 +76,16 @@ describe("org-model-provider-keys service", () => {
 
       const [row] = await db
         .select()
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, id));
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
       expect(row).toBeDefined();
       // Plaintext must not appear anywhere in the row.
       const serialized = JSON.stringify(row);
       expect(serialized).not.toContain(PLAINTEXT);
       // Envelope shape: v1:<kid>:<base64>.
-      expect(row!.apiKeyEncrypted).toMatch(/^v1:[^:]+:[A-Za-z0-9+/=]+$/);
+      expect(row!.credentialsEncrypted).toMatch(/^v1:[^:]+:[A-Za-z0-9+/=]+$/);
+      // Reverse-resolution against the registry pins the canonical providerId.
+      expect(row!.providerId).toBe("anthropic");
     });
 
     it("returns plaintext only via loadModelProviderKeyCredentials for the owning org", async () => {
@@ -100,6 +105,25 @@ describe("org-model-provider-keys service", () => {
       expect(creds!.api).toBe("anthropic-messages");
       expect(creds!.baseUrl).toBe("https://api.anthropic.com");
     });
+
+    it("falls back to openai-compatible + baseUrlOverride for unrecognized (api, baseUrl) pairs", async () => {
+      const ctx = await createTestContext({ orgSlug: "vault-fallback" });
+      const id = await createOrgModelProviderKey(
+        ctx.orgId,
+        "Self-hosted",
+        "openai-completions",
+        "https://self-hosted.example.com/v1",
+        PLAINTEXT,
+        ctx.user.id,
+      );
+
+      const [row] = await db
+        .select()
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
+      expect(row!.providerId).toBe("openai-compatible");
+      expect(row!.baseUrlOverride).toBe("https://self-hosted.example.com/v1");
+    });
   });
 
   describe("listOrgModelProviderKeys", () => {
@@ -118,10 +142,10 @@ describe("org-model-provider-keys service", () => {
       const custom = list.filter((k) => k.source === "custom");
       expect(custom).toHaveLength(1);
       // The list shape is `OrgModelProviderKeyInfo` — must not contain any `apiKey`
-      // or `apiKeyEncrypted` field; only metadata.
+      // or `credentialsEncrypted` field; only metadata.
       const serialized = JSON.stringify(custom[0]);
       expect(serialized).not.toContain(PLAINTEXT);
-      expect(serialized).not.toContain("apiKeyEncrypted");
+      expect(serialized).not.toContain("credentialsEncrypted");
       expect(serialized).not.toContain("apiKey");
     });
   });
@@ -165,8 +189,8 @@ describe("org-model-provider-keys service", () => {
 
       const [row] = await db
         .select()
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, idA));
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, idA));
       // Encrypted blob must still decrypt to org A's original secret.
       const own = await loadModelProviderKeyCredentials(ctxA.orgId, idA);
       expect(own?.apiKey).toBe("secret-original");
@@ -203,16 +227,16 @@ describe("org-model-provider-keys service", () => {
         ctx.user.id,
       );
       const [before] = await db
-        .select({ blob: orgSystemProviderKeys.apiKeyEncrypted })
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, id));
+        .select({ blob: modelProviderCredentials.credentialsEncrypted })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
 
       await updateOrgModelProviderKey(ctx.orgId, id, { apiKey: "new-secret" });
 
       const [after] = await db
-        .select({ blob: orgSystemProviderKeys.apiKeyEncrypted })
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, id));
+        .select({ blob: modelProviderCredentials.credentialsEncrypted })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
       expect(after!.blob).not.toBe(before!.blob);
       const creds = await loadModelProviderKeyCredentials(ctx.orgId, id);
       expect(creds?.apiKey).toBe("new-secret");
@@ -229,16 +253,19 @@ describe("org-model-provider-keys service", () => {
         ctx.user.id,
       );
       const [before] = await db
-        .select({ blob: orgSystemProviderKeys.apiKeyEncrypted })
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, id));
+        .select({ blob: modelProviderCredentials.credentialsEncrypted })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
 
       await updateOrgModelProviderKey(ctx.orgId, id, { label: "renamed" });
 
       const [after] = await db
-        .select({ blob: orgSystemProviderKeys.apiKeyEncrypted, label: orgSystemProviderKeys.label })
-        .from(orgSystemProviderKeys)
-        .where(eq(orgSystemProviderKeys.id, id));
+        .select({
+          blob: modelProviderCredentials.credentialsEncrypted,
+          label: modelProviderCredentials.label,
+        })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id));
       expect(after!.blob).toBe(before!.blob);
       expect(after!.label).toBe("renamed");
     });
@@ -253,9 +280,8 @@ describe("org-model-provider-keys service", () => {
    * test suite exercised this path end-to-end.
    *
    * The setup uses `importOAuthModelProviderConnection` rather than hand-
-   * building rows: it mirrors the prod control-flow exactly (insert
-   * connection + key + decrypted creds) and would catch any future drift
-   * between import and read shapes.
+   * building rows: it mirrors the prod control-flow exactly and would catch
+   * any future drift between import and read shapes.
    */
   describe("OAuth path", () => {
     let userId: string;
@@ -263,14 +289,11 @@ describe("org-model-provider-keys service", () => {
     let applicationId: string;
 
     beforeEach(async () => {
-      // truncateAll() already ran in the outer beforeEach.
       const user = await createTestUser();
       userId = user.id;
       const { org, defaultAppId } = await createTestOrg(userId, { slug: "vault-oauth" });
       orgId = org.id;
       applicationId = defaultAppId;
-      // No FK seeding required since Phase 4 — OAuth credentials live in
-      // `model_provider_credentials` which has no FK to `packages`.
     });
 
     it("Codex: returns access token + providerPackageId + accountId from connection", async () => {

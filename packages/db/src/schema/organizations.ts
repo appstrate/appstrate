@@ -11,13 +11,11 @@ import {
   index,
   uniqueIndex,
   primaryKey,
-  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications } from "./applications.ts";
-import { userProviderConnections } from "./connections.ts";
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -130,50 +128,16 @@ export const orgProxies = pgTable(
   ],
 );
 
-export const orgSystemProviderKeys = pgTable(
-  "org_system_provider_keys",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    api: text("api").notNull(),
-    baseUrl: text("base_url").notNull(),
-    apiKeyEncrypted: text("api_key_encrypted"),
-    authMode: text("auth_mode", { enum: ["api_key", "oauth"] })
-      .notNull()
-      .default("api_key"),
-    oauthConnectionId: uuid("oauth_connection_id").references(() => userProviderConnections.id, {
-      onDelete: "cascade",
-    }),
-    providerPackageId: text("provider_package_id"),
-    createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_org_system_provider_keys_org_id").on(t.orgId),
-    index("idx_org_system_provider_keys_oauth_conn").on(t.oauthConnectionId),
-    check(
-      "org_system_provider_keys_auth_mode_consistency",
-      sql`(
-        (auth_mode = 'api_key' AND api_key_encrypted IS NOT NULL AND oauth_connection_id IS NULL) OR
-        (auth_mode = 'oauth'   AND api_key_encrypted IS NULL     AND oauth_connection_id IS NOT NULL)
-      )`,
-    ),
-  ],
-);
-
 /**
  * Unified credentials table for LLM model providers (API-key + OAuth alike).
  *
- * Replaces `org_system_provider_keys` (Phase 8 drop). The `provider_id` column
- * is a free-text registry key (e.g. "codex", "openai") — NOT a FK to
- * `packages.id`. Inference wire format and default base URL are read from the
- * platform registry (`apps/api/src/services/oauth-model-providers/registry.ts`)
- * keyed by `provider_id`. `base_url_override` is honored only for providers
- * whose registry entry has `baseUrlOverridable: true` (e.g. "openai-compatible").
+ * Sole credential store as of Phase 5 — the legacy `org_system_provider_keys`
+ * table was dropped. `provider_id` is a free-text registry key (e.g. "codex",
+ * "openai") — NOT a FK to `packages.id`. Inference wire format and default
+ * base URL are read from the platform registry
+ * (`apps/api/src/services/oauth-model-providers/registry.ts`) keyed by
+ * `provider_id`. `base_url_override` is honored only for providers whose
+ * registry entry has `baseUrlOverridable: true` (e.g. "openai-compatible").
  *
  * The encrypted blob's plaintext is a tagged union:
  *   { kind: "api_key", apiKey: string }
@@ -216,13 +180,13 @@ export const orgModels = pgTable(
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
     /**
-     * UUID of either an `org_system_provider_keys` row (legacy, api-key path)
-     * or a `model_provider_credentials` row (new, both paths). The FK is
-     * deliberately dropped during the Phase 4 transition — Phase 5 re-adds
-     * a strict FK to `model_provider_credentials.id` after the legacy
-     * table is fully retired.
+     * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
+     * deleting a credential while any model still references it is rejected
+     * at the DB level so the API can surface a clear error.
      */
-    providerKeyId: uuid("provider_key_id").notNull(),
+    providerKeyId: uuid("provider_key_id")
+      .notNull()
+      .references(() => modelProviderCredentials.id, { onDelete: "restrict" }),
     input: jsonb("input"), // ["text", "image"] | null
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null

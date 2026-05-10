@@ -20,7 +20,7 @@ import {
   schedules,
   apiKeys,
   orgProxies,
-  orgSystemProviderKeys,
+  modelProviderCredentials,
   orgModels,
   connectionProfiles,
   userProviderConnections,
@@ -237,26 +237,48 @@ export async function seedOrgProxy(
   return proxy!;
 }
 
-// ─── Org Model Provider Keys ─────────────────────────────
+// ─── Model Provider Credentials ─────────────────────────────
 
-type OrgModelProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
+import { encryptCredentials } from "@appstrate/connect";
+import { resolveProviderIdFromApiKeyForm } from "../../src/services/org-model-provider-keys.ts";
+
+interface ModelProviderCredentialSeed {
   orgId: string;
-};
+  label?: string;
+  /** Wire format the legacy contract expects. Used to derive `providerId` if not given explicitly. */
+  api?: string;
+  /** Base URL — combined with `api` to reverse-resolve `providerId` against the registry. */
+  baseUrl?: string;
+  /** Plaintext API key, wrapped into a `kind: "api_key"` blob before encryption. */
+  apiKey?: string;
+  /** Skips reverse-resolution when provided. Must be a registered registry id. */
+  providerId?: string;
+  createdBy?: string | null;
+}
 
 export async function seedOrgModelProviderKey(
-  overrides: OrgModelProviderKeyInsert,
-): Promise<InferSelectModel<typeof orgSystemProviderKeys>> {
-  const [key] = await db
-    .insert(orgSystemProviderKeys)
+  overrides: ModelProviderCredentialSeed,
+): Promise<InferSelectModel<typeof modelProviderCredentials>> {
+  const api = overrides.api ?? "anthropic-messages";
+  const baseUrl = overrides.baseUrl ?? "https://api.anthropic.com";
+  const apiKey = overrides.apiKey ?? "sk-test-placeholder";
+
+  const resolved = overrides.providerId
+    ? { providerId: overrides.providerId, baseUrlOverride: null }
+    : resolveProviderIdFromApiKeyForm(api, baseUrl);
+
+  const [row] = await db
+    .insert(modelProviderCredentials)
     .values({
-      label: "Test Model Provider Key",
-      api: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      apiKeyEncrypted: "encrypted-key-placeholder",
-      ...overrides,
+      orgId: overrides.orgId,
+      label: overrides.label ?? "Test Model Provider Key",
+      providerId: resolved.providerId,
+      credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
+      baseUrlOverride: resolved.baseUrlOverride,
+      createdBy: overrides.createdBy ?? null,
     })
     .returning();
-  return key!;
+  return row!;
 }
 
 // ─── Org Models ───────────────────────────────────────────

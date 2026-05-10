@@ -11,7 +11,7 @@
  *
  *   2. Request body.model is a preset id — the platform substitutes the
  *      real upstream model id before forwarding. `loadModel()` resolves
- *      against `org_models` + `org_system_provider_keys`.
+ *      against `org_models` + `model_provider_credentials`.
  *
  *   3. Protocol mismatch (preset.api != route.api) → 400.
  *
@@ -30,7 +30,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { encrypt } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -61,7 +60,7 @@ async function buildHarness(overrides?: {
     label: "Upstream",
     api: overrides?.api ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
-    apiKeyEncrypted: encrypt(overrides?.upstreamKey ?? "sk-upstream-42"),
+    apiKey: overrides?.upstreamKey ?? "sk-upstream-42",
   });
   const model = await seedOrgModel({
     orgId: ctx.orgId,

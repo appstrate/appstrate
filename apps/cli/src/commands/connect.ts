@@ -54,7 +54,7 @@ export interface ConnectCommandOptions {
   /** Override the CLI profile used for the platform call. */
   profile?: string;
   /**
-   * User-facing label persisted on the resulting `orgSystemProviderKeys`
+   * User-facing label persisted on the resulting model-provider credential
    * row. When absent, the command prompts (TTY) or falls back to the
    * provider default (non-TTY).
    */

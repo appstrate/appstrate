@@ -1,37 +1,61 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Legacy org-scoped model-provider-keys service.
+ * Legacy facade over `model_provider_credentials`.
  *
- * Phase 4-transition shim. The API-key creation/update path still writes
- * to `org_system_provider_keys` to keep the existing routes working
- * unchanged; the OAuth path has fully moved to `model_provider_credentials`
- * via {@link createOAuthCredential}.
+ * The route contract (`/api/model-provider-keys`) is preserved verbatim — it
+ * takes `(api, baseUrl, apiKey)` — but every CRUD operation now reads/writes
+ * the unified `model_provider_credentials` table. The `(api, baseUrl)` pair
+ * is reverse-resolved against the platform registry to a canonical
+ * `providerId`; unknown combinations fall back to `openai-compatible` with a
+ * `baseUrlOverride`.
  *
- * The read path is polymorphic — `listOrgModelProviderKeys` and
- * `loadModelProviderKeyCredentials` consult both tables and merge their
- * results so a `providerKeyId` referenced from `org_models.providerKeyId`
- * resolves regardless of which table holds it. Phase 5 retires the legacy
- * table and re-adds a strict FK to `model_provider_credentials`.
+ * Phase 6 will rename the routes and require explicit `providerId`, retiring
+ * this shim.
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { orgSystemProviderKeys } from "@appstrate/db/schema";
-import { encrypt, decrypt } from "@appstrate/connect";
+import { listModelProviders, getModelProviderConfig } from "./oauth-model-providers/registry.ts";
 import { getSystemModelProviderKeys } from "./model-registry.ts";
 import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
-import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
-import { toISO, toISORequired } from "../lib/date-helpers.ts";
-import { getModelProviderConfig } from "./oauth-model-providers/registry.ts";
+import { mergeSystemAndDb } from "../lib/db-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 import {
   listModelProviderCredentials,
   loadModelProviderCredentials,
+  createApiKeyCredential,
+  updateModelProviderCredential,
+  deleteModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "./model-provider-credentials.ts";
 
-// --- List (system + legacy DB rows + new credentials table) ---
+// --- Provider resolution (api, baseUrl → providerId) ---
+
+function stripTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+/**
+ * Resolve `(api, baseUrl)` to a registry providerId. Matches an `api_key`
+ * provider whose `apiShape` and `defaultBaseUrl` align; falls back to
+ * `openai-compatible` with a `baseUrlOverride` for any unrecognized combo.
+ */
+export function resolveProviderIdFromApiKeyForm(
+  api: string,
+  baseUrl: string,
+): { providerId: string; baseUrlOverride: string | null } {
+  const normalizedBaseUrl = stripTrailingSlash(baseUrl);
+  for (const cfg of listModelProviders()) {
+    if (cfg.authMode !== "api_key") continue;
+    if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
+    if (cfg.apiShape === api && stripTrailingSlash(cfg.defaultBaseUrl) === normalizedBaseUrl) {
+      return { providerId: cfg.providerId, baseUrlOverride: null };
+    }
+  }
+  return { providerId: "openai-compatible", baseUrlOverride: baseUrl };
+}
+
+// --- List (system + unified credentials) ---
 
 function adaptCredentialInfoToLegacyShape(
   info: ModelProviderCredentialInfo,
@@ -56,15 +80,12 @@ function adaptCredentialInfoToLegacyShape(
 
 export async function listOrgModelProviderKeys(orgId: string): Promise<OrgModelProviderKeyInfo[]> {
   const system = getSystemModelProviderKeys();
-  const legacyRows = await db
-    .select()
-    .from(orgSystemProviderKeys)
-    .where(scopedWhere(orgSystemProviderKeys, { orgId }));
   const now = toISORequired(new Date());
+  const rows = await listModelProviderCredentials(orgId);
 
-  const legacyAsLegacyShape = mergeSystemAndDb({
+  return mergeSystemAndDb({
     system,
-    rows: legacyRows,
+    rows,
     mapSystem: (id, def): OrgModelProviderKeyInfo => ({
       id,
       label: def.label,
@@ -76,28 +97,11 @@ export async function listOrgModelProviderKeys(orgId: string): Promise<OrgModelP
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (r): OrgModelProviderKeyInfo => ({
-      id: r.id,
-      label: r.label,
-      api: r.api,
-      baseUrl: r.baseUrl,
-      source: "custom",
-      authMode: r.authMode,
-      providerPackageId: r.providerPackageId ?? null,
-      oauthConnectionId: r.oauthConnectionId ?? null,
-      oauthEmail: null,
-      needsReconnection: false,
-      createdBy: r.createdBy,
-      createdAt: toISO(r.createdAt) ?? now,
-      updatedAt: toISO(r.updatedAt) ?? now,
-    }),
+    mapRow: adaptCredentialInfoToLegacyShape,
   });
-
-  const newRows = await listModelProviderCredentials(orgId);
-  return [...legacyAsLegacyShape, ...newRows.map(adaptCredentialInfoToLegacyShape)];
 }
 
-// --- CRUD (legacy api-key path, still on `org_system_provider_keys`) ---
+// --- CRUD ---
 
 export async function createOrgModelProviderKey(
   orgId: string,
@@ -107,18 +111,15 @@ export async function createOrgModelProviderKey(
   apiKey: string,
   userId: string,
 ): Promise<string> {
-  const [row] = await db
-    .insert(orgSystemProviderKeys)
-    .values({
-      orgId,
-      label,
-      api,
-      baseUrl,
-      apiKeyEncrypted: encrypt(apiKey),
-      createdBy: userId,
-    })
-    .returning({ id: orgSystemProviderKeys.id });
-  return row!.id;
+  const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(api, baseUrl);
+  return createApiKeyCredential({
+    orgId,
+    userId,
+    label,
+    providerId,
+    apiKey,
+    baseUrlOverride,
+  });
 }
 
 export async function updateOrgModelProviderKey(
@@ -126,31 +127,26 @@ export async function updateOrgModelProviderKey(
   id: string,
   data: { label?: string; api?: string; baseUrl?: string; apiKey?: string },
 ): Promise<void> {
-  const { apiKey, ...rest } = data;
-  const updates = buildUpdateSet(rest);
-  if (apiKey !== undefined) updates.apiKeyEncrypted = encrypt(apiKey);
-  await db
-    .update(orgSystemProviderKeys)
-    .set(updates)
-    .where(
-      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
-    );
+  // `api` and `baseUrl` mutations are silently ignored — the registry pins
+  // both via `providerId`, and rotating those is a Phase 6 concern (the
+  // future routes will accept `providerId` explicitly). Label and apiKey
+  // rotation flow through the unified service.
+  await updateModelProviderCredential(orgId, id, {
+    ...(data.label !== undefined ? { label: data.label } : {}),
+    ...(data.apiKey !== undefined ? { apiKey: data.apiKey } : {}),
+  });
 }
 
 export async function deleteOrgModelProviderKey(orgId: string, id: string): Promise<void> {
-  await db
-    .delete(orgSystemProviderKeys)
-    .where(
-      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
-    );
+  await deleteModelProviderCredential(orgId, id);
 }
 
-// --- Credential loading (polymorphic across both tables) ---
+// --- Credential loading ---
 
 /**
  * Returned shape preserved for back-compat. `providerPackageId` is populated
- * for OAuth-backed keys (legacy AFPS form OR new short-form) and `accountId`
- * for Codex.
+ * for OAuth-backed keys (canonical short form like "codex" / "claude-code");
+ * `accountId` for Codex.
  */
 export interface ModelProviderKeyCredentials {
   api: string;
@@ -165,48 +161,23 @@ export async function loadModelProviderKeyCredentials(
   orgId: string,
   id: string,
 ): Promise<ModelProviderKeyCredentials | null> {
-  // 1) System model provider keys (env-driven, platform-wide).
+  // 1) System (env-driven) keys.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
   }
 
-  // 2) New unified table (covers both api-key and OAuth credentials).
-  const fromNew = await loadModelProviderCredentials(orgId, id);
-  if (fromNew) {
-    if (fromNew.needsReconnection) return null;
-    return {
-      api: fromNew.apiShape,
-      baseUrl: fromNew.baseUrl,
-      apiKey: fromNew.apiKey,
-      providerPackageId: fromNew.providerId,
-      accountId: fromNew.accountId,
-    };
-  }
-
-  // 3) Legacy `org_system_provider_keys` table (api-key writes still land here).
-  const [row] = await db
-    .select({
-      api: orgSystemProviderKeys.api,
-      baseUrl: orgSystemProviderKeys.baseUrl,
-      apiKeyEncrypted: orgSystemProviderKeys.apiKeyEncrypted,
-      authMode: orgSystemProviderKeys.authMode,
-      providerPackageId: orgSystemProviderKeys.providerPackageId,
-    })
-    .from(orgSystemProviderKeys)
-    .where(scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }))
-    .limit(1);
-  if (!row) return null;
-
-  // Defensive: a legacy row with `authMode='oauth'` has no longer any
-  // companion `userProviderConnections` row to refresh against (Phase 4
-  // moved the OAuth flow off this table). Treat as not loadable.
-  if (row.authMode === "oauth" || row.apiKeyEncrypted === null) return null;
-  try {
-    return { api: row.api, baseUrl: row.baseUrl, apiKey: decrypt(row.apiKeyEncrypted) };
-  } catch {
-    return null;
-  }
+  // 2) Unified credentials table (covers api-key + OAuth).
+  const creds = await loadModelProviderCredentials(orgId, id);
+  if (!creds) return null;
+  if (creds.needsReconnection) return null;
+  return {
+    api: creds.apiShape,
+    baseUrl: creds.baseUrl,
+    apiKey: creds.apiKey,
+    providerPackageId: creds.providerId,
+    accountId: creds.accountId,
+  };
 }
 
 // --- Connection test ---
@@ -224,9 +195,8 @@ export async function testModelProviderKeyConnection(
       message: "Model provider key not found",
     };
 
-  // For OAuth-backed credentials the inference probe needs a real model id
-  // (the upstream rejects `_test`). Fall back to the registry's first model
-  // — sized to be a low-cost probe (single token in/out) regardless.
+  // OAuth providers reject the dummy `_test` model id — fall back to the
+  // registry's first model (sized for a low-cost probe regardless).
   let modelId = "_test";
   if (creds.providerPackageId) {
     const cfg = getModelProviderConfig(creds.providerPackageId);

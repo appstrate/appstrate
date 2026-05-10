@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { encrypt } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -61,7 +60,7 @@ describe("Models API", () => {
         orgId: ctx.orgId,
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
-        apiKeyEncrypted: encrypt("sk-ant-oat-real-token-xyz"),
+        apiKey: "sk-ant-oat-real-token-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
@@ -87,7 +86,7 @@ describe("Models API", () => {
         orgId: ctx.orgId,
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
-        apiKeyEncrypted: encrypt("sk-ant-api03-real-key-xyz"),
+        apiKey: "sk-ant-api03-real-key-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
@@ -111,7 +110,7 @@ describe("Models API", () => {
         orgId: ctx.orgId,
         api: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
-        apiKeyEncrypted: encrypt("sk-openai-anything"),
+        apiKey: "sk-openai-anything",
       });
       await seedOrgModel({
         orgId: ctx.orgId,

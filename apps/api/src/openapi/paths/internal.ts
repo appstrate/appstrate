@@ -263,7 +263,7 @@ export const internalPaths = {
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
-          description: "user_provider_connections.id referenced by the orgSystemProviderKeys row.",
+          description: "model_provider_credentials.id of the OAuth-backed credential.",
         },
       ],
       responses: {
