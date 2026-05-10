@@ -1,0 +1,29 @@
+-- Add `billed_at` to `llm_usage` so the cloud module can switch from
+-- snapshot-billing (`runs.cost` SUM at finalize time) to ledger-first
+-- billing (per-row claim with `billed_at IS NULL` as the work queue).
+--
+-- Layer 4 of the billing-correctness plan:
+--   - Layer 1 (appstrate#394) routed every terminal-state path through
+--     `finalizeRun`, closing the cancel-bypass leak.
+--   - Layer 3 (cloud#14) added a periodic sweeper that catches any
+--     `runs.cost > 0 AND no cloud_usage_records` gap.
+--   - Layer 4 (this) — eliminates the temporal coupling between the
+--     cost write and the billing debit. A late-arriving `llm_usage`
+--     row (sidecar buffer flush, runner reconnect, …) automatically
+--     enters the cloud sweeper's work queue without any platform-side
+--     coordination, because `billed_at IS NULL` is the canonical signal.
+--
+-- The platform never reads this column — it is informational from the
+-- platform's perspective. Cloud is the sole writer; cloud is the sole
+-- reader. Keeping it on the same row as `cost_usd` (rather than a
+-- side-table cloud could own) avoids the JOIN that bill-from-ledger
+-- would otherwise pay on every tick.
+ALTER TABLE "llm_usage" ADD COLUMN "billed_at" TIMESTAMPTZ;
+--> statement-breakpoint
+-- Partial index — cloud's sweeper SELECT is `WHERE run_id = ? AND
+-- billed_at IS NULL`. Once a row is billed, it leaves the index
+-- automatically, so the index footprint reflects in-flight work only.
+-- A regular index on `run_id` already exists (`idx_llm_usage_run_id`);
+-- this one is additive and far cheaper because it omits ~99 % of rows
+-- in steady state.
+CREATE INDEX "idx_llm_usage_unbilled_run_id" ON "llm_usage" ("run_id") WHERE billed_at IS NULL;

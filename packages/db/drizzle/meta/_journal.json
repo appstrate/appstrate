@@ -141,6 +141,13 @@
       "when": 1784073600000,
       "tag": "0019_rename_dashboard_user_to_user",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784160000000,
+      "tag": "0020_llm_usage_billed_at",
+      "breakpoints": true
     }
   ]
 }

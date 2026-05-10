@@ -371,6 +371,15 @@ export const llmUsage = pgTable(
     // Null on runner-source rows (they dedup on run_id instead).
     requestId: text("request_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    // Billing-side marker (cloud-only) — `null` means the row has not yet
+    // been consumed by the billing path; set to `NOW()` by the cloud
+    // module's `recordUsage` once the cost has been debited. Lives on this
+    // table (rather than a side-table cloud could own) because it must be
+    // updated atomically with the SUM(cost_usd) read that produces the
+    // debit; a side-table would force a JOIN on every billing tick and
+    // double the partial-index footprint. The platform never reads this
+    // column — it is informational from the platform's perspective.
+    billedAt: timestamp("billed_at", { withTimezone: true }),
   },
   (table) => [
     index("idx_llm_usage_org_id").on(table.orgId),
@@ -378,6 +387,12 @@ export const llmUsage = pgTable(
     index("idx_llm_usage_user_id").on(table.userId),
     index("idx_llm_usage_run_id").on(table.runId),
     index("idx_llm_usage_org_created").on(table.orgId, table.createdAt),
+    // Cloud's bill-from-ledger sweep keys on (run_id) WHERE billed_at IS NULL.
+    // Partial index keeps the footprint to whatever's currently in flight —
+    // once a row is billed, it leaves the index automatically.
+    index("idx_llm_usage_unbilled_run_id")
+      .on(table.runId)
+      .where(sql`billed_at IS NULL`),
     // Proxy-source dedup: request_id is unique across all proxy rows.
     uniqueIndex("uq_llm_usage_proxy_request_id")
       .on(table.requestId)
