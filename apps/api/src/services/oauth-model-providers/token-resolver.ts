@@ -110,31 +110,64 @@ async function loadCredentialState(credentialId: string): Promise<CredentialStat
   };
 }
 
-function buildResolvedToken(state: CredentialState): ResolvedToken {
-  // Codex back-fill: rows imported before the CLI started forwarding pi-ai's
-  // `accountId` may have it missing. Try a JWT decode as defense-in-depth.
-  let accountId = state.blob.accountId;
-  if (!accountId && state.config.providerId === "codex") {
-    const decoded = decodeCodexJwtPayload(state.blob.accessToken);
-    accountId = decoded?.chatgpt_account_id;
-    logger.warn("oauth model provider: accountId missing in stored creds", {
-      credentialId: state.credentialId,
-      providerId: state.config.providerId,
-      jwtParsed: decoded !== null,
-      jwtHadAccountId: !!decoded?.chatgpt_account_id,
-    });
-  }
+/**
+ * Resolve `chatgpt_account_id` for a Codex credential, decoding the access
+ * token as a defense-in-depth fallback when the stored value is missing.
+ * Returns `undefined` for non-Codex providers (the field is unused there).
+ *
+ * Always prefers the freshly-decoded JWT over the stored value — Codex
+ * re-issues a JWT on every token rotation, so the wire token is the source
+ * of truth. Falls back to stored only when the JWT is unparseable (which
+ * shouldn't happen for genuine Codex tokens). Logs once at warn level when
+ * both sources fail to surface an id (visibility on broken rows).
+ */
+function resolveCodexAccountId(
+  providerId: string,
+  accessToken: string,
+  stored: string | undefined,
+  credentialId: string,
+): string | undefined {
+  if (providerId !== "codex") return undefined;
+  const decoded = decodeCodexJwtPayload(accessToken);
+  const fromJwt = decoded?.chatgpt_account_id;
+  if (fromJwt) return fromJwt;
+  if (stored) return stored;
+  logger.warn("oauth model provider: accountId missing in stored creds", {
+    credentialId,
+    providerId,
+    jwtParsed: decoded !== null,
+  });
+  return undefined;
+}
+
+/** Map registry config + fresh token material to the sidecar's wire shape. */
+function toResolvedToken(
+  config: ModelProviderConfig,
+  accessToken: string,
+  expiresAt: number | null,
+  accountId: string | undefined,
+): ResolvedToken {
   return {
-    accessToken: state.blob.accessToken,
-    expiresAt: state.blob.expiresAt,
-    apiShape: state.config.apiShape,
-    baseUrl: state.config.defaultBaseUrl,
-    rewriteUrlPath: state.config.rewriteUrlPath,
-    forceStream: state.config.forceStream,
-    forceStore: state.config.forceStore,
+    accessToken,
+    expiresAt,
+    apiShape: config.apiShape,
+    baseUrl: config.defaultBaseUrl,
+    rewriteUrlPath: config.rewriteUrlPath,
+    forceStream: config.forceStream,
+    forceStore: config.forceStore,
     accountId,
-    providerId: state.config.providerId,
+    providerId: config.providerId,
   };
+}
+
+function buildResolvedToken(state: CredentialState): ResolvedToken {
+  const accountId = resolveCodexAccountId(
+    state.config.providerId,
+    state.blob.accessToken,
+    state.blob.accountId,
+    state.credentialId,
+  );
+  return toResolvedToken(state.config, state.blob.accessToken, state.blob.expiresAt, accountId);
 }
 
 /**
@@ -254,13 +287,12 @@ async function doRefresh(credentialId: string): Promise<ResolvedToken> {
   // one (Anthropic does, OpenAI rotates them too, but be defensive).
   const parsed = parseTokenResponse(data, undefined, state.blob.refreshToken);
 
-  // Re-extract account_id on Codex in case of token rotation.
-  let accountId = state.blob.accountId;
-  if (state.config.providerId === "codex") {
-    const claims = decodeCodexJwtPayload(parsed.accessToken);
-    accountId = claims?.chatgpt_account_id ?? accountId;
-  }
-
+  const accountId = resolveCodexAccountId(
+    state.config.providerId,
+    parsed.accessToken,
+    state.blob.accountId,
+    credentialId,
+  );
   const expiresAtMs = parsed.expiresAt ? new Date(parsed.expiresAt).getTime() : null;
   await updateOAuthCredentialTokens(state.orgId, credentialId, {
     accessToken: parsed.accessToken,
@@ -269,17 +301,7 @@ async function doRefresh(credentialId: string): Promise<ResolvedToken> {
     ...(accountId ? { accountId } : {}),
   });
 
-  return {
-    accessToken: parsed.accessToken,
-    expiresAt: expiresAtMs,
-    apiShape: state.config.apiShape,
-    baseUrl: state.config.defaultBaseUrl,
-    rewriteUrlPath: state.config.rewriteUrlPath,
-    forceStream: state.config.forceStream,
-    forceStore: state.config.forceStore,
-    accountId,
-    providerId: state.config.providerId,
-  };
+  return toResolvedToken(state.config, parsed.accessToken, expiresAtMs, accountId);
 }
 
 /**
