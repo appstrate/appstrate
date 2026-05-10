@@ -84,7 +84,15 @@ export const modelProvidersOAuthPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "Forbidden — caller lacks `model-provider-credentials:write`, OR the `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

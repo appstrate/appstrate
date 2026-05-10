@@ -26,6 +26,7 @@ import { mergeSystemAndDb, scopedWhere } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   getModelProviderConfig,
+  isModelProviderEnabled,
   listModelProviders,
   type ModelApiShape,
 } from "./oauth-model-providers/registry.ts";
@@ -459,6 +460,11 @@ export function resolveProviderIdFromApiKeyForm(
   baseUrl: string,
 ): { providerId: string; baseUrlOverride: string | null } {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  // Unfiltered: existing credentials for disabled providers must keep working.
+  // The POST route enforces `isModelProviderEnabled` BEFORE calling this
+  // helper, so disabled providers never reach create. Resolution itself stays
+  // total over the registry so update/delete paths on existing rows keep
+  // matching their canonical providerId.
   for (const cfg of listModelProviders()) {
     if (cfg.authMode !== "api_key") continue;
     if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
@@ -514,6 +520,7 @@ export async function listOrgModelProviderCredentials(
         oauthConnectionId: info.authMode === "oauth2" ? info.id : null,
         oauthEmail: info.oauthEmail ?? null,
         needsReconnection: info.oauthNeedsReconnection ?? false,
+        providerDisabled: !isModelProviderEnabled(info.providerId),
         createdBy: info.createdBy,
         createdAt: info.createdAt,
         updatedAt: info.updatedAt,

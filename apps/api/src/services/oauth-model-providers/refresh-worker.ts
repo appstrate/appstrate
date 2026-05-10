@@ -75,6 +75,11 @@ export async function scanAndEnqueueRefreshes(): Promise<{
   scanned: number;
   enqueued: number;
 }> {
+  // Unfiltered: existing credentials for disabled providers must keep working.
+  // The refresh worker rotates tokens for any OAuth credential still on the
+  // shelf — even ones whose provider is currently in `MODEL_PROVIDERS_DISABLED`
+  // — so an admin temporarily disabling a provider doesn't silently expire
+  // user tokens.
   const oauthProviderIds = listModelProviders()
     .filter((p) => p.authMode === "oauth2")
     .map((p) => p.providerId);

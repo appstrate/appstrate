@@ -301,6 +301,15 @@ function ProviderKeysSection({
                         {t("providerKeys.oauth.needsReconnection")}
                       </Badge>
                     )}
+                    {pk.providerDisabled && (
+                      <Badge
+                        variant="secondary"
+                        className="text-[0.65rem]"
+                        title={t("providerKeys.disabledTooltip")}
+                      >
+                        {t("providerKeys.disabledBadge")}
+                      </Badge>
+                    )}
                   </div>
                   <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
                     <span>{pk.apiShape}</span>
@@ -348,7 +357,7 @@ function ProviderKeysSection({
                   )}
                   {isOauth && (
                     <>
-                      {pk.needsReconnection && pk.providerId && (
+                      {pk.needsReconnection && pk.providerId && !pk.providerDisabled && (
                         <Button
                           variant="outline"
                           size="sm"

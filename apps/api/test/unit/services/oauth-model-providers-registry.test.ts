@@ -8,11 +8,14 @@
  *     uses plain `/v1/messages` against api.anthropic.com)
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import {
   MODEL_PROVIDERS,
   getModelProviderConfig,
+  isModelProviderEnabled,
   isOAuthModelProvider,
+  listEnabledModelProviders,
   listModelProviders,
 } from "../../../src/services/oauth-model-providers/registry.ts";
 
@@ -131,5 +134,73 @@ describe("isOAuthModelProvider()", () => {
     expect(isOAuthModelProvider("@appstrate/provider-gmail")).toBe(false);
     expect(isOAuthModelProvider("@unknown/x")).toBe(false);
     expect(isOAuthModelProvider("")).toBe(false);
+  });
+});
+
+// ─── MODEL_PROVIDERS_DISABLED env filter ─────────────────────────────────────
+
+/**
+ * The env getter is cached after first call — mutating `process.env` does
+ * nothing until we flush the cache. Each test sets the env, flushes, asserts,
+ * then restores in `afterEach`.
+ */
+describe("MODEL_PROVIDERS_DISABLED filter", () => {
+  const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
+
+  afterEach(() => {
+    if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
+    else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
+    resetEnvCache();
+  });
+
+  it("isModelProviderEnabled returns true for every canonical id when env is empty", () => {
+    delete process.env.MODEL_PROVIDERS_DISABLED;
+    resetEnvCache();
+    for (const id of CANONICAL_IDS) {
+      expect(isModelProviderEnabled(id)).toBe(true);
+    }
+  });
+
+  it("isModelProviderEnabled returns false for ids listed in the env CSV", () => {
+    process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+    resetEnvCache();
+    expect(isModelProviderEnabled("codex")).toBe(false);
+    expect(isModelProviderEnabled("claude-code")).toBe(false);
+    expect(isModelProviderEnabled("openai")).toBe(true);
+    expect(isModelProviderEnabled("anthropic")).toBe(true);
+    expect(isModelProviderEnabled("openai-compatible")).toBe(true);
+  });
+
+  it("listEnabledModelProviders returns the full catalog when env is empty", () => {
+    delete process.env.MODEL_PROVIDERS_DISABLED;
+    resetEnvCache();
+    const ids = listEnabledModelProviders().map((p) => p.providerId);
+    expect(ids.sort()).toEqual([...CANONICAL_IDS].sort());
+  });
+
+  it("listEnabledModelProviders filters out disabled providers", () => {
+    process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+    resetEnvCache();
+    const ids = listEnabledModelProviders().map((p) => p.providerId);
+    expect(ids).not.toContain("codex");
+    expect(ids).not.toContain("claude-code");
+    expect(ids).toContain("openai");
+    expect(ids).toContain("anthropic");
+    expect(ids).toContain("openai-compatible");
+  });
+
+  it("CSV parser trims whitespace and drops empty entries", () => {
+    process.env.MODEL_PROVIDERS_DISABLED = " codex , , claude-code ,";
+    resetEnvCache();
+    expect(isModelProviderEnabled("codex")).toBe(false);
+    expect(isModelProviderEnabled("claude-code")).toBe(false);
+    expect(isModelProviderEnabled("openai")).toBe(true);
+  });
+
+  it("listModelProviders stays unfiltered — runtime hot path is unaffected", () => {
+    process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+    resetEnvCache();
+    const ids = listModelProviders().map((p) => p.providerId);
+    expect(ids.sort()).toEqual([...CANONICAL_IDS].sort());
   });
 });

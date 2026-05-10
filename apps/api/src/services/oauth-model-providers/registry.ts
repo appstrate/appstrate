@@ -20,6 +20,8 @@
  * See docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §3.3 for rationale.
  */
 
+import { getEnv } from "@appstrate/env";
+
 export type ModelApiShape = "anthropic-messages" | "openai-chat" | "openai-responses";
 
 export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
@@ -233,4 +235,30 @@ export function isOAuthModelProvider(providerId: string): boolean {
 /** Iterate all registered model providers (insertion order). */
 export function listModelProviders(): readonly ModelProviderConfig[] {
   return Object.values(MODEL_PROVIDERS);
+}
+
+/**
+ * True iff `providerId` is NOT listed in `MODEL_PROVIDERS_DISABLED`.
+ *
+ * "Soft disable" — this check is consulted only at admin-facing surfaces
+ * (UI picker, POST creation, OAuth initiate). The runtime hot path
+ * (token-resolver, refresh-worker, llm-proxy, `executeProviderCall`)
+ * deliberately uses the unfiltered accessors so existing credentials for
+ * a disabled provider keep working until the admin deletes them.
+ *
+ * `getEnv()` is cached after first call so this is O(1) on the hot path.
+ */
+export function isModelProviderEnabled(providerId: string): boolean {
+  return !getEnv().MODEL_PROVIDERS_DISABLED.includes(providerId);
+}
+
+/**
+ * Iterate the subset of registered model providers that are enabled by env.
+ *
+ * Use this in admin/UI surfaces where disabled providers must NOT appear
+ * (picker, validators, OpenAPI enums). Use `listModelProviders()` for any
+ * runtime resolver that must keep operating on existing credentials.
+ */
+export function listEnabledModelProviders(): readonly ModelProviderConfig[] {
+  return listModelProviders().filter((p) => isModelProviderEnabled(p.providerId));
 }

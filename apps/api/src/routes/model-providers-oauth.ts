@@ -6,8 +6,11 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
 import { importOAuthModelProviderConnection } from "../services/oauth-model-providers/oauth-flow.ts";
-import { isOAuthModelProvider } from "../services/oauth-model-providers/registry.ts";
-import { parseBody } from "../lib/errors.ts";
+import {
+  isModelProviderEnabled,
+  isOAuthModelProvider,
+} from "../services/oauth-model-providers/registry.ts";
+import { forbidden, parseBody } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 /**
@@ -74,6 +77,13 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const body = await c.req.json();
       const input = parseBody(importBody, body);
+
+      // Provider may be registered (passes the `isOAuthModelProvider` refine)
+      // but still soft-disabled by `MODEL_PROVIDERS_DISABLED`. Existing
+      // credentials keep working; this gate blocks NEW connections only.
+      if (!isModelProviderEnabled(input.providerId)) {
+        throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
+      }
 
       const result = await importOAuthModelProviderConnection({
         orgId,

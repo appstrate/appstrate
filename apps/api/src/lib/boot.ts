@@ -24,6 +24,7 @@ import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
+import { MODEL_PROVIDERS } from "../services/oauth-model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
@@ -163,6 +164,26 @@ export async function boot(): Promise<void> {
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
   initSystemModelProviderKeys();
   logger.info("System provider keys loaded");
+
+  // Validate MODEL_PROVIDERS_DISABLED against the live registry. Unknown ids
+  // are a config bug (typo, retired provider) — fail-fast at boot rather
+  // than silently no-op'ing the admin's intent. Validation lives here (not
+  // in `@appstrate/env`) because the registry is an API-package runtime
+  // artefact and the env schema is framework-agnostic by design.
+  {
+    const disabled = env.MODEL_PROVIDERS_DISABLED;
+    if (disabled.length > 0) {
+      const known = new Set(Object.keys(MODEL_PROVIDERS));
+      const unknown = disabled.filter((id) => !known.has(id));
+      if (unknown.length > 0) {
+        throw new Error(
+          `MODEL_PROVIDERS_DISABLED: unknown providerIds: ${unknown.join(", ")}. ` +
+            `Known: ${[...known].join(", ")}`,
+        );
+      }
+      logger.info("Model providers disabled from picker", { providerIds: disabled });
+    }
+  }
 
   // Load system packages from ZIPs, sync to DB + S3
   await loadAndSyncSystemPackages().catch((err) => {

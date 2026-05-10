@@ -815,6 +815,11 @@ export const schemas = {
       apiShape: { type: "string" },
       baseUrl: { type: "string" },
       source: { type: "string", enum: ["built-in", "custom"] },
+      providerDisabled: {
+        type: "boolean",
+        description:
+          "True when the credential's `providerId` is listed in `MODEL_PROVIDERS_DISABLED`. Existing rows keep working (token resolver, refresh worker, llm-proxy stay unfiltered); the UI hides the Reconnect affordance and shows a 'Disabled by admin' badge.",
+      },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
