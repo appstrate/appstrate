@@ -10,6 +10,8 @@ import { testModelConfig } from "./org-models.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import type { OAuthModelProviderCredentials } from "./oauth-model-providers/credentials.ts";
+import { resolveOAuthTokenForSidecar } from "./oauth-model-providers/token-resolver.ts";
+import { logger } from "../lib/logger.ts";
 
 // --- List (system + DB) ---
 
@@ -134,10 +136,24 @@ export async function deleteOrgModelProviderKey(orgId: string, id: string): Prom
 
 // --- Credential loading ---
 
+/**
+ * `providerPackageId` is populated for OAuth-backed keys (and only for those).
+ * Downstream consumers branch on it to apply provider-specific request shapes
+ * — e.g. Codex tokens need `chatgpt-account-id` headers and a special probe,
+ * Claude Code tokens need `anthropic-beta: oauth-2025-04-20`. API-key rows
+ * leave it undefined.
+ */
+export interface ModelProviderKeyCredentials {
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+  providerPackageId?: string;
+}
+
 export async function loadModelProviderKeyCredentials(
   orgId: string,
   id: string,
-): Promise<{ api: string; baseUrl: string; apiKey: string } | null> {
+): Promise<ModelProviderKeyCredentials | null> {
   // Check system model provider keys first (same pattern as loadModel checks system models)
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
@@ -149,11 +165,38 @@ export async function loadModelProviderKeyCredentials(
       api: orgSystemProviderKeys.api,
       baseUrl: orgSystemProviderKeys.baseUrl,
       apiKeyEncrypted: orgSystemProviderKeys.apiKeyEncrypted,
+      authMode: orgSystemProviderKeys.authMode,
+      oauthConnectionId: orgSystemProviderKeys.oauthConnectionId,
+      providerPackageId: orgSystemProviderKeys.providerPackageId,
     })
     .from(orgSystemProviderKeys)
     .where(scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }))
     .limit(1);
   if (!row) return null;
+
+  // OAuth path: resolve a fresh access token via the resolver (auto-refreshes
+  // when expired). Throws `gone(needsReconnection)` when the connection is
+  // dead — surface that as `null` so callers fall through to their own
+  // "key not found / unusable" handling.
+  if (row.authMode === "oauth" && row.oauthConnectionId) {
+    try {
+      const token = await resolveOAuthTokenForSidecar(row.oauthConnectionId);
+      return {
+        api: row.api,
+        baseUrl: row.baseUrl,
+        apiKey: token.accessToken,
+        providerPackageId: row.providerPackageId ?? undefined,
+      };
+    } catch (err) {
+      logger.warn("OAuth model provider token resolution failed", {
+        keyId: id,
+        connectionId: row.oauthConnectionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   if (row.apiKeyEncrypted === null) return null;
   try {
     return { api: row.api, baseUrl: row.baseUrl, apiKey: decrypt(row.apiKeyEncrypted) };

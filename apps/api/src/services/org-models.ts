@@ -218,6 +218,8 @@ interface ResolvedModel {
   cost?: ModelCost | null;
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
+  /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
+  providerPackageId?: string;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -278,6 +280,7 @@ export async function resolveModel(
         reasoning: dbDefault.reasoning,
         cost: dbDefault.cost as ModelCost | null,
         isSystemModel: false,
+        providerPackageId: creds.providerPackageId,
       };
     }
   }
@@ -338,13 +341,19 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     reasoning: row.reasoning,
     cost: row.cost as ModelCost | null,
     isSystemModel: false,
+    providerPackageId: creds.providerPackageId,
   };
 }
 
 // --- Connection test ---
 
 /** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
-export function buildModelTestRequest(config: { api: string; baseUrl: string; apiKey: string }): {
+export function buildModelTestRequest(config: {
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+  providerPackageId?: string;
+}): {
   url: string;
   headers: Record<string, string>;
 } {
@@ -352,10 +361,17 @@ export function buildModelTestRequest(config: { api: string; baseUrl: string; ap
   const headers: Record<string, string> = {};
   let url: string;
 
+  // OAuth-backed Anthropic flows (sk-ant-oat API tokens or Claude Code OAuth
+  // access tokens) probe `/v1/models` with the OAuth headers; the package id
+  // is the canonical signal — sk-ant-oat prefix is the legacy fallback.
+  const isAnthropicOAuth =
+    config.providerPackageId === "@appstrate/provider-claude-code" ||
+    config.apiKey.startsWith("sk-ant-oat");
+
   switch (config.api) {
     case "anthropic-messages":
       url = `${base}/v1/models`;
-      if (config.apiKey.startsWith("sk-ant-oat")) {
+      if (isAnthropicOAuth) {
         headers["Authorization"] = `Bearer ${config.apiKey}`;
         headers["anthropic-beta"] = "oauth-2025-04-20";
       } else {
@@ -396,6 +412,7 @@ export async function testModelConfig(config: {
   baseUrl: string;
   modelId: string;
   apiKey: string;
+  providerPackageId?: string;
 }): Promise<TestResult> {
   if (isBlockedUrl(config.baseUrl)) {
     return {
@@ -404,6 +421,15 @@ export async function testModelConfig(config: {
       error: "BLOCKED_URL",
       message: "URL targets a blocked network",
     };
+  }
+
+  // Codex (ChatGPT subscription) has no public discovery endpoint on
+  // `chatgpt.com/backend-api` — `/models` 404s even with a valid token.
+  // Reaching this point already implies a successful token resolution
+  // (the OAuth resolver refreshes if needed and throws on dead tokens),
+  // so report ok without an upstream probe.
+  if (config.providerPackageId === "@appstrate/provider-codex") {
+    return { ok: true, latency: 0 };
   }
 
   const { url, headers } = buildModelTestRequest(config);

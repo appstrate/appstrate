@@ -29,16 +29,24 @@ import {
   buildTokenBody,
 } from "@appstrate/connect";
 import { decodeCodexJwtPayload, type OAuthModelProviderCredentials } from "./credentials.ts";
-import { getOAuthModelProviderConfig, type OAuthModelProviderConfig } from "./registry.ts";
+import {
+  getOAuthModelProviderConfig,
+  OAUTH_MODEL_PROVIDER_TOKEN_URLS,
+  type OAuthModelProviderConfig,
+} from "./registry.ts";
 import { gone, notFound } from "../../lib/errors.ts";
 
 /** Refresh `expiresAt` lead time. Mirrors the sidecar threshold (SPEC §5.2). */
 const REFRESH_LEAD_MS = 5 * 60_000;
 
-const PROVIDER_TOKEN_URL: Record<string, string> = {
-  "@appstrate/provider-codex": "https://auth.openai.com/oauth/token",
-  "@appstrate/provider-claude-code": "https://claude.ai/v1/oauth/token",
-};
+/**
+ * Per-provider token endpoint. Sourced from the registry so the CLI loopback
+ * helper (`apps/cli/src/commands/connect.ts`) and the platform-side refresh
+ * worker can never drift — a wrong host returns a non-canonical schema and
+ * silently breaks refresh (cf. the `claude.ai` vs `platform.claude.com`
+ * regression caught in PR #397).
+ */
+const PROVIDER_TOKEN_URL = OAUTH_MODEL_PROVIDER_TOKEN_URLS;
 
 const inflightRefreshes = new Map<string, Promise<ResolvedToken>>();
 

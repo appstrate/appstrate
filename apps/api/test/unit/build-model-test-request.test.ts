@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildModelTestRequest } from "../../src/services/org-models.ts";
+import { buildModelTestRequest, testModelConfig } from "../../src/services/org-models.ts";
 
 describe("buildModelTestRequest", () => {
   it("anthropic-messages: appends /v1/models, x-api-key for sk-ant- keys", () => {
@@ -120,5 +120,35 @@ describe("buildModelTestRequest", () => {
       apiKey: "k",
     });
     expect(url).toBe("https://api.openai.com/v1/models");
+  });
+
+  it("anthropic-messages + provider-claude-code: uses Bearer + oauth beta even without sk-ant-oat prefix", () => {
+    // Claude Code OAuth tokens are JWTs, not sk-ant-oat — the provider id is the canonical signal.
+    const { headers } = buildModelTestRequest({
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "eyJhbGciOiJSUzI1NiJ9.fake.jwt",
+      providerPackageId: "@appstrate/provider-claude-code",
+    });
+    expect(headers["Authorization"]).toBe("Bearer eyJhbGciOiJSUzI1NiJ9.fake.jwt");
+    expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    expect(headers["x-api-key"]).toBeUndefined();
+  });
+});
+
+describe("testModelConfig", () => {
+  // chatgpt.com/backend-api has no /models discovery endpoint — probing it
+  // 404s even with a valid OAuth token. The OAuth resolver upstream of this
+  // function already validates the token, so reaching here = ok.
+  it("provider-codex: short-circuits to ok without an upstream probe", async () => {
+    const result = await testModelConfig({
+      api: "openai-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      modelId: "gpt-5.5",
+      apiKey: "fake-codex-jwt",
+      providerPackageId: "@appstrate/provider-codex",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.latency).toBe(0);
   });
 });
