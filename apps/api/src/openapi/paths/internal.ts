@@ -271,37 +271,7 @@ export const internalPaths = {
           description: "Resolved token and runtime config.",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["accessToken", "apiShape", "baseUrl", "providerId"],
-                properties: {
-                  accessToken: { type: "string" },
-                  expiresAt: {
-                    type: ["integer", "null"],
-                    description: "Epoch milliseconds. null when expiry is unknown.",
-                  },
-                  apiShape: {
-                    type: "string",
-                    enum: ["anthropic-messages", "openai-responses", "openai-codex-responses"],
-                  },
-                  baseUrl: { type: "string", format: "uri" },
-                  rewriteUrlPath: {
-                    type: "object",
-                    properties: {
-                      from: { type: "string" },
-                      to: { type: "string" },
-                    },
-                    required: ["from", "to"],
-                  },
-                  forceStream: { type: "boolean" },
-                  forceStore: { type: "boolean" },
-                  accountId: {
-                    type: "string",
-                    description: "Codex only — used as `chatgpt-account-id` header.",
-                  },
-                  providerId: { type: "string" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/OAuthTokenResponse" },
             },
           },
         },
@@ -341,31 +311,7 @@ export const internalPaths = {
           description: "Refreshed token and runtime config (same shape as GET).",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["accessToken", "apiShape", "baseUrl", "providerId"],
-                properties: {
-                  accessToken: { type: "string" },
-                  expiresAt: { type: ["integer", "null"] },
-                  apiShape: {
-                    type: "string",
-                    enum: ["anthropic-messages", "openai-responses", "openai-codex-responses"],
-                  },
-                  baseUrl: { type: "string", format: "uri" },
-                  rewriteUrlPath: {
-                    type: "object",
-                    properties: {
-                      from: { type: "string" },
-                      to: { type: "string" },
-                    },
-                    required: ["from", "to"],
-                  },
-                  forceStream: { type: "boolean" },
-                  forceStore: { type: "boolean" },
-                  accountId: { type: "string" },
-                  providerId: { type: "string" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/OAuthTokenResponse" },
             },
           },
         },

@@ -906,6 +906,39 @@ export const schemas = {
       message: { type: "string", description: "Human-readable error message" },
     },
   },
+  OAuthTokenResponse: {
+    type: "object",
+    description:
+      "Resolved access token + provider runtime config returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+    required: ["accessToken", "apiShape", "baseUrl", "providerId"],
+    properties: {
+      accessToken: { type: "string" },
+      expiresAt: {
+        type: ["integer", "null"],
+        description: "Epoch milliseconds. null when expiry is unknown.",
+      },
+      apiShape: {
+        type: "string",
+        enum: ["anthropic-messages", "openai-responses", "openai-codex-responses"],
+      },
+      baseUrl: { type: "string", format: "uri" },
+      rewriteUrlPath: {
+        type: "object",
+        required: ["from", "to"],
+        properties: {
+          from: { type: "string" },
+          to: { type: "string" },
+        },
+      },
+      forceStream: { type: "boolean" },
+      forceStore: { type: "boolean" },
+      accountId: {
+        type: "string",
+        description: "Codex only — used as `chatgpt-account-id` header.",
+      },
+      providerId: { type: "string" },
+    },
+  },
   OrgProxy: {
     type: "object",
     required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],
