@@ -37,7 +37,6 @@ export interface NormalisedOAuthCredentials {
   /** Epoch milliseconds. `0` means the upstream did not surface an expiry. */
   expiresAt: number;
   email?: string;
-  subscriptionType?: string;
   /** Codex only — extracted from JWT by pi-ai. */
   accountId?: string;
 }
@@ -79,7 +78,7 @@ export async function runLoopbackOAuth(
 
   // pi-ai's `OAuthCredentials` shape: `{ access, refresh, expires (ms epoch), [extras] }`.
   // Surrounding code defensively narrows extras because pi-ai types extras as `[key: string]: unknown`
-  // — a future rename of `accountId` / `subscription_type` would silently drop the field otherwise.
+  // — a future rename of `accountId` would silently drop the field otherwise.
   const extras = creds as Record<string, unknown>;
 
   const account = extras.account as Record<string, unknown> | undefined;
@@ -88,8 +87,6 @@ export async function runLoopbackOAuth(
       ? (account.email_address as string)
       : undefined;
   const directEmail = typeof extras.email === "string" ? (extras.email as string) : undefined;
-  const subscriptionType =
-    typeof extras.subscription_type === "string" ? (extras.subscription_type as string) : undefined;
   const accountId = typeof extras.accountId === "string" ? (extras.accountId as string) : undefined;
 
   const normalised: NormalisedOAuthCredentials = {
@@ -99,7 +96,6 @@ export async function runLoopbackOAuth(
   };
   const email = directEmail ?? accountEmail;
   if (email) normalised.email = email;
-  if (subscriptionType) normalised.subscriptionType = subscriptionType;
   if (accountId) normalised.accountId = accountId;
   return normalised;
 }

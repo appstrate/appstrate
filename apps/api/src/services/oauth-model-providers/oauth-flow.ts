@@ -38,8 +38,6 @@ export interface ImportOAuthModelProviderInput {
   refreshToken: string;
   /** Unix milliseconds since epoch. The CLI converts the provider's `expires_in`. */
   expiresAt?: number | null;
-  /** Free-form subscription tier from the OAuth response body, passed through as opaque metadata. */
-  subscriptionType?: string;
   /** Account email — body takes precedence over the value the hook re-derives. */
   email?: string;
   /**
@@ -57,7 +55,6 @@ export interface ImportOAuthModelProviderResult {
   credentialId: string;
   providerId: string;
   email?: string;
-  subscriptionType?: string;
   availableModelIds: string[];
 }
 
@@ -126,9 +123,7 @@ export async function importOAuthModelProviderConnection(
     accessToken: input.accessToken,
     refreshToken: input.refreshToken,
     expiresAt: input.expiresAt ?? null,
-    scopesGranted: [...config.oauth.scopes],
     ...(accountId ? { accountId } : {}),
-    ...(input.subscriptionType ? { subscriptionType: input.subscriptionType } : {}),
     ...(email ? { email } : {}),
   });
 
@@ -136,7 +131,6 @@ export async function importOAuthModelProviderConnection(
     credentialId: credentialId,
     providerId: input.providerId,
     email,
-    subscriptionType: input.subscriptionType,
     availableModelIds: config.models.map((m) => m.id),
   };
 }

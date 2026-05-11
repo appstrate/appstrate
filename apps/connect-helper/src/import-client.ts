@@ -16,7 +16,6 @@ export interface ImportResult {
   credentialId: string;
   providerId: string;
   email?: string;
-  subscriptionType?: string;
   availableModelIds: string[];
 }
 
@@ -58,7 +57,6 @@ export async function postImport(args: {
     expiresAt: args.credentials.expiresAt > 0 ? args.credentials.expiresAt : null,
   };
   if (args.credentials.email) body.email = args.credentials.email;
-  if (args.credentials.subscriptionType) body.subscriptionType = args.credentials.subscriptionType;
   if (args.credentials.accountId) body.accountId = args.credentials.accountId;
 
   const response = await fetch(url, {

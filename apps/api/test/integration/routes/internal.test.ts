@@ -868,7 +868,6 @@ describe("Internal API", () => {
         accessToken: "test-access-token",
         refreshToken: "test-refresh-token",
         expiresAt: Date.now() + 3600_000,
-        scopesGranted: ["user:inference"],
         needsReconnection: false,
       };
       const [row] = await db

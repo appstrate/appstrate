@@ -47,12 +47,6 @@ const importBody = z.object({
   /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
   expiresAt: z.number().int().positive().optional().nullable(),
   /**
-   * Free-form subscription tier surfaced in the OAuth response body
-   * (e.g. "pro", "team", "enterprise"). Passed through as opaque
-   * metadata — the platform never inspects it.
-   */
-  subscriptionType: z.string().max(40).optional(),
-  /**
    * Account email associated with the credential. Either forwarded by
    * the CLI from the OAuth response body, or re-derived server-side by
    * the provider's `extractTokenIdentity` hook.
@@ -123,7 +117,6 @@ export function createModelProvidersOAuthRouter() {
       accessToken: input.accessToken,
       refreshToken: input.refreshToken,
       expiresAt: input.expiresAt ?? null,
-      subscriptionType: input.subscriptionType,
       email: input.email,
       accountId: input.accountId,
     });

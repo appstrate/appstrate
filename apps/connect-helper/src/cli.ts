@@ -202,7 +202,6 @@ async function main(): Promise<number> {
     logInfo(`✓ Connected.`);
     logInfo(`  Models available: ${result.availableModelIds.join(", ") || "(none)"}`);
     if (result.email) logInfo(`  Account email:    ${result.email}`);
-    if (result.subscriptionType) logInfo(`  Subscription:     ${result.subscriptionType}`);
     logInfo("");
     logInfo(
       "You can close this terminal — the dashboard will pick up the connection automatically.",

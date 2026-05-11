@@ -72,7 +72,6 @@ async function seedOAuthCredential(opts: {
     accessToken: opts.accessToken ?? "stale-access",
     refreshToken: opts.refreshToken ?? "stale-refresh",
     expiresAt: opts.expiresAtMs === undefined ? null : opts.expiresAtMs,
-    scopesGranted: ["user:inference"],
   });
   if (opts.needsReconnection || opts.refreshToken === "") {
     // Force-rewrite the blob to mirror the requested edge-case shape (the

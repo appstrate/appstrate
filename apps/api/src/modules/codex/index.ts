@@ -48,12 +48,10 @@ import type {
  * dance produced this token; downstream Codex calls verify it
  * server-side.
  *
- * Exported off the module for the few hot paths (`token-resolver`,
- * `oauth-flow`, `run-launcher/pi`) that still consume raw claims — once
- * those migrate to `getModelProvider("codex")?.hooks?.extractTokenIdentity`,
- * the export drops.
+ * Module-private — consumers go through `extractTokenIdentity` /
+ * `buildApiKeyPlaceholder` on the provider's `hooks`.
  */
-export function decodeCodexJwtPayload(accessToken: string): {
+function decodeCodexJwtPayload(accessToken: string): {
   chatgpt_account_id?: string;
   email?: string;
 } | null {
@@ -98,10 +96,10 @@ function base64UrlEncode(input: string): string {
  * regression-prone part — Codex rejects requests that drop any of the
  * load-bearing headers (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
  *
- * Exported off the module so the unit suite can pin the wire shape
- * without standing up an HTTP listener.
+ * Module-private — the wire shape is pinned via `buildInferenceProbe`
+ * on the provider's `hooks`.
  */
-export function buildCodexInferenceRequest(config: {
+function buildCodexInferenceRequest(config: {
   baseUrl: string;
   modelId: string;
   apiKey: string;

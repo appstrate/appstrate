@@ -170,12 +170,6 @@ export const modelProvidersOAuthPaths = {
                   type: ["integer", "null"],
                   description: "Unix milliseconds since epoch — when the access token expires.",
                 },
-                subscriptionType: {
-                  type: "string",
-                  maxLength: 40,
-                  description:
-                    "Optional subscription tier hint surfaced by the upstream OAuth provider (e.g. `pro`, `max`, `team`, `enterprise`). Carried through verbatim to the credential row.",
-                },
                 email: {
                   type: "string",
                   format: "email",
@@ -207,7 +201,6 @@ export const modelProvidersOAuthPaths = {
                   credentialId: { type: "string", format: "uuid" },
                   providerId: { type: "string" },
                   email: { type: "string", format: "email" },
-                  subscriptionType: { type: "string" },
                   availableModelIds: { type: "array", items: { type: "string" } },
                 },
               },

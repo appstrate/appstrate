@@ -47,7 +47,6 @@ export interface OAuthBlob {
   refreshToken: string;
   /** Epoch milliseconds. `null` when the upstream did not return an expiry. */
   expiresAt: number | null;
-  scopesGranted: string[];
   needsReconnection: boolean;
   /**
    * Abstract account/tenant identifier — populated by the provider's
@@ -55,8 +54,6 @@ export interface OAuthBlob {
    * here). Echoed by the sidecar as a routing header at request time.
    */
   accountId?: string;
-  /** Free-form subscription tier surfaced in the OAuth response body. */
-  subscriptionType?: string;
   /** Account email — surfaced in the UI; never used in the inference path. */
   email?: string;
 }
@@ -212,9 +209,7 @@ export interface CreateOAuthCredentialInput {
   refreshToken: string;
   /** Epoch ms. */
   expiresAt: number | null;
-  scopesGranted: string[];
   accountId?: string;
-  subscriptionType?: string;
   email?: string;
 }
 
@@ -233,10 +228,8 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     accessToken: input.accessToken,
     refreshToken: input.refreshToken,
     expiresAt: input.expiresAt,
-    scopesGranted: input.scopesGranted,
     needsReconnection: false,
     ...(input.accountId ? { accountId: input.accountId } : {}),
-    ...(input.subscriptionType ? { subscriptionType: input.subscriptionType } : {}),
     ...(input.email ? { email: input.email } : {}),
   };
   const [row] = await db
@@ -316,8 +309,7 @@ export async function updateModelProviderCredential(
 /**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
- * upstream didn't return (e.g. `email`, `subscriptionType`, `accountId` when
- * not rotated).
+ * upstream didn't return (e.g. `email`, `accountId` when not rotated).
  */
 export interface UpdateOAuthCredentialTokensInput {
   accessToken: string;

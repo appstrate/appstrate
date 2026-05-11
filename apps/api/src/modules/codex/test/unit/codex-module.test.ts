@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import codexModule, { decodeCodexJwtPayload } from "../../index.ts";
+import codexModule from "../../index.ts";
 
 describe("codex module", () => {
   it("declares exactly the codex provider", () => {
@@ -103,16 +103,5 @@ describe("extractTokenIdentity hook", () => {
     const codex = codexModule.modelProviders?.()[0];
     expect(codex?.hooks?.buildApiKeyPlaceholder?.("not.a.jwt")).toBeNull();
     expect(codex?.hooks?.buildApiKeyPlaceholder?.(encodeJwt({}))).toBeNull();
-  });
-
-  it("decodeCodexJwtPayload re-export stays available for legacy consumers", () => {
-    const token = encodeJwt({
-      "https://api.openai.com/auth": { chatgpt_account_id: "x" },
-      email: "y@z",
-    });
-    expect(decodeCodexJwtPayload(token)).toEqual({
-      chatgpt_account_id: "x",
-      email: "y@z",
-    });
   });
 });

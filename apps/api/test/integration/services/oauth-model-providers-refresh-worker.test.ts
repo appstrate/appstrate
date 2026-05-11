@@ -56,7 +56,6 @@ async function seedOauthCred(
     accessToken: "tok",
     refreshToken: "rt",
     expiresAt: opts.expiresAtMs,
-    scopesGranted: ["user:inference"],
   });
   if (opts.needsReconnection) {
     await markCredentialNeedsReconnection(fx.orgId, id);
@@ -116,10 +115,9 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     await seedOauthCred(fx, "test-oauth", { expiresAtMs: null });
 
     const result = await scanAndEnqueueRefreshes();
-    // `expires_at IS NULL` qualifies via the backfill branch of the SQL
-    // predicate, so the row IS scanned (decrypted) — but the blob's
-    // `expiresAt === null` then short-circuits the enqueue.
-    expect(result.scanned).toBe(1);
+    // The SQL filter (`expires_at < cutoff`) excludes NULL rows at the
+    // index level — no decrypt, no enqueue.
+    expect(result.scanned).toBe(0);
     expect(result.enqueued).toBe(0);
   });
 

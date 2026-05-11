@@ -252,9 +252,7 @@ describe("model-provider-credentials service — oauth path", () => {
       accessToken: "access-1",
       refreshToken: "refresh-1",
       expiresAt: 1_700_000_000_000,
-      scopesGranted: ["openid", "profile"],
       accountId: "acct-abc",
-      subscriptionType: "pro",
       email: "user@example.test",
     });
 
@@ -279,7 +277,6 @@ describe("model-provider-credentials service — oauth path", () => {
         accessToken: "x",
         refreshToken: "y",
         expiresAt: null,
-        scopesGranted: [],
       }),
     ).rejects.toThrow(/api-key only/);
   });
@@ -294,7 +291,6 @@ describe("model-provider-credentials service — oauth path", () => {
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
-      scopesGranted: [],
     });
     await expect(
       updateModelProviderCredential(ctx.orgId, id, { apiKey: "intruder" }),
@@ -311,9 +307,7 @@ describe("model-provider-credentials service — oauth path", () => {
       accessToken: "old-access",
       refreshToken: "old-refresh",
       expiresAt: 1_000,
-      scopesGranted: ["user:inference"],
       email: "x@example.test",
-      subscriptionType: "max",
     });
 
     await updateOAuthCredentialTokens(ctx.orgId, id, {
@@ -325,7 +319,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
-    // email/subscriptionType preserved (only surface in list, not in load).
+    // email preserved (only surface in list, not in load).
     const list = await listModelProviderCredentialRows(ctx.orgId);
     expect(list[0]!.oauthEmail).toBe("x@example.test");
   });
@@ -340,7 +334,6 @@ describe("model-provider-credentials service — oauth path", () => {
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
-      scopesGranted: [],
     });
 
     await markCredentialNeedsReconnection(ctx.orgId, id);
