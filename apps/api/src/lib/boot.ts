@@ -8,7 +8,12 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
+import {
+  loadModules,
+  getModules,
+  getModuleContributions,
+  getModuleModelProviders,
+} from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
@@ -24,7 +29,11 @@ import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
-import { MODEL_PROVIDERS } from "../services/oauth-model-providers/registry.ts";
+import { seedLegacyModelProviders } from "../services/oauth-model-providers/registry.ts";
+import {
+  getRegisteredProviderIds,
+  registerModelProviders,
+} from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
@@ -83,6 +92,14 @@ export async function boot(): Promise<void> {
   // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
+
+  // Aggregate model provider contributions from every loaded module into
+  // the runtime registry FIRST (module providers take precedence), then
+  // seed the legacy in-code map. PR 4-5 will move the built-ins into
+  // proper modules, at which point `seedLegacyModelProviders()` becomes a
+  // no-op and the file is deleted in PR 7.
+  registerModelProviders(getModuleModelProviders());
+  seedLegacyModelProviders();
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. `createAuth()` narrows the `unknown[]` from the
@@ -173,7 +190,7 @@ export async function boot(): Promise<void> {
   {
     const disabled = env.MODEL_PROVIDERS_DISABLED;
     if (disabled.length > 0) {
-      const known = new Set(Object.keys(MODEL_PROVIDERS));
+      const known = new Set(getRegisteredProviderIds());
       const unknown = disabled.filter((id) => !known.has(id));
       if (unknown.length > 0) {
         throw new Error(

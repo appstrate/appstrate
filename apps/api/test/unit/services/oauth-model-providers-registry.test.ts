@@ -8,7 +8,7 @@
  *     uses plain `/v1/messages` against api.anthropic.com)
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, beforeAll } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import {
   MODEL_PROVIDERS,
@@ -17,7 +17,17 @@ import {
   isOAuthModelProvider,
   listEnabledModelProviders,
   listModelProviders,
+  seedLegacyModelProviders,
 } from "../../../src/services/oauth-model-providers/registry.ts";
+import { resetModelProviders } from "../../../src/services/model-providers/registry.ts";
+
+// PR 2 migration: the legacy lookups now delegate to the runtime registry
+// which starts empty. Seed the legacy built-ins once so the contract tests
+// run against the same five providers as before.
+beforeAll(() => {
+  resetModelProviders();
+  seedLegacyModelProviders();
+});
 
 const CANONICAL_IDS = ["codex", "claude-code", "openai", "anthropic", "openai-compatible"] as const;
 const OAUTH_IDS = ["codex", "claude-code"] as const;

@@ -1,111 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model Providers — runtime execution registry.
+ * Legacy in-code seed of built-in model providers.
  *
- * Single source of truth for every LLM model provider Appstrate knows how
- * to talk to (API-key + OAuth alike). Each entry pins:
- *   - identity & branding (provider id, display name, icon, docs)
- *   - inference wire format (apiShape, base URL, force-stream/store, URL rewriting)
- *   - auth metadata (api_key form OR OAuth2 client config)
- *   - selectable models (id, context window, capabilities, optional cost)
+ * Historically the source of truth; now a transitional layer that feeds
+ * the runtime registry (`services/model-providers/registry.ts`) at boot.
+ * The five built-ins (codex, claude-code, openai, anthropic,
+ * openai-compatible) will migrate into proper `core-providers` and
+ * `codex` modules in PR 4-5, at which point this file (and the explicit
+ * `seedLegacyModelProviders()` call in boot) can be removed.
  *
- * Why in code rather than as AFPS packages: the wire format is provider-
- * specific (Anthropic stealth-mode headers, Codex Responses path rewriting,
- * forced stream/store on ChatGPT-account mode) and changes when upstreams
- * change enforcement — that risk belongs in CI, not in a remote package.
- * The non-LLM provider mechanism (gmail/slack/…) remains AFPS-packaged
- * because its surface IS generic (`provider_call` MCP tool).
- *
- * See docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §3.3 for rationale.
+ * Public re-exports (`getModelProviderConfig`, `listModelProviders`,
+ * `isOAuthModelProvider`, `isModelProviderEnabled`,
+ * `listEnabledModelProviders`) delegate to the runtime registry so
+ * call sites are unchanged during the migration.
  */
 
-import { getEnv } from "@appstrate/env";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
+import {
+  getModelProvider as _getModelProvider,
+  isOAuthModelProvider as _isOAuthModelProvider,
+  listModelProviders as _listModelProviders,
+  isModelProviderEnabled as _isModelProviderEnabled,
+  listEnabledModelProviders as _listEnabledModelProviders,
+  registerModelProviders,
+} from "../model-providers/registry.ts";
 
-export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
-
-export type AuthMode = "api_key" | "oauth2";
-
-export interface ModelCost {
-  /** USD per 1M input tokens. */
-  input: number;
-  /** USD per 1M output tokens. */
-  output: number;
-  /** USD per 1M cache-read tokens (provider-specific). */
-  cacheRead?: number;
-  /** USD per 1M cache-write tokens (provider-specific). */
-  cacheWrite?: number;
-}
-
-export interface ModelEntry {
-  /** Canonical model identifier accepted by the provider's API. */
-  id: string;
-  /** Maximum input context window in tokens. */
-  contextWindow: number;
-  /** Maximum response tokens. */
-  maxTokens?: number;
-  /** Surfaced capabilities for selection UIs. */
-  capabilities: readonly ModelCapability[];
-  /** Default per-token cost. Self-hosters can override via SYSTEM_PROVIDER_KEYS env. */
-  cost?: ModelCost;
-  /**
-   * Curated default for first-connection auto-seed flows (onboarding
-   * quick-connect cards). When `true`, the model is created in `org_models`
-   * automatically right after a fresh OAuth pairing succeeds. If no model in
-   * a provider's list carries this flag, callers fall back to seeding every
-   * entry — see `apps/web/src/hooks/use-auto-seed-models.ts`.
-   */
-  recommended?: true;
-}
-
-export interface OAuthConfig {
-  /** Public OAuth client_id — shared with the official CLI. */
-  clientId: string;
-  /** /authorize endpoint. */
-  authorizationUrl: string;
-  /** Token exchange endpoint. */
-  tokenUrl: string;
-  /** Token refresh endpoint (often equal to tokenUrl). */
-  refreshUrl: string;
-  /** Scopes requested at /authorize. */
-  scopes: readonly string[];
-  /** PKCE code challenge method. All current providers require S256. */
-  pkce: "S256";
-}
-
-export interface ModelProviderConfig {
-  /** Stable id used as `provider_id` in DB rows and as registry lookup key. */
-  providerId: string;
-  displayName: string;
-  /** Icon hint consumed by the UI (matches the existing AFPS provider iconUrl format). */
-  iconUrl: string;
-  description?: string;
-  docsUrl?: string;
-
-  // — Inference —
-  /** Wire format the runtime serializes against. */
-  apiShape: ModelApiShape;
-  /** Default base URL the sidecar forwards LLM traffic to. */
-  defaultBaseUrl: string;
-  /** Whether the user can override `defaultBaseUrl` per credential row. */
-  baseUrlOverridable: boolean;
-  /** Force `stream: true` on outbound bodies (Codex ChatGPT-account mode). */
-  forceStream?: true;
-  /** Force `store: false` on outbound bodies (Codex ChatGPT-account mode). */
-  forceStore?: false;
-  /** Path rewriting applied at the proxy boundary. */
-  rewriteUrlPath?: { from: string; to: string };
-
-  // — Auth —
-  authMode: AuthMode;
-  /** Required iff authMode === "oauth2". */
-  oauth?: OAuthConfig;
-
-  // — Catalog —
-  /** Selectable models. May be empty for providers whose model list is user-supplied. */
-  models: readonly ModelEntry[];
-}
+// Re-export `ModelProviderDefinition` under the legacy `ModelProviderConfig`
+// alias so consumer code in PR 2 keeps compiling. PR 3 sweeps the alias.
+export type ModelProviderConfig = ModelProviderDefinition;
+export type AuthMode = ModelProviderDefinition["authMode"];
+export type ModelEntry = ModelProviderDefinition["models"][number];
+export type ModelCapability = ModelEntry["capabilities"][number];
+export type ModelCost = NonNullable<ModelEntry["cost"]>;
+export type OAuthConfig = NonNullable<ModelProviderDefinition["oauth"]>;
 
 /**
  * Decode the JWT payload of a Codex access token.
@@ -277,52 +205,59 @@ const openaiCompatibleConfig: ModelProviderConfig = {
   models: [],
 };
 
-export const MODEL_PROVIDERS: Readonly<Record<string, ModelProviderConfig>> = Object.freeze({
-  [codexConfig.providerId]: codexConfig,
-  [claudeCodeConfig.providerId]: claudeCodeConfig,
-  [openaiConfig.providerId]: openaiConfig,
-  [anthropicConfig.providerId]: anthropicConfig,
-  [openaiCompatibleConfig.providerId]: openaiCompatibleConfig,
-});
+/**
+ * Built-in provider definitions, in insertion order. Consumed by
+ * `seedLegacyModelProviders()` at boot. Once PR 4-5 land, this array
+ * shrinks to `[]` and the file disappears in PR 7.
+ */
+const LEGACY_PROVIDERS: readonly ModelProviderDefinition[] = [
+  codexConfig,
+  claudeCodeConfig,
+  openaiConfig,
+  anthropicConfig,
+  openaiCompatibleConfig,
+];
 
-/** Returns the runtime config for a model provider, or null if unknown. */
+/**
+ * Register every legacy built-in provider into the runtime registry.
+ *
+ * Called from `boot.ts` AFTER `loadModules()` so that any module-owned
+ * provider (when those land) is registered first and a legacy duplicate
+ * surfaces as a fatal error rather than a silent shadow.
+ */
+export function seedLegacyModelProviders(): void {
+  registerModelProviders(LEGACY_PROVIDERS);
+}
+
+// ---- Back-compat shims (PR 2) -----------------------------------------------
+// PR 3 sweeps every caller off these wrappers onto the runtime-registry
+// accessors directly. Until then the legacy import paths keep working
+// unchanged.
+
+/** @deprecated PR 3 — call `getModelProvider` from `services/model-providers/registry.ts`. */
 export function getModelProviderConfig(providerId: string): ModelProviderConfig | null {
-  return MODEL_PROVIDERS[providerId] ?? null;
+  return _getModelProvider(providerId);
 }
 
-/** Whitelist check — true iff the id resolves to an OAuth model provider. */
-export function isOAuthModelProvider(providerId: string): boolean {
-  const config = getModelProviderConfig(providerId);
-  return config?.authMode === "oauth2";
-}
+/** @deprecated PR 3 — import from `services/model-providers/registry.ts`. */
+export const isOAuthModelProvider = _isOAuthModelProvider;
 
-/** Iterate all registered model providers (insertion order). */
-export function listModelProviders(): readonly ModelProviderConfig[] {
-  return Object.values(MODEL_PROVIDERS);
-}
+/** @deprecated PR 3 — import from `services/model-providers/registry.ts`. */
+export const listModelProviders = _listModelProviders;
 
-/**
- * True iff `providerId` is NOT listed in `MODEL_PROVIDERS_DISABLED`.
- *
- * "Soft disable" — this check is consulted only at admin-facing surfaces
- * (UI picker, POST creation, OAuth initiate). The runtime hot path
- * (token-resolver, refresh-worker, llm-proxy, `executeProviderCall`)
- * deliberately uses the unfiltered accessors so existing credentials for
- * a disabled provider keep working until the admin deletes them.
- *
- * `getEnv()` is cached after first call so this is O(1) on the hot path.
- */
-export function isModelProviderEnabled(providerId: string): boolean {
-  return !getEnv().MODEL_PROVIDERS_DISABLED.includes(providerId);
-}
+/** @deprecated PR 3 — import from `services/model-providers/registry.ts`. */
+export const isModelProviderEnabled = _isModelProviderEnabled;
+
+/** @deprecated PR 3 — import from `services/model-providers/registry.ts`. */
+export const listEnabledModelProviders = _listEnabledModelProviders;
 
 /**
- * Iterate the subset of registered model providers that are enabled by env.
+ * @deprecated PR 3 — call `getModelProvider` from the runtime registry.
  *
- * Use this in admin/UI surfaces where disabled providers must NOT appear
- * (picker, validators, OpenAPI enums). Use `listModelProviders()` for any
- * runtime resolver that must keep operating on existing credentials.
+ * Kept as a freshly-built object literal (not a frozen map) so the legacy
+ * `Object.keys(MODEL_PROVIDERS)` boot validation in `boot.ts` keeps
+ * working until PR 3 swaps it for `getRegisteredProviderIds()`.
  */
-export function listEnabledModelProviders(): readonly ModelProviderConfig[] {
-  return listModelProviders().filter((p) => isModelProviderEnabled(p.providerId));
-}
+export const MODEL_PROVIDERS: Readonly<Record<string, ModelProviderConfig>> = Object.freeze(
+  Object.fromEntries(LEGACY_PROVIDERS.map((p) => [p.providerId, p])),
+);
