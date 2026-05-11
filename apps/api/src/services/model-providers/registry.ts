@@ -4,13 +4,11 @@
  * Model Providers — runtime execution registry.
  *
  * Single source of truth for every LLM model provider Appstrate knows
- * about at runtime. The registry is **populated at boot** from two
- * sources:
- *   1. Module contributions — every loaded module's `modelProviders()`
- *      hook is collected and registered here.
- *   2. The legacy in-code seed (`oauth-model-providers/registry.ts`) —
- *      kept transitional until PR 4-5 move the built-in providers into
- *      dedicated modules.
+ * about at runtime. The registry is **populated at boot** from module
+ * contributions: every loaded module's `modelProviders()` hook is
+ * collected and registered here. The four canonical OSS built-ins
+ * (openai, anthropic, openai-compatible, codex) all ship as modules
+ * (`core-providers`, `codex`) — there is no in-code seed.
  *
  * Lookups during the request hot path (token resolver, llm-proxy,
  * sidecar `/configure`, refresh worker) MUST go through this registry —

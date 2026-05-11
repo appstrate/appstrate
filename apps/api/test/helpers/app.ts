@@ -31,7 +31,6 @@ import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
-import { seedLegacyModelProviders } from "../../src/services/oauth-model-providers/registry.ts";
 import {
   registerModelProviders,
   resetModelProviders,
@@ -113,7 +112,6 @@ resetModelProviders();
     .flat();
   registerModelProviders(moduleContributions);
 }
-seedLegacyModelProviders();
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**

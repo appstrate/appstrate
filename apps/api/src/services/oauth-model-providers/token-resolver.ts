@@ -25,11 +25,9 @@ import {
   buildTokenHeaders,
   buildTokenBody,
 } from "@appstrate/connect";
-import {
-  decodeCodexJwtPayload,
-  getModelProviderConfig,
-  type ModelProviderConfig,
-} from "./registry.ts";
+import type { ModelProviderDefinition as ModelProviderConfig } from "@appstrate/core/module";
+import { decodeCodexJwtPayload } from "../../modules/codex/index.ts";
+import { getModelProvider as getModelProviderConfig } from "../model-providers/registry.ts";
 import {
   markCredentialNeedsReconnection,
   updateOAuthCredentialTokens,

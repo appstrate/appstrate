@@ -29,7 +29,6 @@ import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
-import { seedLegacyModelProviders } from "../services/oauth-model-providers/registry.ts";
 import {
   getRegisteredProviderIds,
   registerModelProviders,
@@ -94,12 +93,10 @@ export async function boot(): Promise<void> {
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
   // Aggregate model provider contributions from every loaded module into
-  // the runtime registry FIRST (module providers take precedence), then
-  // seed the legacy in-code map. PR 4-5 will move the built-ins into
-  // proper modules, at which point `seedLegacyModelProviders()` becomes a
-  // no-op and the file is deleted in PR 7.
+  // the runtime registry. The four canonical OSS built-ins (openai,
+  // anthropic, openai-compatible, codex) all ship as modules
+  // (`core-providers`, `codex`) — there is no in-code seed.
   registerModelProviders(getModuleModelProviders());
-  seedLegacyModelProviders();
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. `createAuth()` narrows the `unknown[]` from the

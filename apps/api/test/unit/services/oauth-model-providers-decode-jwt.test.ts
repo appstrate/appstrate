@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { decodeCodexJwtPayload } from "../../../src/services/oauth-model-providers/registry.ts";
+import { decodeCodexJwtPayload } from "../../../src/modules/codex/index.ts";
 
 function buildJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");

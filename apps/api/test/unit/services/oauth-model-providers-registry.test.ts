@@ -2,24 +2,19 @@
 
 /**
  * Cross-module composition contract for the runtime model-provider
- * registry. The legacy in-code seed is empty post-PR-6 (claude-code
- * removed from OSS); the four canonical OSS providers — openai,
- * anthropic, openai-compatible, codex — are all contributed by
- * modules and aggregated into the runtime registry at boot.
+ * registry. The four canonical OSS providers — openai, anthropic,
+ * openai-compatible, codex — are all contributed by modules and
+ * aggregated into the runtime registry at boot.
  */
 
 import { describe, it, expect, afterEach, beforeAll } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import {
-  MODEL_PROVIDERS,
-  getModelProviderConfig,
+  getModelProvider as getModelProviderConfig,
   isModelProviderEnabled,
   isOAuthModelProvider,
   listEnabledModelProviders,
   listModelProviders,
-  seedLegacyModelProviders,
-} from "../../../src/services/oauth-model-providers/registry.ts";
-import {
   registerModelProviders,
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
@@ -30,7 +25,6 @@ beforeAll(() => {
   resetModelProviders();
   registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
   registerModelProviders(codexModule.modelProviders?.() ?? []);
-  seedLegacyModelProviders();
 });
 
 const CANONICAL_IDS = ["openai", "anthropic", "openai-compatible", "codex"] as const;
@@ -41,10 +35,6 @@ describe("runtime registry composition", () => {
       .map((p) => p.providerId)
       .sort();
     expect(ids).toEqual([...CANONICAL_IDS].sort());
-  });
-
-  it("the legacy in-code seed is empty (every built-in is module-owned)", () => {
-    expect(Object.keys(MODEL_PROVIDERS)).toEqual([]);
   });
 
   it("each entry's providerId matches its key in the runtime registry", () => {
