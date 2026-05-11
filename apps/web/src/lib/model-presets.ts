@@ -12,7 +12,7 @@ interface ModelPreset {
   cost?: ModelCost;
 }
 
-interface ProviderPreset {
+export interface ProviderPreset {
   id: string;
   label: string;
   apiShape: string;
@@ -244,89 +244,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     models: [],
   },
-  // OAuth subscription-mode providers. baseUrl + model list mirror the
-  // runtime registry in apps/api/src/services/oauth-model-providers/registry.ts
-  // — keep in sync when the registry changes.
-  {
-    id: "codex",
-    label: "Codex (ChatGPT Plus / Pro / Team)",
-    apiShape: "openai-codex-responses",
-    baseUrl: "https://chatgpt.com/backend-api",
-    models: [
-      {
-        modelId: "gpt-5.5",
-        label: "GPT-5.5",
-        input: ["text", "image"],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        reasoning: true,
-      },
-      {
-        modelId: "gpt-5.4",
-        label: "GPT-5.4",
-        input: ["text"],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        reasoning: true,
-      },
-      {
-        modelId: "gpt-5.4-mini",
-        label: "GPT-5.4 mini",
-        input: ["text"],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        reasoning: true,
-      },
-      {
-        modelId: "gpt-5.3-codex",
-        label: "GPT-5.3 Codex",
-        input: ["text"],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        reasoning: true,
-      },
-      {
-        modelId: "gpt-5.2",
-        label: "GPT-5.2",
-        input: ["text"],
-        contextWindow: 200_000,
-        maxTokens: 128_000,
-        reasoning: true,
-      },
-    ],
-  },
-  {
-    id: "claude-code",
-    label: "Claude Code (Claude Pro / Max / Team)",
-    apiShape: "anthropic-messages",
-    baseUrl: "https://api.anthropic.com",
-    models: [
-      {
-        modelId: "claude-opus-4-7",
-        label: "Claude Opus 4.7 (1M)",
-        input: ["text", "image"],
-        contextWindow: 1_000_000,
-        maxTokens: 64_000,
-        reasoning: true,
-      },
-      {
-        modelId: "claude-sonnet-4-6",
-        label: "Claude Sonnet 4.6 (1M)",
-        input: ["text", "image"],
-        contextWindow: 1_000_000,
-        maxTokens: 64_000,
-        reasoning: true,
-      },
-      {
-        modelId: "claude-haiku-4-5",
-        label: "Claude Haiku 4.5",
-        input: ["text", "image"],
-        contextWindow: 200_000,
-        maxTokens: 64_000,
-        reasoning: false,
-      },
-    ],
-  },
   {
     id: "xai",
     label: "xAI",
@@ -379,11 +296,20 @@ export const API_TYPES = [
   { value: "bedrock-converse-stream", label: "AWS Bedrock" },
 ] as const;
 
+/**
+ * Helpers accept an optional `extraProviders` list — used by callers that
+ * have already fetched the server's `MODEL_PROVIDERS` registry via
+ * `useProvidersRegistry()` and want OAuth-subscription providers (Codex,
+ * Claude Code) included in the lookup. The static list above intentionally
+ * omits them — the OAuth catalog is authoritatively defined in
+ * `apps/api/src/services/oauth-model-providers/registry.ts`.
+ */
 export function findPresetMatch(
   apiShape: string,
   modelId: string,
+  extraProviders: readonly ProviderPreset[] = [],
 ): { provider: ProviderPreset; model: ModelPreset } | null {
-  for (const provider of PROVIDER_PRESETS) {
+  for (const provider of [...PROVIDER_PRESETS, ...extraProviders]) {
     if (provider.apiShape !== apiShape) continue;
     const model = provider.models.find((m) => m.modelId === modelId);
     if (model) return { provider, model };
@@ -391,17 +317,21 @@ export function findPresetMatch(
   return null;
 }
 
-export function getProviderById(id: string): ProviderPreset | undefined {
-  return PROVIDER_PRESETS.find((p) => p.id === id);
+export function getProviderById(
+  id: string,
+  extraProviders: readonly ProviderPreset[] = [],
+): ProviderPreset | undefined {
+  return [...PROVIDER_PRESETS, ...extraProviders].find((p) => p.id === id);
 }
 
 export function findProviderByApiShapeAndBaseUrl(
   apiShape: string,
   baseUrl: string | undefined,
+  extraProviders: readonly ProviderPreset[] = [],
 ): ProviderPreset | undefined {
   if (!baseUrl) return undefined;
   const normalized = baseUrl.replace(/\/+$/, "");
-  return PROVIDER_PRESETS.find(
+  return [...PROVIDER_PRESETS, ...extraProviders].find(
     (p) => p.apiShape === apiShape && normalized.startsWith(p.baseUrl.replace(/\/+$/, "")),
   );
 }
