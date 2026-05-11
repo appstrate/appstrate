@@ -7,9 +7,9 @@
  *   - the `apiKey` plaintext is never stored as plaintext
  *   - the public list shape never carries plaintext
  *   - cross-org reads/updates/deletes are scoped — org A cannot touch org B
- *   - `loadModelProviderCredentials` overlays the registry config
+ *   - `loadInferenceCredentials` overlays the registry config
  *     (apiShape, defaultBaseUrl, forceStream, rewriteUrlPath)
- *   - `loadModelProviderCredentials` honors `baseUrlOverride` only for
+ *   - `loadInferenceCredentials` honors `baseUrlOverride` only for
  *     providers whose registry entry has `baseUrlOverridable: true`
  *   - rotating an api_key re-encrypts and the old blob stops decrypting
  *   - rotating apiKey on an oauth row throws — the OAuth refresh path is
@@ -34,7 +34,6 @@ import {
   listModelProviderCredentialRows,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
-  loadModelProviderCredentials,
   markCredentialNeedsReconnection,
   resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
@@ -68,7 +67,7 @@ describe("model-provider-credentials service — api_key path", () => {
     expect(row!.credentialsEncrypted).toMatch(/^v1:[^:]+:[A-Za-z0-9+/=]+$/);
   });
 
-  it("loadModelProviderCredentials overlays the registry config", async () => {
+  it("loadInferenceCredentials overlays the registry config", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-load-apikey" });
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
@@ -78,7 +77,7 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: PLAINTEXT,
     });
 
-    const creds = await loadModelProviderCredentials(ctx.orgId, id);
+    const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds).not.toBeNull();
     expect(creds!.providerId).toBe("anthropic");
     expect(creds!.apiShape).toBe("anthropic-messages");
@@ -125,7 +124,7 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: "ollama-fake-key",
       baseUrlOverride: "http://localhost:11434",
     });
-    const compatLoad = await loadModelProviderCredentials(ctx.orgId, compatId);
+    const compatLoad = await loadInferenceCredentials(ctx.orgId, compatId);
     expect(compatLoad!.baseUrl).toBe("http://localhost:11434");
 
     // openai: override is silently ignored (not overridable).
@@ -137,7 +136,7 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: "sk-foo",
       baseUrlOverride: "http://attacker.example/openai",
     });
-    const openaiLoad = await loadModelProviderCredentials(ctx.orgId, openaiId);
+    const openaiLoad = await loadInferenceCredentials(ctx.orgId, openaiId);
     expect(openaiLoad!.baseUrl).toBe("https://api.openai.com");
     const [row] = await db
       .select({ baseUrlOverride: modelProviderCredentials.baseUrlOverride })
@@ -185,7 +184,7 @@ describe("model-provider-credentials service — api_key path", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
     expect(after!.blob).not.toBe(before!.blob);
-    const creds = await loadModelProviderCredentials(ctx.orgId, id);
+    const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.apiKey).toBe("new-secret");
   });
 
@@ -227,13 +226,13 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: "secret-a",
     });
 
-    expect(await loadModelProviderCredentials(ctxB.orgId, id)).toBeNull();
+    expect(await loadInferenceCredentials(ctxB.orgId, id)).toBeNull();
     await updateModelProviderCredential(ctxB.orgId, id, { apiKey: "stolen" });
-    const own = await loadModelProviderCredentials(ctxA.orgId, id);
+    const own = await loadInferenceCredentials(ctxA.orgId, id);
     expect(own!.apiKey).toBe("secret-a");
 
     await deleteModelProviderCredential(ctxB.orgId, id);
-    const stillOwn = await loadModelProviderCredentials(ctxA.orgId, id);
+    const stillOwn = await loadInferenceCredentials(ctxA.orgId, id);
     expect(stillOwn).not.toBeNull();
   });
 });
@@ -259,7 +258,7 @@ describe("model-provider-credentials service — oauth path", () => {
       email: "user@example.test",
     });
 
-    const creds = await loadModelProviderCredentials(ctx.orgId, id);
+    const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.providerId).toBe("codex");
     expect(creds!.apiShape).toBe("openai-codex-responses");
     expect(creds!.baseUrl).toBe("https://chatgpt.com/backend-api");
@@ -328,7 +327,7 @@ describe("model-provider-credentials service — oauth path", () => {
       expiresAt: 2_000_000,
     });
 
-    const creds = await loadModelProviderCredentials(ctx.orgId, id);
+    const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
     // email/subscriptionType preserved (only surface in list, not in load).
@@ -350,8 +349,9 @@ describe("model-provider-credentials service — oauth path", () => {
     });
 
     await markCredentialNeedsReconnection(ctx.orgId, id);
-    const creds = await loadModelProviderCredentials(ctx.orgId, id);
-    expect(creds!.needsReconnection).toBe(true);
+    // loadInferenceCredentials gates dead OAuth rows — null is the signal.
+    expect(await loadInferenceCredentials(ctx.orgId, id)).toBeNull();
+    // The list view surfaces the raw flag for UI affordances.
     const list = await listModelProviderCredentialRows(ctx.orgId);
     expect(list[0]!.needsReconnection).toBe(true);
   });

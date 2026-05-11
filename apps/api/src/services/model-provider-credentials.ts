@@ -84,11 +84,10 @@ interface ModelProviderCredentialRow {
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
 /**
- * Single decrypted credential shape exposed to the rest of the platform —
- * shared by `loadModelProviderCredentials` (DB-only read path used by
- * tests + OAuth refresh worker) and `loadInferenceCredentials` (DB + env
- * system-key fallback + needsReconnection gate, used by org-models +
- * model-provider-credentials routes).
+ * Single decrypted credential shape exposed by `loadInferenceCredentials`
+ * (the only public read path). Carries the registry overlay (apiShape,
+ * baseUrl, rewriteUrlPath, forceStream/Store) inline so downstream consumers
+ * (pi.ts, llm-proxy) don't have to re-look-up `getModelProviderConfig`.
  *
  * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
  * entries have no registry providerId — they are flat wire-format
@@ -412,7 +411,13 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
 
 // ─── Load (decrypt + apply registry overlay) ───────────────────────────────
 
-export async function loadModelProviderCredentials(
+/**
+ * Internal: decrypt + overlay the registry config for one DB row. Public
+ * callers MUST use {@link loadInferenceCredentials} so the env-system-key
+ * fallback and `needsReconnection` gate are honored — those two callers
+ * differ only by what they wrap around this single read path.
+ */
+async function loadDbCredential(
   orgId: string,
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
@@ -578,7 +583,7 @@ export async function loadInferenceCredentials(
   }
 
   // 2) Unified credentials table (api-key + OAuth).
-  const creds = await loadModelProviderCredentials(orgId, id);
+  const creds = await loadDbCredential(orgId, id);
   if (!creds) return null;
   if (creds.needsReconnection) return null;
   return creds;
