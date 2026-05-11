@@ -24,17 +24,18 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
+import codexModule from "../../../src/modules/codex/index.ts";
 
-// PR 2-4 migration: the legacy lookups now delegate to the runtime
+// PR 2-5 migration: the legacy lookups now delegate to the runtime
 // registry. Compose the historical set of five built-in providers by
-// registering both the `core-providers` module's contributions (openai,
-// anthropic, openai-compatible) and the legacy seed (codex, claude-code).
-// Once codex + claude-code move into their own modules (PR 5-6), this
-// suite will fold into the `core-providers` test or a top-level
-// "module aggregation" test.
+// registering each module's contribution (core-providers: openai,
+// anthropic, openai-compatible; codex: codex) and the legacy seed
+// (claude-code remaining). Once claude-code is removed from OSS (PR 6),
+// this suite folds into the per-module tests entirely.
 beforeAll(() => {
   resetModelProviders();
   registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
+  registerModelProviders(codexModule.modelProviders?.() ?? []);
   seedLegacyModelProviders();
 });
 
@@ -42,12 +43,11 @@ const CANONICAL_IDS = ["codex", "claude-code", "openai", "anthropic", "openai-co
 const OAUTH_IDS = ["codex", "claude-code"] as const;
 
 describe("MODEL_PROVIDERS registry", () => {
-  it("exposes the providers still owned by the legacy seed (codex + claude-code)", () => {
-    // PR 4 moved the three API-key providers (openai, anthropic,
-    // openai-compatible) into the `core-providers` module. The legacy
-    // static map now only owns the OAuth pair pending their move into
-    // dedicated modules (PR 5-6).
-    expect(Object.keys(MODEL_PROVIDERS).sort()).toEqual(["claude-code", "codex"]);
+  it("exposes the providers still owned by the legacy seed (claude-code)", () => {
+    // PR 4 moved openai + anthropic + openai-compatible into `core-providers`.
+    // PR 5 moved codex into `codex` module.
+    // Only claude-code remains pending PR 6 (removal from OSS).
+    expect(Object.keys(MODEL_PROVIDERS).sort()).toEqual(["claude-code"]);
   });
 
   it("each entry's providerId matches its registry key", () => {
@@ -93,8 +93,13 @@ describe("MODEL_PROVIDERS registry", () => {
   });
 
   it("hosted providers ship a non-empty model catalog with positive context windows", () => {
+    // Both OAuth providers (codex + claude-code) ship full catalogs.
+    // codex is contributed by its module; claude-code is still in the
+    // legacy seed. Look up via the runtime registry so the test stays
+    // agnostic to provenance.
     for (const id of OAUTH_IDS) {
-      const cfg = MODEL_PROVIDERS[id]!;
+      const cfg = getModelProviderConfig(id)!;
+      expect(cfg).not.toBeNull();
       expect(cfg.models.length).toBeGreaterThan(0);
       for (const model of cfg.models) {
         expect(model.id.length).toBeGreaterThan(0);
@@ -111,18 +116,10 @@ describe("MODEL_PROVIDERS registry", () => {
     }
   });
 
-  it("Codex entry uses openai-codex-responses shape and forces stream/store flags", () => {
-    const codex = MODEL_PROVIDERS["codex"]!;
-    expect(codex.apiShape).toBe("openai-codex-responses");
-    expect(codex.forceStream).toBe(true);
-    expect(codex.forceStore).toBe(false);
-    // No sidecar-side path rewrite — pi-ai's openai-codex-responses provider
-    // resolves `${baseUrl}/codex/responses` natively.
-    expect(codex.rewriteUrlPath).toBeUndefined();
-    expect(codex.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
-  });
-
   it("Claude Code entry uses anthropic-messages shape without rewriting", () => {
+    // The Codex contract is asserted in the codex module's own test
+    // suite (apps/api/src/modules/codex/test/unit/codex-module.test.ts).
+    // Only Claude Code remains in the legacy in-code seed.
     const claude = MODEL_PROVIDERS["claude-code"]!;
     expect(claude.apiShape).toBe("anthropic-messages");
     expect(claude.rewriteUrlPath).toBeUndefined();
