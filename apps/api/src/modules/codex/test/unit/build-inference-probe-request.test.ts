@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildCodexInferenceRequest } from "../../src/services/org-models.ts";
+import codexModule, { buildCodexInferenceRequest } from "../../index.ts";
 
 describe("buildCodexInferenceRequest", () => {
   it("targets `${baseUrl}/codex/responses`", () => {
@@ -82,5 +82,32 @@ describe("buildCodexInferenceRequest", () => {
         content: [{ type: "input_text", text: "ping" }],
       },
     ]);
+  });
+});
+
+describe("buildInferenceProbe hook", () => {
+  const codex = codexModule.modelProviders?.()[0];
+
+  it("returns a probe request when accountId is present", () => {
+    const out = codex?.hooks?.buildInferenceProbe?.({
+      baseUrl: "https://chatgpt.com/backend-api",
+      modelId: "gpt-5.5",
+      apiKey: "jwt",
+      accountId: "acc-uuid",
+    });
+    expect(out).toBeTruthy();
+    expect(out && "url" in out && out.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+  });
+
+  it("returns AUTH_FAILED structured error when accountId is missing", () => {
+    const out = codex?.hooks?.buildInferenceProbe?.({
+      baseUrl: "https://chatgpt.com/backend-api",
+      modelId: "gpt-5.5",
+      apiKey: "jwt",
+    });
+    expect(out).toEqual({
+      error: "AUTH_FAILED",
+      message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
+    });
   });
 });

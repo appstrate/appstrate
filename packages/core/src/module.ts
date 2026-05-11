@@ -364,7 +364,7 @@ export interface AppstrateModule {
    *   authMode: "oauth2",
    *   oauth: { clientId: "...", ... },
    *   models: [...],
-   *   hooks: { extractTokenIdentity: (jwt) => ({ "chatgpt-account-id": ... }) },
+   *   hooks: { extractTokenIdentity: (jwt) => ({ accountId: "...", email: "..." }) },
    * }]
    * ```
    */
@@ -586,6 +586,58 @@ export interface ModelProviderProxyPatch {
 }
 
 /**
+ * Well-known identity slots a provider may surface from an OAuth access
+ * token. Modules map their provider-specific claim names (e.g. Codex's
+ * `chatgpt_account_id`) into these abstract slots, so the platform never
+ * needs to know any provider's internal claim vocabulary.
+ *
+ * `accountId` is the stable account/tenant identifier the provider uses
+ * for routing (e.g. the value Codex echoes back as the `chatgpt-account-id`
+ * header). `email` is the user identity associated with the credential.
+ */
+export interface ModelProviderIdentity {
+  accountId?: string;
+  email?: string;
+}
+
+/**
+ * Pure-data inference probe request — used by the platform's connection
+ * test to verify that a stored credential can actually serve traffic
+ * against the provider's backend. Factored out so the wire format can be
+ * unit-tested without standing up an HTTP listener.
+ */
+export interface InferenceProbeRequest {
+  url: string;
+  method: "POST";
+  headers: Record<string, string>;
+  body: string;
+}
+
+/**
+ * Input passed to {@link ModelProviderHooks.buildInferenceProbe}. The
+ * platform supplies the resolved model + credential material; the module
+ * builds the wire-shape its backend will actually accept.
+ */
+export interface InferenceProbeContext {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  /** Populated from the credential row's identity slots when present. */
+  accountId?: string;
+}
+
+/**
+ * Pure-data error result a module may return from
+ * {@link ModelProviderHooks.buildInferenceProbe} when it knows the probe
+ * cannot succeed (e.g. a required identity slot is missing). The platform
+ * surfaces it as a `TestResult` without ever sending the request.
+ */
+export interface InferenceProbeBuildError {
+  error: string;
+  message: string;
+}
+
+/**
  * Provider-scoped hooks. All hooks are optional. The platform dispatches
  * each by `providerId` — a module's hook only runs for providers it
  * declared, never globally.
@@ -594,33 +646,63 @@ export interface ModelProviderHooks {
   /**
    * Called by the LLM proxy and the in-container sidecar before forwarding
    * a request upstream. Returns a patch (typically extra headers) merged
-   * into the outbound request.
-   *
-   * Use cases:
-   *  - Codex injects `chatgpt-account-id` (decoded from the OAuth JWT)
-   *  - Custom proxies could inject regional routing headers
-   *
-   * MUST be fast and side-effect-free — invoked on every LLM call.
+   * into the outbound request. MUST be fast and side-effect-free — invoked
+   * on every LLM call.
    */
   beforeLlmProxyRequest?: (
     ctx: ModelProviderProxyContext,
   ) => Promise<ModelProviderProxyPatch> | ModelProviderProxyPatch;
 
   /**
-   * Decode an OAuth access token to extract per-credential identity claims.
-   * Called once at credential creation and after every refresh; the result
-   * is persisted on the credential row so the proxy doesn't re-decode on
-   * every request.
+   * Decode an OAuth access token into the well-known
+   * {@link ModelProviderIdentity} slots. Called once at credential creation
+   * and after every refresh; the result is persisted on the credential row
+   * so the proxy doesn't re-decode on every request.
    *
-   * Returns a flat string map merged into the credential's identity bag,
-   * or `null` if the token carries no decodable identity.
+   * Returns the populated subset of identity slots, or `null` if the token
+   * carries no decodable identity. The platform uses
+   * `requiredIdentityClaims` (on the provider definition) to enforce that
+   * mandatory slots are populated after extraction.
    *
-   * Example: Codex tokens are JWTs whose payload contains
-   * `https://api.openai.com/auth.chatgpt_account_id` — the hook returns
-   * `{ chatgpt_account_id: "uuid" }` and the proxy later reads it back to
-   * build the `chatgpt-account-id` header.
+   * The module is responsible for translating its provider-specific claim
+   * vocabulary into these abstract slots — the platform never sees the
+   * raw claim names.
    */
-  extractTokenIdentity?: (accessToken: string) => Record<string, string> | null;
+  extractTokenIdentity?: (accessToken: string) => ModelProviderIdentity | null;
+
+  /**
+   * Build the `apiKey` placeholder that lands in the agent container's
+   * `MODEL_API_KEY` env var, when the in-container LLM client expects a
+   * structurally meaningful value (e.g. a JWT it will decode to read a
+   * routing claim). Returns `null` to fall back to the platform's generic
+   * placeholder.
+   *
+   * The real upstream credential never leaves the platform/sidecar
+   * boundary — the placeholder is what the agent container sees. Modules
+   * whose in-container shape only needs an opaque token should not
+   * implement this hook.
+   */
+  buildApiKeyPlaceholder?: (accessToken: string) => string | null;
+
+  /**
+   * Build the inference probe the platform sends to verify the credential
+   * can serve traffic. Modules whose backend doesn't accept the generic
+   * `GET ${baseUrl}/models` discovery probe (e.g. Codex's chatgpt.com
+   * backend, which has no `/models` endpoint at all) implement this hook
+   * to provide the real wire format.
+   *
+   * Returns:
+   *  - {@link InferenceProbeRequest} → the platform sends it and reports
+   *    the result.
+   *  - {@link InferenceProbeBuildError} → the platform surfaces it as a
+   *    failed `TestResult` without ever sending the request (e.g. when a
+   *    required identity slot is missing).
+   *  - `null` → fall back to the platform's generic `/models` discovery
+   *    probe.
+   */
+  buildInferenceProbe?: (
+    ctx: InferenceProbeContext,
+  ) => InferenceProbeRequest | InferenceProbeBuildError | null;
 }
 
 /**
@@ -672,6 +754,15 @@ export interface ModelProviderDefinition {
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */
   hooks?: ModelProviderHooks;
+  /**
+   * Well-known {@link ModelProviderIdentity} slots the platform MUST refuse
+   * to import without. Lets a provider declare that, for example, an
+   * `accountId` is mandatory (because its backend uses it as a routing
+   * header) — without hardcoding provider ids or claim names in the core
+   * import flow. When omitted, the import succeeds with whatever the hook
+   * returned (or nothing if the hook is absent).
+   */
+  requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
 }
 
 // ---------------------------------------------------------------------------

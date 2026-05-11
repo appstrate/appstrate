@@ -52,30 +52,57 @@ describe("extractTokenIdentity hook", () => {
     ].join(".");
   }
 
-  it("returns chatgpt_account_id + email when both claims are present", () => {
+  it("maps chatgpt_account_id → accountId + passes email through", () => {
     const token = encodeJwt({
       "https://api.openai.com/auth": { chatgpt_account_id: "acct-uuid" },
       email: "user@example.com",
     });
     const codex = codexModule.modelProviders?.()[0];
     expect(codex?.hooks?.extractTokenIdentity?.(token)).toEqual({
-      chatgpt_account_id: "acct-uuid",
+      accountId: "acct-uuid",
       email: "user@example.com",
     });
   });
 
-  it("omits keys absent from the payload (no undefined values leak)", () => {
+  it("omits slots absent from the payload (no undefined values leak)", () => {
     const token = encodeJwt({ email: "only-email@example.com" });
     const codex = codexModule.modelProviders?.()[0];
     const out = codex?.hooks?.extractTokenIdentity?.(token);
     expect(out).toEqual({ email: "only-email@example.com" });
-    expect(out).not.toHaveProperty("chatgpt_account_id");
+    expect(out).not.toHaveProperty("accountId");
   });
 
   it("returns null on a malformed token", () => {
     const codex = codexModule.modelProviders?.()[0];
     expect(codex?.hooks?.extractTokenIdentity?.("not.a.jwt")).toBeNull();
     expect(codex?.hooks?.extractTokenIdentity?.("a.b.c.d")).toBeNull();
+  });
+
+  it("buildApiKeyPlaceholder returns a synthetic JWT carrying only chatgpt_account_id", () => {
+    const token = encodeJwt({
+      "https://api.openai.com/auth": { chatgpt_account_id: "acct-1234" },
+    });
+    const codex = codexModule.modelProviders?.()[0];
+    const placeholder = codex?.hooks?.buildApiKeyPlaceholder?.(token);
+    expect(placeholder).toBeTruthy();
+    const parts = placeholder!.split(".");
+    expect(parts).toHaveLength(3);
+    expect(parts[2]).toBe("placeholder");
+    const payload = JSON.parse(
+      Buffer.from(
+        parts[1]!.replace(/-/g, "+").replace(/_/g, "/") +
+          "=".repeat((4 - (parts[1]!.length % 4)) % 4),
+        "base64",
+      ).toString("utf-8"),
+    ) as Record<string, unknown>;
+    const auth = payload["https://api.openai.com/auth"] as Record<string, unknown>;
+    expect(auth.chatgpt_account_id).toBe("acct-1234");
+  });
+
+  it("buildApiKeyPlaceholder returns null when accountId can't be decoded", () => {
+    const codex = codexModule.modelProviders?.()[0];
+    expect(codex?.hooks?.buildApiKeyPlaceholder?.("not.a.jwt")).toBeNull();
+    expect(codex?.hooks?.buildApiKeyPlaceholder?.(encodeJwt({}))).toBeNull();
   });
 
   it("decodeCodexJwtPayload re-export stays available for legacy consumers", () => {

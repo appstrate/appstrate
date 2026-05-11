@@ -12,6 +12,8 @@ import { loadInferenceCredentials } from "./model-provider-credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
+import { getModelProvider } from "./model-providers/registry.ts";
+import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- List (system + DB) ---
 
@@ -220,7 +222,11 @@ interface ResolvedModel {
   isSystemModel: boolean;
   /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
   providerId?: string;
-  /** Codex only: required as `chatgpt-account-id` header on inference probes/runs. */
+  /**
+   * Abstract account/tenant identifier surfaced by the credential's
+   * `extractTokenIdentity` hook — passed to the provider's
+   * `buildInferenceProbe` hook so it can be echoed as a routing header.
+   */
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
   credentialId?: string;
@@ -432,12 +438,23 @@ export async function testModelConfig(config: {
     };
   }
 
-  // OAuth-backed providers don't expose a `/models` discovery endpoint
-  // compatible with the Bearer token (Codex has no /models at all on
-  // chatgpt.com/backend-api). Issue a real single-token inference probe
-  // so the test reflects whether the key can actually serve traffic.
-  if (config.providerId === "codex") {
-    return testCodexInference(config);
+  // Provider-agnostic inference-probe override — modules whose backend
+  // doesn't accept the generic `/models` discovery probe (e.g. Codex's
+  // chatgpt.com backend has no `/models` endpoint) implement
+  // `buildInferenceProbe` to provide the real wire format. The platform
+  // sends whatever the module builds without inspecting the contents.
+  const provider = config.providerId ? getModelProvider(config.providerId) : null;
+  const probe = provider?.hooks?.buildInferenceProbe?.({
+    baseUrl: config.baseUrl,
+    modelId: config.modelId,
+    apiKey: config.apiKey,
+    accountId: config.accountId,
+  });
+  if (probe) {
+    if ("error" in probe) {
+      return { ok: false, latency: 0, error: probe.error, message: probe.message };
+    }
+    return runInferenceProbe(probe);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -479,77 +496,15 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
 const PROBE_TIMEOUT_MS = 15_000;
 
 /**
- * Inference probe request shape — `fetch()` arguments factored out as a
- * pure function so the headers + body can be unit-tested without standing
- * up an HTTP listener. `testCodexInference` / `testClaudeCodeInference`
- * are the only callers.
- */
-export interface InferenceProbeRequest {
-  url: string;
-  method: "POST";
-  headers: Record<string, string>;
-  body: string;
-}
-
-/**
- * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
- * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/openai-codex-responses.js). The wire format is the regression-
- * prone part — Codex rejects requests that drop any of the headers below
- * (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
- */
-export function buildCodexInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "chatgpt-account-id": config.accountId,
-      originator: "pi",
-      "OpenAI-Beta": "responses=experimental",
-      accept: "text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      store: false,
-      stream: true,
-      instructions: "ping",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
-      include: [],
-    }),
-  };
-}
-
-/**
- * Codex (ChatGPT subscription) inference probe — single-token request to
- * `${baseUrl}/codex/responses` with the SSE shape pi-ai uses in production
- * (cf. node_modules/@mariozechner/pi-ai/dist/providers/openai-codex-responses.js).
+ * Send a module-supplied {@link InferenceProbeRequest} and map the response
+ * to a {@link TestResult}. The platform is provider-agnostic here — the
+ * module's `buildInferenceProbe` hook owns the wire format; this helper
+ * only knows how to send it and classify the outcome.
  *
- * On 200 the connection works end-to-end (oauth + chatgpt backend +
- * subscription + model availability). The streaming body is canceled
- * immediately — we only care about the response status.
+ * Streaming bodies are aborted immediately — we only care about the
+ * response status.
  */
-async function testCodexInference(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId?: string;
-}): Promise<TestResult> {
-  if (!config.accountId) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "AUTH_FAILED",
-      message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
-    };
-  }
-  const req = buildCodexInferenceRequest({ ...config, accountId: config.accountId });
+async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult> {
   const start = performance.now();
   try {
     const res = await fetch(req.url, {
@@ -559,7 +514,6 @@ async function testCodexInference(config: {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const latency = Math.round(performance.now() - start);
-    // We only need the response status — abort the stream we've started.
     void res.body?.cancel().catch(() => {});
     if (res.ok) return { ok: true, latency };
     if (res.status === 401 || res.status === 403) {
@@ -567,14 +521,14 @@ async function testCodexInference(config: {
         ok: false,
         latency,
         error: "AUTH_FAILED",
-        message: "ChatGPT subscription rejected the token (auth failed or subscription inactive)",
+        message: "Provider rejected the token (auth failed or subscription inactive)",
       };
     }
     return {
       ok: false,
       latency,
       error: "PROVIDER_ERROR",
-      message: `Codex backend returned ${res.status}`,
+      message: `Provider returned ${res.status}`,
     };
   } catch (err) {
     return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));

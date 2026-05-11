@@ -24,7 +24,6 @@
  */
 
 import { createOAuthCredential } from "../model-provider-credentials.ts";
-import { decodeCodexJwtPayload } from "../../modules/codex/index.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -88,27 +87,29 @@ export async function importOAuthModelProviderConnection(
     throw invalidRequest("`accessToken` and `refreshToken` are required");
   }
 
-  // Provider-specific claim extraction. The CLI forwards pi-ai's surfaced
-  // `accountId` (preferred — same value pi-ai's runtime already validated
-  // against the upstream contract); we fall back to a server-side JWT decode
-  // if the CLI didn't include it. An attacker can't forge `accountId` past
-  // the token itself because Codex's backend rejects mismatched
-  // chatgpt-account-id headers.
-  let accountId: string | undefined = input.accountId;
-  let email: string | undefined = input.email;
-  if (config.providerId === "codex") {
-    const claims = decodeCodexJwtPayload(input.accessToken);
-    if (!accountId) accountId = claims?.chatgpt_account_id;
-    if (!email) email = claims?.email;
-    // Hard fail on missing chatgpt-account-id at import time — the inference
-    // probe and runtime calls both require this header. Persisting a
-    // connection without it produces a credential that can't actually be used.
-    if (!accountId) {
+  // Identity extraction is delegated to the provider's module via the
+  // `extractTokenIdentity` hook, which maps provider-specific claims into
+  // the platform's abstract identity slots (`accountId`, `email`). The CLI
+  // may also forward identity slots directly after its loopback dance; the
+  // body-level value takes precedence, the hook fills in the gaps. An
+  // attacker can't forge identity past the token itself — upstream backends
+  // reject mismatched routing headers.
+  const claims = config.hooks?.extractTokenIdentity?.(input.accessToken) ?? null;
+  const accountId: string | undefined = input.accountId ?? claims?.accountId;
+  const email: string | undefined = input.email ?? claims?.email;
+
+  // Provider-declared required identity slots — declarative gate so the
+  // platform refuses to persist a credential that downstream calls can't
+  // actually use (e.g. when an `accountId` is mandatory for the upstream
+  // backend's routing header).
+  const required = config.requiredIdentityClaims ?? [];
+  if (required.length > 0) {
+    const identity = { accountId, email };
+    const missing = required.filter((k) => !identity[k]);
+    if (missing.length > 0) {
       throw invalidRequest(
-        "Could not resolve chatgpt-account-id from the Codex token. " +
-          "The CLI must forward `accountId` (pi-ai surfaces it as a top-level " +
-          "field after a successful login) — rebuild the CLI: " +
-          "`cd apps/cli && bun run build`.",
+        `Could not resolve required identity slot(s) for ${config.providerId}: ${missing.join(", ")}. ` +
+          `Re-run the OAuth flow or check the CLI version.`,
       );
     }
   }

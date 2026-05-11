@@ -136,7 +136,7 @@ describe("model-providers runtime registry", () => {
 
   describe("hooks survive registration", () => {
     it("preserves the hooks reference on the stored definition", () => {
-      const extractTokenIdentity = (t: string) => ({ prefix: t.slice(0, 4) });
+      const extractTokenIdentity = (t: string) => ({ accountId: t.slice(0, 4) });
       registerModelProvider(
         fakeDef("codex", {
           authMode: "oauth2",

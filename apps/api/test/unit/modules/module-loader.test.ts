@@ -893,7 +893,7 @@ describe("module-loader", () => {
     });
 
     it("preserves provider hooks intact on the returned definitions", async () => {
-      const extractTokenIdentity = (token: string) => ({ token_prefix: token.slice(0, 4) });
+      const extractTokenIdentity = (token: string) => ({ accountId: token.slice(0, 4) });
       const a = mockModule("a", {
         modelProviders: () => [
           {

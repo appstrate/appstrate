@@ -91,9 +91,13 @@ export interface OAuthTokenResponse {
   rewriteUrlPath?: { from: string; to: string };
   forceStream?: boolean;
   forceStore?: boolean;
-  /** Codex only — extracted from JWT, used as `chatgpt-account-id` header by the sidecar. */
+  /**
+   * Abstract account/tenant identifier surfaced by the provider's
+   * `extractTokenIdentity` hook. The sidecar's identity layer (per
+   * `providerId`) decides which routing header to echo it as.
+   */
   accountId?: string;
-  /** Canonical providerId, e.g. "codex". */
+  /** Canonical providerId. */
   providerId: string;
 }
 

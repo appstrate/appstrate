@@ -1,121 +1,95 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+/**
+ * Unit test for the platform-side `deriveOauthPlaceholder()` helper in
+ * `run-launcher/pi.ts`. The helper is provider-agnostic: it asks the
+ * runtime registry for a provider's `hooks.buildApiKeyPlaceholder` and
+ * falls back to the generic dash-stripping placeholder when the hook is
+ * absent or returns null.
+ *
+ * The test registers a synthetic provider with a known placeholder shape
+ * so the platform helper is exercised end-to-end without importing any
+ * specific module's internals.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import {
   _deriveKeyPlaceholderForTesting as deriveKeyPlaceholder,
   _deriveOauthPlaceholderForTesting as deriveOauthPlaceholder,
 } from "../../src/services/run-launcher/pi.ts";
+import {
+  registerModelProviders,
+  resetModelProviders,
+} from "../../src/services/model-providers/registry.ts";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 
-function buildCodexJwt(accountId: string, extraSignatureChars = ""): string {
-  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" }), "utf-8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  const payload = Buffer.from(
-    JSON.stringify({
-      "https://api.openai.com/auth": { chatgpt_account_id: accountId },
-      email: "user@example.com",
-      iat: 0,
-      exp: 9_999_999_999,
-    }),
-    "utf-8",
-  )
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  const sig = "abc-def-ghi-jkl-mno-pqr-stu-vwx-yz0-123-456-789-abc-def" + extraSignatureChars;
-  return `${header}.${payload}.${sig}`;
-}
+const SYNTH_PROVIDER_ID = "test-placeholder-oauth";
+const SYNTH_PLACEHOLDER_SENTINEL = "synthetic.placeholder.value";
 
-function decodePayload(jwt: string): Record<string, unknown> {
-  const parts = jwt.split(".");
-  expect(parts).toHaveLength(3);
-  const padded = parts[1]! + "=".repeat((4 - (parts[1]!.length % 4)) % 4);
-  const json = Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
-    "utf-8",
-  );
-  return JSON.parse(json) as Record<string, unknown>;
-}
+const synthProvider: ModelProviderDefinition = {
+  providerId: SYNTH_PROVIDER_ID,
+  displayName: "Test Placeholder OAuth",
+  iconUrl: "openai",
+  description: "Synthetic OAuth provider with a buildApiKeyPlaceholder hook (test-only).",
+  apiShape: "openai-responses",
+  defaultBaseUrl: "https://example.test/v1",
+  baseUrlOverridable: false,
+  authMode: "oauth2",
+  oauth: {
+    clientId: "test-placeholder-client",
+    authorizationUrl: "https://auth.example.test/authorize",
+    tokenUrl: "https://auth.example.test/token",
+    refreshUrl: "https://auth.example.test/token",
+    scopes: ["openid"],
+    pkce: "S256",
+  },
+  models: [{ id: "test-model", contextWindow: 8000, capabilities: ["text"] }],
+  hooks: {
+    /**
+     * Returns a fixed synthetic placeholder when the token looks "structured"
+     * (contains a dot), null otherwise — exercises both the hook-served and
+     * fallback paths.
+     */
+    buildApiKeyPlaceholder(accessToken) {
+      return accessToken.includes(".") ? SYNTH_PLACEHOLDER_SENTINEL : null;
+    },
+  },
+};
 
 describe("deriveOauthPlaceholder", () => {
-  describe("Codex (RS256 JWT)", () => {
-    const ACCOUNT_ID = "11111111-2222-3333-4444-555555555555";
+  beforeAll(() => {
+    registerModelProviders([synthProvider]);
+  });
+  afterAll(() => {
+    resetModelProviders();
+  });
 
-    it("returns a structurally valid 3-segment JWT", () => {
-      const jwt = buildCodexJwt(ACCOUNT_ID);
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
-      expect(placeholder.split(".")).toHaveLength(3);
+  describe("provider with buildApiKeyPlaceholder hook", () => {
+    it("returns the hook's placeholder when the hook produces one", () => {
+      const placeholder = deriveOauthPlaceholder("a.b.c", SYNTH_PROVIDER_ID);
+      expect(placeholder).toBe(SYNTH_PLACEHOLDER_SENTINEL);
     });
 
-    it("preserves chatgpt_account_id in the synthetic payload", () => {
-      const jwt = buildCodexJwt(ACCOUNT_ID);
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
-      const payload = decodePayload(placeholder);
-      const auth = payload["https://api.openai.com/auth"] as Record<string, unknown>;
-      expect(auth.chatgpt_account_id).toBe(ACCOUNT_ID);
-    });
-
-    it("does not leak ANY of the original signature material", () => {
+    it("does not leak the original token bytes when hook serves the placeholder", () => {
       const sentinel = "SENSITIVESIGSEGMENT";
-      const jwt = buildCodexJwt(ACCOUNT_ID, sentinel);
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
+      const placeholder = deriveOauthPlaceholder(`a.b.${sentinel}`, SYNTH_PROVIDER_ID);
       expect(placeholder).not.toContain(sentinel);
     });
 
-    it("uses a recognisable fake signature", () => {
-      const jwt = buildCodexJwt(ACCOUNT_ID);
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
-      const sig = placeholder.split(".")[2];
-      expect(sig).toBe("placeholder");
-    });
-
-    it("does not include the original JWT header bytes", () => {
-      const jwt = buildCodexJwt(ACCOUNT_ID);
-      const originalHeader = jwt.split(".")[0]!;
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
-      const placeholderHeader = placeholder.split(".")[0]!;
-      // Real Codex header advertises RS256, synthetic header advertises "none".
-      expect(placeholderHeader).not.toBe(originalHeader);
-      const decodedHeader = JSON.parse(
-        Buffer.from(
-          placeholderHeader.replace(/-/g, "+").replace(/_/g, "/") +
-            "=".repeat((4 - (placeholderHeader.length % 4)) % 4),
-          "base64",
-        ).toString("utf-8"),
-      );
-      expect(decodedHeader.alg).toBe("none");
-    });
-
-    it("falls back to the legacy placeholder when JWT cannot be decoded", () => {
-      const placeholder = deriveOauthPlaceholder("not-a-jwt", "codex");
-      expect(placeholder).toBe(deriveKeyPlaceholder("not-a-jwt"));
-    });
-
-    it("falls back when chatgpt_account_id is missing from claims", () => {
-      const header = "eyJhbGciOiJSUzI1NiJ9";
-      const payload = Buffer.from(JSON.stringify({ sub: "x" }), "utf-8")
-        .toString("base64")
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
-      const jwt = `${header}.${payload}.sig`;
-      const placeholder = deriveOauthPlaceholder(jwt, "codex");
-      expect(placeholder).toBe(deriveKeyPlaceholder(jwt));
+    it("falls back to deriveKeyPlaceholder when the hook returns null", () => {
+      const placeholder = deriveOauthPlaceholder("opaque-token", SYNTH_PROVIDER_ID);
+      expect(placeholder).toBe(deriveKeyPlaceholder("opaque-token"));
     });
 
     it("returns sk-placeholder when input is undefined", () => {
-      const placeholder = deriveOauthPlaceholder(undefined, "codex");
-      expect(placeholder).toBe("sk-placeholder");
+      expect(deriveOauthPlaceholder(undefined, SYNTH_PROVIDER_ID)).toBe("sk-placeholder");
     });
   });
 
-  describe("non-Codex OAuth providers (opaque bearer tokens)", () => {
-    it("delegates to deriveKeyPlaceholder for any non-Codex providerId", () => {
+  describe("provider without hook / unknown provider", () => {
+    it("delegates to deriveKeyPlaceholder when provider isn't in the registry", () => {
       const token = "sk-some-oauth-DEADBEEFCAFEBABE";
-      // Any non-codex providerId follows the generic dash-stripping path.
-      const placeholder = deriveOauthPlaceholder(token, "some-external-provider");
+      const placeholder = deriveOauthPlaceholder(token, "unregistered-provider");
       expect(placeholder).toBe(deriveKeyPlaceholder(token));
       expect(placeholder).not.toContain("DEADBEEFCAFEBABE");
     });

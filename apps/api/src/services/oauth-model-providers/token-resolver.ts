@@ -26,7 +26,6 @@ import {
   buildTokenBody,
 } from "@appstrate/connect";
 import type { ModelProviderDefinition as ModelProviderConfig } from "@appstrate/core/module";
-import { decodeCodexJwtPayload } from "../../modules/codex/index.ts";
 import { getModelProvider as getModelProviderConfig } from "../model-providers/registry.ts";
 import {
   markCredentialNeedsReconnection,
@@ -136,32 +135,33 @@ async function loadCredentialState(
 }
 
 /**
- * Resolve `chatgpt_account_id` for a Codex credential, decoding the access
- * token as a defense-in-depth fallback when the stored value is missing.
- * Returns `undefined` for non-Codex providers (the field is unused there).
+ * Resolve the abstract `accountId` identity slot via the provider's
+ * `extractTokenIdentity` hook, with the stored value as fallback. Returns
+ * `undefined` for providers that don't surface the slot.
  *
- * Always prefers the freshly-decoded JWT over the stored value — Codex
- * re-issues a JWT on every token rotation, so the wire token is the source
- * of truth. Falls back to stored only when the JWT is unparseable (which
- * shouldn't happen for genuine Codex tokens). Logs once at warn level when
- * both sources fail to surface an id (visibility on broken rows).
+ * Always prefers the freshly-extracted hook value over the stored one —
+ * providers that re-issue a token on every refresh (e.g. JWT-bearing
+ * OAuth providers) make the wire token the source of truth. Falls back to
+ * stored only when the hook returns null. Logs once at warn level when
+ * the provider declares `accountId` as a required identity slot yet
+ * neither source yields one (visibility on broken rows).
  */
-function resolveCodexAccountId(
-  providerId: string,
+function resolveAccountIdViaHook(
+  config: ModelProviderConfig,
   accessToken: string,
   stored: string | undefined,
   credentialId: string,
 ): string | undefined {
-  if (providerId !== "codex") return undefined;
-  const decoded = decodeCodexJwtPayload(accessToken);
-  const fromJwt = decoded?.chatgpt_account_id;
-  if (fromJwt) return fromJwt;
+  const claims = config.hooks?.extractTokenIdentity?.(accessToken) ?? null;
+  if (claims?.accountId) return claims.accountId;
   if (stored) return stored;
-  logger.warn("oauth model provider: accountId missing in stored creds", {
-    credentialId,
-    providerId,
-    jwtParsed: decoded !== null,
-  });
+  if (config.requiredIdentityClaims?.includes("accountId")) {
+    logger.warn("oauth model provider: accountId missing in stored creds", {
+      credentialId,
+      providerId: config.providerId,
+      hookReturnedClaims: claims !== null,
+    });
+  }
   return undefined;
 }
 
@@ -191,8 +191,8 @@ function toResolvedToken(
 }
 
 function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
-  const accountId = resolveCodexAccountId(
-    state.config.providerId,
+  const accountId = resolveAccountIdViaHook(
+    state.config,
     state.blob.accessToken,
     state.blob.accountId,
     state.credentialId,
@@ -414,8 +414,8 @@ async function doRefresh(
   // one (Anthropic does, OpenAI rotates them too, but be defensive).
   const parsed = parseTokenResponse(data, undefined, state.blob.refreshToken);
 
-  const accountId = resolveCodexAccountId(
-    state.config.providerId,
+  const accountId = resolveAccountIdViaHook(
+    state.config,
     parsed.accessToken,
     state.blob.accountId,
     credentialId,

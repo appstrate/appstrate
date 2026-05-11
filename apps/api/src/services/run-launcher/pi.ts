@@ -38,8 +38,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
-import { isOAuthModelProvider } from "../model-providers/registry.ts";
-import { decodeCodexJwtPayload } from "../../modules/codex/index.ts";
+import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
@@ -95,21 +94,17 @@ export async function runPlatformContainer(
     const llmApiKey = llmConfig.apiKey;
 
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
-    // path can't refresh tokens or inject the provider identity headers
-    // (chatgpt-account-id, originator, …) that chatgpt.com / Codex require.
+    // path can't refresh tokens or inject the provider's identity routing
+    // headers at request time.
     const isOauthCredential =
       !!llmConfig.providerId &&
       !!llmConfig.credentialId &&
       isOAuthModelProvider(llmConfig.providerId);
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
-    // agent container. For OAuth/Codex specifically, pi-ai's
-    // openai-codex-responses provider decodes the apiKey as a JWT to
-    // extract `chatgpt_account_id`, so the placeholder must be a parseable
-    // JWT carrying that one claim — anything else (including the legacy
-    // dash-stripping placeholder, which leaks most of the real signature)
-    // is either rejected by pi-ai or dribbles signature material into the
-    // agent's environment for nothing.
+    // agent container. Provider-specific shape (e.g. a structured JWT) is
+    // built by the module's `buildApiKeyPlaceholder` hook — see
+    // `deriveOauthPlaceholder` below.
     const llmPlaceholder = isOauthCredential
       ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId!)
       : deriveKeyPlaceholder(llmApiKey);
@@ -147,9 +142,6 @@ export async function runPlatformContainer(
     // (apiKeyPlaceholder); the real access token never leaves the
     // platform/sidecar boundary. The sidecar overwrites Authorization with
     // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
-    // For OAuth/Codex the placeholder is a synthetic JWT carrying only
-    // `chatgpt_account_id`, which is what pi-ai's
-    // `openai-codex-responses` provider actually reads from `apiKey`.
     const containerEnv = buildRuntimePiEnv({
       model: {
         api: llmConfig.apiShape,
@@ -337,45 +329,20 @@ function deriveKeyPlaceholder(key: string | undefined): string {
 }
 
 /**
- * Build a placeholder that satisfies pi-ai's per-provider apiKey shape
- * expectations without leaking the real upstream credential.
+ * Build the `MODEL_API_KEY` placeholder the agent container sees, without
+ * leaking the real upstream credential.
  *
- * Codex tokens are RS256 JWTs and pi-ai's `openai-codex-responses` provider
- * decodes the JWT in-container to read `https://api.openai.com/auth.chatgpt_account_id`.
- * The legacy `deriveKeyPlaceholder` strategy (replace last `-`-separated
- * segment) preserves the JWT's structure but leaks ~all of the original
- * signature — for an RSA-SHA256 token whose signature contains many `-`
- * characters in its base64url encoding, only the trailing chunk is
- * replaced. We reissue a fresh, fully-synthetic JWT carrying only the one
- * claim pi-ai needs and a fixed fake signature, so no upstream signature
- * material is ever shipped into the agent container.
- *
- * For non-Codex OAuth providers (opaque bearer tokens, no embedded
- * claims) the dash-stripping strategy already replaces the entire
- * secret tail and is safe.
+ * Provider-specific: the module owns the placeholder shape via its
+ * `buildApiKeyPlaceholder` hook (e.g. a synthetic JWT carrying only the
+ * routing claim pi-ai's in-container LLM client will read). When the hook
+ * is absent or returns null, the platform falls back to the generic
+ * dash-stripping strategy — safe for opaque bearer tokens.
  */
 function deriveOauthPlaceholder(key: string | undefined, providerId: string): string {
-  if (providerId !== "codex") return deriveKeyPlaceholder(key);
   if (!key) return deriveKeyPlaceholder(key);
-  const decoded = decodeCodexJwtPayload(key);
-  const accountId = decoded?.chatgpt_account_id;
-  if (!accountId) return deriveKeyPlaceholder(key);
-  const headerB64 = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
-  const payloadB64 = base64UrlEncode(
-    JSON.stringify({
-      "https://api.openai.com/auth": { chatgpt_account_id: accountId },
-    }),
-  );
-  // Fixed, recognisable fake signature — never derived from the real one.
-  return `${headerB64}.${payloadB64}.placeholder`;
-}
-
-function base64UrlEncode(input: string): string {
-  return Buffer.from(input, "utf-8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const config = getModelProvider(providerId);
+  const fromHook = config?.hooks?.buildApiKeyPlaceholder?.(key);
+  return fromHook ?? deriveKeyPlaceholder(key);
 }
 
 /** @internal Exported for testing */

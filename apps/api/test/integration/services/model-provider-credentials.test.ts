@@ -369,29 +369,7 @@ describe("model-provider-credentials service — oauth path", () => {
  * nothing in the test suite exercised this leg end-to-end.
  */
 describe("model-provider-credentials service — aggregator + inference loader", () => {
-  const CODEX = "codex";
-
-  /**
-   * Build a synthetic Codex-shaped JWT carrying a `chatgpt_account_id` claim.
-   * The platform decodes the payload defensively without verifying the
-   * signature, so an unsigned token is sufficient for tests that exercise
-   * the read path.
-   */
-  function makeFakeCodexJwt(payload: { chatgpt_account_id?: string; email?: string }): string {
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
-    const claims = {
-      iss: "https://auth.openai.com",
-      aud: "codex-cli",
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      "https://api.openai.com/auth": payload.chatgpt_account_id
-        ? { chatgpt_account_id: payload.chatgpt_account_id }
-        : {},
-      ...(payload.email ? { email: payload.email } : {}),
-    };
-    const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
-    return `${header}.${body}.x`;
-  }
+  const TEST_OAUTH = "test-oauth";
 
   beforeEach(async () => {
     await truncateAll();
@@ -445,17 +423,13 @@ describe("model-provider-credentials service — aggregator + inference loader",
     it("surfaces OAuth credentials with providerId + authMode='oauth'", async () => {
       const user = await createTestUser();
       const { org } = await createTestOrg(user.id, { slug: "agg-list-oauth" });
-      const accessJwt = makeFakeCodexJwt({
-        chatgpt_account_id: "acc-list-1",
-        email: "user@example.com",
-      });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
-        providerId: CODEX,
-        label: "ChatGPT Pro",
-        accessToken: accessJwt,
-        refreshToken: "rt-codex",
+        providerId: TEST_OAUTH,
+        label: "Test OAuth",
+        accessToken: "access-list-1",
+        refreshToken: "refresh-list-1",
         expiresAt: Date.now() + 3600 * 1000,
         email: "user@example.com",
       });
@@ -465,7 +439,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
       expect(oauth!.authMode).toBe("oauth2");
-      expect(oauth!.providerId).toBe("codex");
+      expect(oauth!.providerId).toBe(TEST_OAUTH);
       expect(oauth!.id).toBe(imported.credentialId);
       expect(oauth!.oauthEmail).toBe("user@example.com");
       expect(oauth!.needsReconnection).toBe(false);
@@ -493,48 +467,41 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(own?.baseUrl).toBe("https://api.anthropic.com");
     });
 
-    it("Codex OAuth: returns access token + providerId + accountId", async () => {
+    it("returns access token + providerId for OAuth rows (regression: no null on read)", async () => {
       const user = await createTestUser();
-      const { org } = await createTestOrg(user.id, { slug: "agg-load-codex" });
-      const accessJwt = makeFakeCodexJwt({
-        chatgpt_account_id: "acc-codex-123",
-        email: "user@example.com",
-      });
+      const { org } = await createTestOrg(user.id, { slug: "agg-load-oauth" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
-        providerId: CODEX,
-        label: "ChatGPT Pro",
-        accessToken: accessJwt,
-        refreshToken: "rt-codex",
+        providerId: TEST_OAUTH,
+        label: "Test OAuth",
+        accessToken: "access-load",
+        refreshToken: "refresh-load",
         expiresAt: Date.now() + 3600 * 1000,
       });
 
       const creds = await loadInferenceCredentials(org.id, imported.credentialId);
       expect(creds).not.toBeNull();
       // Regression guard: OAuth rows must not return null on read.
-      expect(creds!.apiKey).toBe(accessJwt);
-      // Regression guard: accountId must be propagated through the return
-      // shape (a missing field here surfaces as "Missing chatgpt-account-id"
-      // in the model-test endpoint).
-      expect(creds!.accountId).toBe("acc-codex-123");
+      expect(creds!.apiKey).toBe("access-load");
       // providerId is what the inference probe branches on to apply
-      // the Codex-specific request shape (`/codex/responses` + the account
-      // header). Phase 4 normalizes to the canonical short providerId form.
-      expect(creds!.providerId).toBe("codex");
+      // provider-specific request shaping.
+      expect(creds!.providerId).toBe(TEST_OAUTH);
+      // Provider-specific identity-claim plumbing (e.g. Codex's
+      // `chatgpt_account_id` → sidecar header) is covered by each
+      // module's own integration tests.
     });
 
     it("returns null when the underlying OAuth credential is flagged needsReconnection", async () => {
       const user = await createTestUser();
       const { org } = await createTestOrg(user.id, { slug: "agg-load-revoked" });
-      const accessJwt = makeFakeCodexJwt({ chatgpt_account_id: "acc-revoke" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
-        providerId: CODEX,
-        label: "Codex (about to revoke)",
-        accessToken: accessJwt,
-        refreshToken: "rt-codex",
+        providerId: TEST_OAUTH,
+        label: "Test OAuth (about to revoke)",
+        accessToken: "access-revoke",
+        refreshToken: "refresh-revoke",
         expiresAt: Date.now() + 3600 * 1000,
       });
 

@@ -23,8 +23,12 @@
 
 import type {
   AppstrateModule,
+  InferenceProbeBuildError,
+  InferenceProbeContext,
+  InferenceProbeRequest,
   ModelProviderDefinition,
   ModelProviderHooks,
+  ModelProviderIdentity,
 } from "@appstrate/core/module";
 
 // ---------------------------------------------------------------------------
@@ -79,19 +83,122 @@ export function decodeCodexJwtPayload(accessToken: string): {
 // Provider hooks
 // ---------------------------------------------------------------------------
 
+function base64UrlEncode(input: string): string {
+  return Buffer.from(input, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
+ * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
+ * providers/openai-codex-responses.js). The wire format is the
+ * regression-prone part — Codex rejects requests that drop any of the
+ * load-bearing headers (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
+ *
+ * Exported off the module so the unit suite can pin the wire shape
+ * without standing up an HTTP listener.
+ */
+export function buildCodexInferenceRequest(config: {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  accountId: string;
+}): InferenceProbeRequest {
+  return {
+    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "chatgpt-account-id": config.accountId,
+      originator: "pi",
+      "OpenAI-Beta": "responses=experimental",
+      accept: "text/event-stream",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      store: false,
+      stream: true,
+      instructions: "ping",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
+      include: [],
+    }),
+  };
+}
+
 const codexHooks: ModelProviderHooks = {
   /**
-   * Read identity claims off the access JWT. The platform persists the
-   * result alongside the credential row so the sidecar can build the
-   * `chatgpt-account-id` header without re-decoding on every call.
+   * Decode the access JWT and map Codex-specific claims into the
+   * platform's abstract identity slots:
+   *  - `chatgpt_account_id` → `accountId` (echoed by the sidecar as the
+   *    `chatgpt-account-id` header at request time)
+   *  - `email` → `email`
+   *
+   * The platform persists the result alongside the credential row so the
+   * sidecar doesn't re-decode on every call.
    */
-  extractTokenIdentity(accessToken: string): Record<string, string> | null {
+  extractTokenIdentity(accessToken: string): ModelProviderIdentity | null {
     const claims = decodeCodexJwtPayload(accessToken);
     if (!claims) return null;
-    const out: Record<string, string> = {};
-    if (claims.chatgpt_account_id) out.chatgpt_account_id = claims.chatgpt_account_id;
+    const out: ModelProviderIdentity = {};
+    if (claims.chatgpt_account_id) out.accountId = claims.chatgpt_account_id;
     if (claims.email) out.email = claims.email;
-    return Object.keys(out).length > 0 ? out : null;
+    return out.accountId || out.email ? out : null;
+  },
+
+  /**
+   * Build the `MODEL_API_KEY` placeholder the agent container sees. pi-ai's
+   * `openai-codex-responses` provider decodes the apiKey as a JWT to read
+   * `https://api.openai.com/auth.chatgpt_account_id`, so the placeholder
+   * must be a parseable JWT carrying only that claim — anything else
+   * either fails to parse or leaks signature material into the container.
+   *
+   * Returns `null` when the access token has no decodable account id so
+   * the platform falls back to its generic dash-stripped placeholder.
+   */
+  buildApiKeyPlaceholder(accessToken: string): string | null {
+    const claims = decodeCodexJwtPayload(accessToken);
+    const accountId = claims?.chatgpt_account_id;
+    if (!accountId) return null;
+    const headerB64 = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
+    const payloadB64 = base64UrlEncode(
+      JSON.stringify({
+        "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+      }),
+    );
+    // Fixed, recognisable fake signature — never derived from the real one.
+    return `${headerB64}.${payloadB64}.placeholder`;
+  },
+
+  /**
+   * Build the inference probe sent by the platform's connection test.
+   * Codex's chatgpt.com backend exposes no `/models` endpoint, so the
+   * generic discovery probe is useless — we issue a real single-token
+   * `${baseUrl}/codex/responses` request instead. On 200 the connection
+   * works end-to-end (oauth + chatgpt backend + subscription + model).
+   *
+   * Returns a structured error when the `accountId` slot is missing so
+   * the platform fails the test loudly instead of sending a request the
+   * backend will 401.
+   */
+  buildInferenceProbe(
+    ctx: InferenceProbeContext,
+  ): InferenceProbeRequest | InferenceProbeBuildError | null {
+    if (!ctx.accountId) {
+      return {
+        error: "AUTH_FAILED",
+        message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
+      };
+    }
+    return buildCodexInferenceRequest({
+      baseUrl: ctx.baseUrl,
+      modelId: ctx.modelId,
+      apiKey: ctx.apiKey,
+      accountId: ctx.accountId,
+    });
   },
 };
 
@@ -142,6 +249,11 @@ const codexProvider: ModelProviderDefinition = {
     { id: "gpt-5.2", contextWindow: 200000, capabilities: ["text", "reasoning"] },
   ],
   hooks: codexHooks,
+  // The chatgpt.com Codex backend rejects requests without a
+  // `chatgpt-account-id` header. The platform refuses to persist a
+  // credential whose token doesn't carry this claim — failing at import
+  // time is louder than silently persisting a dead credential.
+  requiredIdentityClaims: ["accountId"],
 };
 
 // ---------------------------------------------------------------------------

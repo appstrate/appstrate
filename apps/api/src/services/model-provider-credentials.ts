@@ -49,9 +49,13 @@ export interface OAuthBlob {
   expiresAt: number | null;
   scopesGranted: string[];
   needsReconnection: boolean;
-  /** Codex only — `chatgpt-account-id` header value. */
+  /**
+   * Abstract account/tenant identifier — populated by the provider's
+   * `extractTokenIdentity` hook (e.g. Codex maps `chatgpt_account_id`
+   * here). Echoed by the sidecar as a routing header at request time.
+   */
   accountId?: string;
-  /** Subscription tier from the OAuth response (Claude). */
+  /** Free-form subscription tier surfaced in the OAuth response body. */
   subscriptionType?: string;
   /** Account email — surfaced in the UI; never used in the inference path. */
   email?: string;
