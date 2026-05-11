@@ -28,8 +28,8 @@ import {
   getModelProviderConfig,
   isModelProviderEnabled,
   listModelProviders,
-  type ModelApiShape,
 } from "./oauth-model-providers/registry.ts";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "./model-registry.ts";
 import { logger } from "../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";

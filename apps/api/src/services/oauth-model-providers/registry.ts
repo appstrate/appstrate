@@ -23,14 +23,6 @@
 import { getEnv } from "@appstrate/env";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
-/**
- * Re-export the canonical wire-format union from `@appstrate/core/sidecar-types`
- * so platform-side callers (token-resolver, refresh-worker, …) keep importing
- * `ModelApiShape` from this module while the actual definition stays in core
- * — preventing drift with the sidecar runtime's `LlmProxyOauthConfig.apiShape`.
- */
-export type { ModelApiShape };
-
 export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
 
 export type AuthMode = "api_key" | "oauth2";
