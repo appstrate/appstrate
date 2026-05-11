@@ -38,7 +38,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
-import { isOAuthModelProvider } from "../oauth-model-providers/registry.ts";
+import { isOAuthModelProvider } from "../model-providers/registry.ts";
 import { decodeCodexJwtPayload } from "../oauth-model-providers/registry.ts";
 import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 

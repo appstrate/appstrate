@@ -10,7 +10,7 @@ import { importOAuthModelProviderConnection } from "../services/oauth-model-prov
 import {
   isModelProviderEnabled,
   isOAuthModelProvider,
-} from "../services/oauth-model-providers/registry.ts";
+} from "../services/model-providers/registry.ts";
 import {
   cancelPairing,
   consumePairing,

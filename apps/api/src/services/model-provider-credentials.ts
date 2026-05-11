@@ -25,10 +25,10 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
-  getModelProviderConfig,
+  getModelProvider,
   isModelProviderEnabled,
   listModelProviders,
-} from "./oauth-model-providers/registry.ts";
+} from "./model-providers/registry.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "./model-registry.ts";
 import { logger } from "../lib/logger.ts";
@@ -87,7 +87,7 @@ interface ModelProviderCredentialRow {
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
  * (the only public read path). Carries the registry overlay (apiShape,
  * baseUrl, rewriteUrlPath, forceStream/Store) inline so downstream consumers
- * (pi.ts, llm-proxy) don't have to re-look-up `getModelProviderConfig`.
+ * (pi.ts, llm-proxy) don't have to re-look-up `getModelProvider`.
  *
  * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
  * entries have no registry providerId — they are flat wire-format
@@ -114,7 +114,7 @@ export interface DecryptedModelProviderCredentials {
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
 function effectiveBaseUrl(providerId: string, override: string | null): string | null {
-  const cfg = getModelProviderConfig(providerId);
+  const cfg = getModelProvider(providerId);
   if (!cfg) return null;
   if (override && cfg.baseUrlOverridable) return override;
   return cfg.defaultBaseUrl;
@@ -139,7 +139,7 @@ export async function listModelProviderCredentialRows(
     .where(scopedWhere(modelProviderCredentials, { orgId }));
 
   return rows.map((r): ModelProviderCredentialRow => {
-    const cfg = getModelProviderConfig(r.providerId);
+    const cfg = getModelProvider(r.providerId);
     const baseUrl = effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "";
     const blob = decryptBlob(r.credentialsEncrypted);
     const isOauth = blob?.kind === "oauth";
@@ -173,7 +173,7 @@ export interface CreateApiKeyCredentialInput {
 }
 
 export async function createApiKeyCredential(input: CreateApiKeyCredentialInput): Promise<string> {
-  const cfg = getModelProviderConfig(input.providerId);
+  const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
   }
@@ -215,7 +215,7 @@ export interface CreateOAuthCredentialInput {
 }
 
 export async function createOAuthCredential(input: CreateOAuthCredentialInput): Promise<string> {
-  const cfg = getModelProviderConfig(input.providerId);
+  const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
   }
@@ -433,7 +433,7 @@ async function loadDbCredential(
     .limit(1);
   if (!row) return null;
 
-  const cfg = getModelProviderConfig(row.providerId);
+  const cfg = getModelProvider(row.providerId);
   if (!cfg) {
     logger.warn("model-provider-credentials: unknown providerId in DB row", {
       credentialId: id,
@@ -533,7 +533,7 @@ export async function listOrgModelProviderCredentials(
       updatedAt: now,
     }),
     mapRow: (row): ModelProviderCredentialInfo => {
-      const cfg = getModelProviderConfig(row.providerId);
+      const cfg = getModelProvider(row.providerId);
       return {
         id: row.id,
         label: row.label,
@@ -563,7 +563,7 @@ export async function listOrgModelProviderCredentials(
  *
  * The returned shape carries the registry overlay (rewriteUrlPath,
  * forceStream/Store) inline so downstream consumers (pi.ts, llm-proxy)
- * don't have to re-look-up `getModelProviderConfig(providerId)`.
+ * don't have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the
  * OAuth credential is dead and the caller must treat it as missing.

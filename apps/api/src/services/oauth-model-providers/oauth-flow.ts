@@ -24,7 +24,8 @@
  */
 
 import { createOAuthCredential } from "../model-provider-credentials.ts";
-import { decodeCodexJwtPayload, getModelProviderConfig } from "./registry.ts";
+import { decodeCodexJwtPayload } from "./registry.ts";
+import { getModelProvider } from "../model-providers/registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -76,7 +77,7 @@ export interface ImportOAuthModelProviderResult {
 export async function importOAuthModelProviderConnection(
   input: ImportOAuthModelProviderInput,
 ): Promise<ImportOAuthModelProviderResult> {
-  const config = getModelProviderConfig(input.providerId);
+  const config = getModelProvider(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
     throw notFound(`Unknown OAuth model provider: ${input.providerId} (not in registry)`);
   }
