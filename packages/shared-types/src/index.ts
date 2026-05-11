@@ -501,18 +501,27 @@ export interface OrgModelInfo {
   updatedAt: string;
 }
 
-export interface OrgModelProviderKeyInfo {
+/**
+ * Aggregated UI view of a model provider credential — combines env-driven
+ * `SYSTEM_PROVIDER_KEYS` (source: "built-in") with the unified
+ * `model_provider_credentials` table (source: "custom"). Never carries
+ * plaintext. The shape is produced by `listOrgModelProviderCredentials()` —
+ * keep it in lock-step with the service.
+ */
+export interface ModelProviderCredentialInfo {
   id: string;
   label: string;
   apiShape: string;
   baseUrl: string;
   source: "built-in" | "custom";
-  /** Auth mode of the underlying credential. Defaults to `"api_key"` for OSS rows that predate OAuth model providers. */
-  authMode?: "api_key" | "oauth";
-  /** Set when `authMode === "oauth"`. Canonical providerId backing the connection (e.g. `codex`, `claude-code`). */
+  /** Auth mode of the underlying credential (matches the registry vocabulary). */
+  authMode: "api_key" | "oauth2";
+  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection (e.g. `codex`, `claude-code`). */
   providerId?: string | null;
   /** Surface email of the OAuth account (Codex JWT claim or Claude `claudeAiOauth.email`). UI shows it as transparency hint. */
   oauthEmail?: string | null;
+  /** OAuth token expiry, ISO-8601. `null` when expiry is unknown. */
+  oauthExpiresAt?: string | null;
   /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
   needsReconnection?: boolean;
   /**

@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTestModelProviderCredentialInline } from "../hooks/use-model-provider-credentials";
-import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
@@ -37,7 +37,7 @@ interface ProviderKeyFormData {
 interface ProviderKeyFormModalProps {
   open: boolean;
   onClose: () => void;
-  providerKey: OrgModelProviderKeyInfo | null;
+  providerKey: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
 }
@@ -49,7 +49,7 @@ interface ProviderKeyFormFields {
   apiKey: string;
 }
 
-function detectProviderFromKey(key: OrgModelProviderKeyInfo | null): string {
+function detectProviderFromKey(key: ModelProviderCredentialInfo | null): string {
   if (!key) return "";
   const match = findProviderByApiShapeAndBaseUrl(key.apiShape, key.baseUrl);
   return match ? match.id : CUSTOM_ID;
@@ -61,7 +61,7 @@ function ProviderKeyFormBody({
   onSubmit,
   onClose,
 }: {
-  providerKey: OrgModelProviderKeyInfo | null;
+  providerKey: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
   onClose: () => void;

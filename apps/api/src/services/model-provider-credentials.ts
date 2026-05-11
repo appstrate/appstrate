@@ -32,7 +32,7 @@ import {
 } from "./oauth-model-providers/registry.ts";
 import { getSystemModelProviderKeys } from "./model-registry.ts";
 import { logger } from "../lib/logger.ts";
-import type { OrgModelProviderKeyInfo } from "@appstrate/shared-types";
+import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
@@ -59,9 +59,11 @@ export interface OAuthBlob {
 
 export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
-// ─── Public info shape (never carries plaintext) ───────────────────────────
+// ─── Internal DB-row shape (never carries plaintext) ───────────────────────
+// Distinct from the public `ModelProviderCredentialInfo` (shared-types) which
+// also represents env-driven system keys via `source: "built-in"`.
 
-export interface ModelProviderCredentialInfo {
+interface ModelProviderCredentialRow {
   id: string;
   orgId: string;
   label: string;
@@ -72,7 +74,7 @@ export interface ModelProviderCredentialInfo {
   authMode: "api_key" | "oauth2";
   /** OAuth-only: filled when the row's blob is `kind: "oauth"`. */
   oauthEmail?: string | null;
-  oauthNeedsReconnection?: boolean;
+  needsReconnection?: boolean;
   oauthExpiresAt?: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -117,15 +119,15 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
 
 // ─── List (org-scoped) ─────────────────────────────────────────────────────
 
-export async function listModelProviderCredentials(
+export async function listModelProviderCredentialRows(
   orgId: string,
-): Promise<ModelProviderCredentialInfo[]> {
+): Promise<ModelProviderCredentialRow[]> {
   const rows = await db
     .select()
     .from(modelProviderCredentials)
     .where(scopedWhere(modelProviderCredentials, { orgId }));
 
-  return rows.map((r): ModelProviderCredentialInfo => {
+  return rows.map((r): ModelProviderCredentialRow => {
     const cfg = getModelProviderConfig(r.providerId);
     const baseUrl = effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "";
     const blob = decryptBlob(r.credentialsEncrypted);
@@ -138,7 +140,7 @@ export async function listModelProviderCredentials(
       baseUrl,
       authMode: cfg?.authMode ?? "api_key",
       oauthEmail: isOauth ? (blob.email ?? null) : undefined,
-      oauthNeedsReconnection: isOauth ? blob.needsReconnection : undefined,
+      needsReconnection: isOauth ? blob.needsReconnection : undefined,
       oauthExpiresAt:
         isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
       createdBy: r.createdBy,
@@ -488,21 +490,21 @@ export function resolveProviderIdFromApiKeyForm(
  *   1. `SYSTEM_PROVIDER_KEYS` env-driven keys (built-in, immutable, env-controlled)
  *   2. The unified `model_provider_credentials` table (custom, OAuth + api-key)
  *
- * The return shape is `OrgModelProviderKeyInfo` — a UI aggregation shape that
- * preserves the historic `(apiShape, baseUrl, source)` triple expected by the
- * frontend. Distinct from the DB-row shape `ModelProviderCredentialInfo`.
+ * Returns the public `ModelProviderCredentialInfo` shape (shared-types) —
+ * never carries plaintext. `apiShape` is derived from the registry for DB
+ * rows and from the system definition for env-driven keys.
  */
 export async function listOrgModelProviderCredentials(
   orgId: string,
-): Promise<OrgModelProviderKeyInfo[]> {
+): Promise<ModelProviderCredentialInfo[]> {
   const system = getSystemModelProviderKeys();
   const now = toISORequired(new Date());
-  const rows = await listModelProviderCredentials(orgId);
+  const rows = await listModelProviderCredentialRows(orgId);
 
   return mergeSystemAndDb({
     system,
     rows,
-    mapSystem: (id, def): OrgModelProviderKeyInfo => ({
+    mapSystem: (id, def): ModelProviderCredentialInfo => ({
       id,
       label: def.label,
       apiShape: def.apiShape,
@@ -513,22 +515,23 @@ export async function listOrgModelProviderCredentials(
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (info): OrgModelProviderKeyInfo => {
-      const cfg = getModelProviderConfig(info.providerId);
+    mapRow: (row): ModelProviderCredentialInfo => {
+      const cfg = getModelProviderConfig(row.providerId);
       return {
-        id: info.id,
-        label: info.label,
+        id: row.id,
+        label: row.label,
         apiShape: cfg?.apiShape ?? "openai-chat",
-        baseUrl: info.baseUrl,
+        baseUrl: row.baseUrl,
         source: "custom",
-        authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
-        providerId: info.providerId,
-        oauthEmail: info.oauthEmail ?? null,
-        needsReconnection: info.oauthNeedsReconnection ?? false,
-        providerDisabled: !isModelProviderEnabled(info.providerId),
-        createdBy: info.createdBy,
-        createdAt: info.createdAt,
-        updatedAt: info.updatedAt,
+        authMode: row.authMode,
+        providerId: row.providerId,
+        oauthEmail: row.oauthEmail ?? null,
+        oauthExpiresAt: row.oauthExpiresAt ?? null,
+        needsReconnection: row.needsReconnection ?? false,
+        providerDisabled: !isModelProviderEnabled(row.providerId),
+        createdBy: row.createdBy,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
       };
     },
   });

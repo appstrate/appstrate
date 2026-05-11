@@ -806,15 +806,33 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgModelProviderKey: {
+  ModelProviderCredential: {
     type: "object",
-    required: ["id", "label", "apiShape", "baseUrl", "source", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "label",
+      "apiShape",
+      "baseUrl",
+      "source",
+      "authMode",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
       apiShape: { type: "string" },
       baseUrl: { type: "string" },
       source: { type: "string", enum: ["built-in", "custom"] },
+      authMode: { type: "string", enum: ["api_key", "oauth2"] },
+      providerId: {
+        type: ["string", "null"],
+        description:
+          "Canonical providerId backing the credential (e.g. `codex`, `claude-code`). Set when `authMode === 'oauth2'`.",
+      },
+      oauthEmail: { type: ["string", "null"] },
+      oauthExpiresAt: { type: ["string", "null"], format: "date-time" },
+      needsReconnection: { type: "boolean" },
       providerDisabled: {
         type: "boolean",
         description:

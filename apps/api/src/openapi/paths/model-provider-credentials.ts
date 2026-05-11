@@ -101,7 +101,7 @@ export const modelProviderCredentialsPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgModelProviderKey" },
+                    items: { $ref: "#/components/schemas/ModelProviderCredential" },
                   },
                   hasMore: { type: "boolean" },
                 },
@@ -116,6 +116,7 @@ export const modelProviderCredentialsPaths = {
                     apiShape: "openai-chat",
                     baseUrl: "https://api.openai.com",
                     source: "custom",
+                    authMode: "api_key",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },

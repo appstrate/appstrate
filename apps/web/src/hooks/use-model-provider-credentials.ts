@@ -3,13 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 
 export function useModelProviderCredentials() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["model-provider-credentials", orgId],
-    queryFn: () => apiList<OrgModelProviderKeyInfo>("/model-provider-credentials"),
+    queryFn: () => apiList<ModelProviderCredentialInfo>("/model-provider-credentials"),
     enabled: !!orgId,
   });
 }
@@ -114,7 +114,10 @@ export function useTestModelProviderCredential() {
   });
 }
 
-export function deduplicateLabel(label: string, existingKeys: OrgModelProviderKeyInfo[]): string {
+export function deduplicateLabel(
+  label: string,
+  existingKeys: ModelProviderCredentialInfo[],
+): string {
   const existingLabels = new Set(existingKeys.map((k) => k.label));
   if (!existingLabels.has(label)) return label;
   let counter = 2;

@@ -42,7 +42,11 @@ import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { OrgModelInfo, OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import type {
+  OrgModelInfo,
+  ModelProviderCredentialInfo,
+  TestResult,
+} from "@appstrate/shared-types";
 
 function TestResultSpan({
   result,
@@ -234,13 +238,13 @@ function ProviderKeysSection({
   onRename,
   onConnectOAuth,
 }: {
-  providerKeys: OrgModelProviderKeyInfo[] | undefined;
+  providerKeys: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
   error: Error | null;
   onCreate: () => void;
-  onEdit: (pk: OrgModelProviderKeyInfo) => void;
-  onDelete: (pk: OrgModelProviderKeyInfo) => void;
-  onRename: (pk: OrgModelProviderKeyInfo, newLabel: string) => void;
+  onEdit: (pk: ModelProviderCredentialInfo) => void;
+  onDelete: (pk: ModelProviderCredentialInfo) => void;
+  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
   onConnectOAuth: (providerId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -280,7 +284,7 @@ function ProviderKeysSection({
           {providerKeys.map((pk) => {
             const provider = findProviderByApiShapeAndBaseUrl(pk.apiShape, pk.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
-            const isOauth = pk.authMode === "oauth";
+            const isOauth = pk.authMode === "oauth2";
             return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
                 {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
@@ -415,7 +419,7 @@ export function OrgSettingsModelsPage() {
   });
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
-  const [editPk, setEditPk] = useState<OrgModelProviderKeyInfo | null>(null);
+  const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
   const {
     data: providerKeys,
     isLoading: pkLoading,

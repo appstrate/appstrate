@@ -31,7 +31,7 @@ import {
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
-  listModelProviderCredentials,
+  listModelProviderCredentialRows,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   loadModelProviderCredentials,
@@ -156,7 +156,7 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: PLAINTEXT,
     });
 
-    const list = await listModelProviderCredentials(ctx.orgId);
+    const list = await listModelProviderCredentialRows(ctx.orgId);
     expect(list).toHaveLength(1);
     const serialized = JSON.stringify(list[0]);
     expect(serialized).not.toContain(PLAINTEXT);
@@ -332,7 +332,7 @@ describe("model-provider-credentials service — oauth path", () => {
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
     // email/subscriptionType preserved (only surface in list, not in load).
-    const list = await listModelProviderCredentials(ctx.orgId);
+    const list = await listModelProviderCredentialRows(ctx.orgId);
     expect(list[0]!.oauthEmail).toBe("x@example.test");
   });
 
@@ -352,8 +352,8 @@ describe("model-provider-credentials service — oauth path", () => {
     await markCredentialNeedsReconnection(ctx.orgId, id);
     const creds = await loadModelProviderCredentials(ctx.orgId, id);
     expect(creds!.needsReconnection).toBe(true);
-    const list = await listModelProviderCredentials(ctx.orgId);
-    expect(list[0]!.oauthNeedsReconnection).toBe(true);
+    const list = await listModelProviderCredentialRows(ctx.orgId);
+    expect(list[0]!.needsReconnection).toBe(true);
   });
 });
 
@@ -468,7 +468,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const oauth = list.find((k) => k.id === imported.providerKeyId);
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
-      expect(oauth!.authMode).toBe("oauth");
+      expect(oauth!.authMode).toBe("oauth2");
       expect(oauth!.providerId).toBe("claude-code");
       expect(oauth!.id).toBe(imported.providerKeyId);
       expect(oauth!.oauthEmail).toBe("user@anthropic-test.com");
