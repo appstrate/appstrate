@@ -3,9 +3,10 @@
 /**
  * Pins the OSS-mode boot contract for `loadModules`:
  *
- *   - the default registry (`MODULES` unset) is `oidc,webhooks` and never
- *     attempts to dynamically import `@appstrate/cloud`. An OSS install
- *     without the private cloud package on disk MUST boot cleanly.
+ *   - the default registry (`MODULES` unset) is the built-in OSS module
+ *     set (oidc, webhooks, core-providers) and never attempts to
+ *     dynamically import `@appstrate/cloud`. An OSS install without the
+ *     private cloud package on disk MUST boot cleanly.
  *   - when a non-builtin specifier is listed but the npm package is not
  *     installed, the loader surfaces a wrapped error mentioning the
  *     specifier name (so operators see "Module \"@appstrate/cloud\" could
@@ -39,24 +40,27 @@ describe("OSS-mode module loading", () => {
     resetModules();
   });
 
-  it("default registry is oidc,webhooks — cloud is never auto-loaded", () => {
+  it("default registry is the built-in OSS module set — cloud is never auto-loaded", () => {
     const previous = process.env.MODULES;
     delete process.env.MODULES;
     try {
-      expect(getModuleRegistry()).toEqual(["oidc", "webhooks"]);
+      // PR 4 added `core-providers` to the OSS defaults so API-key model
+      // providers (openai, anthropic, openai-compatible) ship as a module
+      // contribution rather than hardcoded inside core.
+      expect(getModuleRegistry()).toEqual(["oidc", "webhooks", "core-providers"]);
     } finally {
       if (previous !== undefined) process.env.MODULES = previous;
     }
   });
 
-  it("an MODULES list containing only known builtins resolves and does not reach for any npm package", () => {
+  it("a MODULES list containing only known builtins resolves and does not reach for any npm package", () => {
     const previous = process.env.MODULES;
-    process.env.MODULES = "oidc,webhooks";
+    process.env.MODULES = "oidc,webhooks,core-providers";
     try {
       const registry = getModuleRegistry();
-      expect(registry).toEqual(["oidc", "webhooks"]);
+      expect(registry).toEqual(["oidc", "webhooks", "core-providers"]);
       // Sanity: no entry looks like an npm-style scoped package (which
-      // would force a dynamic import). The OSS default surface is two
+      // would force a dynamic import). The OSS default surface is
       // builtin module ids only.
       for (const id of registry) {
         expect(id.startsWith("@")).toBe(false);

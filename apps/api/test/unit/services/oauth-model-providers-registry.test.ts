@@ -19,13 +19,22 @@ import {
   listModelProviders,
   seedLegacyModelProviders,
 } from "../../../src/services/oauth-model-providers/registry.ts";
-import { resetModelProviders } from "../../../src/services/model-providers/registry.ts";
+import {
+  registerModelProviders,
+  resetModelProviders,
+} from "../../../src/services/model-providers/registry.ts";
+import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
 
-// PR 2 migration: the legacy lookups now delegate to the runtime registry
-// which starts empty. Seed the legacy built-ins once so the contract tests
-// run against the same five providers as before.
+// PR 2-4 migration: the legacy lookups now delegate to the runtime
+// registry. Compose the historical set of five built-in providers by
+// registering both the `core-providers` module's contributions (openai,
+// anthropic, openai-compatible) and the legacy seed (codex, claude-code).
+// Once codex + claude-code move into their own modules (PR 5-6), this
+// suite will fold into the `core-providers` test or a top-level
+// "module aggregation" test.
 beforeAll(() => {
   resetModelProviders();
+  registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
   seedLegacyModelProviders();
 });
 
@@ -33,8 +42,12 @@ const CANONICAL_IDS = ["codex", "claude-code", "openai", "anthropic", "openai-co
 const OAUTH_IDS = ["codex", "claude-code"] as const;
 
 describe("MODEL_PROVIDERS registry", () => {
-  it("exposes the expected built-in providers", () => {
-    expect(Object.keys(MODEL_PROVIDERS).sort()).toEqual([...CANONICAL_IDS].sort());
+  it("exposes the providers still owned by the legacy seed (codex + claude-code)", () => {
+    // PR 4 moved the three API-key providers (openai, anthropic,
+    // openai-compatible) into the `core-providers` module. The legacy
+    // static map now only owns the OAuth pair pending their move into
+    // dedicated modules (PR 5-6).
+    expect(Object.keys(MODEL_PROVIDERS).sort()).toEqual(["claude-code", "codex"]);
   });
 
   it("each entry's providerId matches its registry key", () => {

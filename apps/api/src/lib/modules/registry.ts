@@ -51,15 +51,23 @@ import { getModule, emitEvent } from "./module-loader.ts";
  * the env in tests without flushing the whole env cache. The field is a
  * plain comma-separated string — no validation beyond trim/filter is useful.
  *
- * Defaults to the built-in OSS modules (`oidc,webhooks`) when the env
- * var is unset. External deployments extend the list by appending npm
- * package specifiers, e.g.:
- *   MODULES=oidc,webhooks,@scope/module
+ * Defaults to the built-in OSS modules (`oidc,webhooks,core-providers`)
+ * when the env var is unset. External deployments extend the list by
+ * appending npm package specifiers, e.g.:
+ *   MODULES=oidc,webhooks,core-providers,@scope/module
+ *
+ * `core-providers` ships the API-key model providers (openai, anthropic,
+ * openai-compatible) as an explicit, disablable module so cloud SaaS
+ * deployments that BYO their own provider catalog can opt out cleanly.
+ *
+ * OAuth-backed providers (codex, ...) live in their own modules and are
+ * NOT in the default — operators add them explicitly after reviewing the
+ * provider's ToS posture.
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
  */
-const DEFAULT_MODULES = "oidc,webhooks";
+const DEFAULT_MODULES = "oidc,webhooks,core-providers";
 
 export function getModuleRegistry(): string[] {
   return (process.env.MODULES ?? DEFAULT_MODULES)

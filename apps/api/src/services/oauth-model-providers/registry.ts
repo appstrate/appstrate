@@ -166,56 +166,20 @@ const claudeCodeConfig: ModelProviderConfig = {
   ],
 };
 
-const openaiConfig: ModelProviderConfig = {
-  providerId: "openai",
-  displayName: "OpenAI",
-  iconUrl: "openai",
-  description: "Bring your own OpenAI API key.",
-  docsUrl: "https://platform.openai.com/docs/api-reference",
-  apiShape: "openai-chat",
-  defaultBaseUrl: "https://api.openai.com",
-  baseUrlOverridable: false,
-  authMode: "api_key",
-  models: [],
-};
-
-const anthropicConfig: ModelProviderConfig = {
-  providerId: "anthropic",
-  displayName: "Anthropic",
-  iconUrl: "anthropic",
-  description: "Bring your own Anthropic API key.",
-  docsUrl: "https://docs.anthropic.com/en/api",
-  apiShape: "anthropic-messages",
-  defaultBaseUrl: "https://api.anthropic.com",
-  baseUrlOverridable: false,
-  authMode: "api_key",
-  models: [],
-};
-
-const openaiCompatibleConfig: ModelProviderConfig = {
-  providerId: "openai-compatible",
-  displayName: "OpenAI-compatible (custom)",
-  iconUrl: "openai",
-  description:
-    "Self-hosted or third-party endpoint exposing the OpenAI chat-completions API (Ollama, vLLM, LiteLLM, …).",
-  apiShape: "openai-chat",
-  defaultBaseUrl: "http://localhost:11434",
-  baseUrlOverridable: true,
-  authMode: "api_key",
-  models: [],
-};
-
 /**
  * Built-in provider definitions, in insertion order. Consumed by
- * `seedLegacyModelProviders()` at boot. Once PR 4-5 land, this array
- * shrinks to `[]` and the file disappears in PR 7.
+ * `seedLegacyModelProviders()` at boot. Each migration to a dedicated
+ * module removes the corresponding entry; once empty the file disappears
+ * in PR 7.
+ *
+ * Migration progress:
+ *   - openai, anthropic, openai-compatible → `core-providers` module (PR 4 ✅)
+ *   - codex → `codex` module (PR 5)
+ *   - claude-code → external private module (PR 6 — removed from OSS)
  */
 const LEGACY_PROVIDERS: readonly ModelProviderDefinition[] = [
   codexConfig,
   claudeCodeConfig,
-  openaiConfig,
-  anthropicConfig,
-  openaiCompatibleConfig,
 ];
 
 /**
