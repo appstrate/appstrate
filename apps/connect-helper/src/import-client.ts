@@ -13,7 +13,7 @@
 import type { NormalisedOAuthCredentials } from "./loopback-oauth.ts";
 
 export interface ImportResult {
-  providerKeyId: string;
+  credentialId: string;
   providerId: string;
   email?: string;
   subscriptionType?: string;

@@ -131,10 +131,10 @@ export function createModelProvidersOAuthRouter() {
       await recordAuditFromContext(c, {
         action: "oauth_model_provider.imported",
         resourceType: "oauth_model_provider",
-        resourceId: result.providerKeyId,
+        resourceId: result.credentialId,
         after: {
           providerId: result.providerId,
-          credentialId: result.providerKeyId,
+          credentialId: result.credentialId,
           availableModelIds: result.availableModelIds,
           pairingId: consumed.id,
           viaPairing: true,
@@ -181,10 +181,10 @@ export function createModelProvidersOAuthRouter() {
     await recordAuditFromContext(c, {
       action: "oauth_model_provider.imported",
       resourceType: "oauth_model_provider",
-      resourceId: result.providerKeyId,
+      resourceId: result.credentialId,
       after: {
         providerId: result.providerId,
-        credentialId: result.providerKeyId,
+        credentialId: result.credentialId,
         availableModelIds: result.availableModelIds,
         // No raw token / email — audit log MUST NOT carry secrets
       },

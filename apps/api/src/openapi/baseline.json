@@ -5119,7 +5119,7 @@
                       "source": "built-in",
                       "enabled": true,
                       "isDefault": false,
-                      "providerKeyId": "pk_abc123",
+                      "credentialId": "pk_abc123",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
                       "reasoning": false,
@@ -5155,7 +5155,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label", "apiShape", "baseUrl", "modelId", "providerKeyId"],
+                "required": ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
                 "properties": {
                   "label": {
                     "type": "string",
@@ -5178,7 +5178,7 @@
                     "minLength": 1,
                     "description": "Model identifier (e.g. gpt-4o)"
                   },
-                  "providerKeyId": {
+                  "credentialId": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Provider key ID for API key credentials"
@@ -5594,7 +5594,7 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "providerKeyId": {
+                  "credentialId": {
                     "type": "string",
                     "description": "Provider key ID to change which key is used"
                   },
@@ -6559,9 +6559,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["providerKeyId", "providerId", "availableModelIds"],
+                  "required": ["credentialId", "providerId", "availableModelIds"],
                   "properties": {
-                    "providerKeyId": {
+                    "credentialId": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -19807,7 +19807,7 @@
           "enabled",
           "isDefault",
           "source",
-          "providerKeyId",
+          "credentialId",
           "createdAt",
           "updatedAt"
         ],
@@ -19852,13 +19852,9 @@
             "type": "string",
             "enum": ["built-in", "custom"]
           },
-          "providerKeyId": {
+          "credentialId": {
             "type": "string",
-            "description": "Provider key ID for API key credentials"
-          },
-          "providerKeyLabel": {
-            "type": ["string", "null"],
-            "description": "Provider key label for display"
+            "description": "ID of the backing `model_provider_credentials` row."
           },
           "keyKind": {
             "type": ["string", "null"],

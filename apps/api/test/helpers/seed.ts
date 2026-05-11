@@ -285,7 +285,7 @@ export async function seedOrgModelProviderKey(
 
 type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & {
   orgId: string;
-  providerKeyId: string;
+  credentialId: string;
 };
 
 export async function seedOrgModel(

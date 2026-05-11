@@ -30,7 +30,7 @@ export function useCreateModel() {
       apiShape: string;
       baseUrl: string;
       modelId: string;
-      providerKeyId: string;
+      credentialId: string;
       input?: string[];
       contextWindow?: number;
       maxTokens?: number;
@@ -61,7 +61,7 @@ export function useUpdateModel() {
         apiShape?: string;
         baseUrl?: string;
         modelId?: string;
-        providerKeyId?: string;
+        credentialId?: string;
         enabled?: boolean;
         input?: string[] | null;
         contextWindow?: number | null;
@@ -200,7 +200,7 @@ export function useModelFormHandler(opts: {
         createProviderKeyAndThen((keyId) => {
           const { newProviderKey: _, ...modelData } = data;
           updateModel.mutate(
-            { id: opts.editModel!.id, data: { ...modelData, providerKeyId: keyId } },
+            { id: opts.editModel!.id, data: { ...modelData, credentialId: keyId } },
             { onSuccess: opts.onSuccess },
           );
         });
@@ -210,7 +210,7 @@ export function useModelFormHandler(opts: {
     } else if (data.newProviderKey) {
       createProviderKeyAndThen((keyId) => {
         const { newProviderKey: _, ...modelData } = data;
-        createModel.mutate({ ...modelData, providerKeyId: keyId }, { onSuccess: opts.onSuccess });
+        createModel.mutate({ ...modelData, credentialId: keyId }, { onSuccess: opts.onSuccess });
       });
     } else {
       createModel.mutate(data, { onSuccess: opts.onSuccess });

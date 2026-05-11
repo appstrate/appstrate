@@ -64,7 +64,7 @@ describe("Models API", () => {
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
+        credentialId: providerKey.id,
         apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
@@ -90,7 +90,7 @@ describe("Models API", () => {
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
+        credentialId: providerKey.id,
         apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
@@ -114,7 +114,7 @@ describe("Models API", () => {
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
+        credentialId: providerKey.id,
         apiShape: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
         modelId: "gpt-4o",
@@ -135,7 +135,7 @@ describe("Models API", () => {
 
   describe("POST /api/models", () => {
     it("creates a model with a valid provider key", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       const res = await app.request("/api/models", {
         method: "POST",
@@ -145,7 +145,7 @@ describe("Models API", () => {
           apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
-          providerKeyId,
+          credentialId,
         }),
       });
 
@@ -158,7 +158,7 @@ describe("Models API", () => {
 
   describe("DELETE /api/models/:id", () => {
     it("deletes a model and returns 204", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       // Create a model
       const createRes = await app.request("/api/models", {
@@ -169,7 +169,7 @@ describe("Models API", () => {
           apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o-mini",
-          providerKeyId,
+          credentialId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -187,7 +187,7 @@ describe("Models API", () => {
 
   describe("PUT /api/models/default", () => {
     it("sets the default model", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       // Create a model first
       const createRes = await app.request("/api/models", {
@@ -198,7 +198,7 @@ describe("Models API", () => {
           apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
-          providerKeyId,
+          credentialId,
         }),
       });
       expect(createRes.status).toBe(201);

@@ -41,10 +41,10 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const now = toISORequired(new Date());
 
   // Resolve keyKind for Anthropic DB models — needs a credentials lookup
-  // per distinct providerKeyId. System models carry `apiKey` inline, so
+  // per distinct credentialId. System models carry `apiKey` inline, so
   // detection there is free. Other protocols don't expose keyKind at all.
   const anthropicProviderKeyIds = new Set(
-    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.providerKeyId),
+    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.credentialId),
   );
   const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
   await Promise.all(
@@ -71,8 +71,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in" as const,
-      providerKeyId: def.providerKeyId,
-      providerKeyLabel: null,
+      credentialId: def.credentialId,
       keyKind: detectKeyKind(def.apiShape, def.apiKey),
       createdBy: null,
       createdAt: now,
@@ -92,10 +91,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: row.enabled,
       isDefault: row.isDefault,
       source: row.source as "custom" | "built-in",
-      providerKeyId: row.providerKeyId,
-      providerKeyLabel: null,
+      credentialId: row.credentialId,
       keyKind:
-        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.providerKeyId) ?? null) : null,
+        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.credentialId) ?? null) : null,
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
@@ -112,7 +110,7 @@ export async function createOrgModel(
   baseUrl: string,
   modelId: string,
   userId: string,
-  providerKeyId: string,
+  credentialId: string,
   capabilities?: {
     input?: string[];
     contextWindow?: number;
@@ -137,7 +135,7 @@ export async function createOrgModel(
       apiShape,
       baseUrl,
       modelId,
-      providerKeyId,
+      credentialId,
       input: capabilities?.input ?? null,
       contextWindow: capabilities?.contextWindow ?? null,
       maxTokens: capabilities?.maxTokens ?? null,
@@ -165,7 +163,7 @@ export async function updateOrgModel(
     maxTokens?: number | null;
     reasoning?: boolean | null;
     cost?: ModelCost | null;
-    providerKeyId?: string;
+    credentialId?: string;
   },
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
@@ -274,7 +272,7 @@ export async function resolveModel(
     .limit(1);
 
   if (dbDefault) {
-    const creds = await loadInferenceCredentials(orgId, dbDefault.providerKeyId);
+    const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
     if (creds) {
       return {
         apiShape: dbDefault.apiShape,
@@ -290,7 +288,7 @@ export async function resolveModel(
         isSystemModel: false,
         providerId: creds.providerId,
         accountId: creds.accountId,
-        credentialId: dbDefault.providerKeyId,
+        credentialId: dbDefault.credentialId,
       };
     }
   }
@@ -321,7 +319,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
       apiShape: orgModels.apiShape,
       baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
-      providerKeyId: orgModels.providerKeyId,
+      credentialId: orgModels.credentialId,
       enabled: orgModels.enabled,
       label: orgModels.label,
       input: orgModels.input,
@@ -336,7 +334,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   if (!row || !row.enabled) return null;
 
-  const creds = await loadInferenceCredentials(orgId, row.providerKeyId);
+  const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
   return {
@@ -353,7 +351,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     isSystemModel: false,
     providerId: creds.providerId,
     accountId: creds.accountId,
-    credentialId: row.providerKeyId,
+    credentialId: row.credentialId,
   };
 }
 

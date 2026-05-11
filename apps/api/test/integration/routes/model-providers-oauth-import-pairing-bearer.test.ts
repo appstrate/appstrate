@@ -76,9 +76,9 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
       body: JSON.stringify(VALID_BODY("codex")),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { providerId: string; providerKeyId: string };
+    const body = (await res.json()) as { providerId: string; credentialId: string };
     expect(body.providerId).toBe("codex");
-    expect(body.providerKeyId).toBeTruthy();
+    expect(body.credentialId).toBeTruthy();
   });
 
   it("flips the pairing's consumed_at on success (single-use)", async () => {

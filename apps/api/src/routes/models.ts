@@ -35,7 +35,7 @@ export const createModelSchema = z.object({
   apiShape: z.string().min(1, "apiShape is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
-  providerKeyId: z.string().min(1, "providerKeyId is required"),
+  credentialId: z.string().min(1, "credentialId is required"),
   input: z.array(z.string()).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -48,7 +48,7 @@ export const updateModelSchema = z.object({
   apiShape: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
-  providerKeyId: z.string().optional(),
+  credentialId: z.string().optional(),
   enabled: z.boolean().optional(),
   input: z.array(z.string()).nullable().optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
@@ -92,7 +92,7 @@ export function createModelsRouter() {
         apiShape,
         baseUrl,
         modelId,
-        providerKeyId,
+        credentialId,
         input,
         contextWindow,
         maxTokens,
@@ -106,7 +106,7 @@ export function createModelsRouter() {
         baseUrl,
         modelId,
         user.id,
-        providerKeyId,
+        credentialId,
         {
           input,
           contextWindow,
@@ -119,7 +119,7 @@ export function createModelsRouter() {
         action: "model.created",
         resourceType: "model",
         resourceId: id,
-        after: { label, apiShape, baseUrl, modelId, providerKeyId },
+        after: { label, apiShape, baseUrl, modelId, credentialId },
       });
       return c.json({ id }, 201);
     } catch (err) {

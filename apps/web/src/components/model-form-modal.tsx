@@ -76,7 +76,7 @@ export interface ModelFormData {
   apiShape: string;
   baseUrl: string;
   modelId: string;
-  providerKeyId: string;
+  credentialId: string;
   newProviderKey?: { apiKey: string };
   input?: string[];
   contextWindow?: number;
@@ -98,7 +98,7 @@ interface ModelFormFields {
   apiShape: string;
   baseUrl: string;
   modelId: string;
-  providerKeyId: string;
+  credentialId: string;
   inlineApiKey: string;
   inputText: boolean;
   inputImage: boolean;
@@ -299,7 +299,7 @@ function ModelFormBody({
       apiShape: model?.apiShape ?? "",
       baseUrl: model?.baseUrl ?? "",
       modelId: model?.modelId ?? "",
-      providerKeyId: model?.providerKeyId ?? "",
+      credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
       inputText: model?.input?.includes("text") !== false,
       inputImage: model?.input?.includes("image") ?? false,
@@ -309,28 +309,20 @@ function ModelFormBody({
     },
   });
 
-  const [
-    apiShape,
-    baseUrl,
-    modelId,
-    providerKeyId,
-    inlineApiKey,
-    inputText,
-    inputImage,
-    reasoning,
-  ] = useWatch({
-    control,
-    name: [
-      "apiShape",
-      "baseUrl",
-      "modelId",
-      "providerKeyId",
-      "inlineApiKey",
-      "inputText",
-      "inputImage",
-      "reasoning",
-    ],
-  });
+  const [apiShape, baseUrl, modelId, credentialId, inlineApiKey, inputText, inputImage, reasoning] =
+    useWatch({
+      control,
+      name: [
+        "apiShape",
+        "baseUrl",
+        "modelId",
+        "credentialId",
+        "inlineApiKey",
+        "inputText",
+        "inputImage",
+        "reasoning",
+      ],
+    });
 
   const providerKeysQuery = useModelProviderCredentials();
 
@@ -342,8 +334,8 @@ function ModelFormBody({
     );
   }, [providerKeysQuery.data, apiShape, baseUrl]);
 
-  const selectedKey = availableProviderKeys.find((k) => k.id === providerKeyId);
-  const inlineKeyMode = !selectedKey && !providerKeyId;
+  const selectedKey = availableProviderKeys.find((k) => k.id === credentialId);
+  const inlineKeyMode = !selectedKey && !credentialId;
 
   const [openRouterSearch, setOpenRouterSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -432,7 +424,7 @@ function ModelFormBody({
       apiShape: data.apiShape.trim(),
       baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
-      providerKeyId: inlineKeyMode ? "" : data.providerKeyId,
+      credentialId: inlineKeyMode ? "" : data.credentialId,
       ...(inlineKeyMode && data.inlineApiKey.trim()
         ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } }
         : {}),
@@ -576,7 +568,7 @@ function ModelFormBody({
                   size="icon"
                   className="h-9 w-9 shrink-0"
                   onClick={() => {
-                    setValue("providerKeyId", "");
+                    setValue("credentialId", "");
                     setValue("inlineApiKey", "");
                   }}
                 >
@@ -590,14 +582,14 @@ function ModelFormBody({
                   type="password"
                   {...register("inlineApiKey")}
                   placeholder="sk-..."
-                  className={cn("flex-1", showError("providerKeyId") && "border-destructive")}
-                  aria-invalid={showError("providerKeyId") ? true : undefined}
+                  className={cn("flex-1", showError("credentialId") && "border-destructive")}
+                  aria-invalid={showError("credentialId") ? true : undefined}
                 />
                 {availableProviderKeys.length > 0 && (
                   <Select
                     value=""
                     onValueChange={(id) => {
-                      setValue("providerKeyId", id);
+                      setValue("credentialId", id);
                       setValue("inlineApiKey", "");
                     }}
                   >
@@ -620,8 +612,8 @@ function ModelFormBody({
                 {t("models.form.createProviderKeyHint")}
               </div>
             )}
-            {showError("providerKeyId") && errors.providerKeyId?.message && (
-              <div className="text-destructive text-sm">{errors.providerKeyId.message}</div>
+            {showError("credentialId") && errors.credentialId?.message && (
+              <div className="text-destructive text-sm">{errors.credentialId.message}</div>
             )}
           </div>
         )}

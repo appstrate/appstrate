@@ -57,7 +57,7 @@ export interface ImportOAuthModelProviderInput {
 
 export interface ImportOAuthModelProviderResult {
   /** UUID of the `model_provider_credentials` row. */
-  providerKeyId: string;
+  credentialId: string;
   providerId: string;
   email?: string;
   subscriptionType?: string;
@@ -137,7 +137,7 @@ export async function importOAuthModelProviderConnection(
   });
 
   return {
-    providerKeyId: credentialId,
+    credentialId: credentialId,
     providerId: input.providerId,
     email,
     subscriptionType: input.subscriptionType,

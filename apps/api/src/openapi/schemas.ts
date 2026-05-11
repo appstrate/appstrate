@@ -854,7 +854,7 @@ export const schemas = {
       "enabled",
       "isDefault",
       "source",
-      "providerKeyId",
+      "credentialId",
       "createdAt",
       "updatedAt",
     ],
@@ -871,11 +871,10 @@ export const schemas = {
       enabled: { type: "boolean" },
       isDefault: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },
-      providerKeyId: {
+      credentialId: {
         type: "string",
-        description: "Provider key ID for API key credentials",
+        description: "ID of the backing `model_provider_credentials` row.",
       },
-      providerKeyLabel: { type: ["string", "null"], description: "Provider key label for display" },
       keyKind: {
         type: ["string", "null"],
         enum: ["oauth", "api-key", null],

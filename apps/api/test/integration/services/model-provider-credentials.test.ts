@@ -465,12 +465,12 @@ describe("model-provider-credentials service — aggregator + inference loader",
       });
 
       const list = await listOrgModelProviderCredentials(org.id);
-      const oauth = list.find((k) => k.id === imported.providerKeyId);
+      const oauth = list.find((k) => k.id === imported.credentialId);
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
       expect(oauth!.authMode).toBe("oauth2");
       expect(oauth!.providerId).toBe("claude-code");
-      expect(oauth!.id).toBe(imported.providerKeyId);
+      expect(oauth!.id).toBe(imported.credentialId);
       expect(oauth!.oauthEmail).toBe("user@anthropic-test.com");
       expect(oauth!.needsReconnection).toBe(false);
     });
@@ -515,7 +515,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         expiresAt: Date.now() + 3600 * 1000,
       });
 
-      const creds = await loadInferenceCredentials(org.id, imported.providerKeyId);
+      const creds = await loadInferenceCredentials(org.id, imported.credentialId);
       expect(creds).not.toBeNull();
       // Regression guard: OAuth rows must not return null on read.
       expect(creds!.apiKey).toBe(accessJwt);
@@ -545,7 +545,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         email: "user@anthropic-test.com",
       });
 
-      const creds = await loadInferenceCredentials(org.id, imported.providerKeyId);
+      const creds = await loadInferenceCredentials(org.id, imported.credentialId);
       expect(creds).not.toBeNull();
       expect(creds!.apiKey).toBe("sk-ant-oat01-fake");
       expect(creds!.providerId).toBe("claude-code");
@@ -571,12 +571,12 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
       // Simulate the refresh worker flagging the credential after a
       // 400 invalid_grant from the upstream provider.
-      await markCredentialNeedsReconnection(org.id, imported.providerKeyId);
+      await markCredentialNeedsReconnection(org.id, imported.credentialId);
 
       // The loader returns null when the OAuth blob's needsReconnection flag
       // is set, so callers fall through to their own "credential unusable"
       // handling (route returns 404).
-      const creds = await loadInferenceCredentials(org.id, imported.providerKeyId);
+      const creds = await loadInferenceCredentials(org.id, imported.credentialId);
       expect(creds).toBeNull();
     });
 

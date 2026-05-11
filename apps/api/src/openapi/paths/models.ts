@@ -42,7 +42,7 @@ export const modelsPaths = {
                     source: "built-in",
                     enabled: true,
                     isDefault: false,
-                    providerKeyId: "pk_abc123",
+                    credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,
                     reasoning: false,
@@ -70,7 +70,7 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "apiShape", "baseUrl", "modelId", "providerKeyId"],
+              required: ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
               properties: {
                 label: { type: "string", minLength: 1, description: "Display name for the model" },
                 apiShape: {
@@ -90,7 +90,7 @@ export const modelsPaths = {
                   minLength: 1,
                   description: "Model identifier (e.g. gpt-4o)",
                 },
-                providerKeyId: {
+                credentialId: {
                   type: "string",
                   minLength: 1,
                   description: "Provider key ID for API key credentials",
@@ -376,7 +376,7 @@ export const modelsPaths = {
                 apiShape: { type: "string", minLength: 1 },
                 baseUrl: { type: "string", format: "uri" },
                 modelId: { type: "string", minLength: 1 },
-                providerKeyId: {
+                credentialId: {
                   type: "string",
                   description: "Provider key ID to change which key is used",
                 },

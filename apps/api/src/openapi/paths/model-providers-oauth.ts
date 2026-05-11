@@ -216,9 +216,9 @@ export const modelProvidersOAuthPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["providerKeyId", "providerId", "availableModelIds"],
+                required: ["credentialId", "providerId", "availableModelIds"],
                 properties: {
-                  providerKeyId: { type: "string", format: "uuid" },
+                  credentialId: { type: "string", format: "uuid" },
                   providerId: { type: "string" },
                   email: { type: "string", format: "email" },
                   subscriptionType: { type: "string" },

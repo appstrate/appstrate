@@ -33,7 +33,7 @@ describe("postImport", () => {
       };
       return new Response(
         JSON.stringify({
-          providerKeyId: "mp_xyz",
+          credentialId: "mp_xyz",
           connectionId: "con_xyz",
           providerId: "codex",
           availableModelIds: ["gpt-4o"],
@@ -65,7 +65,7 @@ describe("postImport", () => {
     expect(captured?.body.expiresAt).toBe(12345);
     expect(captured?.body.email).toBe("user@example.com");
     expect(captured?.body.accountId).toBe("uuid-here");
-    expect(result.providerKeyId).toBe("mp_xyz");
+    expect(result.credentialId).toBe("mp_xyz");
     expect(result.availableModelIds).toEqual(["gpt-4o"]);
   });
 
@@ -74,7 +74,7 @@ describe("postImport", () => {
       captured = { url: req.url, bearer: "", body: {} };
       return new Response(
         JSON.stringify({
-          providerKeyId: "x",
+          credentialId: "x",
           connectionId: "y",
           providerId: "codex",
           availableModelIds: [],
@@ -100,7 +100,7 @@ describe("postImport", () => {
       };
       return new Response(
         JSON.stringify({
-          providerKeyId: "x",
+          credentialId: "x",
           connectionId: "y",
           providerId: "codex",
           availableModelIds: [],

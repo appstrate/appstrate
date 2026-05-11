@@ -431,7 +431,7 @@ export function OrgSettingsModelsPage() {
 
   const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
 
-  // Surface OAuth callback outcomes — `?connected=:providerKeyId` or `?error=...`.
+  // Surface OAuth callback outcomes — `?connected=:credentialId` or `?error=...`.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const connected = searchParams.get("oauthConnected");

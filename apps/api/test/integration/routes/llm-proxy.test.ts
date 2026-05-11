@@ -44,7 +44,7 @@ interface Harness {
   ctx: TestContext;
   apiKey: string;
   presetId: string;
-  providerKeyId: string;
+  credentialId: string;
 }
 
 async function buildHarness(overrides?: {
@@ -64,7 +64,7 @@ async function buildHarness(overrides?: {
   });
   const model = await seedOrgModel({
     orgId: ctx.orgId,
-    providerKeyId: providerKey.id,
+    credentialId: providerKey.id,
     label: "Preset",
     apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
@@ -82,7 +82,7 @@ async function buildHarness(overrides?: {
     ctx,
     apiKey: key.rawKey,
     presetId: model.id,
-    providerKeyId: providerKey.id,
+    credentialId: providerKey.id,
   };
 }
 

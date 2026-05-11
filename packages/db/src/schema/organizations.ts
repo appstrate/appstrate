@@ -266,7 +266,7 @@ export const orgModels = pgTable(
      * deleting a credential while any model still references it is rejected
      * at the DB level so the API can surface a clear error.
      */
-    providerKeyId: uuid("provider_key_id")
+    credentialId: uuid("credential_id")
       .notNull()
       .references(() => modelProviderCredentials.id, { onDelete: "restrict" }),
     input: jsonb("input"), // ["text", "image"] | null

@@ -57,10 +57,10 @@ describe("RBAC — Permission enforcement", () => {
           apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
-      // May fail due to FK constraint on providerKeyId, but should NOT be 403
+      // May fail due to FK constraint on credentialId, but should NOT be 403
       expect(res.status).not.toBe(403);
     });
 
@@ -73,7 +73,7 @@ describe("RBAC — Permission enforcement", () => {
           apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).not.toBe(403);
@@ -88,7 +88,7 @@ describe("RBAC — Permission enforcement", () => {
           apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);
@@ -103,7 +103,7 @@ describe("RBAC — Permission enforcement", () => {
           apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);
@@ -241,7 +241,7 @@ describe("RBAC — Permission enforcement", () => {
           apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);

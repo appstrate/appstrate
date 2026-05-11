@@ -267,7 +267,7 @@ export function createModelProviderCredentialsRouter() {
       });
       return c.body(null, 204);
     } catch (err) {
-      // `org_models.provider_key_id` has ON DELETE RESTRICT — surface the
+      // `org_models.credential_id` has ON DELETE RESTRICT — surface the
       // PG `foreign_key_violation` (23503) as a 409 with an actionable
       // message rather than a generic 500.
       if (isForeignKeyViolation(err)) {

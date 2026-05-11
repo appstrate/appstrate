@@ -146,63 +146,14 @@
       "idx": 20,
       "version": "7",
       "when": 1788998400000,
-      "tag": "0020_oauth_model_providers",
+      "tag": "0020_model_provider_credentials",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
       "when": 1789084800000,
-      "tag": "0021_model_provider_credentials",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "7",
-      "when": 1789171200000,
-      "tag": "0022_drop_org_models_provider_key_fk",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1789257600000,
-      "tag": "0023_drop_org_system_provider_keys",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1789344000000,
-      "tag": "0024_org_models_fk_to_credentials",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1789430400000,
-      "tag": "0025_rename_org_models_api_to_api_shape",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1789516800000,
-      "tag": "0026_runs_model_credential_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1789603200000,
-      "tag": "0027_model_provider_credentials_expires_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 28,
-      "version": "7",
-      "when": 1789689600000,
-      "tag": "0028_model_provider_pairings",
+      "tag": "0021_model_provider_pairings",
       "breakpoints": true
     }
   ]

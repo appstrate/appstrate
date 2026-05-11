@@ -136,7 +136,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Sonnet pinned",
-          providerKeyId: credId,
+          credentialId: credId,
           modelId: "claude-sonnet-4-6",
           apiShape: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",

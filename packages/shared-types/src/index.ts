@@ -481,8 +481,7 @@ export interface OrgModelInfo {
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
-  providerKeyId: string;
-  providerKeyLabel: string | null;
+  credentialId: string;
   /**
    * Anthropic-only: shape of the upstream credential, exposed so the CLI
    * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`

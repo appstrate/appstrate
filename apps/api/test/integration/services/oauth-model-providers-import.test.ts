@@ -95,14 +95,14 @@ describe("importOAuthModelProviderConnection", () => {
     });
 
     expect(result.providerId).toBe(CODEX);
-    expect(result.providerKeyId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.credentialId).toMatch(/^[0-9a-f-]{36}$/);
     expect(result.email).toBe("user@example.com");
     expect(result.availableModelIds.length).toBeGreaterThan(0);
 
     const [row] = await db
       .select()
       .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, result.providerKeyId));
+      .where(eq(modelProviderCredentials.id, result.credentialId));
     expect(row?.providerId).toBe("codex");
     expect(row?.label).toBe("ChatGPT Pro");
 
@@ -136,7 +136,7 @@ describe("importOAuthModelProviderConnection", () => {
     const [row] = await db
       .select()
       .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, result.providerKeyId));
+      .where(eq(modelProviderCredentials.id, result.credentialId));
     expect(row?.providerId).toBe("claude-code");
     const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
     expect(blob.subscriptionType).toBe("max");
@@ -239,7 +239,7 @@ describe("importOAuthModelProviderConnection", () => {
       expiresAt: Date.now() + 7200 * 1000,
     });
 
-    expect(second.providerKeyId).not.toBe(first.providerKeyId);
+    expect(second.credentialId).not.toBe(first.credentialId);
 
     const rows = await db
       .select()
@@ -247,7 +247,7 @@ describe("importOAuthModelProviderConnection", () => {
       .where(eq(modelProviderCredentials.orgId, orgId));
     expect(rows).toHaveLength(2);
     const blob2 = decryptCredentials<OAuthBlob>(
-      rows.find((r) => r.id === second.providerKeyId)!.credentialsEncrypted,
+      rows.find((r) => r.id === second.credentialId)!.credentialsEncrypted,
     );
     expect(blob2.accessToken).toBe("access-v2");
   });

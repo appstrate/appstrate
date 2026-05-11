@@ -23,7 +23,7 @@ export interface ModelDefinition {
   baseUrl: string;
   modelId: string;
   apiKey: string;
-  providerKeyId: string;
+  credentialId: string;
   input?: string[] | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
@@ -133,7 +133,7 @@ export function initSystemModelProviderKeys(): void {
           baseUrl: validPk.baseUrl,
           modelId: validM.modelId,
           apiKey: validPk.apiKey,
-          providerKeyId: validPk.id,
+          credentialId: validPk.id,
           input: validM.input ?? null,
           contextWindow: validM.contextWindow ?? null,
           maxTokens: validM.maxTokens ?? null,
