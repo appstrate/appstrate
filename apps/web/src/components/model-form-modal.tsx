@@ -38,7 +38,7 @@ import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
-  API_TYPES,
+  PI_ADAPTER_TYPES,
   findPresetMatch,
   getProviderById,
   findProviderByApiShapeAndBaseUrl,
@@ -638,7 +638,7 @@ function ModelFormBody({
                     <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {API_TYPES.map((apiType) => (
+                    {PI_ADAPTER_TYPES.map((apiType) => (
                       <SelectItem key={apiType.value} value={apiType.value}>
                         {apiType.label}
                       </SelectItem>

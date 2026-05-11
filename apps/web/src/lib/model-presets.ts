@@ -282,10 +282,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 /**
- * Supported API types for the Pi SDK.
- * Used by the custom provider form to offer all available adapter options.
+ * Supported Pi SDK adapter shapes (the in-container LLM client). Disambiguates
+ * from `ModelApiShape` used by the LLM-proxy on the platform side — the two
+ * have overlapping but distinct vocabularies (this list covers what pi-ai's
+ * provider registry actually exposes).
  */
-export const API_TYPES = [
+export const PI_ADAPTER_TYPES = [
   { value: "openai-completions", label: "OpenAI / Compatible" },
   { value: "openai-responses", label: "OpenAI Responses" },
   { value: "mistral-conversations", label: "Mistral" },
