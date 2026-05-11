@@ -125,7 +125,7 @@ export async function runPlatformContainer(
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
         baseUrl: llmConfig.baseUrl,
-        oauthConnectionId: llmConfig.credentialId!,
+        credentialId: llmConfig.credentialId!,
         apiShape: providerCfg.apiShape as LlmProxyOauthConfig["apiShape"],
         providerId: providerCfg.providerId,
         ...(providerCfg.rewriteUrlPath ? { rewriteUrlPath: providerCfg.rewriteUrlPath } : {}),

@@ -25,11 +25,7 @@ import {
   buildTokenHeaders,
   buildTokenBody,
 } from "@appstrate/connect";
-import {
-  getModelProviderConfig,
-  type ModelApiShape,
-  type ModelProviderConfig,
-} from "./registry.ts";
+import { getModelProviderConfig, type ModelProviderConfig } from "./registry.ts";
 import { decodeCodexJwtPayload } from "./credentials.ts";
 import {
   markCredentialNeedsReconnection,
@@ -41,9 +37,7 @@ import { logger } from "../../lib/logger.ts";
 import { hasRedis } from "../../infra/mode.ts";
 import { getRedisConnection } from "../../lib/redis.ts";
 import { randomBytes } from "node:crypto";
-
-/** Refresh `expiresAt` lead time. Mirrors the sidecar threshold (SPEC §5.2). */
-const REFRESH_LEAD_MS = 5 * 60_000;
+import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
 /**
  * Distributed-lock TTL in seconds. Sized as `30s network timeout` + slack.
@@ -58,7 +52,7 @@ const REFRESH_LOCK_TTL_SECONDS = 45;
  * On Tier 0/1 (no Redis) the platform is single-instance by definition, so
  * this map is the only serialization needed.
  */
-const inflightRefreshes = new Map<string, Promise<ResolvedToken>>();
+const inflightRefreshes = new Map<string, Promise<OAuthTokenResponse>>();
 
 /**
  * Lua script for safe lock release: only deletes the key if its value
@@ -72,21 +66,6 @@ else
   return 0
 end
 `;
-
-export interface ResolvedToken {
-  accessToken: string;
-  /** Epoch milliseconds. `null` when the token's expiry is unknown — sidecar treats this as "always refresh". */
-  expiresAt: number | null;
-  apiShape: ModelApiShape;
-  baseUrl: string;
-  rewriteUrlPath?: { from: string; to: string };
-  forceStream?: boolean;
-  forceStore?: boolean;
-  /** Codex only — extracted from JWT, used as `chatgpt-account-id` header by the sidecar. */
-  accountId?: string;
-  /** Canonical providerId, e.g. "codex" or "claude-code". */
-  providerId: string;
-}
 
 /** Credential row + decrypted blob + registry overlay. Internal helper return shape. */
 interface CredentialState {
@@ -185,17 +164,22 @@ function resolveCodexAccountId(
   return undefined;
 }
 
-/** Map registry config + fresh token material to the sidecar's wire shape. */
+/**
+ * Map registry config + fresh token material to the sidecar's wire shape.
+ *
+ * The `authMode: "oauth2"` constraint guarantees `apiShape` is one of the
+ * OAuth-reachable shapes (never `openai-chat`, which is API-key-only).
+ */
 function toResolvedToken(
-  config: ModelProviderConfig,
+  config: ModelProviderConfig & { authMode: "oauth2" },
   accessToken: string,
   expiresAt: number | null,
   accountId: string | undefined,
-): ResolvedToken {
+): OAuthTokenResponse {
   return {
     accessToken,
     expiresAt,
-    apiShape: config.apiShape,
+    apiShape: config.apiShape as OAuthTokenResponse["apiShape"],
     baseUrl: config.defaultBaseUrl,
     rewriteUrlPath: config.rewriteUrlPath,
     forceStream: config.forceStream,
@@ -205,7 +189,7 @@ function toResolvedToken(
   };
 }
 
-function buildResolvedToken(state: CredentialState): ResolvedToken {
+function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
   const accountId = resolveCodexAccountId(
     state.config.providerId,
     state.blob.accessToken,
@@ -217,7 +201,7 @@ function buildResolvedToken(state: CredentialState): ResolvedToken {
 
 /**
  * Resolve a fresh access token for the sidecar. Refreshes proactively if
- * the token expires within {@link REFRESH_LEAD_MS}.
+ * the token expires within {@link OAUTH_REFRESH_LEAD_MS}.
  *
  * `expectedOrgId` is forwarded to {@link loadCredentialState} as
  * defense-in-depth — see that function's comment.
@@ -228,7 +212,7 @@ function buildResolvedToken(state: CredentialState): ResolvedToken {
 export async function resolveOAuthTokenForSidecar(
   credentialId: string,
   expectedOrgId?: string,
-): Promise<ResolvedToken> {
+): Promise<OAuthTokenResponse> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(
@@ -238,7 +222,7 @@ export async function resolveOAuthTokenForSidecar(
   }
 
   const expiresInMs = state.blob.expiresAt ? state.blob.expiresAt - Date.now() : 0;
-  if (state.blob.expiresAt && expiresInMs > REFRESH_LEAD_MS) {
+  if (state.blob.expiresAt && expiresInMs > OAUTH_REFRESH_LEAD_MS) {
     return buildResolvedToken(state);
   }
 
@@ -271,7 +255,7 @@ export async function resolveOAuthTokenForSidecar(
 export async function forceRefreshOAuthModelProviderToken(
   credentialId: string,
   expectedOrgId?: string,
-): Promise<ResolvedToken> {
+): Promise<OAuthTokenResponse> {
   const inflight = inflightRefreshes.get(credentialId);
   if (inflight) return inflight;
 
@@ -296,7 +280,7 @@ export async function forceRefreshOAuthModelProviderToken(
 async function refreshUnderDistributedLock(
   credentialId: string,
   expectedOrgId?: string,
-): Promise<ResolvedToken> {
+): Promise<OAuthTokenResponse> {
   if (!hasRedis()) {
     return doRefresh(credentialId, expectedOrgId);
   }
@@ -337,7 +321,7 @@ async function refreshUnderDistributedLock(
         `OAuth credential ${credentialId} needs reconnection`,
       );
     }
-    if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > REFRESH_LEAD_MS) {
+    if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > OAUTH_REFRESH_LEAD_MS) {
       return buildResolvedToken(state);
     }
     return await doRefresh(credentialId, expectedOrgId);
@@ -355,7 +339,10 @@ async function refreshUnderDistributedLock(
   }
 }
 
-async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<ResolvedToken> {
+async function doRefresh(
+  credentialId: string,
+  expectedOrgId?: string,
+): Promise<OAuthTokenResponse> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(

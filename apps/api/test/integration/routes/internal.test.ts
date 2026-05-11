@@ -855,15 +855,13 @@ describe("Internal API", () => {
     });
   });
 
-  // ─── GET /internal/oauth-token/:connectionId ───────────
+  // ─── GET /internal/oauth-token/:credentialId ───────────
   //
-  // The route param is named `connectionId` for sidecar wire compat, but
-  // the value is a `model_provider_credentials.id` since the OAuth model
-  // provider refactor. These tests pin that contract so the bug that
-  // shipped pre-fix (validation against `userProviderConnections.id`,
-  // always 404) cannot reappear.
+  // The path param is a `model_provider_credentials.id`. These tests pin
+  // that contract so the bug that shipped pre-fix (validation against
+  // `userProviderConnections.id`, always 404) cannot reappear.
 
-  describe("GET /internal/oauth-token/:connectionId", () => {
+  describe("GET /internal/oauth-token/:credentialId", () => {
     async function seedOAuthCredential(orgId: string): Promise<string> {
       const blob: OAuthBlob = {
         kind: "oauth",

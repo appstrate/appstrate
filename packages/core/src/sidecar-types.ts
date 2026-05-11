@@ -64,7 +64,7 @@ export interface LlmProxyOauthConfig {
   /** Fallback base URL — the sidecar prefers `baseUrl` returned by the platform's token endpoint. */
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
-  oauthConnectionId: string;
+  credentialId: string;
   /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
   apiShape: OauthModelApiShape;
   /** Used to look up the identity-header / body-transform strategy. Canonical providerId ("codex", "claude-code"). */
@@ -76,3 +76,35 @@ export interface LlmProxyOauthConfig {
   /** Codex: force `store: false` in the request body. */
   forceStore?: boolean;
 }
+
+/**
+ * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
+ * (and `POST .../refresh`) endpoint. Single source of truth — both the platform
+ * resolver (`apps/api/src/services/oauth-model-providers/token-resolver.ts`) and
+ * the sidecar cache (`runtime-pi/sidecar/oauth-token-cache.ts`) reference this
+ * type so a new field added on either side cannot silently drift.
+ */
+export interface OAuthTokenResponse {
+  accessToken: string;
+  /** Epoch milliseconds. `null` when expiry is unknown — sidecar treats this as "always refresh". */
+  expiresAt: number | null;
+  apiShape: OauthModelApiShape;
+  baseUrl: string;
+  rewriteUrlPath?: { from: string; to: string };
+  forceStream?: boolean;
+  forceStore?: boolean;
+  /** Codex only — extracted from JWT, used as `chatgpt-account-id` header by the sidecar. */
+  accountId?: string;
+  /** Canonical providerId, e.g. "codex" or "claude-code". */
+  providerId: string;
+}
+
+/**
+ * Refresh lead time (epoch-ms): proactively refresh an OAuth access token when
+ * its remaining lifetime drops below this threshold. Both the platform's
+ * `resolveOAuthTokenForSidecar` and the sidecar's `OAuthTokenCache` honor this
+ * value — keeping them in sync is critical: if the sidecar caches a token as
+ * "fresh" while the platform considers it stale, the agent path 401s exactly
+ * when the token expires.
+ */
+export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;

@@ -523,7 +523,6 @@ export async function listOrgModelProviderCredentials(
         source: "custom",
         authMode: info.authMode === "oauth2" ? "oauth" : "api_key",
         providerId: info.providerId,
-        oauthConnectionId: info.authMode === "oauth2" ? info.id : null,
         oauthEmail: info.oauthEmail ?? null,
         needsReconnection: info.oauthNeedsReconnection ?? false,
         providerDisabled: !isModelProviderEnabled(info.providerId),

@@ -249,7 +249,7 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/oauth-token/{connectionId}": {
+  "/internal/oauth-token/{credentialId}": {
     get: {
       operationId: "getOAuthModelProviderToken",
       tags: ["Internal"],
@@ -259,7 +259,7 @@ export const internalPaths = {
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
-          name: "connectionId",
+          name: "credentialId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
@@ -320,7 +320,7 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/oauth-token/{connectionId}/refresh": {
+  "/internal/oauth-token/{credentialId}/refresh": {
     post: {
       operationId: "refreshOAuthModelProviderToken",
       tags: ["Internal"],
@@ -330,7 +330,7 @@ export const internalPaths = {
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
-          name: "connectionId",
+          name: "credentialId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },

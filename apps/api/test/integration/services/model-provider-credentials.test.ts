@@ -448,7 +448,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(custom[0]!.authMode).toBe("api_key");
     });
 
-    it("surfaces OAuth credentials with providerId + oauthConnectionId + authMode='oauth'", async () => {
+    it("surfaces OAuth credentials with providerId + authMode='oauth'", async () => {
       const user = await createTestUser();
       const { org, defaultAppId } = await createTestOrg(user.id, { slug: "agg-list-oauth" });
       const imported = await importOAuthModelProviderConnection({
@@ -470,7 +470,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(oauth!.source).toBe("custom");
       expect(oauth!.authMode).toBe("oauth");
       expect(oauth!.providerId).toBe("claude-code");
-      expect(oauth!.oauthConnectionId).toBe(imported.providerKeyId);
+      expect(oauth!.id).toBe(imported.providerKeyId);
       expect(oauth!.oauthEmail).toBe("user@anthropic-test.com");
       expect(oauth!.needsReconnection).toBe(false);
     });

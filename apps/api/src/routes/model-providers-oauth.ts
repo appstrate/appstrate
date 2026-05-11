@@ -134,7 +134,7 @@ export function createModelProvidersOAuthRouter() {
         resourceId: result.providerKeyId,
         after: {
           providerId: result.providerId,
-          connectionId: result.connectionId,
+          credentialId: result.providerKeyId,
           availableModelIds: result.availableModelIds,
           pairingId: consumed.id,
           viaPairing: true,
@@ -184,7 +184,7 @@ export function createModelProvidersOAuthRouter() {
       resourceId: result.providerKeyId,
       after: {
         providerId: result.providerId,
-        connectionId: result.connectionId,
+        credentialId: result.providerKeyId,
         availableModelIds: result.availableModelIds,
         // No raw token / email — audit log MUST NOT carry secrets
       },

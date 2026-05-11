@@ -328,7 +328,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(fetchCalled).toBe(false);
     });
 
-    it("triggers refresh when within REFRESH_LEAD_MS of expiry", async () => {
+    it("triggers refresh when within OAUTH_REFRESH_LEAD_MS of expiry", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,

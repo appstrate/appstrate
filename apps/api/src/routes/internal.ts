@@ -428,16 +428,16 @@ export function createInternalRouter() {
   // the requested credentialId resolves to a `model_provider_credentials`
   // row owned by the run's org.
 
-  router.get("/oauth-token/:connectionId", async (c) => {
+  router.get("/oauth-token/:credentialId", async (c) => {
     const { run } = await verifyRunToken(c);
-    const credentialId = c.req.param("connectionId");
+    const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
   });
 
-  router.post("/oauth-token/:connectionId/refresh", async (c) => {
+  router.post("/oauth-token/:credentialId/refresh", async (c) => {
     const { run } = await verifyRunToken(c);
-    const credentialId = c.req.param("connectionId");
+    const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
   });
@@ -456,9 +456,6 @@ export function createInternalRouter() {
  *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
  *   3. UUID well-formedness: malformed path params surface as 404 not 500.
  *
- * The route param is still called `connectionId` for sidecar wire
- * compatibility, but the value is a `model_provider_credentials.id` since
- * the OAuth model provider refactor.
  *
  * `pinnedCredentialId === null` is allowed (legacy pre-binding rows, plus
  * future schedule/inline run paths that may resolve the model lazily) — the

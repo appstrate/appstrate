@@ -59,8 +59,6 @@ export interface ImportOAuthModelProviderInput {
 export interface ImportOAuthModelProviderResult {
   /** UUID of the `model_provider_credentials` row. */
   providerKeyId: string;
-  /** Same UUID — kept as an alias in the response for backward compat. */
-  connectionId: string;
   providerId: string;
   email?: string;
   subscriptionType?: string;
@@ -141,7 +139,6 @@ export async function importOAuthModelProviderConnection(
 
   return {
     providerKeyId: credentialId,
-    connectionId: credentialId,
     providerId: input.providerId,
     email,
     subscriptionType: input.subscriptionType,

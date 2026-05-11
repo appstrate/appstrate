@@ -13,7 +13,8 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
-import { OAuthTokenCache, type PlatformTokenResponse } from "../oauth-token-cache.ts";
+import { OAuthTokenCache } from "../oauth-token-cache.ts";
+import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { CredentialsResponse, LlmProxyOauthConfig } from "../helpers.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
@@ -32,9 +33,7 @@ interface MockUpstream {
   calls: FetchCall[];
 }
 
-function buildPlatformTokenResponse(
-  overrides: Partial<PlatformTokenResponse> = {},
-): PlatformTokenResponse {
+function buildOAuthTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
   return {
     accessToken: "oat-fresh-token",
     expiresAt: Date.now() + 60 * 60_000,
@@ -92,7 +91,7 @@ function makeDepsWithCache(upstream: MockUpstream): AppDeps {
 const CLAUDE_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://api.anthropic.com",
-  oauthConnectionId: "conn-abc",
+  credentialId: "conn-abc",
   apiShape: "anthropic-messages",
   providerId: "claude-code",
 };
@@ -100,7 +99,7 @@ const CLAUDE_OAUTH: LlmProxyOauthConfig = {
 const CODEX_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://chatgpt.com/backend-api",
-  oauthConnectionId: "conn-codex",
+  credentialId: "conn-codex",
   apiShape: "openai-codex-responses",
   providerId: "codex",
   forceStream: true,
@@ -111,7 +110,7 @@ describe("/llm/* OAuth — Claude path", () => {
   it("injects bearer + identity headers and prepends Claude Code identity to body", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -156,7 +155,7 @@ describe("/llm/* OAuth — Claude path", () => {
         const isRefresh = url.endsWith("/refresh");
         return new Response(
           JSON.stringify(
-            buildPlatformTokenResponse({
+            buildOAuthTokenResponse({
               accessToken: isRefresh ? "oat-after-refresh" : "oat-stale",
             }),
           ),
@@ -205,7 +204,7 @@ describe("/llm/* OAuth — Claude path", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        return new Response(JSON.stringify(buildPlatformTokenResponse({ accessToken: "stale" })), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse({ accessToken: "stale" })), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -254,7 +253,7 @@ describe("/llm/* OAuth — Claude path", () => {
     let upstreamCalls = 0;
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -299,7 +298,7 @@ describe("/llm/* OAuth — Codex path", () => {
       if (url.startsWith(PLATFORM_API)) {
         return new Response(
           JSON.stringify(
-            buildPlatformTokenResponse({
+            buildOAuthTokenResponse({
               providerId: "codex",
               apiShape: "openai-codex-responses",
               baseUrl: "https://chatgpt.com/backend-api",
@@ -356,7 +355,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
     let upstreamCalls = 0;
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -391,7 +390,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
     let upstreamCalls = 0;
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -419,7 +418,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
     let upstreamCalls = 0;
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -447,7 +446,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
   it("returns a structured 502 when the upstream provider is unreachable", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(JSON.stringify(buildPlatformTokenResponse()), {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -506,7 +505,7 @@ describe("/llm/* OAuth — config errors", () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
         return new Response(
-          JSON.stringify(buildPlatformTokenResponse({ baseUrl: "http://10.0.0.1" })),
+          JSON.stringify(buildOAuthTokenResponse({ baseUrl: "http://10.0.0.1" })),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }

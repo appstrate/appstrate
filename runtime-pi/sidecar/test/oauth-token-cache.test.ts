@@ -17,15 +17,10 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import {
-  OAuthTokenCache,
-  NeedsReconnectionError,
-  CACHE_TTL_MS,
-  REFRESH_THRESHOLD_MS,
-  type PlatformTokenResponse,
-} from "../oauth-token-cache.ts";
+import { OAuthTokenCache, NeedsReconnectionError, CACHE_TTL_MS } from "../oauth-token-cache.ts";
+import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
-function makeTokenResponse(overrides: Partial<PlatformTokenResponse> = {}): PlatformTokenResponse {
+function makeTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
   return {
     accessToken: "tok-fresh",
     expiresAt: Date.now() + 60 * 60_000, // 1h
@@ -109,7 +104,7 @@ describe("OAuthTokenCache.getToken — basic", () => {
     expect(maxInflight).toBe(1);
   });
 
-  it("isolates by connectionId — different connections fetch independently", async () => {
+  it("isolates by credentialId — different credentials fetch independently", async () => {
     let invocations = 0;
     const { cache } = makeHarness(() => {
       invocations++;
@@ -123,7 +118,7 @@ describe("OAuthTokenCache.getToken — basic", () => {
 
 describe("OAuthTokenCache.getToken — proactive refresh", () => {
   it("calls /refresh when initial response shows near-expiry", async () => {
-    let firstCallReturned: PlatformTokenResponse | null = null;
+    let firstCallReturned: OAuthTokenResponse | null = null;
     const { cache, calls } = makeHarness((url) => {
       if (url.endsWith("/refresh")) {
         return makeJsonResponse(
@@ -135,8 +130,8 @@ describe("OAuthTokenCache.getToken — proactive refresh", () => {
       }
       firstCallReturned = makeTokenResponse({
         accessToken: "tok-near-expiry",
-        // Within REFRESH_THRESHOLD_MS — should trigger proactive refresh
-        expiresAt: Date.now() + (REFRESH_THRESHOLD_MS - 1_000),
+        // Within OAUTH_REFRESH_LEAD_MS — should trigger proactive refresh
+        expiresAt: Date.now() + (OAUTH_REFRESH_LEAD_MS - 1_000),
       });
       return makeJsonResponse(firstCallReturned);
     });
@@ -352,7 +347,7 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
     expect(invocations).toBe(2);
   });
 
-  it("invalidate() is a no-op for unknown connectionId (does not throw)", async () => {
+  it("invalidate() is a no-op for unknown credentialId (does not throw)", async () => {
     const { cache } = makeHarness();
     expect(() => cache.invalidate("never-seen")).not.toThrow();
   });
@@ -393,6 +388,6 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(NeedsReconnectionError);
-    expect((caught as NeedsReconnectionError).connectionId).toBe("c1");
+    expect((caught as NeedsReconnectionError).credentialId).toBe("c1");
   });
 });

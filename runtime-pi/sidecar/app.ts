@@ -345,7 +345,7 @@ export function createApp(deps: AppDeps): Hono {
 
     let token: CachedToken;
     try {
-      token = await tokenCache.getToken(llmConfig.oauthConnectionId);
+      token = await tokenCache.getToken(llmConfig.credentialId);
     } catch (err) {
       if (err instanceof NeedsReconnectionError) {
         return c.json(
@@ -446,10 +446,10 @@ export function createApp(deps: AppDeps): Hono {
 
     // 401 retry: invalidate cache, force-refresh token, replay once.
     if (upstream.status === 401) {
-      tokenCache.invalidate(llmConfig.oauthConnectionId);
+      tokenCache.invalidate(llmConfig.credentialId);
       let refreshed: CachedToken;
       try {
-        refreshed = await tokenCache.forceRefresh(llmConfig.oauthConnectionId);
+        refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
       } catch (err) {
         if (err instanceof NeedsReconnectionError) {
           return c.json(

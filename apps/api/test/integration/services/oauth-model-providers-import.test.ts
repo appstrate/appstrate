@@ -96,7 +96,6 @@ describe("importOAuthModelProviderConnection", () => {
 
     expect(result.providerId).toBe(CODEX);
     expect(result.providerKeyId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.connectionId).toBe(result.providerKeyId);
     expect(result.email).toBe("user@example.com");
     expect(result.availableModelIds.length).toBeGreaterThan(0);
 
