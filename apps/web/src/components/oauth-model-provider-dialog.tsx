@@ -12,16 +12,20 @@
  *   `npx @appstrate/connect-helper <token>` one-shot helper.
  *
  * Two stages:
- *   1. **ToS warning + label**: explicit notice that the subscription quota
- *      is shared org-wide, that the connection isn't covered by the
- *      provider's personal-tier ToS, and that Anthropic actively blocks
- *      third-party Pro/Max OAuth tokens server-side since 2026-01-09.
+ *   1. **ToS warning**: explicit notice that the subscription quota is
+ *      shared org-wide, that the connection isn't covered by the provider's
+ *      personal-tier ToS, and that Anthropic actively blocks third-party
+ *      Pro/Max OAuth tokens server-side since 2026-01-09.
  *   2. **Pairing command + poller**: mints a one-shot pairing token via
  *      `POST /api/model-providers-oauth/pairing`, surfaces the resulting
  *      `npx @appstrate/connect-helper <token>` command, and polls the
  *      pairing status until it flips to `consumed` (helper completed +
  *      credentials saved). On modal close we DELETE the pairing so the
  *      token can't be reused.
+ *
+ * The credential label is picked by the helper (`--label` flag or its own
+ * default from `DEFAULT_LABEL[slug]`) — the dashboard never sends one, so
+ * there's no label input here.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -31,8 +35,6 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
 import {
@@ -44,26 +46,18 @@ import {
 interface Props {
   open: boolean;
   providerId: string;
-  /** Pre-fill suggestion shown in the label input. */
-  defaultLabel: string;
   onClose: () => void;
 }
 
-const SLUG_BY_PROVIDER_ID: Readonly<Record<string, "codex" | "claude">> = Object.freeze({
-  codex: "codex",
-  "claude-code": "claude",
-});
-
-export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClose }: Props) {
+export function OAuthModelProviderDialog({ open, providerId, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
   const [stage, setStage] = useState<"tos" | "cli">("tos");
-  const [label, setLabel] = useState(defaultLabel);
   const [tosAccepted, setTosAccepted] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
-  const slug = SLUG_BY_PROVIDER_ID[providerId] ?? "codex";
+  const isClaude = providerId === "claude-code";
   const createPairing = useCreateModelProviderPairing();
   const cancelPairing = useCancelModelProviderPairing();
   const pairingStatus = useModelProviderPairingStatus(pairing?.id ?? null, {
@@ -97,7 +91,6 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
 
   function reset() {
     setStage("tos");
-    setLabel(defaultLabel);
     setTosAccepted(false);
     setCopied(false);
     setPairing(null);
@@ -127,7 +120,7 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
   }
 
   async function handleAdvanceToCli() {
-    if (!tosAccepted || !label.trim()) return;
+    if (!tosAccepted) return;
     setStage("cli");
     await generatePairing();
   }
@@ -158,7 +151,7 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
             <Button variant="ghost" onClick={handleClose}>
               {t("providerKeys.oauth.cancel")}
             </Button>
-            <Button onClick={handleAdvanceToCli} disabled={!tosAccepted || !label.trim()}>
+            <Button onClick={handleAdvanceToCli} disabled={!tosAccepted}>
               {t("providerKeys.oauth.continue")}
             </Button>
           </>
@@ -175,7 +168,7 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
             </ul>
           </div>
 
-          {slug === "claude" ? (
+          {isClaude ? (
             <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-xs">
               <p className="font-semibold">
                 {t("providerKeys.oauth.tosAnthropicEnforcementTitle")}
@@ -188,17 +181,6 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
               <p className="mt-1">{t("providerKeys.oauth.tosOpenAiUnclearBody")}</p>
             </div>
           )}
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="oauth-label">{t("providerKeys.oauth.labelLabel")}</Label>
-            <Input
-              id="oauth-label"
-              autoFocus
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder={t("providerKeys.oauth.labelPlaceholder")}
-            />
-          </div>
 
           <label className="flex cursor-pointer items-start gap-2 text-xs">
             <Checkbox

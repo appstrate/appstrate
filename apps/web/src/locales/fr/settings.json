@@ -664,8 +664,6 @@
   "providerKeys.oauth.tosFooter": "En continuant vous acceptez ces conditions.",
   "providerKeys.oauth.continue": "Continuer →",
   "providerKeys.oauth.cancel": "Annuler",
-  "providerKeys.oauth.labelPlaceholder": "Ex: ChatGPT Pro de l'équipe",
-  "providerKeys.oauth.labelLabel": "Nom de la connexion",
   "providerKeys.oauth.connectedAs": "Connecté en tant que {{email}}",
   "providerKeys.oauth.subscriptionShared": "Quota partagé avec l'abonnement {{provider}} de {{email}}",
   "providerKeys.oauth.needsReconnection": "Reconnexion requise",

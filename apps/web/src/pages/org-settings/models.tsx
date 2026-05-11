@@ -506,13 +506,6 @@ export function OrgSettingsModelsPage() {
         <OAuthModelProviderDialog
           open
           providerId={oauthDialogProviderId}
-          defaultLabel={
-            oauthDialogProviderId === "codex"
-              ? "ChatGPT"
-              : oauthDialogProviderId === "claude-code"
-                ? "Claude"
-                : "OAuth provider"
-          }
           onClose={() => setOauthDialogProviderId(null)}
         />
       )}
