@@ -18,8 +18,7 @@ export function useModelProviderCredentials() {
  * Catalog entry surfaced by `GET /api/model-provider-credentials/registry` —
  * the in-code `MODEL_PROVIDERS` registry on the API side, filtered by
  * `MODEL_PROVIDERS_DISABLED`. Used by the model picker so OAuth providers
- * (Codex, Claude Code) and any future entries don't need to be re-declared
- * client-side.
+ * (Codex) and any future entries don't need to be re-declared client-side.
  */
 export interface ProviderRegistryEntry {
   providerId: string;

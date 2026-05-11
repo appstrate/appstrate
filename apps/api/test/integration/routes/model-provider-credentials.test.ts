@@ -359,7 +359,7 @@ describe("Model Provider Keys API", () => {
     });
 
     it("GET /registry excludes disabled providers", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+      process.env.MODEL_PROVIDERS_DISABLED = "codex";
       resetEnvCache();
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
@@ -368,7 +368,6 @@ describe("Model Provider Keys API", () => {
       const body = (await res.json()) as { data: { providerId: string }[] };
       const ids = body.data.map((p) => p.providerId);
       expect(ids).not.toContain("codex");
-      expect(ids).not.toContain("claude-code");
       expect(ids).toContain("openai");
       expect(ids).toContain("anthropic");
       expect(ids).toContain("openai-compatible");
@@ -383,9 +382,7 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { providerId: string }[] };
       const ids = body.data.map((p) => p.providerId).sort();
-      expect(ids).toEqual(
-        ["codex", "claude-code", "openai", "anthropic", "openai-compatible"].sort(),
-      );
+      expect(ids).toEqual(["codex", "openai", "anthropic", "openai-compatible"].sort());
     });
 
     it("POST returns 403 when the resolved providerId is disabled", async () => {
@@ -409,7 +406,7 @@ describe("Model Provider Keys API", () => {
     });
 
     it("POST succeeds for a provider NOT listed as disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+      process.env.MODEL_PROVIDERS_DISABLED = "codex";
       resetEnvCache();
       const res = await app.request("/api/model-provider-credentials", {
         method: "POST",

@@ -81,7 +81,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     });
 
     it("returns 403 when the providerId is soft-disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+      process.env.MODEL_PROVIDERS_DISABLED = "codex";
       resetEnvCache();
       const res = await app.request("/api/model-providers-oauth/pairing", {
         method: "POST",

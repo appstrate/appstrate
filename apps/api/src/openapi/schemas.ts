@@ -828,7 +828,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential (e.g. `codex`, `claude-code`). Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential (e.g. `codex`). Set when `authMode === 'oauth2'`.",
       },
       oauthEmail: { type: ["string", "null"] },
       oauthExpiresAt: { type: ["string", "null"], format: "date-time" },
@@ -879,7 +879,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: ["oauth", "api-key", null],
         description:
-          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
+          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
       },
       cost: {
         type: ["object", "null"],

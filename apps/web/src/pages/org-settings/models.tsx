@@ -268,9 +268,6 @@ function ProviderKeysSection({
         <DropdownMenuItem onSelect={() => onConnectOAuth("codex")}>
           {t("providerKeys.oauth.connectCodex")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onConnectOAuth("claude-code")}>
-          {t("providerKeys.oauth.connectClaude")}
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

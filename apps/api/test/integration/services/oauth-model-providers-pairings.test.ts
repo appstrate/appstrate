@@ -193,7 +193,7 @@ describe("cleanupExpiredPairings", () => {
     const recent = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "claude-code",
+      providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: -60, // expired 60s ago
     });

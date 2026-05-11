@@ -3,7 +3,7 @@
 /**
  * OAuth Model Providers — token-import flow.
  *
- * Specialized for public PKCE clients (Codex, Claude Code) with no
+ * Specialized for public PKCE clients (Codex and similar OAuth providers) with no
  * `client_secret`. The official flow in @appstrate/connect requires a secret;
  * we read `clientId` from the runtime registry and skip the secret entirely.
  *
@@ -13,7 +13,7 @@
  * `/internal/oauth-token/:id` polling and the BullMQ refresh worker scan.
  *
  * Why no `/initiate` + `/callback` here: the public CLI client_ids
- * (Codex `app_EMoamE…`, Claude Code `9d1c2…`) only allowlist
+ * (Codex `app_EMoamE…`) only allowlist
  * `http://localhost:PORT/...` redirect_uris baked into the official CLIs.
  * Any platform-hosted callback is rejected. The CLI (`appstrate connect`)
  * does the loopback dance locally via @mariozechner/pi-ai and POSTs the
@@ -32,7 +32,7 @@ import { logger } from "../../lib/logger.ts";
 export interface ImportOAuthModelProviderInput {
   orgId: string;
   userId: string;
-  /** Canonical providerId ("codex", "claude-code"). */
+  /** Canonical providerId ("codex"). */
   providerId: string;
   label: string;
   accessToken: string;

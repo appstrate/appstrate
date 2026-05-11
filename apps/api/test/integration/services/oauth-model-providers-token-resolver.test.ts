@@ -58,7 +58,7 @@ afterAll(() => restoreFetch());
 async function seedOAuthCredential(opts: {
   orgId: string;
   userId: string;
-  providerId: "codex" | "claude-code";
+  providerId: "codex";
   accessToken?: string;
   refreshToken?: string;
   expiresAtMs?: number | null;
@@ -130,7 +130,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "stale",
         refreshToken: "rt-revoked",
         expiresAtMs: Date.now() - 10_000,
@@ -162,7 +162,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "stale",
         refreshToken: "rt-1",
         needsReconnection: true,
@@ -189,7 +189,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "only-access-token",
         refreshToken: "",
       });
@@ -218,7 +218,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "old-access",
         refreshToken: "old-refresh",
         expiresAtMs: Date.now() - 10_000,
@@ -253,7 +253,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "old-access",
         refreshToken: "kept-refresh",
         expiresAtMs: Date.now() - 1_000,
@@ -282,7 +282,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "stale",
         refreshToken: "rt",
         expiresAtMs: Date.now() - 1_000,
@@ -310,7 +310,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "cached-access",
         refreshToken: "rt",
         expiresAtMs: Date.now() + 60 * 60 * 1000,
@@ -324,7 +324,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       const result = await resolveOAuthTokenForSidecar(id);
       expect(result.accessToken).toBe("cached-access");
-      expect(result.providerId).toBe("claude-code");
+      expect(result.providerId).toBe("codex");
       expect(fetchCalled).toBe(false);
     });
 
@@ -332,7 +332,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "near-expiry",
         refreshToken: "rt",
         expiresAtMs: Date.now() + 60 * 1000,
@@ -359,7 +359,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "codex",
         accessToken: "stale",
         refreshToken: "rt",
         needsReconnection: true,
@@ -406,14 +406,15 @@ describe("OAuth model providers — token-resolver hardening", () => {
         const id = await seedOAuthCredential({
           orgId,
           userId,
-          providerId: "claude-code",
+          providerId: "codex",
           accessToken: "still-good",
           refreshToken: "rt",
           expiresAtMs: Date.now() + 60 * 60 * 1000,
         });
 
-        // Admin disables the provider AFTER the credential was created.
-        process.env.MODEL_PROVIDERS_DISABLED = "claude-code";
+        // Admin disables a different provider AFTER the credential was created
+        // — codex stays usable.
+        process.env.MODEL_PROVIDERS_DISABLED = "openai";
         resetEnvCache();
 
         let fetchCalled = false;
@@ -424,7 +425,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
         const result = await resolveOAuthTokenForSidecar(id);
         expect(result.accessToken).toBe("still-good");
-        expect(result.providerId).toBe("claude-code");
+        expect(result.providerId).toBe("codex");
         // Cached + far from expiry → no provider call.
         expect(fetchCalled).toBe(false);
       } finally {

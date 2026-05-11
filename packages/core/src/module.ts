@@ -567,8 +567,7 @@ export interface ModelProviderOAuthConfig {
 /**
  * Context passed to provider-specific proxy hooks. The provider's
  * `beforeLlmProxyRequest` decides which headers to add/override on the
- * outbound LLM call (e.g. Codex `chatgpt-account-id`, Claude-Code identity
- * prelude).
+ * outbound LLM call (e.g. Codex `chatgpt-account-id`).
  */
 export interface ModelProviderProxyContext {
   providerId: string;
@@ -599,7 +598,6 @@ export interface ModelProviderHooks {
    *
    * Use cases:
    *  - Codex injects `chatgpt-account-id` (decoded from the OAuth JWT)
-   *  - Claude-Code injects the identity prelude + merges OAuth-required betas
    *  - Custom proxies could inject regional routing headers
    *
    * MUST be fast and side-effect-free — invoked on every LLM call.

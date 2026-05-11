@@ -49,8 +49,8 @@ import {
 
 /**
  * Adapt the API's `/registry` entries into the modal's `ProviderPreset`
- * shape so OAuth-subscription providers (Codex, Claude Code) participate in
- * the picker without being statically duplicated in `model-presets.ts`.
+ * shape so OAuth-subscription providers (Codex) participate in the
+ * picker without being statically duplicated in `model-presets.ts`.
  */
 function registryToPresets(entries: ProviderRegistryEntry[] | undefined): ProviderPreset[] {
   if (!entries) return [];
@@ -333,8 +333,8 @@ function ModelFormBody({
   //   - "oauth2"  → no inline apiKey, must select an existing connection or
   //                 launch the OAuth dialog to create one.
   //   - "api_key" → inline apiKey input OR pick an existing matching credential.
-  // The registry is the source of truth — OAuth providers (codex, claude-code)
-  // only exist there; static `PROVIDER_PRESETS` entries are all api_key.
+  // The registry is the source of truth — OAuth providers (codex) only
+  // exist there; static `PROVIDER_PRESETS` entries are all api_key.
   const registryEntry = useMemo(
     () => registryQuery.data?.find((p) => p.providerId === providerId),
     [registryQuery.data, providerId],

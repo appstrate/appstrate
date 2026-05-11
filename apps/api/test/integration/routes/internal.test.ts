@@ -876,7 +876,7 @@ describe("Internal API", () => {
         .values({
           orgId,
           label: "Test OAuth Credential",
-          providerId: "claude-code",
+          providerId: "codex",
           credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
           createdBy: null,
         })
@@ -922,7 +922,7 @@ describe("Internal API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { accessToken: string; providerId: string };
       expect(body.accessToken).toBe("test-access-token");
-      expect(body.providerId).toBe("claude-code");
+      expect(body.providerId).toBe("codex");
     });
 
     it("rejects api_key credentials (only OAuth rows are valid here)", async () => {

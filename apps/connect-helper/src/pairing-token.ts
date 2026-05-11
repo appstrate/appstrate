@@ -32,7 +32,7 @@ const HEADER_VERSION = 1;
 export interface PairingTokenHeader {
   /** Base URL of the platform that minted the token (e.g. `https://app.appstrate.dev`). */
   platformUrl: string;
-  /** Canonical providerId (`codex`, `claude-code`, …). */
+  /** Canonical providerId (`codex`, …). */
   providerId: string;
 }
 

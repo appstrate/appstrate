@@ -3,26 +3,20 @@
 /**
  * Anthropic-messages adapter for `/api/llm-proxy/anthropic-messages/*`.
  *
- * Protocol specifics:
- *   - Auth (two flavours, decided by upstream key prefix):
- *       1. Standard API keys (`sk-ant-…`)        → `x-api-key: <key>`.
- *       2. OAuth long-lived tokens (`sk-ant-oat-…`) → `Authorization:
- *          Bearer <key>` + Claude-Code identity headers
- *          (`anthropic-beta: claude-code-20250219,oauth-2025-04-20,…`,
- *          `user-agent: claude-cli/<v>`, `x-app: cli`,
- *          `anthropic-dangerous-direct-browser-access: true`). Anthropic
- *          gates OAuth tokens to Claude-Code identity server-side, so
- *          omitting any of these returns 401 `invalid x-api-key`. We
- *          mirror what `pi-ai`'s anthropic provider sends when it
- *          detects an OAuth token locally — the runner-pi path works
- *          because pi-ai sees the raw key; the proxy path needs the
- *          same wire format because pi-ai sees only the Appstrate
- *          bearer placeholder and skips the OAuth branch.
+ * Auth: standard API keys (`sk-ant-…`) → `x-api-key: <key>`. OAuth
+ * subscription tokens (`sk-ant-oat-…`) are NOT supported by this
+ * adapter: Anthropic's Consumer ToS forbids using such tokens with
+ * any product other than Claude Code / Claude.ai themselves, so the
+ * platform refuses to forward them. Operators with a Claude Pro/Max/
+ * Team plan who want to use Claude inside Appstrate must either
+ * (a) use the Anthropic API key flow (this adapter), or (b) install
+ * a private external module that owns the subscription wire format
+ * end-to-end.
+ *
+ * Wire format:
  *   - `anthropic-version` and `anthropic-beta` are forwarded verbatim
  *     from the caller so `prompt-caching-2024-07-31`, `extended-thinking`
- *     and similar beta headers pass through untouched. For OAuth tokens
- *     the caller's beta list is appended to the OAuth-required betas
- *     rather than replacing them.
+ *     and similar beta headers pass through untouched.
  *   - `cache_control` blocks in the request body MUST pass through
  *     unaltered — we only rewrite `body.model`, never touch `messages`,
  *     `system`, or `metadata`.
@@ -34,11 +28,6 @@
  *     two to produce the metering row.
  */
 
-import {
-  CLAUDE_CODE_CLI_VERSION,
-  CLAUDE_CODE_IDENTITY_HEADERS,
-  CLAUDE_CODE_OAUTH_BETAS,
-} from "@appstrate/core/sidecar-types";
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
 import {
   extractUsageObject,
@@ -46,10 +35,6 @@ import {
   parseSseDataFrame,
   substituteModelJson,
 } from "./helpers.ts";
-
-function isOAuthToken(apiKey: string): boolean {
-  return apiKey.includes("sk-ant-oat");
-}
 
 function readForwardedHeader(incoming: Headers, name: string): string | null {
   for (const [k, v] of incoming) {
@@ -68,42 +53,16 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
   buildUpstreamHeaders(incoming, upstreamApiKey) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "x-api-key": upstreamApiKey,
     };
 
-    if (isOAuthToken(upstreamApiKey)) {
-      // OAuth: Bearer auth + Claude-Code identity. Caller-supplied
-      // betas are merged into (not overriding) the OAuth-required set
-      // so things like `prompt-caching-2024-07-31` keep working.
-      headers["Authorization"] = `Bearer ${upstreamApiKey}`;
-      headers["user-agent"] = `claude-cli/${CLAUDE_CODE_CLI_VERSION}`;
-      Object.assign(headers, CLAUDE_CODE_IDENTITY_HEADERS);
-      const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
-      const callerBetas = callerBeta ? callerBeta.split(",").map((s) => s.trim()) : [];
-      const merged = Array.from(new Set([...CLAUDE_CODE_OAUTH_BETAS, ...callerBetas])).filter(
-        (s) => s.length > 0,
-      );
-      headers["anthropic-beta"] = merged.join(",");
-    } else {
-      headers["x-api-key"] = upstreamApiKey;
-      const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
-      if (callerBeta) headers["anthropic-beta"] = callerBeta;
-    }
+    const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
+    if (callerBeta) headers["anthropic-beta"] = callerBeta;
 
     // Default anthropic-version if the caller omitted one — upstream
-    // returns 400 without it. Applies to both auth flavours.
+    // returns 400 without it.
     const callerVersion = readForwardedHeader(incoming, "anthropic-version");
     headers["anthropic-version"] = callerVersion ?? "2023-06-01";
-
-    // `anthropic-dangerous-direct-browser-access` from the caller wins
-    // over our OAuth default if present (rare, but explicit caller
-    // intent should not be silently dropped).
-    const callerBrowserHeader = readForwardedHeader(
-      incoming,
-      "anthropic-dangerous-direct-browser-access",
-    );
-    if (callerBrowserHeader) {
-      headers["anthropic-dangerous-direct-browser-access"] = callerBrowserHeader;
-    }
 
     return headers;
   },

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Onboarding-only quick-connect cards for OAuth model providers (Codex,
- * Claude Code). One click opens the pairing dialog; on success the helper
- * seeds the org's `org_models` with the registry's recommended models so
- * the user can hit "Continue" without touching the manual form.
+ * Onboarding-only quick-connect cards for OAuth model providers (Codex).
+ * One click opens the pairing dialog; on success the helper seeds the
+ * org's `org_models` with the registry's recommended models so the user
+ * can hit "Continue" without touching the manual form.
  *
  * The seeding behavior is intentionally bound to this caller — the generic
  * `OAuthModelProviderDialog` stays neutral so OAuth connections triggered
@@ -28,7 +28,7 @@ import {
 import { useAutoSeedRecommendedModels } from "../hooks/use-auto-seed-models";
 import { useNewOAuthCredential } from "../hooks/use-new-oauth-credential";
 
-const QUICK_CONNECT_PROVIDER_IDS = ["codex", "claude-code"] as const;
+const QUICK_CONNECT_PROVIDER_IDS = ["codex"] as const;
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -44,8 +44,8 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const [working, setWorking] = useState(false);
 
   // `iconUrl` is the canonical PROVIDER_ICONS key surfaced by the registry
-  // (codex → "openai", claude-code → "anthropic"). Falls back to a generic
-  // plug glyph for future providers without a registered brand icon.
+  // (codex → "openai"). Falls back to a generic plug glyph for future
+  // providers without a registered brand icon.
   const Icon = entry.iconUrl ? (PROVIDER_ICONS[entry.iconUrl] ?? null) : null;
 
   const openDialog = () => {

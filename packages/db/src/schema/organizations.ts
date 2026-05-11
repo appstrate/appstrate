@@ -227,7 +227,7 @@ export const modelProviderPairings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** Provider id (e.g. `codex`, `claude-code`) from the OAuth model provider registry. */
+    /** Provider id (e.g. `codex`) from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */

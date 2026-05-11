@@ -5772,7 +5772,7 @@
         "operationId": "listModelProviderRegistry",
         "tags": ["Model Provider Credentials"],
         "summary": "List the in-code model provider registry",
-        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, Claude Code, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
+        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5831,7 +5831,12 @@
                           },
                           "apiShape": {
                             "type": "string",
-                            "enum": ["anthropic-messages", "openai-chat", "openai-responses"]
+                            "enum": [
+                              "anthropic-messages",
+                              "openai-chat",
+                              "openai-responses",
+                              "openai-codex-responses"
+                            ]
                           },
                           "defaultBaseUrl": {
                             "type": "string"
@@ -5847,7 +5852,7 @@
                             "type": "array",
                             "items": {
                               "type": "object",
-                              "required": ["id", "contextWindow", "capabilities"],
+                              "required": ["id", "contextWindow", "capabilities", "recommended"],
                               "properties": {
                                 "id": {
                                   "type": "string"
@@ -5863,6 +5868,10 @@
                                   "items": {
                                     "type": "string"
                                   }
+                                },
+                                "recommended": {
+                                  "type": "boolean",
+                                  "description": "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all."
                                 }
                               }
                             }
@@ -5892,7 +5901,7 @@
         "operationId": "listModelProviderCredentials",
         "tags": ["Model Provider Credentials"],
         "summary": "List organization model provider credentials",
-        "description": "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, Claude Code, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "description": "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5983,7 +5992,7 @@
                   "apiShape": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Wire format / API shape (anthropic-messages, openai-chat, openai-responses, openai-completions, …). Combined with baseUrl to reverse-resolve the registry providerId."
+                    "description": "Wire format / API shape used to reverse-resolve the registry providerId together with baseUrl. Accepted values match `ModelApiShape` (anthropic-messages, openai-chat, openai-responses, openai-codex-responses) plus the legacy `openai-compatible`-fallback strings the picker still emits for self-hosted endpoints."
                   },
                   "baseUrl": {
                     "type": "string",
@@ -6304,13 +6313,10 @@
         "operationId": "createOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted.",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
           }
         ],
         "requestBody": {
@@ -6324,7 +6330,7 @@
                   "providerId": {
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
-                    "enum": ["codex", "claude-code"],
+                    "enum": ["codex"],
                     "description": "Canonical provider id from the OAuth model provider registry. Must resolve to an OAuth provider that is not soft-disabled via `MODEL_PROVIDERS_DISABLED`."
                   }
                 }
@@ -6396,9 +6402,6 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
             "name": "id",
             "in": "path",
             "required": true,
@@ -6456,9 +6459,6 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
             "name": "id",
             "in": "path",
             "required": true,
@@ -6485,16 +6485,8 @@
       "post": {
         "operationId": "importOAuthModelProviderConnection",
         "tags": ["Model Provider Credentials"],
-        "summary": "Import an OAuth model provider token bundle from the CLI",
-        "description": "Persists an OAuth token bundle obtained on the user's machine via `appstrate connect <provider>`. The CLI runs the loopback OAuth dance against the provider's authorization server because the public CLI client_ids only allowlist `http://localhost:PORT/...` redirect_uris. Server-side this re-derives provider claims (Codex JWT account_id) defensively, then persists via the same shared helper the legacy callback used.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
+        "summary": "Import an OAuth model provider token bundle from the connect helper",
+        "description": "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives provider claims (Codex JWT `chatgpt_account_id`) defensively, then persists into `model_provider_credentials`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6505,7 +6497,7 @@
                 "properties": {
                   "providerId": {
                     "type": "string",
-                    "enum": ["codex", "claude-code"]
+                    "enum": ["codex"]
                   },
                   "label": {
                     "type": "string",
@@ -6523,11 +6515,6 @@
                   "expiresAt": {
                     "type": ["integer", "null"],
                     "description": "Unix milliseconds since epoch — when the access token expires."
-                  },
-                  "connectionProfileId": {
-                    "type": "string",
-                    "format": "uuid",
-                    "description": "Optional connection profile to attach the connection to. Defaults to the user's default profile when absent."
                   },
                   "subscriptionType": {
                     "type": "string",
@@ -10259,50 +10246,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["accessToken", "apiShape", "baseUrl", "providerId"],
-                  "properties": {
-                    "accessToken": {
-                      "type": "string"
-                    },
-                    "expiresAt": {
-                      "type": ["integer", "null"],
-                      "description": "Epoch milliseconds. null when expiry is unknown."
-                    },
-                    "apiShape": {
-                      "type": "string",
-                      "enum": ["anthropic-messages", "openai-responses", "openai-codex-responses"]
-                    },
-                    "baseUrl": {
-                      "type": "string",
-                      "format": "uri"
-                    },
-                    "rewriteUrlPath": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "string"
-                        },
-                        "to": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["from", "to"]
-                    },
-                    "forceStream": {
-                      "type": "boolean"
-                    },
-                    "forceStore": {
-                      "type": "boolean"
-                    },
-                    "accountId": {
-                      "type": "string",
-                      "description": "Codex only — used as `chatgpt-account-id` header."
-                    },
-                    "providerId": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
                 }
               }
             }
@@ -10357,48 +10301,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["accessToken", "apiShape", "baseUrl", "providerId"],
-                  "properties": {
-                    "accessToken": {
-                      "type": "string"
-                    },
-                    "expiresAt": {
-                      "type": ["integer", "null"]
-                    },
-                    "apiShape": {
-                      "type": "string",
-                      "enum": ["anthropic-messages", "openai-responses", "openai-codex-responses"]
-                    },
-                    "baseUrl": {
-                      "type": "string",
-                      "format": "uri"
-                    },
-                    "rewriteUrlPath": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "string"
-                        },
-                        "to": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["from", "to"]
-                    },
-                    "forceStream": {
-                      "type": "boolean"
-                    },
-                    "forceStore": {
-                      "type": "boolean"
-                    },
-                    "accountId": {
-                      "type": "string"
-                    },
-                    "providerId": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
                 }
               }
             }
@@ -19767,7 +19670,7 @@
           },
           "providerId": {
             "type": ["string", "null"],
-            "description": "Canonical providerId backing the credential (e.g. `codex`, `claude-code`). Set when `authMode === 'oauth2'`."
+            "description": "Canonical providerId backing the credential (e.g. `codex`). Set when `authMode === 'oauth2'`."
           },
           "oauthEmail": {
             "type": ["string", "null"]
@@ -19859,7 +19762,7 @@
           "keyKind": {
             "type": ["string", "null"],
             "enum": ["oauth", "api-key", null],
-            "description": "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols."
+            "description": "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping happens locally before the proxy ever sees the request. null for non-Anthropic protocols."
           },
           "cost": {
             "type": ["object", "null"],
@@ -19910,6 +19813,53 @@
           "message": {
             "type": "string",
             "description": "Human-readable error message"
+          }
+        }
+      },
+      "OAuthTokenResponse": {
+        "type": "object",
+        "description": "Resolved access token + provider runtime config returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+        "required": ["accessToken", "apiShape", "baseUrl", "providerId"],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": ["integer", "null"],
+            "description": "Epoch milliseconds. null when expiry is unknown."
+          },
+          "apiShape": {
+            "type": "string",
+            "enum": ["anthropic-messages", "openai-responses", "openai-codex-responses"]
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "rewriteUrlPath": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          },
+          "forceStream": {
+            "type": "boolean"
+          },
+          "forceStore": {
+            "type": "boolean"
+          },
+          "accountId": {
+            "type": "string",
+            "description": "Codex only — used as `chatgpt-account-id` header."
+          },
+          "providerId": {
+            "type": "string"
           }
         }
       },

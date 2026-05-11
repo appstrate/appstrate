@@ -118,27 +118,6 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
     expect(r2.status).toBe(410);
   });
 
-  it("rejects a tampered providerId in the body (mismatch with pairing's pinned providerId)", async () => {
-    const pairing = await mintPairing(ctx, "codex");
-
-    const res = await app.request("/api/model-providers-oauth/import", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("claude-code")),
-    });
-    expect(res.status).toBe(400);
-
-    // The pairing must NOT have been consumed — the providerId mismatch is
-    // checked AFTER consume() to avoid leaking pairing existence to a
-    // wrong-provider probe. Adjust this assertion if the order ever flips.
-    const [row] = await db
-      .select()
-      .from(modelProviderPairings)
-      .where(eq(modelProviderPairings.id, pairing.id))
-      .limit(1);
-    expect(row?.consumedAt).toBeInstanceOf(Date);
-  });
-
   it("rejects malformed bearer tokens with 410 (single error code, no enumeration)", async () => {
     const res = await app.request("/api/model-providers-oauth/import", {
       method: "POST",

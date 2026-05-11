@@ -1,35 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Wrapper around `@mariozechner/pi-ai`'s loopback PKCE flow for the two
- * OAuth model providers Appstrate supports today: OpenAI Codex and
- * Anthropic Claude Code.
+ * Wrapper around `@mariozechner/pi-ai`'s loopback PKCE flow for the OAuth
+ * model providers Appstrate supports today. Currently only OpenAI Codex
+ * ships in OSS; additional OAuth providers can be added by extending the
+ * slug map below (operator-installed modules can extend it at runtime).
  *
  * Internal-only — driven by the helper binary (`apps/connect-helper/src/cli.ts`)
- * after it decodes a pairing token from the dashboard. The `claude` /
- * `codex` slug is a pi-ai surface concern (which loopback to invoke); the
- * dashboard / platform speak only in canonical `providerId` values.
+ * after it decodes a pairing token from the dashboard. The `codex` slug is
+ * a pi-ai surface concern (which loopback to invoke); the dashboard /
+ * platform speak only in canonical `providerId` values.
  */
 
-import { loginOpenAICodex, loginAnthropic } from "@mariozechner/pi-ai/oauth";
+import { loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
 
 /** Provider slugs accepted by pi-ai's loopback helpers. */
-export type ConnectProviderSlug = "codex" | "claude";
+export type ConnectProviderSlug = "codex";
 
 /** Map the platform's canonical `providerId` to the slug pi-ai expects. */
 export const PROVIDER_ID_TO_SLUG: Readonly<Record<string, ConnectProviderSlug>> = Object.freeze({
   codex: "codex",
-  "claude-code": "claude",
 });
 
 export const DISPLAY_NAME: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
   codex: "ChatGPT (Codex / Plus / Pro / Business)",
-  claude: "Claude (Pro / Max / Team)",
 });
 
 export const DEFAULT_LABEL: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
   codex: "ChatGPT",
-  claude: "Claude",
 });
 
 /** Normalised credential shape returned by the loopback flow. */
@@ -60,12 +58,12 @@ export interface LoopbackCallbacks {
 /**
  * Run the loopback PKCE flow for the chosen provider via Pi's helpers.
  * Pi spins up an HTTP listener on the provider-specific loopback port
- * (`127.0.0.1:1455` for Codex, `127.0.0.1:53692` for Claude), exchanges
- * the authorization code, and returns Pi's `OAuthCredentials` shape. This
- * function normalises that shape into {@link NormalisedOAuthCredentials}.
+ * (`127.0.0.1:1455` for Codex), exchanges the authorization code, and
+ * returns Pi's `OAuthCredentials` shape. This function normalises that
+ * shape into {@link NormalisedOAuthCredentials}.
  */
 export async function runLoopbackOAuth(
-  slug: ConnectProviderSlug,
+  _slug: ConnectProviderSlug,
   callbacks: LoopbackCallbacks = {},
 ): Promise<NormalisedOAuthCredentials> {
   const piCallbacks = {
@@ -77,8 +75,7 @@ export async function runLoopbackOAuth(
     onProgress: (message: string) => callbacks.onProgress?.(message),
   };
 
-  const creds =
-    slug === "codex" ? await loginOpenAICodex(piCallbacks) : await loginAnthropic(piCallbacks);
+  const creds = await loginOpenAICodex(piCallbacks);
 
   // pi-ai's `OAuthCredentials` shape: `{ access, refresh, expires (ms epoch), [extras] }`.
   // Surrounding code defensively narrows extras because pi-ai types extras as `[key: string]: unknown`

@@ -51,7 +51,7 @@ describe("POST /api/model-providers-oauth/import", () => {
       // at consume-time on /import, after consumePairing() has run.
       const token = await mintPairing(ctx, "codex");
 
-      process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
+      process.env.MODEL_PROVIDERS_DISABLED = "codex";
       resetEnvCache();
       const res = await app.request("/api/model-providers-oauth/import", {
         method: "POST",

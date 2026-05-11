@@ -485,14 +485,16 @@ export interface OrgModelInfo {
   /**
    * Anthropic-only: shape of the upstream credential, exposed so the CLI
    * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`
-   * tokens (Anthropic gates these to Claude-Code identity at the body
-   * level — system prompt + tool-name renaming — which pi-ai injects
-   * locally only when its prefix-based detection fires); `api-key` for
-   * regular `sk-ant-…` keys; null for non-Anthropic protocols and for
-   * Anthropic models whose credentials cannot be loaded (treat as
-   * api-key). The CLI mirrors the kind by passing `sk-ant-oat-placeholder`
-   * as the `apiKey` to pi-ai when `keyKind === "oauth"`, so pi-ai
-   * reshapes the body before the proxy ever sees it.
+   * tokens (Anthropic gates these at the body level — system prompt +
+   * tool-name renaming — which pi-ai injects locally only when its
+   * prefix-based detection fires); `api-key` for regular `sk-ant-…` keys;
+   * null for non-Anthropic protocols and for Anthropic models whose
+   * credentials cannot be loaded (treat as api-key). The CLI mirrors
+   * the kind by passing `sk-ant-oat-placeholder` as the `apiKey` to pi-ai
+   * when `keyKind === "oauth"`, so pi-ai reshapes the body before the
+   * proxy ever sees it. OSS ships no Anthropic OAuth provider — this
+   * field stays as a contribution point for external operator-installed
+   * modules.
    */
   keyKind?: "oauth" | "api-key" | null;
   createdBy: string | null;
@@ -515,9 +517,9 @@ export interface ModelProviderCredentialInfo {
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";
-  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection (e.g. `codex`, `claude-code`). */
+  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection (e.g. `codex`). */
   providerId?: string | null;
-  /** Surface email of the OAuth account (Codex JWT claim or Claude `claudeAiOauth.email`). UI shows it as transparency hint. */
+  /** Surface email of the OAuth account (Codex JWT claim). UI shows it as transparency hint. */
   oauthEmail?: string | null;
   /** OAuth token expiry, ISO-8601. `null` when expiry is unknown. */
   oauthExpiresAt?: string | null;

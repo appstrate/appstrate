@@ -7,12 +7,6 @@ import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-re
 import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import {
-  CLAUDE_CODE_CLI_VERSION,
-  CLAUDE_CODE_IDENTITY_HEADERS,
-  CLAUDE_CODE_IDENTITY_PROMPT,
-  CLAUDE_CODE_OAUTH_IDENTITY_BETAS,
-} from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./model-provider-credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -22,14 +16,16 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 // --- List (system + DB) ---
 
 /**
- * Anthropic gates `sk-ant-oat-*` tokens to Claude-Code identity at the
- * body level (system prompt + tool-name renaming) — pi-ai injects that
- * locally only when its prefix-based detection fires (see
+ * Anthropic gates `sk-ant-oat-*` tokens to a specific identity shape at
+ * the body level (system prompt + tool-name renaming) — pi-ai injects
+ * that locally only when its prefix-based detection fires (see
  * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
  * the LLM proxy path the upstream key never leaves the platform, so we
  * surface its kind to the CLI; the CLI then mirrors the prefix in the
  * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
- * protocols and for Anthropic models whose creds are unavailable.
+ * protocols and for Anthropic models whose creds are unavailable. OSS
+ * ships no Anthropic OAuth provider; this stays as a contribution point
+ * for external operator-installed modules.
  */
 function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
   if (apiShape !== "anthropic-messages") return null;
@@ -383,21 +379,12 @@ export function buildModelTestRequest(config: {
   const headers: Record<string, string> = {};
   let url: string;
 
-  // OAuth-backed Anthropic flows (sk-ant-oat API tokens or Claude Code OAuth
-  // access tokens) probe `/v1/models` with the OAuth headers; the provider id
-  // is the canonical signal — sk-ant-oat prefix is the legacy fallback.
-  const isAnthropicOAuth =
-    config.providerId === "claude-code" || config.apiKey.startsWith("sk-ant-oat");
-
   switch (config.apiShape) {
     case "anthropic-messages":
+      // API-key only — OAuth subscription tokens (`sk-ant-oat-*`) are
+      // not used by any provider Appstrate ships out of the box.
       url = `${base}/v1/models`;
-      if (isAnthropicOAuth) {
-        headers["Authorization"] = `Bearer ${config.apiKey}`;
-        headers["anthropic-beta"] = "oauth-2025-04-20";
-      } else {
-        headers["x-api-key"] = config.apiKey;
-      }
+      headers["x-api-key"] = config.apiKey;
       headers["anthropic-version"] = "2023-06-01";
       break;
     case "mistral-conversations":
@@ -447,15 +434,10 @@ export async function testModelConfig(config: {
 
   // OAuth-backed providers don't expose a `/models` discovery endpoint
   // compatible with the Bearer token (Codex has no /models at all on
-  // chatgpt.com/backend-api; Claude Code's /v1/models would 200 even when
-  // /v1/messages is blocked by the third-party OAuth ban). Issue a real
-  // single-token inference probe so the test reflects whether the key can
-  // actually serve traffic.
+  // chatgpt.com/backend-api). Issue a real single-token inference probe
+  // so the test reflects whether the key can actually serve traffic.
   if (config.providerId === "codex") {
     return testCodexInference(config);
-  }
-  if (config.providerId === "claude-code") {
-    return testClaudeCodeInference(config);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -599,122 +581,7 @@ async function testCodexInference(config: {
   }
 }
 
-/**
- * Claude Code (Anthropic subscription) inference probe — single-token
- * `/v1/messages` call mirroring pi-ai's "stealth mode" exactly: Anthropic
- * 429s/403s requests that don't impersonate the official Claude Code CLI
- * (third-party enforcement since 2026-01-09). The required signals are:
- *
- *   - `anthropic-beta: claude-code-20250219,oauth-2025-04-20`
- *   - `user-agent: claude-cli/<version>`
- *   - `x-app: cli`
- *   - `anthropic-dangerous-direct-browser-access: true`
- *   - First system message: "You are Claude Code, Anthropic's official CLI for Claude."
- *
- * cf. node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js (search
- * for `claudeCodeVersion`). The constants are defined in `@appstrate/core/
- * sidecar-types` so the sidecar runtime and the platform probe reference
- * the same source of truth.
- */
-
-/**
- * Build the Claude Code inference probe request. Mirrors pi-ai's
- * "stealth mode" exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/anthropic.js — search for `claudeCodeVersion`). All five
- * signals below are load-bearing — drop any one and Anthropic 429s
- * the request as third-party tier abuse.
- */
-export function buildClaudeCodeInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "anthropic-beta": CLAUDE_CODE_OAUTH_IDENTITY_BETAS.join(","),
-      "anthropic-version": "2023-06-01",
-      "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
-      ...CLAUDE_CODE_IDENTITY_HEADERS,
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      max_tokens: 1,
-      system: [{ type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT }],
-      messages: [{ role: "user", content: "ping" }],
-    }),
-  };
-}
-
-async function testClaudeCodeInference(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): Promise<TestResult> {
-  const req = buildClaudeCodeInferenceRequest(config);
-  const start = performance.now();
-  try {
-    const res = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const latency = Math.round(performance.now() - start);
-    if (res.ok) {
-      void res.body?.cancel().catch(() => {});
-      return { ok: true, latency };
-    }
-    // Read the error body up to 1 KB to catch the third-party enforcement signal.
-    const text = await res
-      .text()
-      .then((t) => t.slice(0, 1024))
-      .catch(() => "");
-    if (
-      (res.status === 403 || res.status === 429) &&
-      /third.?party|claude code|oauth.{0,40}(not allowed|not permitted|disabled)/i.test(text)
-    ) {
-      return {
-        ok: false,
-        latency,
-        error: "OAUTH_TIER_BLOCKED",
-        message:
-          "Anthropic blocks third-party use of Claude Code OAuth tokens (in effect since 2026-01-09). Use a paid API plan instead.",
-      };
-    }
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Anthropic rejected the token (auth failed or subscription inactive)",
-      };
-    }
-    if (res.status === 429) {
-      // Anthropic's per-IP / per-account rate limit on Claude Code OAuth is
-      // aggressive (kicks in after a handful of probes from the same IP).
-      // Surface a Retry-After hint when the upstream provides one.
-      const retryAfter = res.headers.get("retry-after");
-      return {
-        ok: false,
-        latency,
-        error: "RATE_LIMITED",
-        message: retryAfter
-          ? `Anthropic rate limit hit — retry in ${retryAfter}s`
-          : "Anthropic rate limit hit on the OAuth tier — try again in a minute",
-      };
-    }
-    return {
-      ok: false,
-      latency,
-      error: "PROVIDER_ERROR",
-      message: `Anthropic returned ${res.status}`,
-    };
-  } catch (err) {
-    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
-  }
-}
+// OSS supports only the API-key flow for Anthropic, via the `anthropic`
+// provider in the `core-providers` module. Anthropic Consumer ToS forbids
+// using OAuth subscription tokens in any third-party product, so OSS
+// ships no Anthropic OAuth provider.

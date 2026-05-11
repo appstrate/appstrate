@@ -17,16 +17,18 @@ describe("buildModelTestRequest", () => {
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
-  it("anthropic-messages: uses Bearer + oauth beta for sk-ant-oat keys", () => {
+  it("anthropic-messages: uses x-api-key for every token form (no OAuth branching)", () => {
+    // The historical Bearer + oauth-2025-04-20 path was removed in PR 6
+    // (Anthropic Consumer ToS forbids using OAuth subscription tokens in
+    // third-party tools). All Anthropic calls route through x-api-key.
     const { headers } = buildModelTestRequest({
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
-      apiKey: "sk-ant-oat-token",
+      apiKey: "sk-ant-api03-token",
     });
-    expect(headers["Authorization"]).toBe("Bearer sk-ant-oat-token");
-    expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    expect(headers["x-api-key"]).toBe("sk-ant-api03-token");
     expect(headers["anthropic-version"]).toBe("2023-06-01");
-    expect(headers["x-api-key"]).toBeUndefined();
+    expect(headers["Authorization"]).toBeUndefined();
   });
 
   // Regression: https://github.com/appstrate/appstrate/issues/148
@@ -122,24 +124,25 @@ describe("buildModelTestRequest", () => {
     expect(url).toBe("https://api.openai.com/v1/models");
   });
 
-  it("anthropic-messages + claude-code: uses Bearer + oauth beta even without sk-ant-oat prefix", () => {
-    // Claude Code OAuth tokens are JWTs, not sk-ant-oat — the provider id is the canonical signal.
+  it("anthropic-messages: uses x-api-key (OAuth flavour removed in PR 6 for ToS reasons)", () => {
+    // PR 6 retired the Anthropic OAuth path (Authorization Bearer +
+    // oauth-2025-04-20 beta). Any Anthropic call goes through the API
+    // key flow now.
     const { headers } = buildModelTestRequest({
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
-      apiKey: "eyJhbGciOiJSUzI1NiJ9.fake.jwt",
-      providerId: "claude-code",
+      apiKey: "sk-ant-api03-AbCdEf",
     });
-    expect(headers["Authorization"]).toBe("Bearer eyJhbGciOiJSUzI1NiJ9.fake.jwt");
-    expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
-    expect(headers["x-api-key"]).toBeUndefined();
+    expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCdEf");
+    expect(headers["Authorization"]).toBeUndefined();
+    expect(headers["anthropic-version"]).toBe("2023-06-01");
   });
 });
 
 describe("testModelConfig", () => {
-  // The Codex/Claude Code branches issue a real single-token inference
-  // probe and need an outbound fetch — covered in the integration test
-  // suite where we can intercept the upstream call. This unit suite only
+  // The Codex branch issues a real single-token inference probe and
+  // needs an outbound fetch — covered in the integration test suite
+  // where we can intercept the upstream call. This unit suite only
   // covers the static request shape via buildModelTestRequest above.
   it("codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
     const result = await testModelConfig({

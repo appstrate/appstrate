@@ -350,9 +350,9 @@ function deriveKeyPlaceholder(key: string | undefined): string {
  * claim pi-ai needs and a fixed fake signature, so no upstream signature
  * material is ever shipped into the agent container.
  *
- * For non-Codex OAuth providers (Claude Code uses opaque
- * `sk-ant-oat01-…` tokens) the dash-stripping strategy already replaces
- * the entire secret tail and is safe.
+ * For non-Codex OAuth providers (opaque bearer tokens, no embedded
+ * claims) the dash-stripping strategy already replaces the entire
+ * secret tail and is safe.
  */
 function deriveOauthPlaceholder(key: string | undefined, providerId: string): string {
   if (providerId !== "codex") return deriveKeyPlaceholder(key);

@@ -5,7 +5,10 @@ import coreProvidersModule from "../../index.ts";
 
 describe("core-providers module", () => {
   it("declares the three canonical API-key providers", () => {
-    const ids = coreProvidersModule.modelProviders?.().map((p) => p.providerId).sort();
+    const ids = coreProvidersModule
+      .modelProviders?.()
+      .map((p) => p.providerId)
+      .sort();
     expect(ids).toEqual(["anthropic", "openai", "openai-compatible"]);
   });
 

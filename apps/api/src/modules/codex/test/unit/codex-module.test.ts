@@ -45,9 +45,11 @@ describe("extractTokenIdentity hook", () => {
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
-    return [b64(JSON.stringify({ alg: "RS256" })), b64(JSON.stringify(payload)), "fake-signature"].join(
-      ".",
-    );
+    return [
+      b64(JSON.stringify({ alg: "RS256" })),
+      b64(JSON.stringify(payload)),
+      "fake-signature",
+    ].join(".");
   }
 
   it("returns chatgpt_account_id + email when both claims are present", () => {

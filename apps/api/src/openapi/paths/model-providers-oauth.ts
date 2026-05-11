@@ -20,7 +20,7 @@ export const modelProvidersOAuthPaths = {
                 providerId: {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
-                  enum: ["codex", "claude-code"],
+                  enum: ["codex"],
                   description:
                     "Canonical provider id from the OAuth model provider registry. Must resolve to an OAuth provider that is not soft-disabled via `MODEL_PROVIDERS_DISABLED`.",
                 },
@@ -160,7 +160,7 @@ export const modelProvidersOAuthPaths = {
               properties: {
                 providerId: {
                   type: "string",
-                  enum: ["codex", "claude-code"],
+                  enum: ["codex"],
                 },
                 label: { type: "string", minLength: 1, maxLength: 120 },
                 accessToken: { type: "string", minLength: 1 },

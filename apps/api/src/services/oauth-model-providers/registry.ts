@@ -5,10 +5,9 @@
  *
  * Historically the source of truth; now a transitional layer that feeds
  * the runtime registry (`services/model-providers/registry.ts`) at boot.
- * The five built-ins (codex, claude-code, openai, anthropic,
- * openai-compatible) will migrate into proper `core-providers` and
- * `codex` modules in PR 4-5, at which point this file (and the explicit
- * `seedLegacyModelProviders()` call in boot) can be removed.
+ * The four canonical OSS built-ins (codex, openai, anthropic,
+ * openai-compatible) all live in proper modules (`core-providers`,
+ * `codex`); this file is empty and slated for deletion in PR 7.
  *
  * Public re-exports (`getModelProviderConfig`, `listModelProviders`,
  * `isOAuthModelProvider`, `isModelProviderEnabled`,
@@ -44,60 +43,16 @@ export type OAuthConfig = NonNullable<ModelProviderDefinition["oauth"]>;
 export { decodeCodexJwtPayload } from "../../modules/codex/index.ts";
 
 /**
- * Claude: `platform.claude.com` is the canonical token host
- * (cf. @mariozechner/pi-ai/utils/oauth/anthropic.js). The first iteration
- * shipped `claude.ai/v1/oauth/token` which appears reachable but returns
- * a non-canonical schema and was the root cause of refresh failures.
- */
-const claudeCodeConfig: ModelProviderConfig = {
-  providerId: "claude-code",
-  displayName: "Claude Code (Anthropic)",
-  iconUrl: "anthropic",
-  description:
-    "Run agents against your Claude Pro / Max / Team subscription via the Claude Code OAuth client.",
-  docsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
-  apiShape: "anthropic-messages",
-  defaultBaseUrl: "https://api.anthropic.com",
-  baseUrlOverridable: false,
-  authMode: "oauth2",
-  oauth: {
-    clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-    authorizationUrl: "https://claude.ai/oauth/authorize",
-    tokenUrl: "https://platform.claude.com/v1/oauth/token",
-    refreshUrl: "https://platform.claude.com/v1/oauth/token",
-    scopes: ["org:create_api_key", "user:profile", "user:inference"],
-    pkce: "S256",
-  },
-  models: [
-    {
-      id: "claude-opus-4-7",
-      contextWindow: 1000000,
-      capabilities: ["text", "image", "reasoning", "long-context-1m"],
-      recommended: true,
-    },
-    {
-      id: "claude-sonnet-4-6",
-      contextWindow: 1000000,
-      capabilities: ["text", "image", "reasoning", "long-context-1m"],
-      recommended: true,
-    },
-    {
-      id: "claude-haiku-4-5",
-      contextWindow: 200000,
-      capabilities: ["text", "image"],
-    },
-  ],
-};
-
-/**
  * Built-in provider definitions remaining in the legacy seed.
  *
- * Migration progress:
- *   - openai, anthropic, openai-compatible → `core-providers` module (PR 4 ✅)
- *   - codex → `codex` module (PR 5 ✅)
- *   - claude-code → external private module (PR 6 — removed from OSS)
+ * Migration complete:
+ *   - openai, anthropic, openai-compatible → `core-providers` module
+ *   - codex → `codex` module
+ *
+ * The seed is empty by design — PR 7 deletes this file entirely once
+ * every consumer has been migrated to the runtime registry.
  */
-const LEGACY_PROVIDERS: readonly ModelProviderDefinition[] = [claudeCodeConfig];
+const LEGACY_PROVIDERS: readonly ModelProviderDefinition[] = [];
 
 /**
  * Register every legacy built-in provider into the runtime registry.

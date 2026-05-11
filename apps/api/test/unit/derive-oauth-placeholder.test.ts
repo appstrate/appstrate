@@ -111,12 +111,12 @@ describe("deriveOauthPlaceholder", () => {
     });
   });
 
-  describe("Claude Code (opaque sk-ant-oat01-…)", () => {
-    it("delegates to deriveKeyPlaceholder for non-Codex providers", () => {
-      const token = "sk-ant-oat01-DEADBEEFCAFEBABE";
-      const placeholder = deriveOauthPlaceholder(token, "claude-code");
+  describe("non-Codex OAuth providers (opaque bearer tokens)", () => {
+    it("delegates to deriveKeyPlaceholder for any non-Codex providerId", () => {
+      const token = "sk-some-oauth-DEADBEEFCAFEBABE";
+      // Any non-codex providerId follows the generic dash-stripping path.
+      const placeholder = deriveOauthPlaceholder(token, "some-external-provider");
       expect(placeholder).toBe(deriveKeyPlaceholder(token));
-      expect(placeholder).toBe("sk-ant-oat01-placeholder");
       expect(placeholder).not.toContain("DEADBEEFCAFEBABE");
     });
   });

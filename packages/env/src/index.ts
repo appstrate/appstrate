@@ -247,9 +247,9 @@ const envSchema = z
     RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 
     // Modules (comma-separated specifiers).
-    // Default loads built-in OSS modules (oidc, webhooks).
+    // Default loads built-in OSS modules (oidc, webhooks, core-providers).
     // Append external specifiers (npm package names) to extend.
-    MODULES: z.string().default("oidc,webhooks"),
+    MODULES: z.string().default("oidc,webhooks,core-providers"),
 
     // MODEL_PROVIDERS_DISABLED — comma-separated `providerId` allowlist removed
     // from the in-app picker. Soft-disable semantics: existing credentials
@@ -257,11 +257,12 @@ const envSchema = z
     // and llm-proxy all use unfiltered accessors), but the UI hides the
     // provider and POST creation returns 403.
     //
-    // Known providerIds: codex, claude-code, openai, anthropic, openai-compatible.
-    // Unknown ids are rejected fail-fast at boot in `apps/api/src/lib/boot.ts`
-    // against the live `MODEL_PROVIDERS` registry — that check lives there
-    // (not here) because the registry is a runtime artefact of the API
-    // package and the env schema must remain framework-agnostic.
+    // Known providerIds come from the runtime model-provider registry
+    // (built from every loaded module's modelProviders() contribution +
+    // the legacy seed). Unknown ids are rejected fail-fast at boot in
+    // `apps/api/src/lib/boot.ts` — that check lives there (not here)
+    // because the registry is a runtime artefact of the API package and
+    // the env schema must remain framework-agnostic.
     MODEL_PROVIDERS_DISABLED: z
       .string()
       .default("")

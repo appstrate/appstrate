@@ -2,7 +2,7 @@
 
 /**
  * Modal that walks the user through connecting an OAuth model provider
- * (Codex / Claude Code).
+ * (Codex).
  *
  * Why a helper, not a browser-only flow:
  *   The public OAuth client_ids baked into the official CLIs only
@@ -63,7 +63,6 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
   const [copied, setCopied] = useState(false);
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
-  const isClaude = providerId === "claude-code";
   const createPairing = useCreateModelProviderPairing();
   const cancelPairing = useCancelModelProviderPairing();
   const pairingStatus = useModelProviderPairingStatus(pairing?.id ?? null, {
@@ -175,19 +174,10 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
             </ul>
           </div>
 
-          {isClaude ? (
-            <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-xs">
-              <p className="font-semibold">
-                {t("providerKeys.oauth.tosAnthropicEnforcementTitle")}
-              </p>
-              <p className="mt-1">{t("providerKeys.oauth.tosAnthropicEnforcementBody")}</p>
-            </div>
-          ) : (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-              <p className="font-semibold">{t("providerKeys.oauth.tosOpenAiUnclearTitle")}</p>
-              <p className="mt-1">{t("providerKeys.oauth.tosOpenAiUnclearBody")}</p>
-            </div>
-          )}
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <p className="font-semibold">{t("providerKeys.oauth.tosOpenAiUnclearTitle")}</p>
+            <p className="mt-1">{t("providerKeys.oauth.tosOpenAiUnclearBody")}</p>
+          </div>
 
           <label className="flex cursor-pointer items-start gap-2 text-xs">
             <Checkbox

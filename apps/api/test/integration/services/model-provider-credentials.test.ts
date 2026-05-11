@@ -294,8 +294,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "claude",
-      providerId: "claude-code",
+      label: "codex",
+      providerId: "codex",
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
@@ -311,8 +311,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "claude",
-      providerId: "claude-code",
+      label: "codex",
+      providerId: "codex",
       accessToken: "old-access",
       refreshToken: "old-refresh",
       expiresAt: 1_000,
@@ -340,8 +340,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "claude",
-      providerId: "claude-code",
+      label: "codex",
+      providerId: "codex",
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
@@ -375,7 +375,6 @@ describe("model-provider-credentials service — oauth path", () => {
  */
 describe("model-provider-credentials service — aggregator + inference loader", () => {
   const CODEX = "codex";
-  const CLAUDE = "claude-code";
 
   /**
    * Build a synthetic Codex-shaped JWT carrying a `chatgpt_account_id` claim.
@@ -451,16 +450,19 @@ describe("model-provider-credentials service — aggregator + inference loader",
     it("surfaces OAuth credentials with providerId + authMode='oauth'", async () => {
       const user = await createTestUser();
       const { org } = await createTestOrg(user.id, { slug: "agg-list-oauth" });
+      const accessJwt = makeFakeCodexJwt({
+        chatgpt_account_id: "acc-list-1",
+        email: "user@example.com",
+      });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
-        providerId: CLAUDE,
-        label: "Claude Max",
-        accessToken: "sk-ant-oat01-fake",
-        refreshToken: "sk-ant-ort01-fake",
+        providerId: CODEX,
+        label: "ChatGPT Pro",
+        accessToken: accessJwt,
+        refreshToken: "rt-codex",
         expiresAt: Date.now() + 3600 * 1000,
-        subscriptionType: "max",
-        email: "user@anthropic-test.com",
+        email: "user@example.com",
       });
 
       const list = await listOrgModelProviderCredentials(org.id);
@@ -468,9 +470,9 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
       expect(oauth!.authMode).toBe("oauth2");
-      expect(oauth!.providerId).toBe("claude-code");
+      expect(oauth!.providerId).toBe("codex");
       expect(oauth!.id).toBe(imported.credentialId);
-      expect(oauth!.oauthEmail).toBe("user@anthropic-test.com");
+      expect(oauth!.oauthEmail).toBe("user@example.com");
       expect(oauth!.needsReconnection).toBe(false);
     });
   });
@@ -527,41 +529,17 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(creds!.providerId).toBe("codex");
     });
 
-    it("Claude OAuth: returns access token + providerId; accountId stays undefined (Codex-only field)", async () => {
-      const user = await createTestUser();
-      const { org } = await createTestOrg(user.id, { slug: "agg-load-claude" });
-      const imported = await importOAuthModelProviderConnection({
-        orgId: org.id,
-        userId: user.id,
-        providerId: CLAUDE,
-        label: "Claude Max",
-        accessToken: "sk-ant-oat01-fake",
-        refreshToken: "sk-ant-ort01-fake",
-        expiresAt: Date.now() + 3600 * 1000,
-        subscriptionType: "max",
-        email: "user@anthropic-test.com",
-      });
-
-      const creds = await loadInferenceCredentials(org.id, imported.credentialId);
-      expect(creds).not.toBeNull();
-      expect(creds!.apiKey).toBe("sk-ant-oat01-fake");
-      expect(creds!.providerId).toBe("claude-code");
-      // Anthropic OAuth carries no account-scoping claim — `accountId`
-      // staying undefined is the contract (lets the inference probe skip
-      // the `chatgpt-account-id` header it would otherwise require).
-      expect(creds!.accountId).toBeUndefined();
-    });
-
     it("returns null when the underlying OAuth credential is flagged needsReconnection", async () => {
       const user = await createTestUser();
       const { org } = await createTestOrg(user.id, { slug: "agg-load-revoked" });
+      const accessJwt = makeFakeCodexJwt({ chatgpt_account_id: "acc-revoke" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
-        providerId: CLAUDE,
-        label: "Claude (about to revoke)",
-        accessToken: "sk-ant-oat01-fake",
-        refreshToken: "sk-ant-ort01-fake",
+        providerId: CODEX,
+        label: "Codex (about to revoke)",
+        accessToken: accessJwt,
+        refreshToken: "rt-codex",
         expiresAt: Date.now() + 3600 * 1000,
       });
 

@@ -16,7 +16,6 @@
  *
  * Edge cases under test:
  *   - Happy path Codex: persists row + decoded chatgpt_account_id.
- *   - Happy path Claude: passes `subscriptionType` + `email` through verbatim.
  *   - Codex JWT defensive decoding extracts `chatgpt_account_id` server-side
  *     even when the request body did not provide it.
  *   - Unknown providerId → 404 (`notFound`).
@@ -36,7 +35,6 @@ import { type OAuthBlob } from "../../../src/services/model-provider-credentials
 import { ApiError } from "../../../src/lib/errors.ts";
 
 const CODEX = "codex";
-const CLAUDE = "claude-code";
 
 /**
  * Build a synthetic Codex-shaped JWT (RS256 alg header but unsigned — the
@@ -112,34 +110,6 @@ describe("importOAuthModelProviderConnection", () => {
     expect(blob.needsReconnection).toBe(false);
   });
 
-  it("happy path Claude: passes subscriptionType + email through verbatim", async () => {
-    const result = await importOAuthModelProviderConnection({
-      orgId,
-      userId,
-      providerId: CLAUDE,
-      label: "Claude Max",
-      accessToken: "sk-ant-oat01-fake",
-      refreshToken: "sk-ant-ort01-fake",
-      expiresAt: Date.now() + 3600 * 1000,
-      subscriptionType: "max",
-      email: "user@anthropic-test.com",
-    });
-
-    expect(result.providerId).toBe(CLAUDE);
-    expect(result.subscriptionType).toBe("max");
-    expect(result.email).toBe("user@anthropic-test.com");
-
-    const [row] = await db
-      .select()
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, result.credentialId));
-    expect(row?.providerId).toBe("claude-code");
-    const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
-    expect(blob.subscriptionType).toBe("max");
-    expect(blob.email).toBe("user@anthropic-test.com");
-    expect(blob.accountId).toBeUndefined();
-  });
-
   it("unknown providerId → notFound (404)", async () => {
     await expect(
       importOAuthModelProviderConnection({
@@ -211,9 +181,9 @@ describe("importOAuthModelProviderConnection", () => {
     const first = await importOAuthModelProviderConnection({
       orgId,
       userId,
-      providerId: CLAUDE,
-      label: "Claude v1",
-      accessToken: "access-v1",
+      providerId: CODEX,
+      label: "Codex v1",
+      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-v1" }),
       refreshToken: "refresh-v1",
       expiresAt: Date.now() + 3600 * 1000,
     });
@@ -221,9 +191,9 @@ describe("importOAuthModelProviderConnection", () => {
     const second = await importOAuthModelProviderConnection({
       orgId,
       userId,
-      providerId: CLAUDE,
-      label: "Claude v2",
-      accessToken: "access-v2",
+      providerId: CODEX,
+      label: "Codex v2",
+      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-v2" }),
       refreshToken: "refresh-v2",
       expiresAt: Date.now() + 7200 * 1000,
     });

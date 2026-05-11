@@ -45,7 +45,7 @@ async function setupOrg(): Promise<SeedFixture> {
 
 async function seedOauthCred(
   fx: SeedFixture,
-  providerId: "codex" | "claude-code",
+  providerId: "codex",
   opts: { expiresAtMs: number | null; needsReconnection?: boolean },
 ): Promise<string> {
   const id = await createOAuthCredential({
@@ -78,7 +78,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
   });
 
   it("picks up a credential expiring within the 24h lead window", async () => {
-    await seedOauthCred(fx, "claude-code", {
+    await seedOauthCred(fx, "codex", {
       expiresAtMs: Date.now() + 60 * 60 * 1000, // 1h from now
     });
 
@@ -88,7 +88,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
   });
 
   it("ignores a credential whose expiry is far beyond the lead window", async () => {
-    await seedOauthCred(fx, "claude-code", {
+    await seedOauthCred(fx, "codex", {
       expiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -100,7 +100,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
   });
 
   it("ignores a credential flagged needsReconnection=true", async () => {
-    await seedOauthCred(fx, "claude-code", {
+    await seedOauthCred(fx, "codex", {
       expiresAtMs: Date.now() + 60 * 60 * 1000,
       needsReconnection: true,
     });
@@ -113,7 +113,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
   });
 
   it("ignores a credential with expiresAt=null (sidecar handles those reactively)", async () => {
-    await seedOauthCred(fx, "claude-code", { expiresAtMs: null });
+    await seedOauthCred(fx, "codex", { expiresAtMs: null });
 
     const result = await scanAndEnqueueRefreshes();
     // `expires_at IS NULL` qualifies via the backfill branch of the SQL
@@ -128,7 +128,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     // The SQL filter must reject the 4 fresh rows BEFORE the decrypt loop;
     // observable signal: `scanned` reflects only the rows the worker
     // actually fetched (and would have decrypted), so it must equal 1.
-    await seedOauthCred(fx, "claude-code", { expiresAtMs: Date.now() + 60 * 60 * 1000 });
+    await seedOauthCred(fx, "codex", { expiresAtMs: Date.now() + 60 * 60 * 1000 });
     for (let i = 0; i < 4; i++) {
       await seedOauthCred(fx, "codex", {
         expiresAtMs: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
@@ -153,8 +153,8 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     expect(result).toEqual({ scanned: 0, enqueued: 0 });
   });
 
-  it("processes multiple eligible credentials in a single scan (Codex + Claude)", async () => {
-    await seedOauthCred(fx, "claude-code", {
+  it("processes multiple eligible credentials in a single scan", async () => {
+    await seedOauthCred(fx, "codex", {
       expiresAtMs: Date.now() + 30 * 60 * 1000,
     });
     await seedOauthCred(fx, "codex", {

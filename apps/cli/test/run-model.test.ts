@@ -269,8 +269,8 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
 
   it("uses an OAuth-shaped placeholder for keyKind=oauth Anthropic presets", async () => {
     // pi-ai detects OAuth via `apiKey.includes("sk-ant-oat")` and reshapes
-    // the body locally (Claude-Code system prompt + tool renaming) — that
-    // reshape only happens when the placeholder mirrors the prefix. The
+    // the body locally (system prompt + tool renaming) — that reshape only
+    // happens when the placeholder mirrors the prefix. The
     // SDK then tries to set `Authorization: Bearer <oauth-placeholder>`,
     // but `defaultHeaders` (= our `model.headers`) is applied AFTER the
     // auth header in `buildHeaders`, so our `Authorization: Bearer
@@ -313,8 +313,8 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     });
     // `keyKind: "api-key"` MUST NOT trigger pi-ai's OAuth branch —
     // body reshaping with a non-OAuth upstream would be sent to the wrong
-    // shape (renamed tools, injected Claude-Code system prompt) and the
-    // upstream would reject it.
+    // shape (renamed tools, injected system prompt) and the upstream
+    // would reject it.
     expect(apiKey).not.toContain("sk-ant-oat");
   });
 
