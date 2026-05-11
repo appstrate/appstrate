@@ -50,6 +50,10 @@ export interface LlmConfig {
   providerId?: string;
   /** `model_provider_credentials` row id. Required when `providerId` resolves to an OAuth provider — the sidecar pulls fresh tokens from `/internal/oauth-token/:credentialId`. */
   credentialId?: string;
+  /** OAuth registry overlay — passed through from `ResolvedModel` so the sidecar config can be built without a second registry lookup downstream. */
+  rewriteUrlPath?: { from: string; to: string };
+  forceStream?: boolean;
+  forceStore?: false;
 }
 
 /**

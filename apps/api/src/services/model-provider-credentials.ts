@@ -538,7 +538,11 @@ export async function listOrgModelProviderCredentials(
 }
 
 /**
- * Decrypted credentials ready for inference (model probe, LLM proxy).
+ * Decrypted credentials ready for inference (model probe, LLM proxy, sidecar
+ * config). Carries the registry overlay (rewriteUrlPath, forceStream/Store)
+ * inline so downstream consumers (pi.ts, llm-proxy) don't have to re-look-up
+ * `getModelProviderConfig(providerId)` after the fact.
+ *
  * Combines the two read paths:
  *   - system (env-driven) keys: plaintext from `SYSTEM_PROVIDER_KEYS`
  *   - DB-stored credentials (api-key or OAuth, decrypted on demand)
@@ -551,6 +555,10 @@ export interface InferenceCredentials {
   providerId?: string;
   /** Codex only: required as `chatgpt-account-id` header on inference. */
   accountId?: string;
+  /** Registry overlay — OAuth providers only. */
+  rewriteUrlPath?: { from: string; to: string };
+  forceStream?: boolean;
+  forceStore?: false;
 }
 
 /**
@@ -580,5 +588,8 @@ export async function loadInferenceCredentials(
     apiKey: creds.apiKey,
     providerId: creds.providerId,
     accountId: creds.accountId,
+    rewriteUrlPath: creds.rewriteUrlPath,
+    forceStream: creds.forceStream,
+    forceStore: creds.forceStore,
   };
 }

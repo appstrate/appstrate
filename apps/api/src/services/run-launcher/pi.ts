@@ -38,7 +38,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
-import { getModelProviderConfig, isOAuthModelProvider } from "../oauth-model-providers/registry.ts";
+import { isOAuthModelProvider } from "../oauth-model-providers/registry.ts";
 import { decodeCodexJwtPayload } from "../oauth-model-providers/registry.ts";
 import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 
@@ -116,21 +116,15 @@ export async function runPlatformContainer(
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
-      const providerCfg = getModelProviderConfig(llmConfig.providerId!);
-      if (!providerCfg) {
-        throw new Error(
-          `Model credential references unknown OAuth provider "${llmConfig.providerId}"`,
-        );
-      }
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        apiShape: providerCfg.apiShape as LlmProxyOauthConfig["apiShape"],
-        providerId: providerCfg.providerId,
-        ...(providerCfg.rewriteUrlPath ? { rewriteUrlPath: providerCfg.rewriteUrlPath } : {}),
-        ...(providerCfg.forceStream !== undefined ? { forceStream: providerCfg.forceStream } : {}),
-        ...(providerCfg.forceStore !== undefined ? { forceStore: providerCfg.forceStore } : {}),
+        apiShape: llmConfig.apiShape as LlmProxyOauthConfig["apiShape"],
+        providerId: llmConfig.providerId!,
+        ...(llmConfig.rewriteUrlPath ? { rewriteUrlPath: llmConfig.rewriteUrlPath } : {}),
+        ...(llmConfig.forceStream !== undefined ? { forceStream: llmConfig.forceStream } : {}),
+        ...(llmConfig.forceStore !== undefined ? { forceStore: llmConfig.forceStore } : {}),
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {

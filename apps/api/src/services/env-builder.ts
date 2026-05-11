@@ -154,6 +154,9 @@ export async function buildRunContext(params: {
     cost: modelResult.cost,
     ...(modelResult.providerId ? { providerId: modelResult.providerId } : {}),
     ...(modelResult.credentialId ? { credentialId: modelResult.credentialId } : {}),
+    ...(modelResult.rewriteUrlPath ? { rewriteUrlPath: modelResult.rewriteUrlPath } : {}),
+    ...(modelResult.forceStream !== undefined ? { forceStream: modelResult.forceStream } : {}),
+    ...(modelResult.forceStore !== undefined ? { forceStore: modelResult.forceStore } : {}),
   };
 
   // Step 3: resolve version label + dirty flag
