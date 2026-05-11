@@ -5,26 +5,18 @@
  * OAuth model providers Appstrate supports today: OpenAI Codex and
  * Anthropic Claude Code.
  *
- * This module is shared between the persistent CLI (`apps/cli`'s
- * `connect` command) and the one-shot helper (`appstrate-connect`
- * binary) so both speak to the same pi-ai surface area and produce the
- * same normalised credentials shape — divergence here would let the two
- * paths drift in subtle ways (e.g. one stops capturing `accountId` after
- * a pi-ai upgrade and the other doesn't).
+ * Internal-only — driven by the helper binary (`apps/connect-helper/src/cli.ts`)
+ * after it decodes a pairing token from the dashboard. The `claude` /
+ * `codex` slug is a pi-ai surface concern (which loopback to invoke); the
+ * dashboard / platform speak only in canonical `providerId` values.
  */
 
 import { loginOpenAICodex, loginAnthropic } from "@mariozechner/pi-ai/oauth";
 
-/** Provider slugs accepted on the wire. Mapped to canonical `providerId` values server-side. */
+/** Provider slugs accepted by pi-ai's loopback helpers. */
 export type ConnectProviderSlug = "codex" | "claude";
 
-/** Map a UI-friendly slug to the platform's canonical `providerId`. */
-export const SLUG_TO_PROVIDER_ID: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "codex",
-  claude: "claude-code",
-});
-
-/** Inverse of {@link SLUG_TO_PROVIDER_ID} — useful when decoding pairing tokens. */
+/** Map the platform's canonical `providerId` to the slug pi-ai expects. */
 export const PROVIDER_ID_TO_SLUG: Readonly<Record<string, ConnectProviderSlug>> = Object.freeze({
   codex: "codex",
   "claude-code": "claude",
