@@ -166,11 +166,12 @@ describe("codex module — import + identity extraction", () => {
     // OAuth rows must not return null on read (regression).
     expect(creds!.apiKey).toBe(accessJwt);
     // accountId must be propagated through the return shape — a missing
-    // field here surfaces as "Missing chatgpt-account-id" downstream.
+    // field here surfaces as "Missing chatgpt-account-id" downstream when
+    // the codex module's `buildInferenceProbe` hook runs.
     expect(creds!.accountId).toBe("acc-codex-123");
-    // providerId is what the inference probe branches on to apply the
-    // codex-specific request shape (`/codex/responses` + the account
-    // header).
+    // providerId is what the platform looks up in the registry to find
+    // the codex module's hooks (`buildInferenceProbe`, `buildApiKey-
+    // Placeholder`, `extractTokenIdentity`).
     expect(creds!.providerId).toBe("codex");
     // Codex uses apiShape "openai-codex-responses" — sidecar resolves
     // `${baseUrl}/codex/responses` natively, no URL rewrite needed.

@@ -31,22 +31,23 @@ import { logger } from "../../lib/logger.ts";
 export interface ImportOAuthModelProviderInput {
   orgId: string;
   userId: string;
-  /** Canonical providerId ("codex"). */
+  /** Canonical providerId — must be registered + `authMode: "oauth2"`. */
   providerId: string;
   label: string;
   accessToken: string;
   refreshToken: string;
   /** Unix milliseconds since epoch. The CLI converts the provider's `expires_in`. */
   expiresAt?: number | null;
-  /** Claude-only: surfaced from the token response body by the CLI. */
+  /** Free-form subscription tier from the OAuth response body, passed through as opaque metadata. */
   subscriptionType?: string;
-  /** Provider account email — Codex extracts from JWT, Claude from token body. */
+  /** Account email — body takes precedence over the value the hook re-derives. */
   email?: string;
   /**
-   * Codex only — pi-ai's `loginOpenAICodex` surfaces the JWT's
-   * `chatgpt_account_id` claim as a top-level field. The CLI forwards it so
-   * the platform persists the canonical value rather than re-deriving from
-   * the JWT (defense in depth — server-side decode runs as fallback below).
+   * Abstract account/tenant identifier — the well-known `accountId` slot
+   * from {@link ModelProviderIdentity}. Forwarded by the CLI when the
+   * upstream OAuth response surfaces it as a top-level field; the
+   * provider's `extractTokenIdentity` hook fills it in server-side as a
+   * defense-in-depth fallback.
    */
   accountId?: string;
 }
@@ -64,14 +65,11 @@ export interface ImportOAuthModelProviderResult {
  * Persist a token bundle the CLI obtained on the user's machine via a
  * loopback OAuth dance against the official provider client_id.
  *
- * Provider-specific extras:
- *   - Codex: `chatgpt_account_id` is decoded from the access JWT here, not
- *     trusted from the request body — even though the CLI runs on the user's
- *     machine, defense-in-depth keeps the platform from blindly persisting
- *     attacker-controlled fields.
- *   - Claude: `subscriptionType` and `email` come from the token response body
- *     and are passed through as opaque strings (the platform can't recover
- *     them server-side once the CLI has discarded the raw response).
+ * Identity slots (`accountId`, `email`) are resolved provider-agnostically:
+ * the body-level value takes precedence, the registered provider's
+ * `extractTokenIdentity` hook fills in the gaps. `requiredIdentityClaims`
+ * on the provider definition acts as a declarative gate so the platform
+ * refuses to persist a credential whose mandatory slots can't be resolved.
  */
 export async function importOAuthModelProviderConnection(
   input: ImportOAuthModelProviderInput,

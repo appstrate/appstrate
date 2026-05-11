@@ -934,7 +934,8 @@ export const schemas = {
       forceStore: { type: "boolean" },
       accountId: {
         type: "string",
-        description: "Codex only — used as `chatgpt-account-id` header.",
+        description:
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by `providerId`) decides which routing header to echo it as.",
       },
       providerId: { type: "string" },
     },

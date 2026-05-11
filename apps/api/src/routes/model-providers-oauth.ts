@@ -46,20 +46,28 @@ const importBody = z.object({
   refreshToken: z.string().min(1, "refreshToken is required"),
   /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
   expiresAt: z.number().int().positive().optional().nullable(),
-  /** Claude-only: subscription tier from the token response body. */
+  /**
+   * Free-form subscription tier surfaced in the OAuth response body
+   * (e.g. "pro", "team", "enterprise"). Passed through as opaque
+   * metadata — the platform never inspects it.
+   */
   subscriptionType: z.string().max(40).optional(),
-  /** Account email; Codex re-derives from JWT, Claude relies on this. */
+  /**
+   * Account email associated with the credential. Either forwarded by
+   * the CLI from the OAuth response body, or re-derived server-side by
+   * the provider's `extractTokenIdentity` hook.
+   */
   email: z.email().max(320).optional(),
   /**
-   * Codex only — pi-ai surfaces the `chatgpt_account_id` claim as a
-   * top-level `accountId` field after a successful login. We accept it
-   * here so we can persist the canonical value rather than re-deriving
-   * it from the JWT (which risks a base64url decode mismatch). Constrained
-   * to a strict UUID — Codex's `chatgpt_account_id` is canonically a UUID,
-   * so anything else is a malformed payload and rejecting it early keeps
-   * downstream header injection (`chatgpt-account-id`) honest.
+   * Abstract account/tenant identifier — the well-known `accountId`
+   * slot from {@link ModelProviderIdentity}. When the CLI surfaces it
+   * from the OAuth response body we trust the body-level value (it's
+   * cheaper than re-decoding the token); otherwise the provider's
+   * `extractTokenIdentity` hook fills it in server-side. Constrained
+   * to a reasonable length — provider-specific format validation
+   * (e.g. "must be a UUID") belongs in the module's hook.
    */
-  accountId: z.uuid().optional(),
+  accountId: z.string().min(1).max(120).optional(),
 });
 
 export function createModelProvidersOAuthRouter() {

@@ -148,7 +148,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Import an OAuth model provider token bundle from the connect helper",
       description:
-        "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives provider claims (Codex JWT `chatgpt_account_id`) defensively, then persists into `model_provider_credentials`.",
+        "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.",
       requestBody: {
         required: true,
         content: {
@@ -181,15 +181,14 @@ export const modelProvidersOAuthPaths = {
                   format: "email",
                   maxLength: 320,
                   description:
-                    "Account email — Codex re-derives from JWT, other providers carry it through verbatim.",
+                    "Account email — either forwarded from the OAuth response body or re-derived server-side by the provider's `extractTokenIdentity` hook.",
                 },
                 accountId: {
                   type: "string",
                   minLength: 1,
-                  maxLength: 64,
-                  pattern: "^[A-Za-z0-9_-]+$",
+                  maxLength: 120,
                   description:
-                    "Codex-only: pi-ai surfaces the JWT's `chatgpt_account_id` claim as a top-level field. Forwarded here so the platform persists the canonical value rather than re-deriving it.",
+                    "Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side.",
                 },
               },
             },
