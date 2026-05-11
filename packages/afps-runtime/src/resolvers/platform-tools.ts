@@ -48,7 +48,8 @@ export const noteTool: Tool = {
     "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
     "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
     "Prefer bullet-sized entries (one fact per call). " +
-    'By default notes are scoped to the current actor (the user or end-user that triggered the run); pass scope: "shared" for app-wide notes every actor will see.',
+    'Scope defaults to "actor" — well-suited for personal preferences (each actor sees only their own notes). ' +
+    'Pass scope: "shared" for facts universal to the app (API quirks, org conventions, shared-resource structure) so every actor can recall them.',
   parameters: {
     type: "object",
     required: ["content"],
@@ -63,7 +64,7 @@ export const noteTool: Tool = {
         type: "string",
         enum: ["actor", "shared"],
         description:
-          'Persistence scope. "actor" (default) keeps the note private to the run\'s actor; "shared" makes it visible to every actor of this app.',
+          'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of this app; use for facts universal regardless of who triggered the run.',
       },
     },
   } satisfies JSONSchema,
@@ -86,7 +87,8 @@ export const pinTool: Tool = {
   description:
     "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per `(scope, key)` — the most recent call fully replaces the previous value. " +
     'Use `key: "checkpoint"` for the carry-over slot snapshotted onto runs.checkpoint; other keys (e.g. "persona", "goals") are accepted and persisted as named pinned blocks. ' +
-    'By default the slot is scoped to the current actor (the user or end-user that triggered the run); pass scope: "shared" for an app-wide slot shared across all actors.',
+    'Scope defaults to "actor" — scheduled runs (under the schedule owner\'s identity), manual triggers, and different members each maintain their own private copy of the slot. ' +
+    'Pass scope: "shared" when the slot tracks a resource shared across actors (a synced repo, a shared inbox, a shared database), otherwise the agent will desynchronise across triggers.',
   parameters: {
     type: "object",
     required: ["key", "content"],
@@ -107,7 +109,7 @@ export const pinTool: Tool = {
         type: "string",
         enum: ["actor", "shared"],
         description:
-          'Persistence scope. "actor" (default) keeps the slot private to the run\'s actor; "shared" makes it visible to every actor of this app.',
+          'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs and manual triggers do not share state. "shared" makes the slot visible to every actor of this app; use when the slot tracks a resource shared across actors.',
       },
     },
   } satisfies JSONSchema,

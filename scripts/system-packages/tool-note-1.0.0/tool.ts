@@ -10,8 +10,12 @@
  * format").
  *
  * Memories carry an optional `scope` ("actor" | "shared"):
- * - "actor" (default) keeps the note private to the run's actor.
- * - "shared" makes the note visible to every actor of this app.
+ * - "actor" (default) keeps the note private to the calling actor —
+ *   well-suited for personal preferences and observations. Scheduled runs,
+ *   manual triggers, and different members each maintain their own archive.
+ * - "shared" makes the note visible to every actor. Use for facts that
+ *   are universal to the app: API quirks, org conventions, the structure
+ *   of a shared resource.
  */
 
 import { Type } from "@mariozechner/pi-ai";
@@ -30,15 +34,17 @@ export default function (pi: ExtensionAPI) {
     description:
       "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
       "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
-      "By default notes are scoped to the current actor (the user or end-user that triggered the run); " +
-      'pass scope="shared" for an app-wide note visible to every actor. ' +
+      'Scope defaults to "actor" — personal observations stay private to the calling actor (scheduled runs, ' +
+      "manual triggers, and different members each see only their own notes). " +
+      'Pass scope="shared" for facts universal to the app — API quirks, org conventions, shared-resource structure — ' +
+      "so every actor can recall them. " +
       "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
     parameters: Type.Object({
       content: Type.String({ description: "Memory text to save (max 2000 characters)" }),
       scope: Type.Optional(
         Type.Union([Type.Literal("actor"), Type.Literal("shared")], {
           description:
-            'Persistence scope. "actor" (default) keeps the note private to the run\'s actor; "shared" makes it app-wide.',
+            'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the app; use for facts universal regardless of who triggered the run.',
         }),
       ),
     }),

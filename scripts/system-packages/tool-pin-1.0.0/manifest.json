@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "type": "tool",
   "displayName": "Pin",
-  "description": "Upsert a named slot pinned into the system prompt on every run. Supports per-actor and shared scopes.",
+  "description": "Upsert a named slot pinned into the system prompt on every run. Per-actor by default; pass scope=\"shared\" when the slot tracks state against a resource shared across actors (synced repo, shared inbox, shared DB).",
   "schemaVersion": "1.5",
   "entrypoint": "tool.ts",
   "tool": {
     "name": "pin",
-    "description": "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). Use key=\"checkpoint\" for the legacy carry-over checkpoint; other keys (e.g. \"persona\", \"goals\") are accepted and persisted as named pinned blocks. By default the slot is scoped to the current actor (the user or end-user that triggered the run); pass scope=\"shared\" for an app-wide slot.",
+    "description": "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). Use key=\"checkpoint\" for the carry-over checkpoint slot; other keys (e.g. \"persona\", \"goals\") create additional named pinned blocks. Scope defaults to \"actor\": scheduled runs (under the schedule owner's identity), manual triggers, and different members each maintain their own private copy of the slot and will not see each other's writes. Pass scope=\"shared\" when the slot tracks state against a resource shared across actors (a synced repo, a shared inbox, a shared database) — otherwise an agent triggered both manually and by a schedule will desynchronise and repeat work.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -26,7 +26,7 @@
         "scope": {
           "type": "string",
           "enum": ["actor", "shared"],
-          "description": "Persistence scope: \"actor\" (default) keeps the slot private to the run's actor; \"shared\" makes it app-wide."
+          "description": "Persistence scope. \"actor\" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. \"shared\" makes the slot app-wide so every run reads and writes the same value; use this when the slot tracks a resource shared across actors."
         }
       },
       "required": ["key", "content"]

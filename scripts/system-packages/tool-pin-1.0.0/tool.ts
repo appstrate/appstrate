@@ -12,9 +12,13 @@
  * additional named pinned blocks rendered alongside the checkpoint.
  *
  * Scope ("actor" | "shared"):
- * - "actor" (default) keeps the slot private to the run's actor.
- * - "shared" makes the slot app-wide — useful for cron-scheduled syncs
- *   that have no actor of their own.
+ * - "actor" (default) gives every actor their own private copy. Scheduled
+ *   runs (which carry the schedule owner's identity), manual triggers, and
+ *   different members each maintain a separate slot.
+ * - "shared" makes the slot app-wide. Use this when the slot tracks a
+ *   resource shared across actors (a synced repo, a shared inbox, a shared
+ *   database) — otherwise an agent triggered both manually and by a
+ *   schedule will desynchronise and repeat work.
  */
 
 import { Type } from "@mariozechner/pi-ai";
@@ -32,8 +36,10 @@ export default function (pi: ExtensionAPI) {
     label: "Pin",
     description:
       "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). " +
-      'Use key="checkpoint" for the legacy carry-over checkpoint; other keys (e.g. "persona", "goals") create additional pinned blocks. ' +
-      'By default the slot is scoped to the run\'s actor; pass scope="shared" for app-wide.',
+      'Use key="checkpoint" for the carry-over checkpoint; other keys (e.g. "persona", "goals") create additional pinned blocks. ' +
+      'Scope defaults to "actor" — scheduled runs, manual triggers, and different members each get their own copy. ' +
+      'Pass scope="shared" when the slot tracks a resource shared across actors (synced repo, shared inbox, shared DB), ' +
+      "otherwise the agent will desynchronise across triggers.",
     parameters: Type.Object({
       key: Type.String({
         minLength: 1,
@@ -48,7 +54,7 @@ export default function (pi: ExtensionAPI) {
       scope: Type.Optional(
         Type.Union([Type.Literal("actor"), Type.Literal("shared")], {
           description:
-            'Persistence scope. "actor" (default) keeps the slot private to the run\'s actor; "shared" makes it app-wide.',
+            'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot app-wide; use when the slot tracks a resource shared across actors.',
         }),
       ),
     }),
