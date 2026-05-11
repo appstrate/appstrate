@@ -47,8 +47,6 @@ const importBody = z.object({
   refreshToken: z.string().min(1, "refreshToken is required"),
   /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
   expiresAt: z.number().int().positive().optional().nullable(),
-  /** Optional — when absent the server falls back to the user's default profile. */
-  connectionProfileId: z.uuid().optional(),
   /** Claude-only: subscription tier from the token response body. */
   subscriptionType: z.string().max(40).optional(),
   /** Account email; Codex re-derives from JWT, Claude relies on this. */
@@ -77,11 +75,11 @@ export function createModelProvidersOAuthRouter() {
   //      /pairing; `npx @appstrate/connect-helper` POSTs the credentials
   //      back with that token as Bearer credentials. We `consumePairing()`
   //      atomically (single-use) — the resulting row's userId / orgId /
-  //      applicationId / providerId override anything the body claims, so
-  //      a tampered helper cannot redirect the import to a different org
-  //      or provider than the user authorized in the dashboard.
+  //      providerId override anything the body claims, so a tampered
+  //      helper cannot redirect the import to a different org or provider
+  //      than the user authorized in the dashboard.
   //
-  //   2. **Session cookie** (legacy `appstrate connect` CLI path) — goes
+  //   2. **Session cookie** — direct browser-initiated import. Goes
   //      through `requireAppContext` + `requirePermission` like every
   //      other dashboard write.
   //
@@ -115,9 +113,7 @@ export function createModelProvidersOAuthRouter() {
 
       const result = await importOAuthModelProviderConnection({
         orgId: consumed.orgId,
-        applicationId: consumed.applicationId,
         userId: consumed.userId,
-        connectionProfileId: input.connectionProfileId,
         providerId: input.providerId,
         label: input.label,
         accessToken: input.accessToken,
@@ -154,7 +150,6 @@ export function createModelProvidersOAuthRouter() {
   // registering two distinct routes.
   const sessionImportInner = async (c: Context<AppEnv>): Promise<Response> => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
     const user = c.get("user");
     const body = await c.req.json();
     const input = parseBody(importBody, body);
@@ -165,9 +160,7 @@ export function createModelProvidersOAuthRouter() {
 
     const result = await importOAuthModelProviderConnection({
       orgId,
-      applicationId,
       userId: user.id,
-      connectionProfileId: input.connectionProfileId,
       providerId: input.providerId,
       label: input.label,
       accessToken: input.accessToken,
@@ -251,7 +244,6 @@ export function createModelProvidersOAuthRouter() {
     rateLimit(10),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
       const user = c.get("user");
       const body = await c.req.json().catch(() => ({}));
       const input = parseBody(createPairingBody, body);
@@ -266,7 +258,6 @@ export function createModelProvidersOAuthRouter() {
       const { id, token, expiresAt } = await createPairing({
         userId: user.id,
         orgId,
-        applicationId,
         providerId: input.providerId,
         platformUrl,
         ttlSeconds: PAIRING_TTL_SECONDS,

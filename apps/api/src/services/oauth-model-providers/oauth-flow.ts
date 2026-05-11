@@ -30,11 +30,7 @@ import { logger } from "../../lib/logger.ts";
 
 export interface ImportOAuthModelProviderInput {
   orgId: string;
-  /** Kept for backward compat with the CLI body shape; unused by this service. */
-  applicationId: string;
   userId: string;
-  /** Kept for backward compat with the CLI body shape; unused by this service. */
-  connectionProfileId?: string;
   /** Canonical providerId ("codex", "claude-code"). */
   providerId: string;
   label: string;

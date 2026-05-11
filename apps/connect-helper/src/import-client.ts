@@ -48,8 +48,6 @@ export async function postImport(args: {
   providerId: string;
   label: string;
   credentials: NormalisedOAuthCredentials;
-  /** Optional connection profile id when the front-end has a specific one in scope. */
-  connectionProfileId?: string;
 }): Promise<ImportResult> {
   const url = `${args.platformUrl.replace(/\/+$/, "")}/api/model-providers-oauth/import`;
   const body: Record<string, unknown> = {
@@ -62,7 +60,6 @@ export async function postImport(args: {
   if (args.credentials.email) body.email = args.credentials.email;
   if (args.credentials.subscriptionType) body.subscriptionType = args.credentials.subscriptionType;
   if (args.credentials.accountId) body.accountId = args.credentials.accountId;
-  if (args.connectionProfileId) body.connectionProfileId = args.connectionProfileId;
 
   const response = await fetch(url, {
     method: "POST",

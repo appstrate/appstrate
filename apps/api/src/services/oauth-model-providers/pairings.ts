@@ -41,7 +41,6 @@ const CLEANUP_GRACE_HOURS = 1;
 export interface CreatePairingArgs {
   userId: string;
   orgId: string;
-  applicationId: string;
   providerId: string;
   /** Public platform URL embedded in the token so the helper knows where to POST back. */
   platformUrl: string;
@@ -63,7 +62,6 @@ export interface ConsumedPairing {
   id: string;
   userId: string;
   orgId: string;
-  applicationId: string;
   providerId: string;
   expiresAt: Date;
   consumedAt: Date;
@@ -73,7 +71,6 @@ export interface PairingRow {
   id: string;
   userId: string;
   orgId: string;
-  applicationId: string;
   providerId: string;
   expiresAt: Date;
   consumedAt: Date | null;
@@ -118,7 +115,6 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
     tokenHash,
     userId: args.userId,
     orgId: args.orgId,
-    applicationId: args.applicationId,
     providerId: args.providerId,
     expiresAt,
   });
@@ -156,7 +152,6 @@ export async function consumePairing(token: string, fromIp?: string): Promise<Co
       id: modelProviderPairings.id,
       userId: modelProviderPairings.userId,
       orgId: modelProviderPairings.orgId,
-      applicationId: modelProviderPairings.applicationId,
       providerId: modelProviderPairings.providerId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
@@ -171,7 +166,6 @@ export async function consumePairing(token: string, fromIp?: string): Promise<Co
     id: row.id,
     userId: row.userId,
     orgId: row.orgId,
-    applicationId: row.applicationId,
     providerId: row.providerId,
     expiresAt: row.expiresAt,
     consumedAt: row.consumedAt,
@@ -185,7 +179,6 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
       id: modelProviderPairings.id,
       userId: modelProviderPairings.userId,
       orgId: modelProviderPairings.orgId,
-      applicationId: modelProviderPairings.applicationId,
       providerId: modelProviderPairings.providerId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,

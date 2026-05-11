@@ -450,10 +450,9 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
     it("surfaces OAuth credentials with providerId + authMode='oauth'", async () => {
       const user = await createTestUser();
-      const { org, defaultAppId } = await createTestOrg(user.id, { slug: "agg-list-oauth" });
+      const { org } = await createTestOrg(user.id, { slug: "agg-list-oauth" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
-        applicationId: defaultAppId,
         userId: user.id,
         providerId: CLAUDE,
         label: "Claude Max",
@@ -499,14 +498,13 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
     it("Codex OAuth: returns access token + providerId + accountId", async () => {
       const user = await createTestUser();
-      const { org, defaultAppId } = await createTestOrg(user.id, { slug: "agg-load-codex" });
+      const { org } = await createTestOrg(user.id, { slug: "agg-load-codex" });
       const accessJwt = makeFakeCodexJwt({
         chatgpt_account_id: "acc-codex-123",
         email: "user@example.com",
       });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
-        applicationId: defaultAppId,
         userId: user.id,
         providerId: CODEX,
         label: "ChatGPT Pro",
@@ -531,10 +529,9 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
     it("Claude OAuth: returns access token + providerId; accountId stays undefined (Codex-only field)", async () => {
       const user = await createTestUser();
-      const { org, defaultAppId } = await createTestOrg(user.id, { slug: "agg-load-claude" });
+      const { org } = await createTestOrg(user.id, { slug: "agg-load-claude" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
-        applicationId: defaultAppId,
         userId: user.id,
         providerId: CLAUDE,
         label: "Claude Max",
@@ -557,10 +554,9 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
     it("returns null when the underlying OAuth credential is flagged needsReconnection", async () => {
       const user = await createTestUser();
-      const { org, defaultAppId } = await createTestOrg(user.id, { slug: "agg-load-revoked" });
+      const { org } = await createTestOrg(user.id, { slug: "agg-load-revoked" });
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
-        applicationId: defaultAppId,
         userId: user.id,
         providerId: CLAUDE,
         label: "Claude (about to revoke)",

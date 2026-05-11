@@ -49,7 +49,6 @@ describe("createPairing", () => {
     const result = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
@@ -85,7 +84,6 @@ describe("consumePairing", () => {
     const { token } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId,
       platformUrl: PLATFORM_URL,
       ttlSeconds,
@@ -98,7 +96,6 @@ describe("consumePairing", () => {
     const consumed = await consumePairing(token, "127.0.0.1");
     expect(consumed.providerId).toBe("codex");
     expect(consumed.orgId).toBe(fix.org.id);
-    expect(consumed.applicationId).toBe(fix.defaultAppId);
     expect(consumed.consumedAt).toBeInstanceOf(Date);
   });
 
@@ -153,7 +150,6 @@ describe("getPairing", () => {
     const { id } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
@@ -167,7 +163,6 @@ describe("getPairing", () => {
     const { id } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
@@ -190,7 +185,6 @@ describe("cleanupExpiredPairings", () => {
     const fresh = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
@@ -199,7 +193,6 @@ describe("cleanupExpiredPairings", () => {
     const recent = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "claude-code",
       platformUrl: PLATFORM_URL,
       ttlSeconds: -60, // expired 60s ago
@@ -208,7 +201,6 @@ describe("cleanupExpiredPairings", () => {
     const old = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      applicationId: fix.defaultAppId,
       providerId: "codex",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,

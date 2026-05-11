@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS "model_provider_pairings" (
   "token_hash" text NOT NULL,
   "user_id" text NOT NULL,
   "org_id" uuid NOT NULL,
-  "application_id" text NOT NULL,
   "provider_id" text NOT NULL,
   "expires_at" timestamp NOT NULL,
   "consumed_at" timestamp,
@@ -29,11 +28,6 @@ ALTER TABLE "model_provider_pairings"
 ALTER TABLE "model_provider_pairings"
   ADD CONSTRAINT "model_provider_pairings_org_id_organizations_id_fk"
   FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE;
---> statement-breakpoint
-
-ALTER TABLE "model_provider_pairings"
-  ADD CONSTRAINT "model_provider_pairings_application_id_applications_id_fk"
-  FOREIGN KEY ("application_id") REFERENCES "applications"("id") ON DELETE CASCADE;
 --> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS "idx_model_provider_pairings_org_id"

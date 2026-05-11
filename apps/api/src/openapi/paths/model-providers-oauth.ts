@@ -178,12 +178,6 @@ export const modelProvidersOAuthPaths = {
                   type: ["integer", "null"],
                   description: "Unix milliseconds since epoch — when the access token expires.",
                 },
-                connectionProfileId: {
-                  type: "string",
-                  format: "uuid",
-                  description:
-                    "Optional connection profile to attach the connection to. Defaults to the user's default profile when absent.",
-                },
                 subscriptionType: {
                   type: "string",
                   maxLength: 40,

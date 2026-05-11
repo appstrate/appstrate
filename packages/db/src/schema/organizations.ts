@@ -227,9 +227,6 @@ export const modelProviderPairings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
-      .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
     /** Provider id (e.g. `codex`, `claude-code`) from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
     expiresAt: timestamp("expires_at").notNull(),

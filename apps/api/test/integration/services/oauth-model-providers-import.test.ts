@@ -66,15 +66,13 @@ function makeFakeCodexJwt(payload: {
 describe("importOAuthModelProviderConnection", () => {
   let userId: string;
   let orgId: string;
-  let applicationId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const user = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    applicationId = defaultAppId;
   });
 
   it("happy path Codex: persists row + decodes account_id from JWT", async () => {
@@ -85,7 +83,6 @@ describe("importOAuthModelProviderConnection", () => {
 
     const result = await importOAuthModelProviderConnection({
       orgId,
-      applicationId,
       userId,
       providerId: CODEX,
       label: "ChatGPT Pro",
@@ -118,7 +115,6 @@ describe("importOAuthModelProviderConnection", () => {
   it("happy path Claude: passes subscriptionType + email through verbatim", async () => {
     const result = await importOAuthModelProviderConnection({
       orgId,
-      applicationId,
       userId,
       providerId: CLAUDE,
       label: "Claude Max",
@@ -148,7 +144,6 @@ describe("importOAuthModelProviderConnection", () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
-        applicationId,
         userId,
         providerId: "@example/not-a-real-provider",
         label: "x",
@@ -162,7 +157,6 @@ describe("importOAuthModelProviderConnection", () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
-        applicationId,
         userId,
         providerId: "openai",
         label: "x",
@@ -176,7 +170,6 @@ describe("importOAuthModelProviderConnection", () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
-        applicationId,
         userId,
         providerId: CODEX,
         label: "   ",
@@ -190,7 +183,6 @@ describe("importOAuthModelProviderConnection", () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
-        applicationId,
         userId,
         providerId: CODEX,
         label: "x",
@@ -206,7 +198,6 @@ describe("importOAuthModelProviderConnection", () => {
     await expect(
       importOAuthModelProviderConnection({
         orgId,
-        applicationId,
         userId,
         providerId: CODEX,
         label: "ChatGPT",
@@ -219,7 +210,6 @@ describe("importOAuthModelProviderConnection", () => {
   it("re-import creates a fresh row (no upsert across imports)", async () => {
     const first = await importOAuthModelProviderConnection({
       orgId,
-      applicationId,
       userId,
       providerId: CLAUDE,
       label: "Claude v1",
@@ -230,7 +220,6 @@ describe("importOAuthModelProviderConnection", () => {
 
     const second = await importOAuthModelProviderConnection({
       orgId,
-      applicationId,
       userId,
       providerId: CLAUDE,
       label: "Claude v2",
