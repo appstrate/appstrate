@@ -45,7 +45,6 @@
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^12.1.0",
-    "@appstrate/connect-helper": "workspace:*",
     "@clack/prompts": "^1.2.0",
     "@mariozechner/pi-ai": "^0.70.6",
     "@mariozechner/pi-coding-agent": "^0.70.6",

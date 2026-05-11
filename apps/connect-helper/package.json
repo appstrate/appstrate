@@ -16,9 +16,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/appstrate/appstrate.git",
-    "directory": "packages/connect-helper"
+    "directory": "apps/connect-helper"
   },
-  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/connect-helper",
+  "homepage": "https://github.com/appstrate/appstrate/tree/main/apps/connect-helper",
   "bugs": {
     "url": "https://github.com/appstrate/appstrate/issues"
   },
@@ -33,9 +33,7 @@
     "appstrate-connect": "./dist/cli.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./pairing-token": "./src/pairing-token.ts",
-    "./loopback-oauth": "./src/loopback-oauth.ts"
+    "./pairing-token": "./src/pairing-token.ts"
   },
   "files": [
     "dist",

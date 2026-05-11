@@ -14,7 +14,6 @@ import type { NormalisedOAuthCredentials } from "./loopback-oauth.ts";
 
 export interface ImportResult {
   providerKeyId: string;
-  connectionId: string;
   providerId: string;
   email?: string;
   subscriptionType?: string;
@@ -70,7 +69,7 @@ export async function postImport(args: {
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${args.bearer}`,
-      "user-agent": "@appstrate/connect helper",
+      "user-agent": "@appstrate/connect-helper",
     },
     body: JSON.stringify(body),
   });
