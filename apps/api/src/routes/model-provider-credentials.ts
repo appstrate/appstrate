@@ -102,6 +102,7 @@ export function createModelProviderCredentialsRouter() {
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens ?? null,
         capabilities: m.capabilities,
+        recommended: m.recommended ?? false,
       })),
     }));
     return c.json(listResponse(data));

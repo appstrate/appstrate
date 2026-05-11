@@ -47,9 +47,15 @@ interface Props {
   open: boolean;
   providerId: string;
   onClose: () => void;
+  /**
+   * Fires once the helper has consumed the pairing token and the platform
+   * has persisted the credential. Callers can use this to refresh their
+   * credential list and auto-select the freshly-created row.
+   */
+  onConnected?: () => void;
 }
 
-export function OAuthModelProviderDialog({ open, providerId, onClose }: Props) {
+export function OAuthModelProviderDialog({ open, providerId, onClose, onConnected }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
   const [stage, setStage] = useState<"tos" | "cli">("tos");
@@ -74,6 +80,7 @@ export function OAuthModelProviderDialog({ open, providerId, onClose }: Props) {
     if (pairingStatus.data?.status === "consumed") {
       toast.success(t("providerKeys.oauth.callbackSuccess"));
       qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
+      onConnected?.();
       handleClose();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

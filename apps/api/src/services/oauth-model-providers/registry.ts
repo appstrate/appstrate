@@ -49,6 +49,14 @@ export interface ModelEntry {
   capabilities: readonly ModelCapability[];
   /** Default per-token cost. Self-hosters can override via SYSTEM_PROVIDER_KEYS env. */
   cost?: ModelCost;
+  /**
+   * Curated default for first-connection auto-seed flows (onboarding
+   * quick-connect cards). When `true`, the model is created in `org_models`
+   * automatically right after a fresh OAuth pairing succeeds. If no model in
+   * a provider's list carries this flag, callers fall back to seeding every
+   * entry — see `apps/web/src/hooks/use-auto-seed-models.ts`.
+   */
+  recommended?: true;
 }
 
 export interface OAuthConfig {
@@ -166,9 +174,19 @@ const codexConfig: ModelProviderConfig = {
     pkce: "S256",
   },
   models: [
-    { id: "gpt-5.5", contextWindow: 200000, capabilities: ["text", "image", "reasoning"] },
+    {
+      id: "gpt-5.5",
+      contextWindow: 200000,
+      capabilities: ["text", "image", "reasoning"],
+      recommended: true,
+    },
+    {
+      id: "gpt-5.4-mini",
+      contextWindow: 200000,
+      capabilities: ["text", "reasoning"],
+      recommended: true,
+    },
     { id: "gpt-5.4", contextWindow: 200000, capabilities: ["text", "reasoning"] },
-    { id: "gpt-5.4-mini", contextWindow: 200000, capabilities: ["text", "reasoning"] },
     { id: "gpt-5.3-codex", contextWindow: 200000, capabilities: ["text", "reasoning"] },
     { id: "gpt-5.2", contextWindow: 200000, capabilities: ["text", "reasoning"] },
   ],
@@ -204,11 +222,13 @@ const claudeCodeConfig: ModelProviderConfig = {
       id: "claude-opus-4-7",
       contextWindow: 1000000,
       capabilities: ["text", "image", "reasoning", "long-context-1m"],
+      recommended: true,
     },
     {
       id: "claude-sonnet-4-6",
       contextWindow: 1000000,
       capabilities: ["text", "image", "reasoning", "long-context-1m"],
+      recommended: true,
     },
     {
       id: "claude-haiku-4-5",

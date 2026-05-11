@@ -36,6 +36,12 @@ export interface ProviderRegistryEntry {
     contextWindow: number;
     maxTokens: number | null;
     capabilities: readonly string[];
+    /**
+     * Curated default for first-connection auto-seed (onboarding
+     * quick-connect). When at least one model carries the flag, the seeder
+     * inserts only those; otherwise it seeds every entry.
+     */
+    recommended: boolean;
   }[];
 }
 

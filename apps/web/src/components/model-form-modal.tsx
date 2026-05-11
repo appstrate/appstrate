@@ -27,13 +27,15 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
+import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
 import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
+import { OAuthModelProviderDialog } from "./oauth-model-provider-dialog";
+import { useNewOAuthCredential } from "../hooks/use-new-oauth-credential";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -290,6 +292,7 @@ function ModelFormBody({
     handleSubmit,
     control,
     setValue,
+    setError,
     clearErrors,
     showError,
     formState: { errors },
@@ -326,16 +329,66 @@ function ModelFormBody({
 
   const providerKeysQuery = useModelProviderCredentials();
 
+  // `authMode` for the picked provider drives the credential UX:
+  //   - "oauth2"  → no inline apiKey, must select an existing connection or
+  //                 launch the OAuth dialog to create one.
+  //   - "api_key" → inline apiKey input OR pick an existing matching credential.
+  // The registry is the source of truth — OAuth providers (codex, claude-code)
+  // only exist there; static `PROVIDER_PRESETS` entries are all api_key.
+  const registryEntry = useMemo(
+    () => registryQuery.data?.find((p) => p.providerId === providerId),
+    [registryQuery.data, providerId],
+  );
+  const authMode: "api_key" | "oauth2" = registryEntry?.authMode ?? "api_key";
+  const isOauthProvider = authMode === "oauth2";
+
+  // Filter the existing credential list to those compatible with the picked
+  // provider:
+  //   - OAuth: pin to the canonical `providerId` (DB column) — apiShape +
+  //            baseUrl would collide with api-key Anthropic credentials.
+  //   - api-key: match on apiShape + baseUrl as before.
   const availableProviderKeys = useMemo(() => {
-    if (!providerKeysQuery.data || !apiShape || !baseUrl) return [];
+    if (!providerKeysQuery.data) return [];
+    if (isOauthProvider) {
+      return providerKeysQuery.data.filter(
+        (k) => k.authMode === "oauth2" && k.providerId === providerId,
+      );
+    }
+    if (!apiShape || !baseUrl) return [];
     const normalizedBase = baseUrl.replace(/\/+$/, "");
     return providerKeysQuery.data.filter(
-      (k) => k.apiShape === apiShape && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
+      (k) =>
+        k.authMode === "api_key" &&
+        k.apiShape === apiShape &&
+        k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
-  }, [providerKeysQuery.data, apiShape, baseUrl]);
+  }, [providerKeysQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
 
   const selectedKey = availableProviderKeys.find((k) => k.id === credentialId);
-  const inlineKeyMode = !selectedKey && !credentialId;
+  // For api-key providers, the third state is "no selection + about to type
+  // a new key inline". For OAuth providers there's no inline path — the
+  // user must either pick or click "Connect".
+  const inlineKeyMode = !isOauthProvider && !selectedKey && !credentialId;
+
+  // OAuth connect dialog — `useNewOAuthCredential` captures a snapshot before
+  // open + resolves the freshly-minted credential id on success so we can
+  // auto-select it in the form.
+  const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
+  const { captureBeforeConnect, findAfterConnect } = useNewOAuthCredential();
+
+  const handleOpenOauthDialog = () => {
+    captureBeforeConnect();
+    setOauthDialogOpen(true);
+  };
+
+  const handleOauthConnected = async () => {
+    const newId = await findAfterConnect(providerId);
+    if (newId) {
+      setValue("credentialId", newId);
+      setValue("inlineApiKey", "");
+      clearErrors("credentialId");
+    }
+  };
 
   const [openRouterSearch, setOpenRouterSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -419,15 +472,32 @@ function ModelFormBody({
     const cw = data.contextWindow.trim() ? parseInt(data.contextWindow.trim(), 10) : undefined;
     const mt = data.maxTokens.trim() ? parseInt(data.maxTokens.trim(), 10) : undefined;
 
+    // Inline api-key creation only applies to api_key providers — OAuth
+    // credentials must exist before the model is saved (they're created via
+    // the pairing dialog and auto-selected into `credentialId`).
+    const willCreateNewKey =
+      !isOauthProvider && inlineKeyMode && data.inlineApiKey.trim().length > 0;
+
+    // OAuth path requires a selected credential — there's no "type your key
+    // inline" affordance, so emptiness is a hard error. The api-key path
+    // accepts either an existing selection OR an inline new key; the route
+    // handler validates the latter further down.
+    if (isOauthProvider && !data.credentialId) {
+      setError("credentialId", { message: t("models.form.connectionRequired") });
+      return;
+    }
+    if (!isOauthProvider && !data.credentialId && !willCreateNewKey) {
+      setError("credentialId", { message: t("models.form.apiKeyRequired") });
+      return;
+    }
+
     onSubmit({
       label: data.label.trim(),
       apiShape: data.apiShape.trim(),
       baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
-      credentialId: inlineKeyMode ? "" : data.credentialId,
-      ...(inlineKeyMode && data.inlineApiKey.trim()
-        ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } }
-        : {}),
+      credentialId: willCreateNewKey ? "" : data.credentialId,
+      ...(willCreateNewKey ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } } : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
@@ -552,15 +622,31 @@ function ModelFormBody({
           </div>
         )}
 
-        {/* Provider key — visible once a model is chosen */}
+        {/* Credential — visible once a model is chosen.
+            Two flavors keyed on the provider's authMode:
+              - OAuth: select an existing connection OR launch the pairing
+                dialog. No inline secret input.
+              - API key: type a new key inline OR pick an existing credential. */}
         {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
-            <Label>{t("providerKeys.form.apiKey")}</Label>
+            <Label>
+              {isOauthProvider ? t("models.form.connectionLabel") : t("providerKeys.form.apiKey")}
+            </Label>
+
             {selectedKey ? (
               <div className="flex gap-2">
                 <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
-                  <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
+                  {isOauthProvider ? (
+                    <Plug className="text-muted-foreground size-3.5 shrink-0" />
+                  ) : (
+                    <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
+                  )}
                   <span className="truncate">{selectedKey.label}</span>
+                  {isOauthProvider && selectedKey.oauthEmail && (
+                    <span className="text-muted-foreground truncate text-xs">
+                      ({selectedKey.oauthEmail})
+                    </span>
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -573,7 +659,61 @@ function ModelFormBody({
                   }}
                 >
                   <X className="size-4" />
-                  <span className="sr-only">Clear</span>
+                  <span className="sr-only">{t("btn.cancel")}</span>
+                </Button>
+              </div>
+            ) : isOauthProvider ? (
+              // OAuth: existing-connection select stacks ABOVE the connect
+              // button when there's at least one match — single column avoids
+              // the side-by-side overflow when the provider name is long.
+              <div className="flex flex-col gap-2">
+                {availableProviderKeys.length > 0 && (
+                  <Select
+                    value=""
+                    onValueChange={(id) => {
+                      setValue("credentialId", id);
+                      setValue("inlineApiKey", "");
+                      clearErrors("credentialId");
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t("models.form.useExistingConnection")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableProviderKeys.map((k) => (
+                        <SelectItem key={k.id} value={k.id}>
+                          <span className="flex items-center gap-2">
+                            <span className="truncate">{k.label}</span>
+                            {k.oauthEmail && (
+                              <span className="text-muted-foreground truncate text-xs">
+                                {k.oauthEmail}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(
+                    "w-full min-w-0 justify-start",
+                    showError("credentialId") && "border-destructive",
+                  )}
+                  onClick={handleOpenOauthDialog}
+                >
+                  <Plug className="mr-2 size-4 shrink-0" />
+                  <span className="truncate">
+                    {availableProviderKeys.length > 0
+                      ? t("models.form.connectAnother", {
+                          provider: registryEntry?.displayName ?? providerId,
+                        })
+                      : t("models.form.connectProvider", {
+                          provider: registryEntry?.displayName ?? providerId,
+                        })}
+                  </span>
                 </Button>
               </div>
             ) : (
@@ -582,7 +722,10 @@ function ModelFormBody({
                   type="password"
                   {...register("inlineApiKey")}
                   placeholder="sk-..."
-                  className={cn("flex-1", showError("credentialId") && "border-destructive")}
+                  className={cn(
+                    "min-w-0 flex-1",
+                    showError("credentialId") && "border-destructive",
+                  )}
                   aria-invalid={showError("credentialId") ? true : undefined}
                 />
                 {availableProviderKeys.length > 0 && (
@@ -593,7 +736,7 @@ function ModelFormBody({
                       setValue("inlineApiKey", "");
                     }}
                   >
-                    <SelectTrigger className="w-auto shrink-0">
+                    <SelectTrigger className="w-32 shrink-0">
                       <SelectValue placeholder={t("models.form.useExistingKey")} />
                     </SelectTrigger>
                     <SelectContent>
@@ -607,15 +750,32 @@ function ModelFormBody({
                 )}
               </div>
             )}
-            {!selectedKey && inlineApiKey.trim() && (
+
+            {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
               <div className="text-muted-foreground text-sm">
                 {t("models.form.createProviderKeyHint")}
+              </div>
+            )}
+            {!selectedKey && isOauthProvider && (
+              <div className="text-muted-foreground text-sm">
+                {t("models.form.connectProviderHint")}
               </div>
             )}
             {showError("credentialId") && errors.credentialId?.message && (
               <div className="text-destructive text-sm">{errors.credentialId.message}</div>
             )}
           </div>
+        )}
+
+        {oauthDialogOpen && (
+          <OAuthModelProviderDialog
+            open
+            providerId={providerId}
+            onClose={() => setOauthDialogOpen(false)}
+            onConnected={() => {
+              void handleOauthConnected();
+            }}
+          />
         )}
 
         {/* Custom fields — visible for custom provider or custom model */}

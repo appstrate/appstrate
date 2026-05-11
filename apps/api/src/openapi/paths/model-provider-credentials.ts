@@ -59,12 +59,17 @@ export const modelProviderCredentialsPaths = {
                           type: "array",
                           items: {
                             type: "object",
-                            required: ["id", "contextWindow", "capabilities"],
+                            required: ["id", "contextWindow", "capabilities", "recommended"],
                             properties: {
                               id: { type: "string" },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
+                              recommended: {
+                                type: "boolean",
+                                description:
+                                  "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all.",
+                              },
                             },
                           },
                         },
