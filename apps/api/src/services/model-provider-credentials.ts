@@ -83,8 +83,20 @@ interface ModelProviderCredentialRow {
 
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
+/**
+ * Single decrypted credential shape exposed to the rest of the platform —
+ * shared by `loadModelProviderCredentials` (DB-only read path used by
+ * tests + OAuth refresh worker) and `loadInferenceCredentials` (DB + env
+ * system-key fallback + needsReconnection gate, used by org-models +
+ * model-provider-credentials routes).
+ *
+ * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
+ * entries have no registry providerId — they are flat wire-format
+ * descriptors. OAuth + DB rows always carry one.
+ */
 export interface DecryptedModelProviderCredentials {
-  providerId: string;
+  /** Canonical registry id ("anthropic", "codex", …). Absent for env-driven system keys. */
+  providerId?: string;
   apiShape: ModelApiShape;
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
@@ -538,58 +550,36 @@ export async function listOrgModelProviderCredentials(
 }
 
 /**
- * Decrypted credentials ready for inference (model probe, LLM proxy, sidecar
- * config). Carries the registry overlay (rewriteUrlPath, forceStream/Store)
- * inline so downstream consumers (pi.ts, llm-proxy) don't have to re-look-up
- * `getModelProviderConfig(providerId)` after the fact.
+ * Resolve a credential id to plaintext credentials usable for inference
+ * (model probe, LLM proxy, sidecar config). Combines the two read paths
+ * into one — system (env-driven) keys from `SYSTEM_PROVIDER_KEYS` and
+ * DB-stored credentials (api-key or OAuth, decrypted on demand) — and
+ * gates dead OAuth rows (`needsReconnection`).
  *
- * Combines the two read paths:
- *   - system (env-driven) keys: plaintext from `SYSTEM_PROVIDER_KEYS`
- *   - DB-stored credentials (api-key or OAuth, decrypted on demand)
- */
-export interface InferenceCredentials {
-  apiShape: string;
-  baseUrl: string;
-  apiKey: string;
-  /** Populated for OAuth-backed credentials — drives provider-specific request shape. */
-  providerId?: string;
-  /** Codex only: required as `chatgpt-account-id` header on inference. */
-  accountId?: string;
-  /** Registry overlay — OAuth providers only. */
-  rewriteUrlPath?: { from: string; to: string };
-  forceStream?: boolean;
-  forceStore?: false;
-}
-
-/**
- * Resolve a credential id to plaintext credentials usable for inference.
+ * The returned shape carries the registry overlay (rewriteUrlPath,
+ * forceStream/Store) inline so downstream consumers (pi.ts, llm-proxy)
+ * don't have to re-look-up `getModelProviderConfig(providerId)`.
  *
- * Returns `null` when the id is unknown to either source, or when the OAuth
- * credential is flagged `needsReconnection` (the credential is dead and the
- * caller must treat it as missing).
+ * Returns `null` when the id is unknown to either source, or when the
+ * OAuth credential is dead and the caller must treat it as missing.
  */
 export async function loadInferenceCredentials(
   orgId: string,
   id: string,
-): Promise<InferenceCredentials | null> {
-  // 1) System (env-driven) keys.
+): Promise<DecryptedModelProviderCredentials | null> {
+  // 1) System (env-driven) keys — no registry providerId, just wire format.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
-    return { apiShape: systemKey.apiShape, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };
+    return {
+      apiShape: systemKey.apiShape as ModelApiShape,
+      baseUrl: systemKey.baseUrl,
+      apiKey: systemKey.apiKey,
+    };
   }
 
   // 2) Unified credentials table (api-key + OAuth).
   const creds = await loadModelProviderCredentials(orgId, id);
   if (!creds) return null;
   if (creds.needsReconnection) return null;
-  return {
-    apiShape: creds.apiShape,
-    baseUrl: creds.baseUrl,
-    apiKey: creds.apiKey,
-    providerId: creds.providerId,
-    accountId: creds.accountId,
-    rewriteUrlPath: creds.rewriteUrlPath,
-    forceStream: creds.forceStream,
-    forceStore: creds.forceStore,
-  };
+  return creds;
 }
