@@ -306,13 +306,12 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // HMAC signature at the route layer — not via JWT / API key / cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
-  // OAuth model-provider import accepts a one-shot pairing-token bearer
-  // (`Authorization: Bearer appp_…`) that the route handler validates by
-  // atomically consuming the matching `model_provider_pairings` row.
-  // Skipping the cookie/API-key auth chain here lets the helper POST
-  // credentials without a session — the pairing's own lifecycle is the
-  // authorization proof. Cookie and API-key callers fall through to the
-  // standard session+permission middleware as before.
+  // OAuth model-provider import is bearer-only: `Authorization: Bearer appp_…`
+  // is the ONLY accepted auth shape. The route handler atomically consumes
+  // the matching `model_provider_pairings` row; the row's userId/orgId/
+  // providerId become the request context, replacing the cookie/API-key
+  // chain entirely. Requests without the bearer reach the route handler
+  // and 401 there.
   if (path === "/api/model-providers-oauth/import" && headers) {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (auth?.startsWith("Bearer appp_")) return true;

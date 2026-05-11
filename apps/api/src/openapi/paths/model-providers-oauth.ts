@@ -152,13 +152,9 @@ export const modelProvidersOAuthPaths = {
     post: {
       operationId: "importOAuthModelProviderConnection",
       tags: ["Model Provider Credentials"],
-      summary: "Import an OAuth model provider token bundle from the CLI",
+      summary: "Import an OAuth model provider token bundle from the connect helper",
       description:
-        "Persists an OAuth token bundle obtained on the user's machine via `appstrate connect <provider>`. The CLI runs the loopback OAuth dance against the provider's authorization server because the public CLI client_ids only allowlist `http://localhost:PORT/...` redirect_uris. Server-side this re-derives provider claims (Codex JWT account_id) defensively, then persists via the same shared helper the legacy callback used.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
+        "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives provider claims (Codex JWT `chatgpt_account_id`) defensively, then persists into `model_provider_credentials`.",
       requestBody: {
         required: true,
         content: {

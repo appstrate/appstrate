@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bearer-pairing-token auth track on POST /api/model-providers-oauth/import.
+ * Bearer-pairing-token auth on POST /api/model-providers-oauth/import.
  *
- * The pairing token replaces the session cookie for the helper flow:
- *   1. Dashboard mints token via /pairing (session-auth).
+ * The route is bearer-only — there is no cookie/API-key fallback:
+ *   1. Dashboard mints token via POST /pairing (session-auth + RBAC).
  *   2. `npx @appstrate/connect-helper` runs the loopback OAuth dance.
  *   3. Helper POSTs credentials to /import with the pairing token as Bearer.
  *
  * Invariants tested here:
- *   - Bearer track works without any session cookie / X-Org-Id / X-Application-Id.
- *   - The pairing's userId/orgId/applicationId/providerId are pinned at mint
- *     time and override anything the request body claims (no cross-org or
+ *   - Bearer auth works without any session cookie / X-Org-Id / X-Application-Id.
+ *   - The pairing's userId/orgId/providerId are pinned at mint time and
+ *     override anything the request body claims (no cross-org or
  *     cross-provider divert via tampered helper).
  *   - The pairing is single-use — a second POST with the same Bearer 410s.
  *   - Mismatched providerId in body is rejected with 400 before the
  *     credential is created.
  *   - Malformed / expired / replayed bearers all 410.
+ *   - Cookie-only requests 401 (route does not accept session auth).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -162,12 +163,14 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
     expect(res.status).toBe(200);
   });
 
-  it("falls through to session-auth when no bearer is present", async () => {
+  it("rejects session-cookie requests without a pairing-bearer (bearer-only route)", async () => {
+    // The route is bearer-only — cookie/API-key requests reach the handler
+    // (auth-pipeline only bypasses on `Bearer appp_`) and 401 there.
     const res = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify(VALID_BODY("codex")),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 });

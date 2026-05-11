@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono, type Context, type Next } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
@@ -18,16 +18,16 @@ import {
   createPairing,
   getPairing,
 } from "../services/oauth-model-providers/pairings.ts";
-import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 
 /**
- * Body shape posted by `appstrate connect <provider>` after the CLI has
- * completed the loopback OAuth dance against the provider's authorization
- * server. The CLI funnels the `OAuthCredentials` returned by `pi-ai` into
- * this contract; everything except `accessToken`/`refreshToken`/`label` is
- * advisory and re-derived server-side when possible.
+ * Body shape posted by `npx @appstrate/connect-helper <token>` after it
+ * completes the loopback OAuth dance against the provider's authorization
+ * server. The helper funnels the `OAuthCredentials` returned by `pi-ai`
+ * into this contract; everything except `accessToken`/`refreshToken`/`label`
+ * is advisory and re-derived server-side when possible.
  *
  * The browser-OAuth `/initiate` + `/callback` pair this route replaces was
  * fundamentally incompatible with the public CLI client_ids — the providers'
@@ -68,99 +68,49 @@ export function createModelProvidersOAuthRouter() {
 
   // POST /api/model-providers-oauth/import
   //
-  // Two auth tracks land on the same route, discriminated by the auth header:
+  // Auth is exclusively `Authorization: Bearer appp_<token>`. The platform
+  // minted the token via POST /pairing (session-auth + RBAC); the helper
+  // POSTs the credentials back here with it as Bearer credentials. We
+  // `consumePairing()` atomically (single-use) — the resulting row's
+  // userId / orgId / providerId override anything the body claims, so a
+  // tampered helper cannot redirect the import to a different org or
+  // provider than the user authorized in the dashboard.
   //
-  //   1. **Pairing token** (`Authorization: Bearer appp_…`) — the
-  //      dashboard helper flow. The platform minted a one-shot token via
-  //      /pairing; `npx @appstrate/connect-helper` POSTs the credentials
-  //      back with that token as Bearer credentials. We `consumePairing()`
-  //      atomically (single-use) — the resulting row's userId / orgId /
-  //      providerId override anything the body claims, so a tampered
-  //      helper cannot redirect the import to a different org or provider
-  //      than the user authorized in the dashboard.
-  //
-  //   2. **Session cookie** — direct browser-initiated import. Goes
-  //      through `requireAppContext` + `requirePermission` like every
-  //      other dashboard write.
-  //
-  // The two tracks share the same body schema and the same
-  // `importOAuthModelProviderConnection` call — only the auth context
-  // differs. The pairing-bearer track is checked FIRST; if absent we
-  // composte the legacy middleware chain inline so a single `router.post`
-  // registration covers both paths.
-  router.post("/import", async (c, next) => {
+  // No cookie / API-key path: the dashboard never POSTs to this route,
+  // it only mints pairings + polls their status. `auth-pipeline.ts` lets
+  // requests with `Bearer appp_` skip the cookie/API-key chain; any other
+  // shape lands here and we 401.
+  router.post("/import", async (c) => {
     const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
-    if (authHeader?.startsWith("Bearer appp_")) {
-      const token = authHeader.slice(7);
-      const fromIp = getClientIp(c);
-      const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
-
-      const body = await c.req.json();
-      const input = parseBody(importBody, body);
-
-      // Body's providerId MUST match what the pairing was minted for —
-      // otherwise the helper could divert the import to a different
-      // provider than the user authorized in the dashboard.
-      if (input.providerId !== consumed.providerId) {
-        throw invalidRequest(
-          `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
-          "providerId",
-        );
-      }
-      if (!isModelProviderEnabled(input.providerId)) {
-        throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
-      }
-
-      const result = await importOAuthModelProviderConnection({
-        orgId: consumed.orgId,
-        userId: consumed.userId,
-        providerId: input.providerId,
-        label: input.label,
-        accessToken: input.accessToken,
-        refreshToken: input.refreshToken,
-        expiresAt: input.expiresAt ?? null,
-        subscriptionType: input.subscriptionType,
-        email: input.email,
-        accountId: input.accountId,
-      });
-
-      await recordAuditFromContext(c, {
-        action: "oauth_model_provider.imported",
-        resourceType: "oauth_model_provider",
-        resourceId: result.credentialId,
-        after: {
-          providerId: result.providerId,
-          credentialId: result.credentialId,
-          availableModelIds: result.availableModelIds,
-          pairingId: consumed.id,
-          viaPairing: true,
-          // No raw token / email — audit log MUST NOT carry secrets
-        },
-      });
-
-      return c.json(result);
+    if (!authHeader?.startsWith("Bearer appp_")) {
+      throw unauthorized(
+        "POST /api/model-providers-oauth/import requires a pairing-token bearer (Authorization: Bearer appp_…)",
+      );
     }
 
-    // No pairing-bearer — fall through to the legacy session+permission chain.
-    return await sessionImportChain(c, next);
-  });
+    const token = authHeader.slice(7);
+    const fromIp = getClientIp(c);
+    const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
 
-  // Legacy session-auth track. Manually composes the existing middleware
-  // chain so the pairing-bearer branch above can opt out without
-  // registering two distinct routes.
-  const sessionImportInner = async (c: Context<AppEnv>): Promise<Response> => {
-    const orgId = c.get("orgId");
-    const user = c.get("user");
     const body = await c.req.json();
     const input = parseBody(importBody, body);
 
+    // Body's providerId MUST match what the pairing was minted for —
+    // otherwise the helper could divert the import to a different
+    // provider than the user authorized in the dashboard.
+    if (input.providerId !== consumed.providerId) {
+      throw invalidRequest(
+        `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
+        "providerId",
+      );
+    }
     if (!isModelProviderEnabled(input.providerId)) {
       throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
     }
 
     const result = await importOAuthModelProviderConnection({
-      orgId,
-      userId: user.id,
+      orgId: consumed.orgId,
+      userId: consumed.userId,
       providerId: input.providerId,
       label: input.label,
       accessToken: input.accessToken,
@@ -179,30 +129,13 @@ export function createModelProvidersOAuthRouter() {
         providerId: result.providerId,
         credentialId: result.credentialId,
         availableModelIds: result.availableModelIds,
+        pairingId: consumed.id,
         // No raw token / email — audit log MUST NOT carry secrets
       },
     });
 
     return c.json(result);
-  };
-
-  const appCtxMw = requireAppContext();
-  const permMw = requirePermission("model-provider-credentials", "write");
-  const sessionImportChain = async (c: Context<AppEnv>, next: Next): Promise<Response> => {
-    let response: Response | undefined;
-    await appCtxMw(c, async () => {
-      await permMw(c, async () => {
-        response = await sessionImportInner(c);
-      });
-    });
-    if (!response) {
-      // A middleware short-circuited (e.g. requireAppContext threw) — Hono
-      // already handles that via its error path. Defer to next().
-      await next();
-      return c.res;
-    }
-    return response;
-  };
+  });
 
   // ────────────────────────────────────────────────────────────────────────
   // Pairing flow (dashboard-initiated OAuth model provider connection)
