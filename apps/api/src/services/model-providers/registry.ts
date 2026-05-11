@@ -46,8 +46,7 @@ const _byId = new Map<string, ModelProviderDefinition>();
  * tables and appScopedPaths.
  */
 export function registerModelProvider(def: ModelProviderDefinition): void {
-  const existing = _byId.get(def.providerId);
-  if (existing && existing !== def) {
+  if (_byId.has(def.providerId)) {
     throw new Error(
       `Model provider ${JSON.stringify(def.providerId)} is already registered. ` +
         `Provider ids must be unique — the second definition would silently shadow the first.`,
@@ -57,8 +56,8 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
 }
 
 /**
- * Bulk-register from a contribution array (e.g. `getModuleModelProviders()`
- * or the legacy seed). Each entry goes through `registerModelProvider()`.
+ * Bulk-register from a contribution array (e.g. `getModuleModelProviders()`).
+ * Each entry goes through `registerModelProvider()`.
  */
 export function registerModelProviders(defs: readonly ModelProviderDefinition[]): void {
   for (const def of defs) registerModelProvider(def);

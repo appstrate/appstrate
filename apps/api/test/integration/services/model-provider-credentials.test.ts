@@ -31,7 +31,6 @@ import {
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
-  listModelProviderCredentialRows,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
@@ -155,7 +154,9 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: PLAINTEXT,
     });
 
-    const list = await listModelProviderCredentialRows(ctx.orgId);
+    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+      (k) => k.source === "custom",
+    );
     expect(list).toHaveLength(1);
     const serialized = JSON.stringify(list[0]);
     expect(serialized).not.toContain(PLAINTEXT);
@@ -320,7 +321,9 @@ describe("model-provider-credentials service — oauth path", () => {
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
     // email preserved (only surface in list, not in load).
-    const list = await listModelProviderCredentialRows(ctx.orgId);
+    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+      (k) => k.source === "custom",
+    );
     expect(list[0]!.oauthEmail).toBe("x@example.test");
   });
 
@@ -340,7 +343,9 @@ describe("model-provider-credentials service — oauth path", () => {
     // loadInferenceCredentials gates dead OAuth rows — null is the signal.
     expect(await loadInferenceCredentials(ctx.orgId, id)).toBeNull();
     // The list view surfaces the raw flag for UI affordances.
-    const list = await listModelProviderCredentialRows(ctx.orgId);
+    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+      (k) => k.source === "custom",
+    );
     expect(list[0]!.needsReconnection).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import type { ModelCost, TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
+import type { ResolvedModel } from "../org-models.ts";
 
 export type { ModelCost, ToolMeta, TokenUsage };
 export { modelCostSchema, tokenUsageSchema };
@@ -36,25 +37,13 @@ export interface ProviderSummary extends PlatformPromptProvider {
   categories?: string[];
 }
 
-export interface LlmConfig {
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
-  /** Canonical providerId (e.g. `codex`). Set when the credential is OAuth-backed; gates the sidecar's OAuth wiring. */
-  providerId?: string;
-  /** `model_provider_credentials` row id. Required when `providerId` resolves to an OAuth provider — the sidecar pulls fresh tokens from `/internal/oauth-token/:credentialId`. */
-  credentialId?: string;
-  /** OAuth registry overlay — passed through from `ResolvedModel` so the sidecar config can be built without a second registry lookup downstream. */
-  rewriteUrlPath?: { from: string; to: string };
-  forceStream?: boolean;
-  forceStore?: false;
-}
+/**
+ * Inference-only projection of {@link ResolvedModel} — drops display
+ * fields (`label`, `isSystemModel`) the env-builder consumes separately
+ * via the run record, and `accountId` which the sidecar re-reads from
+ * the credential row on each request.
+ */
+export type LlmConfig = Omit<ResolvedModel, "label" | "isSystemModel" | "accountId">;
 
 /**
  * Platform-specific run configuration — everything that does NOT fit in the

@@ -60,28 +60,6 @@ export interface OAuthBlob {
 
 export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
-// ─── Internal DB-row shape (never carries plaintext) ───────────────────────
-// Distinct from the public `ModelProviderCredentialInfo` (shared-types) which
-// also represents env-driven system keys via `source: "built-in"`.
-
-interface ModelProviderCredentialRow {
-  id: string;
-  orgId: string;
-  label: string;
-  providerId: string;
-  /** Effective base URL after applying the override, if any. */
-  baseUrl: string;
-  /** "api_key" | "oauth2" — derived from the registry, not stored on the row. */
-  authMode: "api_key" | "oauth2";
-  /** OAuth-only: filled when the row's blob is `kind: "oauth"`. */
-  oauthEmail?: string | null;
-  needsReconnection?: boolean;
-  oauthExpiresAt?: string | null;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
 /**
@@ -127,39 +105,6 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
   } catch {
     return null;
   }
-}
-
-// ─── List (org-scoped) ─────────────────────────────────────────────────────
-
-export async function listModelProviderCredentialRows(
-  orgId: string,
-): Promise<ModelProviderCredentialRow[]> {
-  const rows = await db
-    .select()
-    .from(modelProviderCredentials)
-    .where(scopedWhere(modelProviderCredentials, { orgId }));
-
-  return rows.map((r): ModelProviderCredentialRow => {
-    const cfg = getModelProvider(r.providerId);
-    const baseUrl = effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "";
-    const blob = decryptBlob(r.credentialsEncrypted);
-    const isOauth = blob?.kind === "oauth";
-    return {
-      id: r.id,
-      orgId: r.orgId,
-      label: r.label,
-      providerId: r.providerId,
-      baseUrl,
-      authMode: cfg?.authMode ?? "api_key",
-      oauthEmail: isOauth ? (blob.email ?? null) : undefined,
-      needsReconnection: isOauth ? blob.needsReconnection : undefined,
-      oauthExpiresAt:
-        isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
-      createdBy: r.createdBy,
-      createdAt: toISORequired(r.createdAt),
-      updatedAt: toISORequired(r.updatedAt),
-    };
-  });
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
@@ -512,7 +457,10 @@ export async function listOrgModelProviderCredentials(
 ): Promise<ModelProviderCredentialInfo[]> {
   const system = getSystemModelProviderKeys();
   const now = toISORequired(new Date());
-  const rows = await listModelProviderCredentialRows(orgId);
+  const rows = await db
+    .select()
+    .from(modelProviderCredentials)
+    .where(scopedWhere(modelProviderCredentials, { orgId }));
 
   return mergeSystemAndDb({
     system,
@@ -528,23 +476,26 @@ export async function listOrgModelProviderCredentials(
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (row): ModelProviderCredentialInfo => {
-      const cfg = getModelProvider(row.providerId);
+    mapRow: (r): ModelProviderCredentialInfo => {
+      const cfg = getModelProvider(r.providerId);
+      const blob = decryptBlob(r.credentialsEncrypted);
+      const isOauth = blob?.kind === "oauth";
       return {
-        id: row.id,
-        label: row.label,
+        id: r.id,
+        label: r.label,
         apiShape: cfg?.apiShape ?? "openai-chat",
-        baseUrl: row.baseUrl,
+        baseUrl: effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "",
         source: "custom",
-        authMode: row.authMode,
-        providerId: row.providerId,
-        oauthEmail: row.oauthEmail ?? null,
-        oauthExpiresAt: row.oauthExpiresAt ?? null,
-        needsReconnection: row.needsReconnection ?? false,
-        providerDisabled: !isModelProviderEnabled(row.providerId),
-        createdBy: row.createdBy,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
+        authMode: cfg?.authMode ?? "api_key",
+        providerId: r.providerId,
+        oauthEmail: isOauth ? (blob.email ?? null) : null,
+        oauthExpiresAt:
+          isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
+        needsReconnection: isOauth ? !!blob.needsReconnection : false,
+        providerDisabled: !isModelProviderEnabled(r.providerId),
+        createdBy: r.createdBy,
+        createdAt: toISORequired(r.createdAt),
+        updatedAt: toISORequired(r.updatedAt),
       };
     },
   });

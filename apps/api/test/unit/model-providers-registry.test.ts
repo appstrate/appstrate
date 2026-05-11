@@ -48,12 +48,12 @@ describe("model-providers runtime registry", () => {
       expect(getModelProvider("not-here")).toBeNull();
     });
 
-    it("is idempotent when called with the same definition object", () => {
+    it("throws on any duplicate providerId (same object or not)", () => {
       const def = fakeDef("openai");
       registerModelProvider(def);
-      // Same reference — no-op, no throw
-      registerModelProvider(def);
-      expect(listModelProviders()).toHaveLength(1);
+      // Same reference re-registered — still a duplicate; the boot path
+      // never re-registers, so we treat any retry as a programming bug.
+      expect(() => registerModelProvider(def)).toThrow(/already registered/);
     });
 
     it("throws when a different definition reuses an existing providerId", () => {

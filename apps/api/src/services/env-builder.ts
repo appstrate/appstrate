@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-  AppstrateRunPlan,
-  FileReference,
-  LlmConfig,
-  ProviderSummary,
-} from "./run-launcher/types.ts";
+import type { AppstrateRunPlan, FileReference, ProviderSummary } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
 import { getProvider } from "@appstrate/connect";
@@ -142,22 +137,15 @@ export async function buildRunContext(params: {
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
-  const llmConfig: LlmConfig = {
-    apiShape: modelResult.apiShape,
-    baseUrl: modelResult.baseUrl,
-    modelId: modelResult.modelId,
-    apiKey: modelResult.apiKey,
-    input: modelResult.input,
-    contextWindow: modelResult.contextWindow,
-    maxTokens: modelResult.maxTokens,
-    reasoning: modelResult.reasoning,
-    cost: modelResult.cost,
-    ...(modelResult.providerId ? { providerId: modelResult.providerId } : {}),
-    ...(modelResult.credentialId ? { credentialId: modelResult.credentialId } : {}),
-    ...(modelResult.rewriteUrlPath ? { rewriteUrlPath: modelResult.rewriteUrlPath } : {}),
-    ...(modelResult.forceStream !== undefined ? { forceStream: modelResult.forceStream } : {}),
-    ...(modelResult.forceStore !== undefined ? { forceStore: modelResult.forceStore } : {}),
-  };
+  // The inference-only projection — `label`/`isSystemModel` are consumed
+  // above (run record), `accountId` is re-read by the sidecar at request
+  // time. Anything else flows through verbatim.
+  const {
+    label: _label,
+    isSystemModel: _isSystemModel,
+    accountId: _accountId,
+    ...llmConfig
+  } = modelResult;
 
   // Step 3: resolve version label + dirty flag
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
