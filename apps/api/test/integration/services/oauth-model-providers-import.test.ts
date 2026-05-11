@@ -178,12 +178,14 @@ describe("importOAuthModelProviderConnection", () => {
   });
 
   it("re-import creates a fresh row (no upsert across imports)", async () => {
+    const tokenV1 = makeFakeCodexJwt({ chatgpt_account_id: "acc-v1" });
+    const tokenV2 = makeFakeCodexJwt({ chatgpt_account_id: "acc-v2" });
     const first = await importOAuthModelProviderConnection({
       orgId,
       userId,
       providerId: CODEX,
       label: "Codex v1",
-      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-v1" }),
+      accessToken: tokenV1,
       refreshToken: "refresh-v1",
       expiresAt: Date.now() + 3600 * 1000,
     });
@@ -193,7 +195,7 @@ describe("importOAuthModelProviderConnection", () => {
       userId,
       providerId: CODEX,
       label: "Codex v2",
-      accessToken: makeFakeCodexJwt({ chatgpt_account_id: "acc-v2" }),
+      accessToken: tokenV2,
       refreshToken: "refresh-v2",
       expiresAt: Date.now() + 7200 * 1000,
     });
@@ -208,6 +210,6 @@ describe("importOAuthModelProviderConnection", () => {
     const blob2 = decryptCredentials<OAuthBlob>(
       rows.find((r) => r.id === second.credentialId)!.credentialsEncrypted,
     );
-    expect(blob2.accessToken).toBe("access-v2");
+    expect(blob2.accessToken).toBe(tokenV2);
   });
 });
