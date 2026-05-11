@@ -7,6 +7,10 @@ import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-re
 import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import {
+  CLAUDE_CODE_CLI_VERSION,
+  CLAUDE_CODE_IDENTITY_PROMPT,
+} from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./model-provider-credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -598,21 +602,10 @@ async function testCodexInference(config: {
  *   - First system message: "You are Claude Code, Anthropic's official CLI for Claude."
  *
  * cf. node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js (search
- * for `claudeCodeVersion`). Keep the version in sync with what pi-ai pins.
+ * for `claudeCodeVersion`). The constants are defined in `@appstrate/core/
+ * sidecar-types` so the sidecar runtime and the platform probe reference
+ * the same source of truth.
  */
-// Exported for the sync-guard test (apps/api/test/unit/build-inference-probe-request.test.ts)
-// against pi-ai's `claudeCodeVersion`. Drift breaks production silently —
-// Anthropic 429s any User-Agent that doesn't match a recent CLI version.
-export const CLAUDE_CODE_CLI_VERSION = "2.1.75";
-
-/**
- * Claude Code stealth-mode "system" preamble — required by Anthropic's
- * third-party enforcement (since 2026-01-09). Without this exact string
- * as the first system message, requests carrying a Claude Code OAuth
- * token are rejected even when the User-Agent + headers all match.
- */
-export const CLAUDE_CODE_STEALTH_SYSTEM_PROMPT =
-  "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /**
  * Build the Claude Code inference probe request. Mirrors pi-ai's
@@ -642,7 +635,7 @@ export function buildClaudeCodeInferenceRequest(config: {
     body: JSON.stringify({
       model: config.modelId,
       max_tokens: 1,
-      system: [{ type: "text", text: CLAUDE_CODE_STEALTH_SYSTEM_PROMPT }],
+      system: [{ type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT }],
       messages: [{ role: "user", content: "ping" }],
     }),
   };

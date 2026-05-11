@@ -34,6 +34,7 @@
  *     two to produce the metering row.
  */
 
+import { CLAUDE_CODE_CLI_VERSION } from "@appstrate/core/sidecar-types";
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
 import {
   extractUsageObject,
@@ -42,13 +43,6 @@ import {
   substituteModelJson,
 } from "./helpers.ts";
 
-/**
- * Mirrors `pi-ai`'s OAuth path
- * (`@mariozechner/pi-ai/dist/providers/anthropic.js`). Anthropic enforces
- * Claude-Code identity for OAuth tokens — bumping the version requires
- * verifying pi-ai still ships the same `claudeCodeVersion` constant.
- */
-const CLAUDE_CODE_VERSION = "2.1.75";
 const OAUTH_REQUIRED_BETAS = [
   "claude-code-20250219",
   "oauth-2025-04-20",
@@ -83,7 +77,7 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
       // betas are merged into (not overriding) the OAuth-required set
       // so things like `prompt-caching-2024-07-31` keep working.
       headers["Authorization"] = `Bearer ${upstreamApiKey}`;
-      headers["user-agent"] = `claude-cli/${CLAUDE_CODE_VERSION}`;
+      headers["user-agent"] = `claude-cli/${CLAUDE_CODE_CLI_VERSION}`;
       headers["x-app"] = "cli";
       headers["anthropic-dangerous-direct-browser-access"] = "true";
       const callerBeta = readForwardedHeader(incoming, "anthropic-beta");

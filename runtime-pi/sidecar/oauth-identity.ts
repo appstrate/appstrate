@@ -17,10 +17,9 @@
  *     well under the sidecar's 10 MB request cap.
  */
 
+import { CLAUDE_CODE_IDENTITY_PROMPT } from "@appstrate/core/sidecar-types";
 import type { CachedToken } from "./oauth-token-cache.ts";
 import { MAX_REQUEST_BODY_SIZE } from "./helpers.ts";
-
-const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /**
  * Thrown by {@link transformBody} when the buffered LLM request body
@@ -131,16 +130,16 @@ interface ClaudeTextBlock {
 }
 
 function applyClaudeIdentityPrepend(json: Record<string, unknown>): Record<string, unknown> {
-  const identityBlock: ClaudeTextBlock = { type: "text", text: CLAUDE_CODE_IDENTITY };
+  const identityBlock: ClaudeTextBlock = { type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT };
 
   const system = json.system;
   if (Array.isArray(system)) {
     const first = system[0] as ClaudeTextBlock | undefined;
-    const alreadyPrepended = first?.type === "text" && first.text === CLAUDE_CODE_IDENTITY;
+    const alreadyPrepended = first?.type === "text" && first.text === CLAUDE_CODE_IDENTITY_PROMPT;
     json.system = alreadyPrepended ? system : [identityBlock, ...system];
   } else if (typeof system === "string") {
     json.system =
-      system === CLAUDE_CODE_IDENTITY
+      system === CLAUDE_CODE_IDENTITY_PROMPT
         ? [identityBlock]
         : [identityBlock, { type: "text", text: system }];
   } else {

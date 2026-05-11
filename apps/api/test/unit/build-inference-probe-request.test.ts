@@ -21,10 +21,12 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  CLAUDE_CODE_CLI_VERSION,
+  CLAUDE_CODE_IDENTITY_PROMPT,
+} from "@appstrate/core/sidecar-types";
+import {
   buildCodexInferenceRequest,
   buildClaudeCodeInferenceRequest,
-  CLAUDE_CODE_CLI_VERSION,
-  CLAUDE_CODE_STEALTH_SYSTEM_PROMPT,
 } from "../../src/services/org-models.ts";
 
 describe("buildCodexInferenceRequest", () => {
@@ -144,7 +146,7 @@ describe("buildClaudeCodeInferenceRequest", () => {
       apiKey: "k",
     });
     const body = JSON.parse(req.body) as Record<string, unknown>;
-    expect(body.system).toEqual([{ type: "text", text: CLAUDE_CODE_STEALTH_SYSTEM_PROMPT }]);
+    expect(body.system).toEqual([{ type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT }]);
   });
 
   it("body uses max_tokens=1 (cheapest possible probe)", () => {
@@ -163,7 +165,7 @@ describe("buildClaudeCodeInferenceRequest", () => {
     // The string is verbatim from pi-ai. Anthropic's enforcement appears
     // to do a substring match on this preamble — paraphrasing it (even
     // capitalization differences) trips the third-party tier filter.
-    expect(CLAUDE_CODE_STEALTH_SYSTEM_PROMPT).toBe(
+    expect(CLAUDE_CODE_IDENTITY_PROMPT).toBe(
       "You are Claude Code, Anthropic's official CLI for Claude.",
     );
   });

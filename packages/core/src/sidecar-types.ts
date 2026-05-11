@@ -108,3 +108,24 @@ export interface OAuthTokenResponse {
  * when the token expires.
  */
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
+
+/**
+ * Claude Code stealth-mode identity — Anthropic enforces this verbatim for
+ * any OAuth-authenticated `/v1/messages` call. The string must appear as the
+ * first system message (or be prepended by the sidecar). Both the platform
+ * inference probe (`apps/api/src/services/org-models.ts`) and the sidecar
+ * runtime (`runtime-pi/sidecar/oauth-identity.ts`) reference this constant —
+ * paraphrasing it (even capitalisation) trips Anthropic's third-party tier
+ * filter and silently 429s every request.
+ */
+export const CLAUDE_CODE_IDENTITY_PROMPT =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/**
+ * Claude Code CLI version sent as `user-agent: claude-cli/<v>` for OAuth
+ * Anthropic traffic. Must track `claudeCodeVersion` in pi-ai's anthropic
+ * provider; an older value silently 429s. Bumping requires reading pi-ai's
+ * CHANGELOG — see `apps/api/test/unit/build-inference-probe-request.test.ts`
+ * "CLAUDE_CODE_CLI_VERSION sync with pi-ai" for the drift detector.
+ */
+export const CLAUDE_CODE_CLI_VERSION = "2.1.75";
