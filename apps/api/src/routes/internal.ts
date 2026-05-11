@@ -75,6 +75,7 @@ async function verifyRunToken(c: Context): Promise<{
     status: string;
     connectionProfileId: string | null;
     providerProfileIds: Record<string, string> | null;
+    modelCredentialId: string | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -103,6 +104,7 @@ async function verifyRunToken(c: Context): Promise<{
       status: runs.status,
       connectionProfileId: runs.connectionProfileId,
       providerProfileIds: runs.providerProfileIds,
+      modelCredentialId: runs.modelCredentialId,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -128,6 +130,7 @@ async function verifyRunToken(c: Context): Promise<{
       status: run.status,
       connectionProfileId: run.connectionProfileId,
       providerProfileIds: run.providerProfileIds ?? null,
+      modelCredentialId: run.modelCredentialId ?? null,
     },
   };
 }
@@ -428,28 +431,47 @@ export function createInternalRouter() {
   router.get("/oauth-token/:connectionId", async (c) => {
     const { run } = await verifyRunToken(c);
     const credentialId = c.req.param("connectionId");
-    await assertOAuthModelCredential(credentialId, run.orgId);
-    return c.json(await resolveOAuthTokenForSidecar(credentialId));
+    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
   });
 
   router.post("/oauth-token/:connectionId/refresh", async (c) => {
     const { run } = await verifyRunToken(c);
     const credentialId = c.req.param("connectionId");
-    await assertOAuthModelCredential(credentialId, run.orgId);
-    return c.json(await forceRefreshOAuthModelProviderToken(credentialId));
+    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
   });
 
   return router;
 }
 
 /**
- * Verify a `model_provider_credentials` row exists and belongs to the
- * run's org. Throws `notFound` / `forbidden` otherwise. The route param
- * is still called `connectionId` for sidecar wire compatibility, but the
- * value is a `model_provider_credentials.id` since the OAuth model
- * provider refactor.
+ * Verify a `model_provider_credentials` row exists and is reachable by
+ * this run. Three layers of checks:
+ *
+ *   1. Per-run pinning: when `pinnedCredentialId` is set (platform-origin
+ *      runs that resolved to an OAuth model), the requested credentialId
+ *      MUST match. This prevents a leaked run token from enumerating any
+ *      other OAuth credential the org might own.
+ *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
+ *   3. UUID well-formedness: malformed path params surface as 404 not 500.
+ *
+ * The route param is still called `connectionId` for sidecar wire
+ * compatibility, but the value is a `model_provider_credentials.id` since
+ * the OAuth model provider refactor.
+ *
+ * `pinnedCredentialId === null` is allowed (legacy pre-binding rows, plus
+ * future schedule/inline run paths that may resolve the model lazily) — the
+ * org-membership check is the only safety net in that case.
  */
-async function assertOAuthModelCredential(credentialId: string, runOrgId: string): Promise<void> {
+async function assertOAuthModelCredential(
+  credentialId: string,
+  runOrgId: string,
+  pinnedCredentialId: string | null,
+): Promise<void> {
+  if (pinnedCredentialId !== null && pinnedCredentialId !== credentialId) {
+    throw forbidden(`Credential ${credentialId} not pinned to this run`);
+  }
   let row: { orgId: string } | undefined;
   try {
     [row] = await db

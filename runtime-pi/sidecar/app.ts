@@ -20,8 +20,14 @@ import {
   readPositiveTokenEnv,
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
-import { buildIdentityHeaders, transformBody, adaptBetaHeaderForRetry } from "./oauth-identity.ts";
+import {
+  buildIdentityHeaders,
+  transformBody,
+  adaptBetaHeaderForRetry,
+  TransformBodyTooLargeError,
+} from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
+import { redactSecrets, filterSensitiveHeaders } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -76,13 +82,36 @@ const PASSTHROUGH_RESPONSE_HEADERS = [
   "x-request-id",
 ];
 
+/**
+ * Canonical casing for headers whose draft / standard spellings don't
+ * match the naive Title-Case derivation. Generic Title-Casing turns
+ * `ratelimit-limit` into `Ratelimit-Limit`, but the IETF RateLimit draft
+ * (`draft-ietf-httpapi-ratelimit-headers`) and the Standard Webhooks
+ * `X-RateLimit-*` family both use `RateLimit` as a single CamelCase token.
+ * Some clients are case-sensitive on these — preserve the canonical form.
+ */
+const HEADER_CANONICAL_CASE: Record<string, string> = {
+  "ratelimit-limit": "RateLimit-Limit",
+  "ratelimit-remaining": "RateLimit-Remaining",
+  "ratelimit-reset": "RateLimit-Reset",
+  "ratelimit-policy": "RateLimit-Policy",
+  "x-ratelimit-limit": "X-RateLimit-Limit",
+  "x-ratelimit-remaining": "X-RateLimit-Remaining",
+  "x-ratelimit-reset": "X-RateLimit-Reset",
+};
+
 function passUpstream(upstream: Response): Response {
   const responseHeaders: Record<string, string> = {};
   for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
     if (value !== null) {
-      // Re-cased to preserve canonical HTTP form for the agent.
-      responseHeaders[name.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase())] = value;
+      // Re-cased to preserve canonical HTTP form for the agent. Special-cased
+      // headers (RateLimit family) come from the lookup table; everything else
+      // falls back to a generic Title-Case transform.
+      const canonical =
+        HEADER_CANONICAL_CASE[name] ??
+        name.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
+      responseHeaders[canonical] = value;
     }
   }
   return new Response(upstream.body, {
@@ -108,17 +137,19 @@ async function logOauthLlmResponse(
   } catch {
     // body unreadable — log what we have
   }
-  const responseHeaders: Record<string, string> = {};
-  upstream.headers.forEach((v, k) => {
-    responseHeaders[k] = v;
-  });
+  // Drop credential-bearing headers (set-cookie, www-authenticate, …)
+  // and regex-scrub known secret shapes from the body sample before it
+  // hits the operator log. See `redact.ts` for the allowlist + shape list.
+  const responseHeaders = filterSensitiveHeaders(upstream.headers);
+  const truncated = bodySample.length > 1500 ? bodySample.slice(0, 1500) + "…" : bodySample;
+  const redactedBodySample = redactSecrets(truncated);
   logger.warn("oauth llm: upstream response non-2xx", {
     providerId,
     targetUrl,
     status: upstream.status,
     contentType: upstream.headers.get("content-type"),
     responseHeaders,
-    bodySample: bodySample.length > 1500 ? bodySample.slice(0, 1500) + "…" : bodySample,
+    bodySample: redactedBodySample,
   });
   return upstream;
 }
@@ -362,10 +393,25 @@ export function createApp(deps: AppDeps): Hono {
     if (method !== "GET" && method !== "HEAD") {
       bodyText = await c.req.raw.text();
       if (bodyText) {
-        bodyText = transformBody(llmConfig.providerId, bodyText, {
-          forceStream: token.forceStream ?? llmConfig.forceStream,
-          forceStore: token.forceStore ?? llmConfig.forceStore,
-        });
+        try {
+          bodyText = transformBody(llmConfig.providerId, bodyText, {
+            forceStream: token.forceStream ?? llmConfig.forceStream,
+            forceStore: token.forceStore ?? llmConfig.forceStore,
+          });
+        } catch (err) {
+          if (err instanceof TransformBodyTooLargeError) {
+            return c.json(
+              {
+                error: err.message,
+                limit: err.limitBytes,
+                actual: err.actualBytes,
+                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+              },
+              413,
+            );
+          }
+          throw err;
+        }
         // Refresh content-length to match the transformed body so the
         // upstream doesn't read a stale value forwarded from the agent.
         forwardedHeaders["content-length"] = String(new TextEncoder().encode(bodyText).byteLength);

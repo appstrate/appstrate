@@ -26,29 +26,21 @@
  * every other authenticated CLI command.
  */
 
-import { loginOpenAICodex, loginAnthropic } from "@mariozechner/pi-ai/oauth";
 import open from "open";
+import {
+  runLoopbackOAuth,
+  SLUG_TO_PROVIDER_ID,
+  DISPLAY_NAME,
+  DEFAULT_LABEL,
+  type ConnectProviderSlug,
+  type NormalisedOAuthCredentials,
+} from "@appstrate/connect-helper";
 import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
 import { askText, confirm, exitWithError, intro, outro, spinner } from "../lib/ui.ts";
 
-/** Slugs accepted on the CLI; mapped to canonical providerIds server-side. */
-export type ConnectProviderSlug = "codex" | "claude";
-
-const SLUG_TO_PROVIDER_ID: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "codex",
-  claude: "claude-code",
-});
-
-const DISPLAY_NAME: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "ChatGPT (Codex / Plus / Pro / Business)",
-  claude: "Claude (Pro / Max / Team)",
-});
-
-const DEFAULT_LABEL: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "ChatGPT",
-  claude: "Claude",
-});
+// Re-exports kept for back-compat with internal CLI test imports.
+export type { ConnectProviderSlug };
 
 export interface ConnectCommandOptions {
   /** Override the CLI profile used for the platform call. */
@@ -125,94 +117,50 @@ async function tryOpenBrowser(url: string): Promise<void> {
 }
 
 /**
- * Run the loopback OAuth dance for the chosen provider via Pi's helpers.
- * Pi spins up an HTTP listener on the provider-specific loopback port,
- * exchanges the authorization code, and returns `OAuthCredentials`.
+ * Drive the loopback OAuth dance via the shared `@appstrate/connect-helper`
+ * implementation, with CLI-flavoured progress UI bolted on.
  *
- * The `onPrompt` / `onManualCodeInput` callbacks let the user paste the
- * code manually if the loopback bind fails (corporate firewalls, port
- * already in use). Both Pi helpers race the loopback listener against
- * `onManualCodeInput` and accept whichever resolves first.
+ * The shared implementation handles the pi-ai integration + credential
+ * normalisation; this wrapper supplies a {@link spinner}-based view layer
+ * that matches the rest of the CLI's intro / outro chrome.
  */
-async function runLoopbackOAuth(slug: ConnectProviderSlug): Promise<{
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  email?: string;
-  subscriptionType?: string;
-  /**
-   * Codex only — pi-ai extracts this from the JWT and surfaces it as a
-   * top-level field. We forward it to the platform so it can persist the
-   * canonical value rather than re-deriving it (and risking a JWT-decode
-   * mismatch with the upstream contract).
-   */
-  accountId?: string;
-}> {
+async function runLoopbackOAuthForCli(
+  slug: ConnectProviderSlug,
+): Promise<NormalisedOAuthCredentials> {
   const sp = spinner();
   sp.start(`Waiting for provider authorization (${DISPLAY_NAME[slug]})…`);
 
-  const callbacks = {
-    onAuth: (info: { url: string; instructions?: string }): void => {
-      sp.stop("Open the URL below in your browser to authorize:");
-      process.stdout.write(`\n  ${info.url}\n`);
-      if (info.instructions) process.stdout.write(`\n${info.instructions}\n`);
-      void tryOpenBrowser(info.url);
-      sp.start("Waiting for callback from provider…");
-    },
-    onPrompt: async (prompt: { message: string; placeholder?: string }): Promise<string> => {
-      sp.stop();
-      const value = await askText(prompt.message);
-      sp.start("Exchanging authorization code…");
-      return value;
-    },
-    onProgress: (message: string): void => {
-      sp.stop(message);
-      sp.start(message);
-    },
-  } as const;
-
   try {
-    const creds =
-      slug === "codex" ? await loginOpenAICodex(callbacks) : await loginAnthropic(callbacks);
+    const creds = await runLoopbackOAuth(slug, {
+      onAuth: (info) => {
+        sp.stop("Open the URL below in your browser to authorize:");
+        process.stdout.write(`\n  ${info.url}\n`);
+        if (info.instructions) process.stdout.write(`\n${info.instructions}\n`);
+        void tryOpenBrowser(info.url);
+        sp.start("Waiting for callback from provider…");
+      },
+      onPrompt: async (prompt) => {
+        sp.stop();
+        const value = await askText(prompt.message);
+        sp.start("Exchanging authorization code…");
+        return value;
+      },
+      onProgress: (message) => {
+        sp.stop(message);
+        sp.start(message);
+      },
+    });
     sp.stop("Authorization received.");
-    // Pi's OAuthCredentials shape: { access, refresh, expires (ms epoch), [extras] }
-    const subscriptionType =
-      typeof (creds as Record<string, unknown>).subscription_type === "string"
-        ? ((creds as Record<string, unknown>).subscription_type as string)
-        : undefined;
-    const account = (creds as Record<string, unknown>).account as
-      | Record<string, unknown>
-      | undefined;
-    const accountEmail =
-      account && typeof account.email_address === "string"
-        ? (account.email_address as string)
-        : undefined;
-    const directEmail =
-      typeof (creds as Record<string, unknown>).email === "string"
-        ? ((creds as Record<string, unknown>).email as string)
-        : undefined;
-    const accountId =
-      typeof (creds as Record<string, unknown>).accountId === "string"
-        ? ((creds as Record<string, unknown>).accountId as string)
-        : undefined;
-    if (slug === "codex" && !accountId) {
-      // Surface the actual shape pi-ai returned so we can spot a renamed
-      // field — historically `accountId` but pi-ai's contract is `[key:
-      // string]: unknown` so any future rename would silently strip it.
+    if (slug === "codex" && !creds.accountId) {
+      // Surface a warning so pi-ai upgrades that rename the JWT-derived
+      // accountId field don't silently break Codex — the credential is
+      // technically importable without it but the sidecar later 401s on
+      // the chatgpt-account-id header.
       process.stderr.write(
-        `[appstrate connect] warning: pi-ai login returned no accountId field. Available keys: ${Object.keys(
-          creds as Record<string, unknown>,
-        ).join(", ")}\n`,
+        "[appstrate connect] warning: pi-ai login returned no accountId field for Codex.\n",
       );
     }
-    return {
-      accessToken: creds.access,
-      refreshToken: creds.refresh,
-      expiresAt: typeof creds.expires === "number" ? creds.expires : 0,
-      email: directEmail ?? accountEmail,
-      subscriptionType,
-      accountId,
-    };
+    return creds;
   } catch (err) {
     sp.stop("Authorization failed.");
     throw err;
@@ -264,7 +212,7 @@ export async function connectCommand(
       : DEFAULT_LABEL[slug]);
 
   try {
-    const tokens = await runLoopbackOAuth(slug);
+    const tokens = await runLoopbackOAuthForCli(slug);
     const sp = spinner();
     sp.start("Saving connection on the platform…");
     const result = await apiFetch<ImportResponse>(

@@ -158,6 +158,20 @@ export const modelProviderCredentials = pgTable(
     providerId: text("provider_id").notNull(),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     baseUrlOverride: text("base_url_override"),
+    /**
+     * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
+     * encrypted blob to enable an efficient SQL filter in the refresh worker
+     * scan (avoids decrypting every row to test a single timestamp).
+     *
+     * The blob remains the source of truth; this column is a cache, written
+     * by `updateOAuthCredentialTokens` / `createOAuthCredential`. NULL for
+     * api-key credentials, OAuth blobs without an upstream-supplied expiry,
+     * and (transiently) for rows that pre-date the column — those self-cure
+     * on the next refresh. The worker's predicate (`expires_at IS NULL OR
+     * expires_at < cutoff`) covers the backfill window without a one-shot
+     * decrypt-and-rewrite migration.
+     */
+    expiresAt: timestamp("expires_at"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -165,6 +179,74 @@ export const modelProviderCredentials = pgTable(
   (t) => [
     index("idx_model_provider_credentials_org_id").on(t.orgId),
     index("idx_model_provider_credentials_org_provider").on(t.orgId, t.providerId),
+    // Partial index — only OAuth rows have a non-null expiry. Keeps the
+    // index small even on installations with millions of api-key rows.
+    index("idx_model_provider_credentials_expires_at_oauth")
+      .on(t.expiresAt)
+      .where(sql`${t.expiresAt} IS NOT NULL`),
+  ],
+);
+
+/**
+ * One-shot pairing tokens that bridge the dashboard "Connect Claude Pro"
+ * button with the `npx @appstrate/connect-helper <token>` loopback OAuth
+ * helper running on the user's machine.
+ *
+ * Lifecycle:
+ *   1. Dashboard POST /api/model-providers-oauth/pairing → row INSERTed,
+ *      plaintext token returned to the browser ONCE (never re-served).
+ *   2. Helper decodes the token client-side, runs the provider's loopback
+ *      OAuth dance, then POSTs the resulting credentials to
+ *      /api/model-providers-oauth/import using the pairing token as
+ *      Bearer credentials. The platform-side Bearer auth re-hashes the
+ *      secret portion (SHA-256, base64url) and looks the row up by
+ *      `token_hash`.
+ *   3. The `consumePairing()` UPDATE atomically sets `consumed_at = now()`
+ *      and returns the row only if it was previously unconsumed and
+ *      unexpired — guaranteeing single-use semantics under concurrent
+ *      retries.
+ *   4. A background worker DELETEs rows past `expires_at + 1h` so the
+ *      table never grows unboundedly. Consumed rows are kept for the
+ *      grace window so audit/UI status reads can still reflect them.
+ *
+ * The plaintext token is `appp_<base64url(header)>.<base64url(secret)>`
+ * — only the SHA-256 of the secret portion is persisted. The header
+ * (platform URL + providerId) is carried inside the token itself so the
+ * helper can decode it without an extra round-trip.
+ */
+export const modelProviderPairings = pgTable(
+  "model_provider_pairings",
+  {
+    /** App-generated id with `pair_` prefix (matches existing `ask_`/`pair_` log conventions). */
+    id: text("id").primaryKey(),
+    /** SHA-256 of the secret portion, base64url-encoded. The plaintext is never stored. */
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    /** Provider id (e.g. `codex`, `claude-code`) from the OAuth model provider registry. */
+    providerId: text("provider_id").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** When the helper successfully POSTed credentials. NULL means still pending. */
+    consumedAt: timestamp("consumed_at"),
+    /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
+    consumedFromIp: text("consumed_from_ip"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_model_provider_pairings_org_id").on(table.orgId),
+    // Partial index — only unconsumed rows matter for the cleanup scan.
+    // Keeps the index footprint proportional to the (small) pending-pairing
+    // population, not the long-tail of consumed rows kept for the audit window.
+    index("idx_model_provider_pairings_expires_at")
+      .on(table.expiresAt)
+      .where(sql`consumed_at IS NULL`),
   ],
 );
 

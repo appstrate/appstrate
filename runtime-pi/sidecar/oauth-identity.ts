@@ -18,8 +18,25 @@
  */
 
 import type { CachedToken } from "./oauth-token-cache.ts";
+import { MAX_REQUEST_BODY_SIZE } from "./helpers.ts";
 
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/**
+ * Thrown by {@link transformBody} when the buffered LLM request body
+ * exceeds {@link MAX_REQUEST_BODY_SIZE}. Caller should map to a 413.
+ */
+export class TransformBodyTooLargeError extends Error {
+  constructor(
+    public readonly actualBytes: number,
+    public readonly limitBytes: number,
+  ) {
+    super(
+      `LLM request body of ${actualBytes} bytes exceeds the per-request limit of ${limitBytes} bytes (raise via SIDECAR_MAX_REQUEST_BODY_BYTES).`,
+    );
+    this.name = "TransformBodyTooLargeError";
+  }
+}
 
 /**
  * Provider identity headers. Returns hop-by-hop-safe lower-cased keys —
@@ -67,6 +84,15 @@ export function buildIdentityHeaders(
  * incompatible with streaming uploads anyway).
  *
  * Returns the same input unchanged when no transform is needed.
+ *
+ * The `/llm/*` route does NOT share the MCP envelope cap enforced inside
+ * `mcp.ts` (that one only governs `provider_call`'s base64-decoded body),
+ * so we gate buffered LLM bodies explicitly here against the same
+ * {@link MAX_REQUEST_BODY_SIZE} (configurable via `SIDECAR_MAX_REQUEST_BODY_BYTES`,
+ * default 10 MB). Refusing oversized payloads early prevents the parse +
+ * restringify round-trip from amplifying memory pressure on legitimate
+ * LLM traffic, and guarantees a loud, structured failure rather than
+ * silent slow-downs.
  */
 export function transformBody(
   providerId: string,
@@ -74,6 +100,11 @@ export function transformBody(
   options: { forceStream?: boolean; forceStore?: boolean } = {},
 ): string {
   if (!bodyText) return bodyText;
+
+  const byteLength = new TextEncoder().encode(bodyText).byteLength;
+  if (byteLength > MAX_REQUEST_BODY_SIZE) {
+    throw new TransformBodyTooLargeError(byteLength, MAX_REQUEST_BODY_SIZE);
+  }
 
   let json: unknown;
   try {

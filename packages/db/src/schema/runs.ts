@@ -18,7 +18,7 @@ import { sql } from "drizzle-orm";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { apiKeys, organizations } from "./organizations.ts";
+import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
 import type { RunProviderSnapshot } from "./types.ts";
@@ -167,6 +167,20 @@ export const runs = pgTable(
     // in the dashboard. Stamped at INSERT alongside `runner_name` and
     // never updated.
     runnerKind: text("runner_kind"),
+    /**
+     * The `model_provider_credentials` row this run is allowed to fetch
+     * tokens for (via `/internal/oauth-token/:credentialId`). Snapshotted
+     * at run creation time. Stamped only for platform-origin runs that
+     * resolve to an OAuth model provider — null otherwise (API-key model,
+     * remote-origin run, scheduler synthesis pre-resolution).
+     *
+     * Defense-in-depth: without this binding, a leaked run token could be
+     * used to enumerate ALL OAuth credentials of the run's org. With it,
+     * the resolver rejects any credentialId not pinned at run start.
+     */
+    modelCredentialId: uuid("model_credential_id").references(() => modelProviderCredentials.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),

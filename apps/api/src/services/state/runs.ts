@@ -212,6 +212,13 @@ interface CreateRunParams {
    * `github-action`, …). Resolved alongside `runnerName`.
    */
   runnerKind?: string | null;
+  /**
+   * `model_provider_credentials.id` snapshotted at run creation. Pinned
+   * here so the OAuth model token resolver can reject any other
+   * credentialId requested via the run's signed token. Set only for
+   * platform-origin runs whose model resolves to an OAuth provider.
+   */
+  modelCredentialId?: string | null;
 }
 
 export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
@@ -251,6 +258,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
     runnerName: params.runnerName ?? null,
     runnerKind: params.runnerKind ?? null,
+    modelCredentialId: params.modelCredentialId ?? null,
   });
 }
 

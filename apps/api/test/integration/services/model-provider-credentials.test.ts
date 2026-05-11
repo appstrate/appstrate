@@ -269,7 +269,9 @@ describe("model-provider-credentials service — oauth path", () => {
     expect(creds!.expiresAt).toBe(1_700_000_000_000);
     expect(creds!.forceStream).toBe(true);
     expect(creds!.forceStore).toBe(false);
-    expect(creds!.rewriteUrlPath).toEqual({ from: "/v1/responses", to: "/codex/responses" });
+    // Codex uses apiShape "openai-codex-responses", which resolves
+    // `${baseUrl}/codex/responses` natively — no sidecar URL rewrite needed.
+    expect(creds!.rewriteUrlPath).toBeUndefined();
   });
 
   it("rejects createOAuthCredential for an api-key provider", async () => {

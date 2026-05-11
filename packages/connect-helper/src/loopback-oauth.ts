@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Wrapper around `@mariozechner/pi-ai`'s loopback PKCE flow for the two
+ * OAuth model providers Appstrate supports today: OpenAI Codex and
+ * Anthropic Claude Code.
+ *
+ * This module is shared between the persistent CLI (`apps/cli`'s
+ * `connect` command) and the one-shot helper (`appstrate-connect`
+ * binary) so both speak to the same pi-ai surface area and produce the
+ * same normalised credentials shape — divergence here would let the two
+ * paths drift in subtle ways (e.g. one stops capturing `accountId` after
+ * a pi-ai upgrade and the other doesn't).
+ */
+
+import { loginOpenAICodex, loginAnthropic } from "@mariozechner/pi-ai/oauth";
+
+/** Provider slugs accepted on the wire. Mapped to canonical `providerId` values server-side. */
+export type ConnectProviderSlug = "codex" | "claude";
+
+/** Map a UI-friendly slug to the platform's canonical `providerId`. */
+export const SLUG_TO_PROVIDER_ID: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
+  codex: "codex",
+  claude: "claude-code",
+});
+
+/** Inverse of {@link SLUG_TO_PROVIDER_ID} — useful when decoding pairing tokens. */
+export const PROVIDER_ID_TO_SLUG: Readonly<Record<string, ConnectProviderSlug>> = Object.freeze({
+  codex: "codex",
+  "claude-code": "claude",
+});
+
+export const DISPLAY_NAME: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
+  codex: "ChatGPT (Codex / Plus / Pro / Business)",
+  claude: "Claude (Pro / Max / Team)",
+});
+
+export const DEFAULT_LABEL: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
+  codex: "ChatGPT",
+  claude: "Claude",
+});
+
+/** Normalised credential shape returned by the loopback flow. */
+export interface NormalisedOAuthCredentials {
+  accessToken: string;
+  refreshToken: string;
+  /** Epoch milliseconds. `0` means the upstream did not surface an expiry. */
+  expiresAt: number;
+  email?: string;
+  subscriptionType?: string;
+  /** Codex only — extracted from JWT by pi-ai. */
+  accountId?: string;
+}
+
+/**
+ * UI hooks injected by the caller. Both the CLI and the helper supply a
+ * {@link spinner}-flavoured implementation; tests inject silent stubs.
+ */
+export interface LoopbackCallbacks {
+  /** Display the authorize URL the user should visit. */
+  onAuth?: (info: { url: string; instructions?: string }) => void;
+  /** Prompt for manual code paste-back when the loopback bind fails. */
+  onPrompt?: (prompt: { message: string; placeholder?: string }) => Promise<string>;
+  /** Surface a free-form progress message (token exchange, etc.). */
+  onProgress?: (message: string) => void;
+}
+
+/**
+ * Run the loopback PKCE flow for the chosen provider via Pi's helpers.
+ * Pi spins up an HTTP listener on the provider-specific loopback port
+ * (`127.0.0.1:1455` for Codex, `127.0.0.1:53692` for Claude), exchanges
+ * the authorization code, and returns Pi's `OAuthCredentials` shape. This
+ * function normalises that shape into {@link NormalisedOAuthCredentials}.
+ */
+export async function runLoopbackOAuth(
+  slug: ConnectProviderSlug,
+  callbacks: LoopbackCallbacks = {},
+): Promise<NormalisedOAuthCredentials> {
+  const piCallbacks = {
+    onAuth: (info: { url: string; instructions?: string }) => callbacks.onAuth?.(info),
+    onPrompt: async (prompt: { message: string; placeholder?: string }) =>
+      callbacks.onPrompt
+        ? callbacks.onPrompt(prompt)
+        : Promise.reject(new Error("Manual code paste-back required but no onPrompt handler")),
+    onProgress: (message: string) => callbacks.onProgress?.(message),
+  };
+
+  const creds =
+    slug === "codex" ? await loginOpenAICodex(piCallbacks) : await loginAnthropic(piCallbacks);
+
+  // pi-ai's `OAuthCredentials` shape: `{ access, refresh, expires (ms epoch), [extras] }`.
+  // Surrounding code defensively narrows extras because pi-ai types extras as `[key: string]: unknown`
+  // — a future rename of `accountId` / `subscription_type` would silently drop the field otherwise.
+  const extras = creds as Record<string, unknown>;
+
+  const account = extras.account as Record<string, unknown> | undefined;
+  const accountEmail =
+    account && typeof account.email_address === "string"
+      ? (account.email_address as string)
+      : undefined;
+  const directEmail = typeof extras.email === "string" ? (extras.email as string) : undefined;
+  const subscriptionType =
+    typeof extras.subscription_type === "string" ? (extras.subscription_type as string) : undefined;
+  const accountId = typeof extras.accountId === "string" ? (extras.accountId as string) : undefined;
+
+  const normalised: NormalisedOAuthCredentials = {
+    accessToken: creds.access,
+    refreshToken: creds.refresh,
+    expiresAt: typeof creds.expires === "number" ? creds.expires : 0,
+  };
+  const email = directEmail ?? accountEmail;
+  if (email) normalised.email = email;
+  if (subscriptionType) normalised.subscriptionType = subscriptionType;
+  if (accountId) normalised.accountId = accountId;
+  return normalised;
+}

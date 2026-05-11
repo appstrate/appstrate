@@ -42,6 +42,7 @@
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/connect": "workspace:*",
+        "@appstrate/connect-helper": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@appstrate/emails": "workspace:*",
@@ -82,6 +83,7 @@
       },
       "dependencies": {
         "@apidevtools/swagger-parser": "^12.1.0",
+        "@appstrate/connect-helper": "workspace:*",
         "@clack/prompts": "^1.2.0",
         "@mariozechner/pi-ai": "^0.70.6",
         "@mariozechner/pi-coding-agent": "^0.70.6",
@@ -215,6 +217,20 @@
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "drizzle-orm": "^0.45.2",
+      },
+    },
+    "packages/connect-helper": {
+      "name": "@appstrate/connect-helper",
+      "version": "0.1.0",
+      "bin": {
+        "appstrate-connect": "./dist/cli.js",
+      },
+      "dependencies": {
+        "@mariozechner/pi-ai": "^0.70.6",
+        "open": "^11.0.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
       },
     },
     "packages/core": {
@@ -389,6 +405,8 @@
     "@appstrate/api": ["@appstrate/api@workspace:apps/api"],
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
+
+    "@appstrate/connect-helper": ["@appstrate/connect-helper@workspace:packages/connect-helper"],
 
     "@appstrate/core": ["@appstrate/core@workspace:packages/core"],
 

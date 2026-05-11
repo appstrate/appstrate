@@ -129,12 +129,21 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (resolvedConfig.proxyUrl) {
       sidecarEnv.PROXY_URL = resolvedConfig.proxyUrl;
     }
-    if (resolvedConfig.llm && resolvedConfig.llm.authMode !== "oauth") {
-      sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
-      sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
-      sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
+    if (resolvedConfig.llm) {
+      if (resolvedConfig.llm.authMode === "oauth") {
+        // OAuth wire format: ship the LlmProxyOauthConfig as JSON, matching
+        // process-orchestrator. server.ts in the sidecar parses it into
+        // config.llm at boot so handleOauthLlmRequest can serve /llm/* on the
+        // fresh-creation path without a /configure round-trip. Without this,
+        // /llm/* returns 503 "LLM proxy not configured" whenever the pool is
+        // empty / disabled / exhausted (cold start, SIDECAR_POOL_SIZE=0, …).
+        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(resolvedConfig.llm);
+      } else {
+        sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
+        sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
+        sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
+      }
     }
-    // OAuth-mode env wiring (PI_OAUTH_CONNECTION_ID, etc.) lands in Phase 5.7.
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.

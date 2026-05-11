@@ -229,6 +229,9 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       label: input.label,
       providerId: input.providerId,
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+      // Mirror `blob.expiresAt` onto the dedicated column so the refresh
+      // worker scan can filter at SQL level. Blob remains source of truth.
+      expiresAt: input.expiresAt !== null ? new Date(input.expiresAt) : null,
       createdBy: input.userId,
     })
     .returning({ id: modelProviderCredentials.id });
@@ -339,6 +342,9 @@ export async function updateOAuthCredentialTokens(
     .update(modelProviderCredentials)
     .set({
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
+      // Keep the denormalized cache in lockstep with the blob — the refresh
+      // worker scan filters on this column to skip the per-row decrypt.
+      expiresAt: fresh.expiresAt !== null ? new Date(fresh.expiresAt) : null,
       updatedAt: new Date(),
     })
     .where(

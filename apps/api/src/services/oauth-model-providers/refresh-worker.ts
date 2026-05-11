@@ -17,14 +17,17 @@
  *      treats every refresh as best-effort; the sidecar still has its
  *      reactive 401-retry path.
  *
- * Filter strategy: the row's `expiresAt` lives inside the encrypted blob
- * (no separate column to index), so the scan does a coarse SQL filter on
- * `provider_id IN <oauth registry ids>` and then decrypts each candidate
- * to check expiry. This is fine — typical orgs have ≤2 OAuth credentials
- * (one Codex, one Claude) so the per-row decrypt cost is negligible.
+ * Filter strategy: `expires_at` is denormalized onto its own indexed
+ * column (mirrored from `blob.expiresAt` by `createOAuthCredential` /
+ * `updateOAuthCredentialTokens`). The scan filters at the SQL level
+ * (`provider_id IN <oauth ids> AND (expires_at IS NULL OR expires_at <
+ * now + lead)`) and only decrypts the qualifying subset. The
+ * `IS NULL` branch handles rows that pre-date the column — they self-cure
+ * on the first refresh. A LIMIT bounds memory use on large installations;
+ * if the query is saturated, the next sweep picks up the remainder.
  */
 
-import { inArray } from "drizzle-orm";
+import { inArray, and, or, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
@@ -35,16 +38,34 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { listModelProviders } from "./registry.ts";
 import { type OAuthBlob } from "../model-provider-credentials.ts";
 import { forceRefreshOAuthModelProviderToken } from "./token-resolver.ts";
+import { cleanupExpiredPairings } from "./pairings.ts";
 
 const SCAN_QUEUE_NAME = "oauth-model-refresh-scan";
 const REFRESH_QUEUE_NAME = "oauth-model-refresh";
+const PAIRING_CLEANUP_QUEUE_NAME = "oauth-model-pairing-cleanup";
 
 /** Cron pattern: every 6 hours (00:00, 06:00, 12:00, 18:00 UTC). */
 const SCAN_CRON = "0 */6 * * *";
 const SCAN_SCHEDULER_ID = "oauth-model-refresh-scan";
 
+/**
+ * Pairing cleanup runs every 15 minutes — pairings have a 5-minute TTL +
+ * a 1-hour grace window before deletion, so a 15-minute sweep keeps the
+ * table tail bounded without thrashing.
+ */
+const PAIRING_CLEANUP_CRON = "*/15 * * * *";
+const PAIRING_CLEANUP_SCHEDULER_ID = "oauth-model-pairing-cleanup";
+
 /** Refresh lead time — anything expiring sooner gets refreshed proactively. */
 const REFRESH_LEAD_HOURS = 24;
+
+/**
+ * Hard cap on rows scanned per sweep. Bounds memory use on installations
+ * with millions of OAuth credentials; remaining rows are picked up on the
+ * next scheduled sweep (or the row's own `expires_at` becomes the SQL
+ * filter once it gets backfilled).
+ */
+const SCAN_BATCH_LIMIT = 500;
 
 interface RefreshJobData {
   credentialId: string;
@@ -56,6 +77,7 @@ type ScanJobData = Record<string, never>;
 
 let scanQueue: JobQueue<ScanJobData> | null = null;
 let refreshQueue: JobQueue<RefreshJobData> | null = null;
+let pairingCleanupQueue: JobQueue<ScanJobData> | null = null;
 
 async function getScanQueue(): Promise<JobQueue<ScanJobData>> {
   if (!scanQueue) scanQueue = await createQueue<ScanJobData>(SCAN_QUEUE_NAME);
@@ -65,6 +87,12 @@ async function getScanQueue(): Promise<JobQueue<ScanJobData>> {
 async function getRefreshQueue(): Promise<JobQueue<RefreshJobData>> {
   if (!refreshQueue) refreshQueue = await createQueue<RefreshJobData>(REFRESH_QUEUE_NAME);
   return refreshQueue;
+}
+
+async function getPairingCleanupQueue(): Promise<JobQueue<ScanJobData>> {
+  if (!pairingCleanupQueue)
+    pairingCleanupQueue = await createQueue<ScanJobData>(PAIRING_CLEANUP_QUEUE_NAME);
+  return pairingCleanupQueue;
 }
 
 /**
@@ -85,6 +113,14 @@ export async function scanAndEnqueueRefreshes(): Promise<{
     .map((p) => p.providerId);
   if (oauthProviderIds.length === 0) return { scanned: 0, enqueued: 0 };
 
+  const cutoffDate = new Date(Date.now() + REFRESH_LEAD_HOURS * 60 * 60 * 1000);
+  const cutoffMs = cutoffDate.getTime();
+
+  // SQL-level filter: `expires_at IS NULL` covers rows that pre-date the
+  // denormalized column (they decrypt once, then `updateOAuthCredentialTokens`
+  // populates `expires_at` and they fall out of this branch). The
+  // `expires_at <= cutoff` branch is the steady-state hot path and rides
+  // on `idx_model_provider_credentials_expires_at_oauth`.
   const candidates = await db
     .select({
       id: modelProviderCredentials.id,
@@ -92,11 +128,20 @@ export async function scanAndEnqueueRefreshes(): Promise<{
       credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
     })
     .from(modelProviderCredentials)
-    .where(inArray(modelProviderCredentials.providerId, oauthProviderIds));
+    .where(
+      and(
+        inArray(modelProviderCredentials.providerId, oauthProviderIds),
+        or(
+          isNull(modelProviderCredentials.expiresAt),
+          lte(modelProviderCredentials.expiresAt, cutoffDate),
+        ),
+      ),
+    )
+    .orderBy(sql`${modelProviderCredentials.expiresAt} ASC NULLS FIRST`)
+    .limit(SCAN_BATCH_LIMIT);
 
   if (candidates.length === 0) return { scanned: 0, enqueued: 0 };
 
-  const cutoff = Date.now() + REFRESH_LEAD_HOURS * 60 * 60 * 1000;
   const dueRows: { id: string; providerId: string }[] = [];
   for (const row of candidates) {
     let blob: OAuthBlob;
@@ -113,7 +158,7 @@ export async function scanAndEnqueueRefreshes(): Promise<{
     }
     if (blob.needsReconnection) continue;
     if (blob.expiresAt === null) continue;
-    if (blob.expiresAt > cutoff) continue;
+    if (blob.expiresAt > cutoffMs) continue;
     dueRows.push({ id: row.id, providerId: row.providerId });
   }
 
@@ -189,13 +234,31 @@ async function handleRefreshJob(job: QueueJob<RefreshJobData>): Promise<void> {
   }
 }
 
+async function handlePairingCleanupJob(_job: QueueJob<ScanJobData>): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    const deleted = await cleanupExpiredPairings();
+    logger.info("oauth_model_pairing_cleanup_done", {
+      deleted,
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (err) {
+    logger.error("oauth_model_pairing_cleanup_failed", {
+      error: getErrorMessage(err),
+      durationMs: Date.now() - startedAt,
+    });
+  }
+}
+
 /** Initialize the OAuth model provider refresh worker. Idempotent. */
 export async function initOAuthModelRefreshWorker(): Promise<void> {
   const scan = await getScanQueue();
   const refresh = await getRefreshQueue();
+  const pairingCleanup = await getPairingCleanupQueue();
 
   scan.process(handleScanJob, { concurrency: 1 });
   refresh.process(handleRefreshJob, { concurrency: 4 });
+  pairingCleanup.process(handlePairingCleanupJob, { concurrency: 1 });
 
   // One-shot upsert of the recurring scan scheduler — BullMQ stores it in
   // Redis so this is safe across restarts.
@@ -205,9 +268,16 @@ export async function initOAuthModelRefreshWorker(): Promise<void> {
     { name: "scan", data: {} },
   );
 
+  await pairingCleanup.upsertScheduler(
+    PAIRING_CLEANUP_SCHEDULER_ID,
+    { pattern: PAIRING_CLEANUP_CRON, tz: "UTC" },
+    { name: "cleanup", data: {} },
+  );
+
   logger.info("OAuth model refresh worker initialized", {
     scanCron: SCAN_CRON,
     refreshLeadHours: REFRESH_LEAD_HOURS,
+    pairingCleanupCron: PAIRING_CLEANUP_CRON,
   });
 }
 
@@ -215,7 +285,9 @@ export async function initOAuthModelRefreshWorker(): Promise<void> {
 export async function shutdownOAuthModelRefreshWorker(): Promise<void> {
   await scanQueue?.shutdown();
   await refreshQueue?.shutdown();
+  await pairingCleanupQueue?.shutdown();
   scanQueue = null;
   refreshQueue = null;
+  pairingCleanupQueue = null;
   logger.info("OAuth model refresh worker stopped");
 }

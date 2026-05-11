@@ -199,7 +199,7 @@ function getAppScopedPrefixes(): string[] {
 
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
   if (!getAppScopedPrefixes().some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);
@@ -211,7 +211,7 @@ const apiVersionMiddleware = apiVersion(async (orgId) => {
   return settings.apiVersion ?? null;
 });
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
   return apiVersionMiddleware(c, next);
 });

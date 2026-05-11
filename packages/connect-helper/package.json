@@ -1,0 +1,59 @@
+{
+  "name": "@appstrate/connect-helper",
+  "version": "0.1.0",
+  "description": "One-shot OAuth helper for Appstrate model-provider subscriptions (ChatGPT Codex, Claude Pro/Max). Run via `npx @appstrate/connect-helper <token>`.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.9",
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "author": "Appstrate <hello@appstrate.dev>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate.git",
+    "directory": "packages/connect-helper"
+  },
+  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/connect-helper",
+  "bugs": {
+    "url": "https://github.com/appstrate/appstrate/issues"
+  },
+  "keywords": [
+    "appstrate",
+    "oauth",
+    "codex",
+    "claude",
+    "pairing"
+  ],
+  "bin": {
+    "appstrate-connect": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./pairing-token": "./src/pairing-token.ts",
+    "./loopback-oauth": "./src/loopback-oauth.ts"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/",
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.70.6",
+    "open": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

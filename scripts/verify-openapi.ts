@@ -166,6 +166,9 @@ const expectedEndpoints = [
   "POST /api/model-provider-credentials/{id}/test",
   // OAuth Model Providers (subscription billing)
   "POST /api/model-providers-oauth/import",
+  "POST /api/model-providers-oauth/pairing",
+  "GET /api/model-providers-oauth/pairing/{id}",
+  "DELETE /api/model-providers-oauth/pairing/{id}",
 
   // Models
   "GET /api/models",

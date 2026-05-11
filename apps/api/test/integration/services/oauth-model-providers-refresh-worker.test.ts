@@ -11,9 +11,13 @@
  *   - `provider_id IN <oauth registry ids>` — api-key rows are filtered
  *     out at the SQL level (and api-key blobs would be `kind: "api_key"`
  *     even if a provider id leaked, which the post-decrypt filter catches).
+ *   - SQL `expires_at IS NULL OR expires_at <= cutoff` — fresh-token rows
+ *     are excluded BEFORE the decrypt loop (denormalized cache, mirrored
+ *     from the encrypted blob). `scanned` reports the post-SQL row count,
+ *     not the table row count.
  *   - blob `needsReconnection=false` — already-flagged credentials skipped.
- *   - blob `expiresAt < now + REFRESH_LEAD_HOURS` — far-future tokens
- *     skipped, near-expiry ones picked up.
+ *   - blob `expiresAt < now + REFRESH_LEAD_HOURS` — second-line check
+ *     against the source-of-truth blob, in case the cache drifted.
  *   - blob `expiresAt !== null` — credentials without a known expiry are
  *     skipped (the sidecar's reactive 401-retry handles them).
  */
@@ -89,7 +93,9 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     });
 
     const result = await scanAndEnqueueRefreshes();
-    expect(result.scanned).toBe(1); // SQL filter passes; in-memory expiry filter rejects
+    // Post-denormalization: SQL filter rejects fresh-expiry rows BEFORE the
+    // decrypt loop runs, so they never appear in `scanned` either.
+    expect(result.scanned).toBe(0);
     expect(result.enqueued).toBe(0);
   });
 
@@ -100,6 +106,8 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     });
 
     const result = await scanAndEnqueueRefreshes();
+    // The SQL filter qualifies (expiry within window) but the post-decrypt
+    // `needsReconnection` gate rejects — so it's counted as scanned, not enqueued.
     expect(result.scanned).toBe(1);
     expect(result.enqueued).toBe(0);
   });
@@ -108,8 +116,28 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     await seedOauthCred(fx, "claude-code", { expiresAtMs: null });
 
     const result = await scanAndEnqueueRefreshes();
+    // `expires_at IS NULL` qualifies via the backfill branch of the SQL
+    // predicate, so the row IS scanned (decrypted) — but the blob's
+    // `expiresAt === null` then short-circuits the enqueue.
     expect(result.scanned).toBe(1);
     expect(result.enqueued).toBe(0);
+  });
+
+  it("does not decrypt fresh credentials — SQL prefilters them out", async () => {
+    // 4 fresh creds (expiry well beyond the lead window) + 1 expiring soon.
+    // The SQL filter must reject the 4 fresh rows BEFORE the decrypt loop;
+    // observable signal: `scanned` reflects only the rows the worker
+    // actually fetched (and would have decrypted), so it must equal 1.
+    await seedOauthCred(fx, "claude-code", { expiresAtMs: Date.now() + 60 * 60 * 1000 });
+    for (let i = 0; i < 4; i++) {
+      await seedOauthCred(fx, "codex", {
+        expiresAtMs: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+    }
+
+    const result = await scanAndEnqueueRefreshes();
+    expect(result.scanned).toBe(1);
+    expect(result.enqueued).toBe(1);
   });
 
   it("ignores api-key credentials (only OAuth providerIds are scanned)", async () => {

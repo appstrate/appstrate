@@ -82,7 +82,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
 
   // Auth middleware: module strategies → Bearer API key → session cookie.
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, publicPaths())) return next();
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
 
     // Module-contributed auth strategies run first (first-match-wins).
     // Strategies MUST return `null` fast when the request does not match
@@ -248,7 +248,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // `requirePlatformRealm` for the allowlist rationale.
   const realmGuard = requirePlatformRealm();
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, publicPaths())) return next();
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
     return realmGuard(c, next);
   });
@@ -256,7 +256,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // Org context middleware: require X-Org-Id for org-scoped /api/* routes.
   app.use("*", async (c, next) => {
     const path = c.req.path;
-    if (skipAuth(path, publicPaths())) return next();
+    if (skipAuth(path, publicPaths(), c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
     // Non-session auth (API key, module strategies) already resolved orgId
     // and permissions inline. Session auth and strategies that set
@@ -289,8 +289,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  *
  * Exported so call sites that need to gate downstream middleware on the
  * same rule (e.g. app-context, api-version) can share this function.
+ *
+ * `headers` is optional and lets callers signal a request-scoped bypass
+ * (e.g. pairing-token bearer auth on /import) without polluting the
+ * static `publicPaths` allowlist with conditionals.
  */
-export function skipAuth(path: string, publicPaths: Set<string>): boolean {
+export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
@@ -302,6 +306,17 @@ export function skipAuth(path: string, publicPaths: Set<string>): boolean {
   // HMAC signature at the route layer — not via JWT / API key / cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
+  // OAuth model-provider import accepts a one-shot pairing-token bearer
+  // (`Authorization: Bearer appp_…`) that the route handler validates by
+  // atomically consuming the matching `model_provider_pairings` row.
+  // Skipping the cookie/API-key auth chain here lets the helper POST
+  // credentials without a session — the pairing's own lifecycle is the
+  // authorization proof. Cookie and API-key callers fall through to the
+  // standard session+permission middleware as before.
+  if (path === "/api/model-providers-oauth/import" && headers) {
+    const auth = headers.get("authorization") ?? headers.get("Authorization");
+    if (auth?.startsWith("Bearer appp_")) return true;
+  }
   return false;
 }
 

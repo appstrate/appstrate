@@ -4,39 +4,42 @@
  * Modal that walks the user through connecting an OAuth model provider
  * (Codex / Claude Code).
  *
- * Why CLI, not browser:
- *   The public OAuth client_ids baked into the official CLIs only allowlist
- *   `http://localhost:PORT/...` redirect_uris. A platform-hosted callback
- *   is rejected at the provider's authorize step. So instead we delegate
- *   the loopback OAuth dance to the user's terminal via
- *   `appstrate connect <provider>`, then poll the platform for the new
- *   provider key to appear.
+ * Why a helper, not a browser-only flow:
+ *   The public OAuth client_ids baked into the official CLIs only
+ *   allowlist `http://localhost:PORT/...` redirect_uris. A platform-hosted
+ *   callback is rejected at the provider's authorize step. So instead we
+ *   delegate the loopback OAuth dance to the user's terminal via the
+ *   `npx @appstrate/connect-helper <token>` one-shot helper.
  *
  * Two stages:
  *   1. **ToS warning + label**: explicit notice that the subscription quota
  *      is shared org-wide, that the connection isn't covered by the
  *      provider's personal-tier ToS, and that Anthropic actively blocks
- *      third-party Pro/Max OAuth tokens server-side since 2026-01-09. The
- *      user must check the consent box AND name the connection before
- *      moving on.
- *   2. **CLI command + poller**: shows the exact `appstrate connect …`
- *      command to copy/paste, with a clipboard button + a spinner that
- *      polls `/api/model-provider-credentials` every 2.5s. When a new row matching
- *      this providerId appears, fires a success toast and closes.
+ *      third-party Pro/Max OAuth tokens server-side since 2026-01-09.
+ *   2. **Pairing command + poller**: mints a one-shot pairing token via
+ *      `POST /api/model-providers-oauth/pairing`, surfaces the resulting
+ *      `npx @appstrate/connect-helper <token>` command, and polls the
+ *      pairing status until it flips to `consumed` (helper completed +
+ *      credentials saved). On modal close we DELETE the pairing so the
+ *      token can't be reused.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
-import { useModelProviderCredentials } from "../hooks/use-model-provider-credentials";
-import type { OrgModelProviderKeyInfo } from "@appstrate/shared-types";
+import {
+  useCreateModelProviderPairing,
+  useModelProviderPairingStatus,
+  useCancelModelProviderPairing,
+} from "../hooks/use-model-provider-pairing";
 
 interface Props {
   open: boolean;
@@ -51,86 +54,87 @@ const SLUG_BY_PROVIDER_ID: Readonly<Record<string, "codex" | "claude">> = Object
   "claude-code": "claude",
 });
 
-/**
- * Build the exact CLI command the user must paste. Values that contain
- * shell metacharacters or spaces (like the label) are wrapped in single
- * quotes; embedded single quotes are escaped via the `'\''` idiom (close,
- * escape, reopen).
- */
-function buildConnectCommand(slug: "codex" | "claude", label: string): string {
-  const escapedLabel = label.replace(/'/g, "'\\''");
-  return `bunx @appstrate/cli@latest connect ${slug} --label='${escapedLabel}'`;
-}
-
 export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
+  const qc = useQueryClient();
   const [stage, setStage] = useState<"tos" | "cli">("tos");
   const [label, setLabel] = useState(defaultLabel);
   const [tosAccepted, setTosAccepted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const slug = SLUG_BY_PROVIDER_ID[providerId] ?? "codex";
+  const createPairing = useCreateModelProviderPairing();
+  const cancelPairing = useCancelModelProviderPairing();
+  const pairingStatus = useModelProviderPairingStatus(pairing?.id ?? null, {
+    enabled: open && stage === "cli" && !!pairing,
+  });
 
-  // Snapshot the set of provider-key ids that already existed at the moment
-  // we entered the CLI stage. The poller treats any new id matching this
-  // providerId as the connection completing. Without the snapshot we'd
-  // false-positive on whatever was already on the org.
-  const baselineRef = useRef<Set<string> | null>(null);
-
-  // Poll model-provider-credentials every 2.5s while we're on the CLI stage. We
-  // funnel the unstable `keysQuery.refetch` through a ref so the polling
-  // effect's dependency array stays primitive — without this, the React-Query
-  // hook returns a new object every render and the interval was being
-  // shredded + recreated on every refetch, causing a tight request loop.
-  const keysQuery = useModelProviderCredentials();
-  const refetchRef = useRef(keysQuery.refetch);
-  refetchRef.current = keysQuery.refetch;
-
+  // When the helper completes + the platform persists the credential, the
+  // pairing flips to `consumed`. Surface the success toast, invalidate the
+  // model-provider-credentials query so the caller's list refreshes, and
+  // close. The pairing row is already consumed server-side — no DELETE
+  // needed on success (the cleanup worker reaps it later).
   useEffect(() => {
     if (!open || stage !== "cli") return;
-    const id = setInterval(() => {
-      void refetchRef.current();
-    }, 2500);
-    return () => clearInterval(id);
-  }, [open, stage]);
-
-  // Fire success when a fresh row matching this providerId appears.
-  useEffect(() => {
-    if (!open || stage !== "cli") return;
-    if (baselineRef.current === null) return;
-    const baseline = baselineRef.current;
-    const fresh = (keysQuery.data ?? []).find(
-      (k: OrgModelProviderKeyInfo) => !baseline.has(k.id) && k.providerId === providerId,
-    );
-    if (fresh) {
+    if (pairingStatus.data?.status === "consumed") {
       toast.success(t("providerKeys.oauth.callbackSuccess"));
+      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
       handleClose();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keysQuery.data, open, stage, providerId]);
+  }, [pairingStatus.data?.status, open, stage]);
 
-  const command = useMemo(
-    () => buildConnectCommand(slug, label.trim() || defaultLabel),
-    [slug, label, defaultLabel],
-  );
+  const isExpired = pairingStatus.data?.status === "expired";
+  const command = pairing?.command ?? "";
+
+  // Cancel pairing on close. We keep this in a ref so the cleanup effect
+  // can read the latest pairing without re-running on every state update.
+  const pairingRef = useRef(pairing);
+  pairingRef.current = pairing;
+  const cancelMutateRef = useRef(cancelPairing.mutate);
+  cancelMutateRef.current = cancelPairing.mutate;
 
   function reset() {
     setStage("tos");
     setLabel(defaultLabel);
     setTosAccepted(false);
     setCopied(false);
-    baselineRef.current = null;
+    setPairing(null);
   }
 
   function handleClose() {
+    // Best-effort cancellation — DELETE failure is non-fatal (token TTL
+    // expires the row regardless). React Query's mutation is fire-and-forget.
+    if (pairingRef.current) {
+      cancelMutateRef.current(pairingRef.current.id, {
+        onError: () => {
+          /* swallow — TTL is the safety net */
+        },
+      });
+    }
     reset();
     onClose();
   }
 
-  function handleAdvanceToCli() {
+  async function generatePairing() {
+    try {
+      const res = await createPairing.mutateAsync({ providerId });
+      setPairing({ id: res.id, command: res.command });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("providerKeys.oauth.pairingCreateFailed"));
+    }
+  }
+
+  async function handleAdvanceToCli() {
     if (!tosAccepted || !label.trim()) return;
-    baselineRef.current = new Set((keysQuery.data ?? []).map((k) => k.id));
     setStage("cli");
+    await generatePairing();
+  }
+
+  async function handleRegenerate() {
+    setPairing(null);
+    await generatePairing();
   }
 
   async function handleCopy() {
@@ -223,27 +227,45 @@ export function OAuthModelProviderDialog({ open, providerId, defaultLabel, onClo
     >
       <div className="flex flex-col gap-4 text-sm">
         <p>{t("providerKeys.oauth.cliInstructions")}</p>
-        <div className="bg-muted relative flex items-center gap-2 rounded-md p-3 font-mono text-xs">
-          <code className="flex-1 break-all whitespace-pre-wrap">{command}</code>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleCopy}
-            aria-label={t("providerKeys.oauth.copyCommand")}
-            className="shrink-0"
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            <span className="ml-1.5">
-              {copied ? t("providerKeys.oauth.copied") : t("providerKeys.oauth.copy")}
-            </span>
-          </Button>
-        </div>
-        <p className="text-muted-foreground text-xs">{t("providerKeys.oauth.cliHint")}</p>
-        <div className="text-muted-foreground flex items-center gap-2 text-xs">
-          <Spinner />
-          <span>{t("providerKeys.oauth.cliWaiting")}</span>
-        </div>
+
+        {createPairing.isPending || (!pairing && !isExpired) ? (
+          <div className="bg-muted text-muted-foreground flex items-center gap-2 rounded-md p-3 text-xs">
+            <Spinner />
+            <span>{t("providerKeys.oauth.generatingCommand")}</span>
+          </div>
+        ) : isExpired ? (
+          <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <p>{t("providerKeys.oauth.pairingExpired")}</p>
+            <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              {t("providerKeys.oauth.regenerateCommand")}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="bg-muted relative flex items-center gap-2 rounded-md p-3 font-mono text-xs">
+              <code className="flex-1 break-all whitespace-pre-wrap">{command}</code>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCopy}
+                aria-label={t("providerKeys.oauth.copyCommand")}
+                className="shrink-0"
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span className="ml-1.5">
+                  {copied ? t("providerKeys.oauth.copied") : t("providerKeys.oauth.copy")}
+                </span>
+              </Button>
+            </div>
+            <p className="text-muted-foreground text-xs">{t("providerKeys.oauth.cliHint")}</p>
+            <div className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Spinner />
+              <span>{t("providerKeys.oauth.cliWaiting")}</span>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );

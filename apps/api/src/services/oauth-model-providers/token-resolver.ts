@@ -38,11 +38,40 @@ import {
 } from "../model-provider-credentials.ts";
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
+import { hasRedis } from "../../infra/mode.ts";
+import { getRedisConnection } from "../../lib/redis.ts";
+import { randomBytes } from "node:crypto";
 
 /** Refresh `expiresAt` lead time. Mirrors the sidecar threshold (SPEC §5.2). */
 const REFRESH_LEAD_MS = 5 * 60_000;
 
+/**
+ * Distributed-lock TTL in seconds. Sized as `30s network timeout` + slack.
+ * If a holder crashes, the lock auto-expires so the next caller can refresh.
+ * Lua-released early when the holder finishes — TTL is the safety net.
+ */
+const REFRESH_LOCK_TTL_SECONDS = 45;
+
+/**
+ * In-process singleflight — collapses concurrent refresh callers WITHIN a
+ * single API instance. Across instances, the Redis lock below serializes.
+ * On Tier 0/1 (no Redis) the platform is single-instance by definition, so
+ * this map is the only serialization needed.
+ */
 const inflightRefreshes = new Map<string, Promise<ResolvedToken>>();
+
+/**
+ * Lua script for safe lock release: only deletes the key if its value
+ * matches the lock-id we wrote. Prevents releasing a lock acquired by
+ * another instance after our TTL expired.
+ */
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`;
 
 export interface ResolvedToken {
   accessToken: string;
@@ -67,7 +96,10 @@ interface CredentialState {
   config: ModelProviderConfig & { authMode: "oauth2" };
 }
 
-async function loadCredentialState(credentialId: string): Promise<CredentialState> {
+async function loadCredentialState(
+  credentialId: string,
+  expectedOrgId?: string,
+): Promise<CredentialState> {
   const [row] = await db
     .select({
       id: modelProviderCredentials.id,
@@ -79,6 +111,15 @@ async function loadCredentialState(credentialId: string): Promise<CredentialStat
     .where(eq(modelProviderCredentials.id, credentialId))
     .limit(1);
   if (!row) {
+    throw notFound(`OAuth model provider credential not found: ${credentialId}`);
+  }
+  // Defense-in-depth: even if the route's `assertOAuthModelCredential`
+  // gate is ever bypassed by a refactor, the data layer refuses to surface
+  // a credential outside the caller's org. Internally this branch is dead
+  // when callers pass `expectedOrgId` correctly — its job is to make
+  // accidental cross-org access fail loudly during refactors instead of
+  // silently leaking a token.
+  if (expectedOrgId !== undefined && row.orgId !== expectedOrgId) {
     throw notFound(`OAuth model provider credential not found: ${credentialId}`);
   }
 
@@ -178,11 +219,17 @@ function buildResolvedToken(state: CredentialState): ResolvedToken {
  * Resolve a fresh access token for the sidecar. Refreshes proactively if
  * the token expires within {@link REFRESH_LEAD_MS}.
  *
+ * `expectedOrgId` is forwarded to {@link loadCredentialState} as
+ * defense-in-depth — see that function's comment.
+ *
  * Throws `gone(needsReconnection: true)` when the credential is flagged as
  * needing reconnection — sidecar surfaces this as 401 to the agent.
  */
-export async function resolveOAuthTokenForSidecar(credentialId: string): Promise<ResolvedToken> {
-  const state = await loadCredentialState(credentialId);
+export async function resolveOAuthTokenForSidecar(
+  credentialId: string,
+  expectedOrgId?: string,
+): Promise<ResolvedToken> {
+  const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(
       "OAUTH_CONNECTION_NEEDS_RECONNECTION",
@@ -195,23 +242,42 @@ export async function resolveOAuthTokenForSidecar(credentialId: string): Promise
     return buildResolvedToken(state);
   }
 
-  return forceRefreshOAuthModelProviderToken(credentialId);
+  return forceRefreshOAuthModelProviderToken(credentialId, expectedOrgId);
 }
 
 /**
- * Force a refresh of the access token regardless of expiry. Singleflighted
- * per-credential. On `invalid_grant` (refresh token revoked), flips
- * `needsReconnection=true` on the row and throws `gone()`.
+ * Force a refresh of the access token regardless of expiry. Two layers of
+ * deduplication guard against concurrent refreshes:
+ *
+ *  1. **In-process singleflight** (`inflightRefreshes`) — collapses callers
+ *     within the same API instance.
+ *  2. **Distributed Redis lock** (`oauth-refresh:${credentialId}`) — serializes
+ *     across instances. Without it, multiple platforms behind a load
+ *     balancer would each hit the upstream `/oauth/token` endpoint
+ *     concurrently; OpenAI/Anthropic both rotate `refresh_token` on use, so
+ *     the slow caller writes a now-invalid `refresh_token` to the DB and
+ *     the credential gets flagged `needsReconnection=true` at the next
+ *     refresh attempt. After acquiring the Redis lock, we **re-read** the
+ *     credential row to pick up any `accessToken`/`refreshToken` already
+ *     written by the lock-winner, and short-circuit if the token is now
+ *     fresh enough — otherwise we'd burn the just-rotated `refresh_token`.
+ *
+ * On Tier 0/1 (no Redis) the platform runs single-instance, so the
+ * in-process singleflight is sufficient and the lock is skipped.
+ *
+ * On `invalid_grant` (refresh token revoked), flips `needsReconnection=true`
+ * on the row and throws `gone()`.
  */
 export async function forceRefreshOAuthModelProviderToken(
   credentialId: string,
+  expectedOrgId?: string,
 ): Promise<ResolvedToken> {
   const inflight = inflightRefreshes.get(credentialId);
   if (inflight) return inflight;
 
   const promise = (async () => {
     try {
-      return await doRefresh(credentialId);
+      return await refreshUnderDistributedLock(credentialId, expectedOrgId);
     } finally {
       inflightRefreshes.delete(credentialId);
     }
@@ -220,8 +286,77 @@ export async function forceRefreshOAuthModelProviderToken(
   return promise;
 }
 
-async function doRefresh(credentialId: string): Promise<ResolvedToken> {
-  const state = await loadCredentialState(credentialId);
+/**
+ * Acquire the distributed refresh lock (if Redis is available), then call
+ * {@link doRefresh}. After acquiring the lock, re-read the credential to
+ * detect a refresh that happened on another instance while we were waiting:
+ * if the stored token is now fresh enough, return it without burning the
+ * (potentially just-rotated) refresh_token.
+ */
+async function refreshUnderDistributedLock(
+  credentialId: string,
+  expectedOrgId?: string,
+): Promise<ResolvedToken> {
+  if (!hasRedis()) {
+    return doRefresh(credentialId, expectedOrgId);
+  }
+
+  const redis = getRedisConnection();
+  const lockKey = `oauth-refresh:${credentialId}`;
+  const lockId = randomBytes(16).toString("hex");
+  const acquireDeadline = Date.now() + 30_000;
+  let acquired = false;
+
+  while (Date.now() < acquireDeadline) {
+    const result = await redis.set(lockKey, lockId, "EX", REFRESH_LOCK_TTL_SECONDS, "NX");
+    if (result === "OK") {
+      acquired = true;
+      break;
+    }
+    // Wait briefly before retrying — the lock-winner is talking to upstream
+    // (~hundreds of ms) so polling at 100ms keeps tail latency reasonable
+    // without hammering Redis.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (!acquired) {
+    logger.warn("oauth model provider: refresh lock acquisition timed out, proceeding unlocked", {
+      credentialId,
+    });
+    return doRefresh(credentialId, expectedOrgId);
+  }
+
+  try {
+    // Lock-winner may have written a fresh token while we were waiting.
+    // Re-read; if the access token is now within the refresh window, the
+    // resolver caller still gets a valid token without us calling upstream.
+    const state = await loadCredentialState(credentialId, expectedOrgId);
+    if (state.blob.needsReconnection) {
+      throw gone(
+        "OAUTH_CONNECTION_NEEDS_RECONNECTION",
+        `OAuth credential ${credentialId} needs reconnection`,
+      );
+    }
+    if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > REFRESH_LEAD_MS) {
+      return buildResolvedToken(state);
+    }
+    return await doRefresh(credentialId, expectedOrgId);
+  } finally {
+    // Best-effort release. If the EVAL fails (Redis hiccup), the TTL
+    // ensures the lock auto-expires within REFRESH_LOCK_TTL_SECONDS.
+    try {
+      await redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockId);
+    } catch (err) {
+      logger.warn("oauth model provider: refresh lock release failed", {
+        credentialId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<ResolvedToken> {
+  const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(
       "OAUTH_CONNECTION_NEEDS_RECONNECTION",

@@ -32,6 +32,26 @@ export interface SidecarConfig {
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
+/**
+ * Canonical wire-format identifier for every LLM model provider Appstrate
+ * proxies to. Lives here (in core) so that the sidecar runtime, the
+ * platform's model-provider registry, and the OAuth token cache all reference
+ * a single source of truth — drift between the three previously caused 401s
+ * to surface as "unknown apiShape" rather than a real auth failure.
+ */
+export type ModelApiShape =
+  | "anthropic-messages"
+  | "openai-chat"
+  | "openai-responses"
+  | "openai-codex-responses";
+
+/**
+ * Subset of {@link ModelApiShape} reachable via the OAuth path. `openai-chat`
+ * is intentionally excluded — chat-completions is an API-key-only surface
+ * (BYO OpenAI key, openai-compatible endpoints), never authenticated via OAuth.
+ */
+export type OauthModelApiShape = Exclude<ModelApiShape, "openai-chat">;
+
 export interface LlmProxyApiKeyConfig {
   authMode?: "api_key";
   baseUrl: string;
@@ -46,7 +66,7 @@ export interface LlmProxyOauthConfig {
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   oauthConnectionId: string;
   /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
-  apiShape: "anthropic-messages" | "openai-responses" | "openai-codex-responses";
+  apiShape: OauthModelApiShape;
   /** Used to look up the identity-header / body-transform strategy. Canonical providerId ("codex", "claude-code"). */
   providerId: string;
   /** Optional URL rewriting (e.g. Codex `/v1/responses` → `/codex/responses`). */
