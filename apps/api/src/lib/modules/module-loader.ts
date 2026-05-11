@@ -4,6 +4,7 @@ import type { Hono } from "hono";
 import type { AppConfig } from "@appstrate/shared-types";
 import type {
   AppstrateModule,
+  ModelProviderDefinition,
   ModuleInitContext,
   ModuleHooks,
   ModuleEvents,
@@ -434,6 +435,41 @@ export function getModuleOidcScopes(): string[] {
     }
   }
   return Array.from(seen);
+}
+
+/**
+ * Aggregate model provider definitions contributed by every loaded module.
+ *
+ * Order: module init order (topological). When two modules contribute a
+ * provider with the same `providerId`, this throws — there is no
+ * first-match-wins fallback. Provider ids must be globally unique because
+ * the platform stores them as `provider_id` strings in DB rows and
+ * resolves credentials by id.
+ *
+ * OSS invariant: returns `[]` when no module contributes (e.g. cloud SaaS
+ * with `MODULES=oidc,webhooks` and neither `core-providers` nor `codex`).
+ */
+export function getModuleModelProviders(): readonly ModelProviderDefinition[] {
+  const collected: ModelProviderDefinition[] = [];
+  const ownerById = new Map<string, string>();
+  for (const mod of _modules.values()) {
+    const contrib = mod.modelProviders?.();
+    if (!contrib) continue;
+    for (const def of contrib) {
+      const previous = ownerById.get(def.providerId);
+      if (previous && previous !== mod.manifest.id) {
+        throw new Error(
+          `Modules "${previous}" and "${mod.manifest.id}" both declared model provider ` +
+            `${JSON.stringify(def.providerId)}. Provider ids must be unique across loaded modules ` +
+            `— credentials are stored by provider_id and the second contribution would silently ` +
+            `shadow the first at lookup time.`,
+        );
+      }
+      ownerById.set(def.providerId, mod.manifest.id);
+      collected.push(def);
+    }
+  }
+  return collected;
 }
 
 /** Collect OpenAPI tags contributed by all loaded modules. */
