@@ -129,3 +129,56 @@ export const CLAUDE_CODE_IDENTITY_PROMPT =
  * "CLAUDE_CODE_CLI_VERSION sync with pi-ai" for the drift detector.
  */
 export const CLAUDE_CODE_CLI_VERSION = "2.1.75";
+
+/**
+ * Beta tokens Anthropic gates `sk-ant-oat-*` tokens to at the OAuth identity
+ * layer. Omitting any of these returns 401 `invalid x-api-key`. Both the
+ * platform llm-proxy (`apps/api/src/services/llm-proxy/anthropic.ts`) and
+ * the inference probe (`apps/api/src/services/org-models.ts`) MUST send
+ * these on every OAuth call.
+ *
+ * The sidecar runtime does NOT inject `anthropic-beta` because pi-ai's
+ * anthropic provider already supplies the beta header in-container (with
+ * its own additional pi-ai performance betas like `fine-grained-tool-
+ * streaming-2025-05-14`).
+ */
+export const CLAUDE_CODE_OAUTH_IDENTITY_BETAS = [
+  "claude-code-20250219",
+  "oauth-2025-04-20",
+] as const;
+
+/**
+ * Full OAuth beta set sent by the platform llm-proxy when forwarding agent
+ * traffic — extends {@link CLAUDE_CODE_OAUTH_IDENTITY_BETAS} with the pi-ai
+ * performance betas (`fine-grained-tool-streaming-2025-05-14`) because the
+ * proxy sees only the placeholder bearer (pi-ai skips its local detection)
+ * and must reproduce pi-ai's wire format exactly. Caller-supplied betas
+ * (`prompt-caching-2024-07-31`, `context-1m-2025-08-07`, …) are merged on
+ * top, not replaced.
+ */
+export const CLAUDE_CODE_OAUTH_BETAS = [
+  ...CLAUDE_CODE_OAUTH_IDENTITY_BETAS,
+  "fine-grained-tool-streaming-2025-05-14",
+] as const;
+
+/**
+ * Static identity headers Anthropic enforces on every OAuth-authenticated
+ * `/v1/messages` call (alongside `Authorization: Bearer …`, the OAuth betas
+ * above, and `user-agent: claude-cli/<v>`). Shared by all three Claude Code
+ * OAuth call sites:
+ *
+ *   - platform llm-proxy adapter (`apps/api/src/services/llm-proxy/anthropic.ts`)
+ *   - inference probe (`apps/api/src/services/org-models.ts`)
+ *   - sidecar runtime (`runtime-pi/sidecar/oauth-identity.ts`)
+ *
+ * Anthropic's third-party-tier filter rejects requests missing any of these
+ * silently with 401/403 (`invalid x-api-key`) or 429 (claude-code-disabled),
+ * so the constant lives here in core to prevent drift across the three.
+ * `accept` and `content-type` are NOT in this set — each call site picks
+ * the right pair (`application/json` for probe/proxy non-stream,
+ * `text/event-stream` for streaming).
+ */
+export const CLAUDE_CODE_IDENTITY_HEADERS = {
+  "anthropic-dangerous-direct-browser-access": "true",
+  "x-app": "cli",
+} as const;

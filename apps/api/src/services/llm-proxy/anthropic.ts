@@ -34,7 +34,11 @@
  *     two to produce the metering row.
  */
 
-import { CLAUDE_CODE_CLI_VERSION } from "@appstrate/core/sidecar-types";
+import {
+  CLAUDE_CODE_CLI_VERSION,
+  CLAUDE_CODE_IDENTITY_HEADERS,
+  CLAUDE_CODE_OAUTH_BETAS,
+} from "@appstrate/core/sidecar-types";
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
 import {
   extractUsageObject,
@@ -42,12 +46,6 @@ import {
   parseSseDataFrame,
   substituteModelJson,
 } from "./helpers.ts";
-
-const OAUTH_REQUIRED_BETAS = [
-  "claude-code-20250219",
-  "oauth-2025-04-20",
-  "fine-grained-tool-streaming-2025-05-14",
-];
 
 function isOAuthToken(apiKey: string): boolean {
   return apiKey.includes("sk-ant-oat");
@@ -78,11 +76,10 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
       // so things like `prompt-caching-2024-07-31` keep working.
       headers["Authorization"] = `Bearer ${upstreamApiKey}`;
       headers["user-agent"] = `claude-cli/${CLAUDE_CODE_CLI_VERSION}`;
-      headers["x-app"] = "cli";
-      headers["anthropic-dangerous-direct-browser-access"] = "true";
+      Object.assign(headers, CLAUDE_CODE_IDENTITY_HEADERS);
       const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
       const callerBetas = callerBeta ? callerBeta.split(",").map((s) => s.trim()) : [];
-      const merged = Array.from(new Set([...OAUTH_REQUIRED_BETAS, ...callerBetas])).filter(
+      const merged = Array.from(new Set([...CLAUDE_CODE_OAUTH_BETAS, ...callerBetas])).filter(
         (s) => s.length > 0,
       );
       headers["anthropic-beta"] = merged.join(",");

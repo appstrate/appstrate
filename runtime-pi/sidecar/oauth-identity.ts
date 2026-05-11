@@ -17,7 +17,10 @@
  *     well under the sidecar's 10 MB request cap.
  */
 
-import { CLAUDE_CODE_IDENTITY_PROMPT } from "@appstrate/core/sidecar-types";
+import {
+  CLAUDE_CODE_IDENTITY_HEADERS,
+  CLAUDE_CODE_IDENTITY_PROMPT,
+} from "@appstrate/core/sidecar-types";
 import type { CachedToken } from "./oauth-token-cache.ts";
 import { MAX_REQUEST_BODY_SIZE } from "./helpers.ts";
 
@@ -50,8 +53,7 @@ export function buildIdentityHeaders(
     case "claude-code":
       return {
         accept: "application/json",
-        "anthropic-dangerous-direct-browser-access": "true",
-        "x-app": "cli",
+        ...CLAUDE_CODE_IDENTITY_HEADERS,
       };
 
     case "codex": {

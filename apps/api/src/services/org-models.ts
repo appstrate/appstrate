@@ -9,7 +9,9 @@ import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import {
   CLAUDE_CODE_CLI_VERSION,
+  CLAUDE_CODE_IDENTITY_HEADERS,
   CLAUDE_CODE_IDENTITY_PROMPT,
+  CLAUDE_CODE_OAUTH_IDENTITY_BETAS,
 } from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./model-provider-credentials.ts";
@@ -632,11 +634,10 @@ export function buildClaudeCodeInferenceRequest(config: {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
-      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+      "anthropic-beta": CLAUDE_CODE_OAUTH_IDENTITY_BETAS.join(","),
       "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
       "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
-      "x-app": "cli",
+      ...CLAUDE_CODE_IDENTITY_HEADERS,
       accept: "application/json",
       "content-type": "application/json",
     },
