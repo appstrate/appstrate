@@ -173,13 +173,14 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   maxLength: 40,
                   description:
-                    "Claude-only: subscription tier (`pro`, `max`, `team`, `enterprise`).",
+                    "Optional subscription tier hint surfaced by the upstream OAuth provider (e.g. `pro`, `max`, `team`, `enterprise`). Carried through verbatim to the credential row.",
                 },
                 email: {
                   type: "string",
                   format: "email",
                   maxLength: 320,
-                  description: "Account email — Codex re-derives from JWT, Claude relies on this.",
+                  description:
+                    "Account email — Codex re-derives from JWT, other providers carry it through verbatim.",
                 },
                 accountId: {
                   type: "string",
