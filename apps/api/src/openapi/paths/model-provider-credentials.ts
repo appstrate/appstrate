@@ -45,7 +45,12 @@ export const modelProviderCredentialsPaths = {
                         docsUrl: { type: ["string", "null"] },
                         apiShape: {
                           type: "string",
-                          enum: ["anthropic-messages", "openai-chat", "openai-responses"],
+                          enum: [
+                            "anthropic-messages",
+                            "openai-chat",
+                            "openai-responses",
+                            "openai-codex-responses",
+                          ],
                         },
                         defaultBaseUrl: { type: "string" },
                         baseUrlOverridable: { type: "boolean" },
@@ -153,7 +158,7 @@ export const modelProviderCredentialsPaths = {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Wire format / API shape (anthropic-messages, openai-chat, openai-responses, openai-completions, …). Combined with baseUrl to reverse-resolve the registry providerId.",
+                    "Wire format / API shape used to reverse-resolve the registry providerId together with baseUrl. Accepted values match `ModelApiShape` (anthropic-messages, openai-chat, openai-responses, openai-codex-responses) plus the legacy `openai-compatible`-fallback strings the picker still emits for self-hosted endpoints.",
                 },
                 baseUrl: {
                   type: "string",
