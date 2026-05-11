@@ -5,7 +5,6 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/oauth-model-providers/oauth-flow.ts";
 import {
@@ -172,7 +171,6 @@ export function createModelProvidersOAuthRouter() {
   // GETs only ever return status, never the token itself.
   router.post(
     "/pairing",
-    requireAppContext(),
     requirePermission("model-provider-credentials", "write"),
     rateLimit(10),
     async (c) => {
@@ -225,31 +223,26 @@ export function createModelProvidersOAuthRouter() {
   //
   // Wrong-org reads return 404 (not 403) — we never confirm or deny
   // existence of a pairing belonging to a different tenant.
-  router.get(
-    "/pairing/:id",
-    requireAppContext(),
-    requirePermission("model-provider-credentials", "read"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
+  router.get("/pairing/:id", requirePermission("model-provider-credentials", "read"), async (c) => {
+    const orgId = c.get("orgId");
+    const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-      const row = await getPairing(id, orgId);
-      if (!row) throw notFound("Pairing not found");
+    const row = await getPairing(id, orgId);
+    if (!row) throw notFound("Pairing not found");
 
-      const now = Date.now();
-      let status: "pending" | "consumed" | "expired";
-      if (row.consumedAt) status = "consumed";
-      else if (row.expiresAt.getTime() <= now) status = "expired";
-      else status = "pending";
+    const now = Date.now();
+    let status: "pending" | "consumed" | "expired";
+    if (row.consumedAt) status = "consumed";
+    else if (row.expiresAt.getTime() <= now) status = "expired";
+    else status = "pending";
 
-      return c.json({
-        id: row.id,
-        status,
-        consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
-        expiresAt: row.expiresAt.toISOString(),
-      });
-    },
-  );
+    return c.json({
+      id: row.id,
+      status,
+      consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
+      expiresAt: row.expiresAt.toISOString(),
+    });
+  });
 
   // DELETE /api/model-providers-oauth/pairing/:id
   // Cancel a pending pairing. Idempotent — returns 204 even when the row
@@ -257,7 +250,6 @@ export function createModelProvidersOAuthRouter() {
   // wrong-org case is silent for the same reason GET returns 404.
   router.delete(
     "/pairing/:id",
-    requireAppContext(),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
       const orgId = c.get("orgId");

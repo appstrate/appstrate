@@ -7,11 +7,8 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
       description:
-        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
+        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
         content: {
@@ -89,7 +86,6 @@ export const modelProvidersOAuthPaths = {
         "Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. The plaintext token is never re-served — only status + timestamps.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         {
           name: "id",
           in: "path",
@@ -133,7 +129,6 @@ export const modelProvidersOAuthPaths = {
         "Idempotent — returns 204 even when the row is already gone (consumed, expired-and-purged, or belongs to another org). Wrong-org cancellations are silent for the same reason GET returns 404 rather than 403.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         {
           name: "id",
           in: "path",
