@@ -26,12 +26,12 @@ import {
   buildTokenBody,
 } from "@appstrate/connect";
 import type { ModelProviderDefinition as ModelProviderConfig } from "@appstrate/core/module";
-import { getModelProvider as getModelProviderConfig } from "../model-providers/registry.ts";
+import { getModelProvider as getModelProviderConfig } from "./registry.ts";
 import {
   markCredentialNeedsReconnection,
   updateOAuthCredentialTokens,
   type OAuthBlob,
-} from "../model-provider-credentials.ts";
+} from "./credentials.ts";
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { hasRedis } from "../../infra/mode.ts";

@@ -35,8 +35,8 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { decryptCredentials } from "@appstrate/connect";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
-import { type OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
+import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
+import { type OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 

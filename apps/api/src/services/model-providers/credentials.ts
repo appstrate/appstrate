@@ -22,16 +22,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
-import { mergeSystemAndDb, scopedWhere } from "../lib/db-helpers.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
-import {
-  getModelProvider,
-  isModelProviderEnabled,
-  listModelProviders,
-} from "./model-providers/registry.ts";
+import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
+import { getModelProvider, isModelProviderEnabled, listModelProviders } from "./registry.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import { getSystemModelProviderKeys } from "./model-registry.ts";
-import { logger } from "../lib/logger.ts";
+import { getSystemModelProviderKeys } from "../model-registry.ts";
+import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────

@@ -26,12 +26,12 @@ import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { decryptCredentials } from "@appstrate/connect";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { importOAuthModelProviderConnection } from "../../../../../services/oauth-model-providers/oauth-flow.ts";
+import { importOAuthModelProviderConnection } from "../../../../../services/model-providers/oauth-flow.ts";
 import {
   loadInferenceCredentials,
   listOrgModelProviderCredentials,
   type OAuthBlob,
-} from "../../../../../services/model-provider-credentials.ts";
+} from "../../../../../services/model-providers/credentials.ts";
 import { ApiError } from "../../../../../lib/errors.ts";
 
 const CODEX = "codex";

@@ -18,7 +18,7 @@ import {
   consumePairing,
   createPairing,
   getPairing,
-} from "../../../src/services/oauth-model-providers/pairings.ts";
+} from "../../../src/services/model-providers/pairings.ts";
 import { hashPairingSecret } from "@appstrate/connect-helper/pairing-token";
 import { modelProviderPairings } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";

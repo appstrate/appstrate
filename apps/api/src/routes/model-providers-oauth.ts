@@ -6,7 +6,7 @@ import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { importOAuthModelProviderConnection } from "../services/oauth-model-providers/oauth-flow.ts";
+import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
 import {
   isModelProviderEnabled,
   isOAuthModelProvider,
@@ -16,7 +16,7 @@ import {
   consumePairing,
   createPairing,
   getPairing,
-} from "../services/oauth-model-providers/pairings.ts";
+} from "../services/model-providers/pairings.ts";
 import { forbidden, invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";

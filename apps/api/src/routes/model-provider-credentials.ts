@@ -14,7 +14,7 @@ import {
   loadInferenceCredentials,
   resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
-} from "../services/model-provider-credentials.ts";
+} from "../services/model-providers/credentials.ts";
 import {
   getModelProvider,
   isModelProviderEnabled,

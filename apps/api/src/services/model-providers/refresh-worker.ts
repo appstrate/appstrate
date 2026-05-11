@@ -36,8 +36,8 @@ import { createQueue, type JobQueue, type QueueJob } from "../../infra/queue/ind
 import { logger } from "../../lib/logger.ts";
 import { ApiError } from "../../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { listModelProviders } from "../model-providers/registry.ts";
-import { type OAuthBlob } from "../model-provider-credentials.ts";
+import { listModelProviders } from "./registry.ts";
+import { type OAuthBlob } from "./credentials.ts";
 import { forceRefreshOAuthModelProviderToken } from "./token-resolver.ts";
 import { cleanupExpiredPairings } from "./pairings.ts";
 

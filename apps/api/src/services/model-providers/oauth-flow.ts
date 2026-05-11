@@ -23,8 +23,8 @@
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
-import { createOAuthCredential } from "../model-provider-credentials.ts";
-import { getModelProvider } from "../model-providers/registry.ts";
+import { createOAuthCredential } from "./credentials.ts";
+import { getModelProvider } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 

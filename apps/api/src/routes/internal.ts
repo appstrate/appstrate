@@ -33,7 +33,7 @@ import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
-} from "../services/oauth-model-providers/token-resolver.ts";
+} from "../services/model-providers/token-resolver.ts";
 
 /**
  * Safety margin used when deciding whether a stored access token is still

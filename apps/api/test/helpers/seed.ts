@@ -240,7 +240,7 @@ export async function seedOrgProxy(
 // ─── Model Provider Credentials ─────────────────────────────
 
 import { encryptCredentials } from "@appstrate/connect";
-import { resolveProviderIdFromApiKeyForm } from "../../src/services/model-provider-credentials.ts";
+import { resolveProviderIdFromApiKeyForm } from "../../src/services/model-providers/credentials.ts";
 
 interface ModelProviderCredentialSeed {
   orgId: string;

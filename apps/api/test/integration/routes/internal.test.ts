@@ -15,7 +15,7 @@ import {
 } from "../../helpers/seed.ts";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
-import type { OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
+import type { OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
 import { userProviderConnections } from "@appstrate/db/schema";

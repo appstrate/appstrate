@@ -37,8 +37,8 @@ import {
   resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
   updateOAuthCredentialTokens,
-} from "../../../src/services/model-provider-credentials.ts";
-import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
+} from "../../../src/services/model-providers/credentials.ts";
+import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 

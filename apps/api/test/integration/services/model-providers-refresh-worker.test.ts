@@ -29,8 +29,8 @@ import {
   createApiKeyCredential,
   createOAuthCredential,
   markCredentialNeedsReconnection,
-} from "../../../src/services/model-provider-credentials.ts";
-import { scanAndEnqueueRefreshes } from "../../../src/services/oauth-model-providers/refresh-worker.ts";
+} from "../../../src/services/model-providers/credentials.ts";
+import { scanAndEnqueueRefreshes } from "../../../src/services/model-providers/refresh-worker.ts";
 
 interface SeedFixture {
   orgId: string;

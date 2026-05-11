@@ -78,7 +78,7 @@ export interface LlmProxyOauthConfig {
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Single source of truth — both the platform
- * resolver (`apps/api/src/services/oauth-model-providers/token-resolver.ts`) and
+ * resolver (`apps/api/src/services/model-providers/token-resolver.ts`) and
  * the sidecar cache (`runtime-pi/sidecar/oauth-token-cache.ts`) reference this
  * type so a new field added on either side cannot silently drift.
  */

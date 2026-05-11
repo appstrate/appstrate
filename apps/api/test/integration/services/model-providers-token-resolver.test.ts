@@ -31,11 +31,11 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
   createOAuthCredential,
   type OAuthBlob,
-} from "../../../src/services/model-provider-credentials.ts";
+} from "../../../src/services/model-providers/credentials.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
-} from "../../../src/services/oauth-model-providers/token-resolver.ts";
+} from "../../../src/services/model-providers/token-resolver.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
