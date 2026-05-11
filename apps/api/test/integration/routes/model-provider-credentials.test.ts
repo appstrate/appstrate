@@ -359,7 +359,9 @@ describe("Model Provider Keys API", () => {
     });
 
     it("GET /registry excludes disabled providers", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex";
+      // Soft-disable the synthetic OAuth provider — generic behavior,
+      // doesn't depend on any module being loaded.
+      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
       resetEnvCache();
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
@@ -367,13 +369,15 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { providerId: string }[] };
       const ids = body.data.map((p) => p.providerId);
-      expect(ids).not.toContain("codex");
+      expect(ids).not.toContain("test-oauth");
+      // The other canonical OSS providers come from modules — they MUST
+      // stay registered when the env disables an unrelated id.
       expect(ids).toContain("openai");
       expect(ids).toContain("anthropic");
       expect(ids).toContain("openai-compatible");
     });
 
-    it("GET /registry returns the full catalog when env is empty", async () => {
+    it("GET /registry returns every registered provider when env is empty", async () => {
       delete process.env.MODEL_PROVIDERS_DISABLED;
       resetEnvCache();
       const res = await app.request("/api/model-provider-credentials/registry", {
@@ -381,8 +385,14 @@ describe("Model Provider Keys API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { providerId: string }[] };
-      const ids = body.data.map((p) => p.providerId).sort();
-      expect(ids).toEqual(["codex", "openai", "anthropic", "openai-compatible"].sort());
+      const ids = body.data.map((p) => p.providerId);
+      // Synthetic test-oauth is always present; module-contributed
+      // providers may or may not be (depending on which modules are
+      // loaded in this test process). Assert containment, not equality.
+      expect(ids).toContain("test-oauth");
+      expect(ids).toContain("openai");
+      expect(ids).toContain("anthropic");
+      expect(ids).toContain("openai-compatible");
     });
 
     it("POST returns 403 when the resolved providerId is disabled", async () => {
@@ -406,7 +416,7 @@ describe("Model Provider Keys API", () => {
     });
 
     it("POST succeeds for a provider NOT listed as disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex";
+      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
       resetEnvCache();
       const res = await app.request("/api/model-provider-credentials", {
         method: "POST",

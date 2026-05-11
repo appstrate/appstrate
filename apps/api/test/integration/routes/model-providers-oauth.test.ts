@@ -18,7 +18,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 
 const app = getTestApp();
 
-async function mintPairing(ctx: TestContext, providerId = "codex"): Promise<string> {
+async function mintPairing(ctx: TestContext, providerId = "test-oauth"): Promise<string> {
   const res = await app.request("/api/model-providers-oauth/pairing", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -49,15 +49,15 @@ describe("POST /api/model-providers-oauth/import", () => {
     it("returns 403 when the providerId is disabled (race: pairing minted, provider disabled mid-flow)", async () => {
       // Mint the pairing while the provider is enabled — the gate fires
       // at consume-time on /import, after consumePairing() has run.
-      const token = await mintPairing(ctx, "codex");
+      const token = await mintPairing(ctx, "test-oauth");
 
-      process.env.MODEL_PROVIDERS_DISABLED = "codex";
+      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
       resetEnvCache();
       const res = await app.request("/api/model-providers-oauth/import", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          providerId: "codex",
+          providerId: "test-oauth",
           label: "Soft-disabled Codex import",
           accessToken: "at-x",
           refreshToken: "rt-x",
@@ -70,7 +70,7 @@ describe("POST /api/model-providers-oauth/import", () => {
     it("returns 400 when the body providerId is unknown (Zod refine fires after consume)", async () => {
       process.env.MODEL_PROVIDERS_DISABLED = "";
       resetEnvCache();
-      const token = await mintPairing(ctx, "codex");
+      const token = await mintPairing(ctx, "test-oauth");
       const res = await app.request("/api/model-providers-oauth/import", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -90,7 +90,7 @@ describe("POST /api/model-providers-oauth/import", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        providerId: "codex",
+        providerId: "test-oauth",
         label: "x",
         accessToken: "at",
         refreshToken: "rt",
@@ -106,7 +106,7 @@ describe("POST /api/model-providers-oauth/import", () => {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
-        providerId: "codex",
+        providerId: "test-oauth",
         label: "x",
         accessToken: "at",
         refreshToken: "rt",

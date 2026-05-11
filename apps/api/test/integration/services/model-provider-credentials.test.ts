@@ -107,7 +107,7 @@ describe("model-provider-credentials service — api_key path", () => {
         orgId: ctx.orgId,
         userId: ctx.user.id,
         label: "x",
-        providerId: "codex",
+        providerId: "test-oauth",
         apiKey: "x",
       }),
     ).rejects.toThrow(/requires OAuth/);
@@ -247,30 +247,25 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "Codex personal",
-      providerId: "codex",
+      label: "Test OAuth personal",
+      providerId: "test-oauth",
       accessToken: "access-1",
       refreshToken: "refresh-1",
       expiresAt: 1_700_000_000_000,
-      scopesGranted: ["openid", "profile", "email"],
+      scopesGranted: ["openid", "profile"],
       accountId: "acct-abc",
       subscriptionType: "pro",
       email: "user@example.test",
     });
 
     const creds = await loadInferenceCredentials(ctx.orgId, id);
-    expect(creds!.providerId).toBe("codex");
-    expect(creds!.apiShape).toBe("openai-codex-responses");
-    expect(creds!.baseUrl).toBe("https://chatgpt.com/backend-api");
+    expect(creds!.providerId).toBe("test-oauth");
+    expect(creds!.apiShape).toBe("openai-responses");
+    expect(creds!.baseUrl).toBe("https://example.test/v1");
     expect(creds!.apiKey).toBe("access-1");
     expect(creds!.accountId).toBe("acct-abc");
     expect(creds!.needsReconnection).toBe(false);
     expect(creds!.expiresAt).toBe(1_700_000_000_000);
-    expect(creds!.forceStream).toBe(true);
-    expect(creds!.forceStore).toBe(false);
-    // Codex uses apiShape "openai-codex-responses", which resolves
-    // `${baseUrl}/codex/responses` natively — no sidecar URL rewrite needed.
-    expect(creds!.rewriteUrlPath).toBeUndefined();
   });
 
   it("rejects createOAuthCredential for an api-key provider", async () => {
@@ -294,8 +289,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "codex",
-      providerId: "codex",
+      label: "test-oauth",
+      providerId: "test-oauth",
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
@@ -311,8 +306,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "codex",
-      providerId: "codex",
+      label: "test-oauth",
+      providerId: "test-oauth",
       accessToken: "old-access",
       refreshToken: "old-refresh",
       expiresAt: 1_000,
@@ -340,8 +335,8 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      label: "codex",
-      providerId: "codex",
+      label: "test-oauth",
+      providerId: "test-oauth",
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,

@@ -30,7 +30,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 
 const app = getTestApp();
 
-async function mintPairing(ctx: TestContext, providerId = "codex") {
+async function mintPairing(ctx: TestContext, providerId = "test-oauth") {
   const res = await app.request("/api/model-providers-oauth/pairing", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -52,7 +52,7 @@ function bearerHeaders(token: string): Record<string, string> {
   };
 }
 
-const VALID_BODY = (providerId = "codex") => ({
+const VALID_BODY = (providerId = "test-oauth") => ({
   providerId,
   label: "Test connection",
   accessToken: "fake-access-token",
@@ -70,25 +70,25 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   });
 
   it("imports credentials when authenticated by a fresh pairing token", async () => {
-    const pairing = await mintPairing(ctx, "codex");
+    const pairing = await mintPairing(ctx, "test-oauth");
     const res = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { providerId: string; credentialId: string };
-    expect(body.providerId).toBe("codex");
+    expect(body.providerId).toBe("test-oauth");
     expect(body.credentialId).toBeTruthy();
   });
 
   it("flips the pairing's consumed_at on success (single-use)", async () => {
-    const pairing = await mintPairing(ctx, "codex");
+    const pairing = await mintPairing(ctx, "test-oauth");
 
     const r1 = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(r1.status).toBe(200);
 
@@ -101,19 +101,19 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   });
 
   it("rejects a replay of the same token with 410 Gone", async () => {
-    const pairing = await mintPairing(ctx, "codex");
+    const pairing = await mintPairing(ctx, "test-oauth");
 
     const r1 = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(r1.status).toBe(200);
 
     const r2 = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(r2.status).toBe(410);
   });
@@ -122,13 +122,13 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
     const res = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: bearerHeaders("appp_garbage.notreallyatoken"),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(410);
   });
 
   it("does NOT require X-Org-Id / X-Application-Id headers (pairing carries them)", async () => {
-    const pairing = await mintPairing(ctx, "codex");
+    const pairing = await mintPairing(ctx, "test-oauth");
 
     // No authHeaders(ctx) — bearer-only.
     const res = await app.request("/api/model-providers-oauth/import", {
@@ -137,7 +137,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
         "Content-Type": "application/json",
         Authorization: `Bearer ${pairing.token}`,
       },
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(200);
   });
@@ -148,7 +148,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
     const res = await app.request("/api/model-providers-oauth/import", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify(VALID_BODY("codex")),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(401);
   });

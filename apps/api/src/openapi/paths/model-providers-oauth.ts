@@ -20,9 +20,8 @@ export const modelProvidersOAuthPaths = {
                 providerId: {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
-                  enum: ["codex"],
                   description:
-                    "Canonical provider id from the OAuth model provider registry. Must resolve to an OAuth provider that is not soft-disabled via `MODEL_PROVIDERS_DISABLED`.",
+                    "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`) AND not soft-disabled via `MODEL_PROVIDERS_DISABLED`. Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
                 },
               },
             },
@@ -160,7 +159,9 @@ export const modelProvidersOAuthPaths = {
               properties: {
                 providerId: {
                   type: "string",
-                  enum: ["codex"],
+                  pattern: "^[a-z0-9-]+$",
+                  description:
+                    "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400.",
                 },
                 label: { type: "string", minLength: 1, maxLength: 120 },
                 accessToken: { type: "string", minLength: 1 },

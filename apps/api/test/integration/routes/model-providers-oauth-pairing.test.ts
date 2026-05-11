@@ -28,7 +28,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -48,7 +48,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(401);
   });
@@ -81,12 +81,12 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     });
 
     it("returns 403 when the providerId is soft-disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex";
+      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
       resetEnvCache();
       const res = await app.request("/api/model-providers-oauth/pairing", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ providerId: "codex" }),
+        body: JSON.stringify({ providerId: "test-oauth" }),
       });
       expect(res.status).toBe(403);
     });
@@ -105,7 +105,7 @@ describe("GET /api/model-providers-oauth/pairing/:id", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string };
@@ -152,7 +152,7 @@ describe("DELETE /api/model-providers-oauth/pairing/:id", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     const body = (await res.json()) as { id: string };
     return body.id;
