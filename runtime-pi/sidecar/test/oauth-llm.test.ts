@@ -92,7 +92,6 @@ const CLAUDE_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://api.anthropic.com",
   credentialId: "conn-abc",
-  apiShape: "anthropic-messages",
   providerId: "claude-code",
 };
 
@@ -100,7 +99,6 @@ const CODEX_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://chatgpt.com/backend-api",
   credentialId: "conn-codex",
-  apiShape: "openai-codex-responses",
   providerId: "codex",
   forceStream: true,
   forceStore: false,

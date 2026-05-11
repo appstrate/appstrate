@@ -65,15 +65,13 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
-  apiShape: OauthModelApiShape;
   /** Used to look up the identity-header / body-transform strategy. Canonical providerId ("codex", "claude-code"). */
   providerId: string;
-  /** Optional URL rewriting (e.g. Codex `/v1/responses` → `/codex/responses`). */
+  /** Fallback URL rewrite — overridden per request by the token-endpoint response (e.g. Codex `/v1/responses` → `/codex/responses`). */
   rewriteUrlPath?: { from: string; to: string };
-  /** Codex: force `stream: true` in the request body. */
+  /** Codex fallback: force `stream: true` in the request body. */
   forceStream?: boolean;
-  /** Codex: force `store: false` in the request body. */
+  /** Codex fallback: force `store: false` in the request body. */
   forceStore?: boolean;
 }
 

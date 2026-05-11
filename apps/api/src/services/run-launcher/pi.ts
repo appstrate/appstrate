@@ -120,7 +120,6 @@ export async function runPlatformContainer(
         authMode: "oauth",
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        apiShape: llmConfig.apiShape as LlmProxyOauthConfig["apiShape"],
         providerId: llmConfig.providerId!,
         ...(llmConfig.rewriteUrlPath ? { rewriteUrlPath: llmConfig.rewriteUrlPath } : {}),
         ...(llmConfig.forceStream !== undefined ? { forceStream: llmConfig.forceStream } : {}),
