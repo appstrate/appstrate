@@ -30,7 +30,7 @@ beforeAll(() => {
 const CANONICAL_IDS = ["openai", "anthropic", "openai-compatible", "codex"] as const;
 
 describe("runtime registry composition", () => {
-  it("exposes the four canonical OSS providers (modules + legacy seed)", () => {
+  it("exposes the four canonical OSS providers (all module-contributed)", () => {
     const ids = listModelProviders()
       .map((p) => p.providerId)
       .sort();
