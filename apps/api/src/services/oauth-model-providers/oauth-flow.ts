@@ -24,8 +24,7 @@
  */
 
 import { createOAuthCredential } from "../model-provider-credentials.ts";
-import { getModelProviderConfig } from "./registry.ts";
-import { decodeCodexJwtPayload } from "./credentials.ts";
+import { decodeCodexJwtPayload, getModelProviderConfig } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 

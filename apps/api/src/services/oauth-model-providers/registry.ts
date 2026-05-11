@@ -107,6 +107,47 @@ export interface ModelProviderConfig {
   models: readonly ModelEntry[];
 }
 
+/**
+ * Decode the JWT payload of a Codex access token.
+ *
+ * Codex tokens are RS256 JWTs whose payload contains:
+ *   - `https://api.openai.com/auth.chatgpt_account_id` (UUID)
+ *   - `email`, `email_verified`
+ *   - standard `iss`, `aud`, `exp`, `iat` claims
+ *
+ * The sidecar needs the account id as a per-request `chatgpt-account-id`
+ * header. Returns `null` if the token is not a JWT or the payload is
+ * malformed. Does NOT verify the signature — the runtime trusts that the
+ * OAuth dance produced this token; downstream Codex calls verify it
+ * server-side. Claude Code returns opaque `sk-ant-oat01-…` tokens with no
+ * embedded claims, so no Claude equivalent exists.
+ */
+export function decodeCodexJwtPayload(accessToken: string): {
+  chatgpt_account_id?: string;
+  email?: string;
+} | null {
+  const parts = accessToken.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = parts[1]!;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const json = Buffer.from(padded, "base64").toString("utf-8");
+    const claims = JSON.parse(json) as Record<string, unknown>;
+
+    const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+    const accountId =
+      auth && typeof auth["chatgpt_account_id"] === "string"
+        ? (auth["chatgpt_account_id"] as string)
+        : undefined;
+    const email = typeof claims["email"] === "string" ? (claims["email"] as string) : undefined;
+
+    return { chatgpt_account_id: accountId, email };
+  } catch {
+    return null;
+  }
+}
+
 const codexConfig: ModelProviderConfig = {
   providerId: "codex",
   displayName: "Codex (ChatGPT)",

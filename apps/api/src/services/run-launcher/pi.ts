@@ -39,7 +39,7 @@ import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
 import { getModelProviderConfig, isOAuthModelProvider } from "../oauth-model-providers/registry.ts";
-import { decodeCodexJwtPayload } from "../oauth-model-providers/credentials.ts";
+import { decodeCodexJwtPayload } from "../oauth-model-providers/registry.ts";
 import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
