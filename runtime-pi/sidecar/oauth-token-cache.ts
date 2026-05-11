@@ -30,7 +30,7 @@ export interface CachedToken {
   /** Epoch milliseconds. `null` when expiry is unknown — treated as "always refresh". */
   expiresAt: number | null;
   fetchedAt: number;
-  apiShape: "anthropic-messages" | "openai-responses";
+  apiShape: "anthropic-messages" | "openai-responses" | "openai-codex-responses";
   baseUrl: string;
   rewriteUrlPath?: { from: string; to: string };
   forceStream?: boolean;
@@ -44,7 +44,7 @@ export interface CachedToken {
 export interface PlatformTokenResponse {
   accessToken: string;
   expiresAt: number | null;
-  apiShape: "anthropic-messages" | "openai-responses";
+  apiShape: "anthropic-messages" | "openai-responses" | "openai-codex-responses";
   baseUrl: string;
   rewriteUrlPath?: { from: string; to: string };
   forceStream?: boolean;

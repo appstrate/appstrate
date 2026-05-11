@@ -250,7 +250,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "codex",
     label: "Codex (ChatGPT Plus / Pro / Team)",
-    apiShape: "openai-responses",
+    apiShape: "openai-codex-responses",
     baseUrl: "https://chatgpt.com/backend-api",
     models: [
       {

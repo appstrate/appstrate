@@ -46,6 +46,10 @@ export interface LlmConfig {
   maxTokens?: number | null;
   reasoning?: boolean | null;
   cost?: ModelCost | null;
+  /** Canonical providerId (`codex`, `claude-code`, ...). Set when the credential is OAuth-backed; gates the sidecar's OAuth wiring. */
+  providerId?: string;
+  /** `model_provider_credentials` row id. Required when `providerId` resolves to an OAuth provider — the sidecar pulls fresh tokens from `/internal/oauth-token/:credentialId`. */
+  credentialId?: string;
 }
 
 /**

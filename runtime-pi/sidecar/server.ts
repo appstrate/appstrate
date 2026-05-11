@@ -2,9 +2,26 @@
 
 import { createApp } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { CredentialsResponse } from "./helpers.ts";
+import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
+
+function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
+  // OAuth credentials (Codex, Claude Code) ship as a single JSON env var
+  // carrying the full LlmProxyOauthConfig. A malformed payload here is a
+  // launcher bug — let JSON.parse throw rather than fall through silently
+  // to the API-key path.
+  const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
+  if (oauthJson) return JSON.parse(oauthJson) as LlmProxyConfig;
+  if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
+    return {
+      baseUrl: process.env.PI_BASE_URL,
+      apiKey: process.env.PI_API_KEY,
+      placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
+    };
+  }
+  return undefined;
+}
 
 // Mutable config — can be set via env vars at startup or updated at runtime
 // via POST /configure (used by sidecar pool for pre-warmed containers).
@@ -12,14 +29,7 @@ const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   runToken: process.env.RUN_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
-  llm:
-    process.env.PI_BASE_URL && process.env.PI_API_KEY
-      ? {
-          baseUrl: process.env.PI_BASE_URL,
-          apiKey: process.env.PI_API_KEY,
-          placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-        }
-      : undefined,
+  llm: readLlmConfigFromEnv(),
 };
 
 const cookieJar = new Map<string, string[]>();

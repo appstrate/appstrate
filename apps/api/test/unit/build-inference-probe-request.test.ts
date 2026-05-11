@@ -59,7 +59,7 @@ describe("buildCodexInferenceRequest", () => {
     expect(req.headers).toEqual({
       Authorization: "Bearer jwt-token",
       "chatgpt-account-id": "acc-uuid-36chars",
-      originator: "appstrate",
+      originator: "pi",
       "OpenAI-Beta": "responses=experimental",
       accept: "text/event-stream",
       "content-type": "application/json",

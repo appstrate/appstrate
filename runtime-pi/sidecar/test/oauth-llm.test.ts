@@ -101,11 +101,10 @@ const CODEX_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://chatgpt.com/backend-api",
   oauthConnectionId: "conn-codex",
-  apiShape: "openai-responses",
+  apiShape: "openai-codex-responses",
   providerId: "codex",
   forceStream: true,
   forceStore: false,
-  rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
 };
 
 describe("/llm/* OAuth — Claude path", () => {
@@ -295,16 +294,15 @@ describe("/llm/* OAuth — Claude path", () => {
 });
 
 describe("/llm/* OAuth — Codex path", () => {
-  it("rewrites URL, injects chatgpt-account-id, and coerces stream/store flags", async () => {
+  it("forwards to /codex/responses, injects chatgpt-account-id + WAF-safe UA, and coerces stream/store flags", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
         return new Response(
           JSON.stringify(
             buildPlatformTokenResponse({
               providerId: "codex",
-              apiShape: "openai-responses",
+              apiShape: "openai-codex-responses",
               baseUrl: "https://chatgpt.com/backend-api",
-              rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
               forceStream: true,
               forceStore: false,
               accountId: "acc_007",
@@ -322,7 +320,9 @@ describe("/llm/* OAuth — Codex path", () => {
     deps.config.llm = CODEX_OAUTH;
     const app = createApp(deps);
 
-    const res = await app.request("/llm/v1/responses", {
+    // pi-ai's openai-codex-responses provider hits `${baseUrl}/codex/responses`
+    // natively — the sidecar receives the already-resolved path.
+    const res = await app.request("/llm/codex/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -338,8 +338,12 @@ describe("/llm/* OAuth — Codex path", () => {
     expect(upstreamCall.url).toBe("https://chatgpt.com/backend-api/codex/responses");
     expect(upstreamCall.headers["authorization"]).toBe("Bearer oat-fresh-token");
     expect(upstreamCall.headers["chatgpt-account-id"]).toBe("acc_007");
-    expect(upstreamCall.headers["originator"]).toBe("codex_cli_rs");
+    expect(upstreamCall.headers["originator"]).toBe("pi");
     expect(upstreamCall.headers["openai-beta"]).toBe("responses=experimental");
+    // WAF-safe UA must be set — Cloudflare on chatgpt.com challenges the
+    // OpenAI SDK's default `OpenAI/JS …` UA with `cf-mitigated: challenge`.
+    expect(upstreamCall.headers["user-agent"]).toBe("pi (linux x86_64)");
+    expect(upstreamCall.headers["accept"]).toBe("text/event-stream");
 
     const body = JSON.parse(upstreamCall.body!);
     expect(body.stream).toBe(true);

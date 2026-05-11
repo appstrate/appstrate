@@ -282,7 +282,7 @@ export const internalPaths = {
                   },
                   apiShape: {
                     type: "string",
-                    enum: ["anthropic-messages", "openai-responses"],
+                    enum: ["anthropic-messages", "openai-responses", "openai-codex-responses"],
                   },
                   baseUrl: { type: "string", format: "uri" },
                   rewriteUrlPath: {
@@ -349,7 +349,7 @@ export const internalPaths = {
                   expiresAt: { type: ["integer", "null"] },
                   apiShape: {
                     type: "string",
-                    enum: ["anthropic-messages", "openai-responses"],
+                    enum: ["anthropic-messages", "openai-responses", "openai-codex-responses"],
                   },
                   baseUrl: { type: "string", format: "uri" },
                   rewriteUrlPath: {

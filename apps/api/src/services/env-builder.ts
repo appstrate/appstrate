@@ -152,6 +152,8 @@ export async function buildRunContext(params: {
     maxTokens: modelResult.maxTokens,
     reasoning: modelResult.reasoning,
     cost: modelResult.cost,
+    ...(modelResult.providerId ? { providerId: modelResult.providerId } : {}),
+    ...(modelResult.credentialId ? { credentialId: modelResult.credentialId } : {}),
   };
 
   // Step 3: resolve version label + dirty flag

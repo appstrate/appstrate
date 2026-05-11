@@ -21,6 +21,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { buildIdentityHeaders, transformBody, adaptBetaHeaderForRetry } from "./oauth-identity.ts";
+import { logger } from "./logger.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -88,6 +89,38 @@ function passUpstream(upstream: Response): Response {
     status: upstream.status,
     headers: responseHeaders,
   });
+}
+
+/**
+ * On non-2xx upstream responses, clone the body for the operator-facing
+ * warn log (the agent still consumes the original stream). 2xx is silent —
+ * normal traffic shouldn't pollute the log. Returns the original response.
+ */
+async function logOauthLlmResponse(
+  providerId: string,
+  targetUrl: string,
+  upstream: Response,
+): Promise<Response> {
+  if (upstream.status >= 200 && upstream.status < 300) return upstream;
+  let bodySample = "";
+  try {
+    bodySample = await upstream.clone().text();
+  } catch {
+    // body unreadable — log what we have
+  }
+  const responseHeaders: Record<string, string> = {};
+  upstream.headers.forEach((v, k) => {
+    responseHeaders[k] = v;
+  });
+  logger.warn("oauth llm: upstream response non-2xx", {
+    providerId,
+    targetUrl,
+    status: upstream.status,
+    contentType: upstream.headers.get("content-type"),
+    responseHeaders,
+    bodySample: bodySample.length > 1500 ? bodySample.slice(0, 1500) + "…" : bodySample,
+  });
+  return upstream;
 }
 
 function llmFetchErrorResponse(
@@ -307,10 +340,16 @@ export function createApp(deps: AppDeps): Hono {
     const filtered = filterHeaders(c.req.header());
     const baseHeaders: Record<string, string> = { ...filtered };
 
-    // Strip any auth/api-key the agent SDK may have set with a placeholder —
-    // OAuth path always overwrites with the real bearer.
-    delete baseHeaders["authorization"];
-    delete baseHeaders["x-api-key"];
+    // Strip any auth/api-key/UA/accept the agent SDK may have set — the
+    // OAuth path forces all four (real bearer + provider-mandated fingerprint
+    // headers). Case-insensitive removal: filterHeaders preserves the caller's
+    // original casing, so we delete every variant before re-injecting our own.
+    const STRIP_HEADERS = ["authorization", "x-api-key", "user-agent", "accept"];
+    for (const key of Object.keys(baseHeaders)) {
+      if (STRIP_HEADERS.includes(key.toLowerCase())) {
+        delete baseHeaders[key];
+      }
+    }
 
     const identityHeaders = buildIdentityHeaders(llmConfig.providerId, token);
     let forwardedHeaders: Record<string, string> = {
@@ -349,8 +388,15 @@ export function createApp(deps: AppDeps): Hono {
     try {
       upstream = await doFetch(forwardedHeaders, bodyText);
     } catch (err) {
+      logger.error("oauth llm: upstream fetch threw", {
+        providerId: llmConfig.providerId,
+        targetUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return llmFetchErrorResponse(c, targetUrl, err);
     }
+
+    upstream = await logOauthLlmResponse(llmConfig.providerId, targetUrl, upstream);
 
     // 401 retry: invalidate cache, force-refresh token, replay once.
     if (upstream.status === 401) {
@@ -378,6 +424,7 @@ export function createApp(deps: AppDeps): Hono {
       } catch (err) {
         return llmFetchErrorResponse(c, targetUrl, err);
       }
+      upstream = await logOauthLlmResponse(llmConfig.providerId, targetUrl, upstream);
       // No second-level retry on the retry — propagate whatever we got.
     }
 

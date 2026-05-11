@@ -44,7 +44,7 @@ describe("buildIdentityHeaders", () => {
         accountId: "acc_xyz",
       }),
     );
-    expect(h["originator"]).toBe("codex_cli_rs");
+    expect(h["originator"]).toBe("pi");
     expect(h["openai-beta"]).toBe("responses=experimental");
     expect(h["chatgpt-account-id"]).toBe("acc_xyz");
   });

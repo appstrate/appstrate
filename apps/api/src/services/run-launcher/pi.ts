@@ -38,6 +38,8 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
+import { getModelProviderConfig, isOAuthModelProvider } from "../oauth-model-providers/registry.ts";
+import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -92,17 +94,56 @@ export async function runPlatformContainer(
     const llmApiKey = llmConfig.apiKey;
     const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
 
+    // OAuth credentials must take the sidecar's OAuth branch — the API-key
+    // path can't refresh tokens or inject the provider identity headers
+    // (chatgpt-account-id, originator, …) that chatgpt.com / Codex require.
+    const isOauthCredential =
+      !!llmConfig.providerId &&
+      !!llmConfig.credentialId &&
+      isOAuthModelProvider(llmConfig.providerId);
+
+    let sidecarLlm: LlmProxyConfig | undefined;
+    if (isOauthCredential) {
+      const providerCfg = getModelProviderConfig(llmConfig.providerId!);
+      if (!providerCfg) {
+        throw new Error(
+          `Model credential references unknown OAuth provider "${llmConfig.providerId}"`,
+        );
+      }
+      const oauthCfg: LlmProxyOauthConfig = {
+        authMode: "oauth",
+        baseUrl: llmConfig.baseUrl,
+        oauthConnectionId: llmConfig.credentialId!,
+        apiShape: providerCfg.apiShape as LlmProxyOauthConfig["apiShape"],
+        providerId: providerCfg.providerId,
+        ...(providerCfg.rewriteUrlPath ? { rewriteUrlPath: providerCfg.rewriteUrlPath } : {}),
+        ...(providerCfg.forceStream !== undefined ? { forceStream: providerCfg.forceStream } : {}),
+        ...(providerCfg.forceStore !== undefined ? { forceStore: providerCfg.forceStore } : {}),
+      };
+      sidecarLlm = oauthCfg;
+    } else if (llmApiKey) {
+      sidecarLlm = {
+        baseUrl: llmConfig.baseUrl,
+        apiKey: llmApiKey,
+        placeholder: llmPlaceholder,
+      };
+    }
+
     const sidecarConfig = {
       runToken: plan.runApi?.token ?? "",
       platformApiUrl: plan.runApi?.url ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,
-      llm: llmApiKey
-        ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
-        : undefined,
+      llm: sidecarLlm,
     };
 
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
+    // OAuth mode: pi-ai's openai-codex-responses provider extracts
+    // `chatgpt_account_id` from the JWT it receives as `apiKey` and throws on
+    // a non-JWT placeholder. Pass the real access token — the sidecar still
+    // overwrites the Authorization header with a fresh token at request time
+    // (the agent process is treated as trusted: it already runs package
+    // code under platform admin control).
     const containerEnv = buildRuntimePiEnv({
       model: {
         api: llmConfig.apiShape,

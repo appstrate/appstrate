@@ -22,7 +22,11 @@
 
 import { getEnv } from "@appstrate/env";
 
-export type ModelApiShape = "anthropic-messages" | "openai-chat" | "openai-responses";
+export type ModelApiShape =
+  | "anthropic-messages"
+  | "openai-chat"
+  | "openai-responses"
+  | "openai-codex-responses";
 
 export type ModelCapability = "text" | "image" | "reasoning" | "long-context-1m";
 
@@ -106,12 +110,16 @@ const codexConfig: ModelProviderConfig = {
   iconUrl: "openai",
   description: "Run agents against your ChatGPT Plus / Pro / Business subscription via Codex.",
   docsUrl: "https://platform.openai.com/docs/guides/codex",
-  apiShape: "openai-responses",
+  // pi-ai's `openai-codex-responses` provider builds the request body the
+  // chatgpt.com Codex backend actually accepts (`instructions`, `input`,
+  // `include` — distinct from the standard openai-responses shape) and
+  // resolves the URL to `${baseUrl}/codex/responses` natively. No
+  // sidecar-side path rewrite needed.
+  apiShape: "openai-codex-responses",
   defaultBaseUrl: "https://chatgpt.com/backend-api",
   baseUrlOverridable: false,
   forceStream: true,
   forceStore: false,
-  rewriteUrlPath: { from: "/v1/responses", to: "/codex/responses" },
   authMode: "oauth2",
   oauth: {
     clientId: "app_EMoamEEZ73f0CkXaXp7hrann",

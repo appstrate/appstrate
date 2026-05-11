@@ -261,7 +261,7 @@ describe("model-provider-credentials service — oauth path", () => {
 
     const creds = await loadModelProviderCredentials(ctx.orgId, id);
     expect(creds!.providerId).toBe("codex");
-    expect(creds!.apiShape).toBe("openai-responses");
+    expect(creds!.apiShape).toBe("openai-codex-responses");
     expect(creds!.baseUrl).toBe("https://chatgpt.com/backend-api");
     expect(creds!.apiKey).toBe("access-1");
     expect(creds!.accountId).toBe("acct-abc");

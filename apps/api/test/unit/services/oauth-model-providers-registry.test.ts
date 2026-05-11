@@ -37,7 +37,9 @@ describe("MODEL_PROVIDERS registry", () => {
     for (const cfg of listModelProviders()) {
       expect(cfg.displayName.length).toBeGreaterThan(0);
       expect(cfg.iconUrl.length).toBeGreaterThan(0);
-      expect(cfg.apiShape).toMatch(/^(anthropic-messages|openai-chat|openai-responses)$/);
+      expect(cfg.apiShape).toMatch(
+        /^(anthropic-messages|openai-chat|openai-responses|openai-codex-responses)$/,
+      );
       expect(cfg.defaultBaseUrl.length).toBeGreaterThan(0);
       expect(typeof cfg.baseUrlOverridable).toBe("boolean");
       expect(cfg.authMode).toMatch(/^(api_key|oauth2)$/);
@@ -86,15 +88,14 @@ describe("MODEL_PROVIDERS registry", () => {
     }
   });
 
-  it("Codex entry forces stream:true, store:false, and rewrites path to /codex/responses", () => {
+  it("Codex entry uses openai-codex-responses shape and forces stream/store flags", () => {
     const codex = MODEL_PROVIDERS["codex"]!;
-    expect(codex.apiShape).toBe("openai-responses");
+    expect(codex.apiShape).toBe("openai-codex-responses");
     expect(codex.forceStream).toBe(true);
     expect(codex.forceStore).toBe(false);
-    expect(codex.rewriteUrlPath).toEqual({
-      from: "/v1/responses",
-      to: "/codex/responses",
-    });
+    // No sidecar-side path rewrite — pi-ai's openai-codex-responses provider
+    // resolves `${baseUrl}/codex/responses` natively.
+    expect(codex.rewriteUrlPath).toBeUndefined();
     expect(codex.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
   });
 

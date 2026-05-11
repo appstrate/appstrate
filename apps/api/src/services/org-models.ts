@@ -222,6 +222,8 @@ interface ResolvedModel {
   providerId?: string;
   /** Codex only: required as `chatgpt-account-id` header on inference probes/runs. */
   accountId?: string;
+  /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
+  credentialId?: string;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -284,6 +286,7 @@ export async function resolveModel(
         isSystemModel: false,
         providerId: creds.providerId,
         accountId: creds.accountId,
+        credentialId: dbDefault.providerKeyId,
       };
     }
   }
@@ -346,6 +349,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     isSystemModel: false,
     providerId: creds.providerId,
     accountId: creds.accountId,
+    credentialId: row.providerKeyId,
   };
 }
 
@@ -510,7 +514,7 @@ export function buildCodexInferenceRequest(config: {
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "chatgpt-account-id": config.accountId,
-      originator: "appstrate",
+      originator: "pi",
       "OpenAI-Beta": "responses=experimental",
       accept: "text/event-stream",
       "content-type": "application/json",

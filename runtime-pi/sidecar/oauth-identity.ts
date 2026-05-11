@@ -39,9 +39,18 @@ export function buildIdentityHeaders(
       };
 
     case "codex": {
+      // Codex traffic is fronted by Cloudflare which bot-mitigates any
+      // request whose `User-Agent` doesn't look like an approved client.
+      // The agent's openai-responses provider goes through the OpenAI
+      // SDK which sets `User-Agent: OpenAI/JS …` — that triggers
+      // `cf-mitigated: challenge` → HTML 403. Force the same UA pi-ai's
+      // openai-codex-responses provider uses (verified to pass WAF), and
+      // keep `originator: pi` consistent with it.
       const headers: Record<string, string> = {
-        originator: "codex_cli_rs",
+        originator: "pi",
         "openai-beta": "responses=experimental",
+        "user-agent": "pi (linux x86_64)",
+        accept: "text/event-stream",
       };
       if (token.accountId) headers["chatgpt-account-id"] = token.accountId;
       return headers;

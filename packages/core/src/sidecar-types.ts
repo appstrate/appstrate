@@ -46,7 +46,7 @@ export interface LlmProxyOauthConfig {
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   oauthConnectionId: string;
   /** Drives sidecar request shaping (URL rewrite, body transform, identity headers). */
-  apiShape: "anthropic-messages" | "openai-responses";
+  apiShape: "anthropic-messages" | "openai-responses" | "openai-codex-responses";
   /** Used to look up the identity-header / body-transform strategy. Canonical providerId ("codex", "claude-code"). */
   providerId: string;
   /** Optional URL rewriting (e.g. Codex `/v1/responses` → `/codex/responses`). */
