@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -344,122 +343,6 @@ describe("Model Provider Keys API", () => {
         }),
       });
       expect(res.status).toBe(400);
-    });
-  });
-
-  // ─── MODEL_PROVIDERS_DISABLED soft-disable ─────────────────────────────────
-
-  describe("MODEL_PROVIDERS_DISABLED (soft-disable)", () => {
-    const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
-
-    afterEach(() => {
-      if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
-      else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
-      resetEnvCache();
-    });
-
-    it("GET /registry excludes disabled providers", async () => {
-      // Soft-disable the synthetic OAuth provider — generic behavior,
-      // doesn't depend on any module being loaded.
-      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
-      resetEnvCache();
-      const res = await app.request("/api/model-provider-credentials/registry", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: { providerId: string }[] };
-      const ids = body.data.map((p) => p.providerId);
-      expect(ids).not.toContain("test-oauth");
-      // The other canonical OSS providers come from modules — they MUST
-      // stay registered when the env disables an unrelated id.
-      expect(ids).toContain("openai");
-      expect(ids).toContain("anthropic");
-      expect(ids).toContain("openai-compatible");
-    });
-
-    it("GET /registry returns every registered provider when env is empty", async () => {
-      delete process.env.MODEL_PROVIDERS_DISABLED;
-      resetEnvCache();
-      const res = await app.request("/api/model-provider-credentials/registry", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: { providerId: string }[] };
-      const ids = body.data.map((p) => p.providerId);
-      // Synthetic test-oauth is always present; module-contributed
-      // providers may or may not be (depending on which modules are
-      // loaded in this test process). Assert containment, not equality.
-      expect(ids).toContain("test-oauth");
-      expect(ids).toContain("openai");
-      expect(ids).toContain("anthropic");
-      expect(ids).toContain("openai-compatible");
-    });
-
-    it("POST returns 403 when the resolved providerId is disabled", async () => {
-      // `(apiShape=anthropic-messages, baseUrl=https://api.anthropic.com)`
-      // reverse-resolves to providerId="anthropic" via
-      // `resolveProviderIdFromApiKeyForm`. Disabling that id must fail
-      // creation at the route gate, not silently demote to openai-compatible.
-      process.env.MODEL_PROVIDERS_DISABLED = "anthropic";
-      resetEnvCache();
-      const res = await app.request("/api/model-provider-credentials", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Should be blocked",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
-          apiKey: "sk-blocked",
-        }),
-      });
-      expect(res.status).toBe(403);
-    });
-
-    it("POST succeeds for a provider NOT listed as disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
-      resetEnvCache();
-      const res = await app.request("/api/model-provider-credentials", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Anthropic stays enabled",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
-          apiKey: "sk-anth-test",
-        }),
-      });
-      expect(res.status).toBe(201);
-    });
-
-    it("list serializer surfaces providerDisabled=true for disabled-provider rows", async () => {
-      // Create a credential while the provider is enabled.
-      delete process.env.MODEL_PROVIDERS_DISABLED;
-      resetEnvCache();
-      const createRes = await app.request("/api/model-provider-credentials", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Existing Anthropic",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
-          apiKey: "sk-anth-test",
-        }),
-      });
-      expect(createRes.status).toBe(201);
-
-      // Now disable it — existing row stays, badge appears.
-      process.env.MODEL_PROVIDERS_DISABLED = "anthropic";
-      resetEnvCache();
-      const listRes = await app.request("/api/model-provider-credentials", {
-        headers: authHeaders(ctx),
-      });
-      expect(listRes.status).toBe(200);
-      const body = (await listRes.json()) as {
-        data: { label: string; providerId?: string; providerDisabled?: boolean }[];
-      };
-      const row = body.data.find((r) => r.label === "Existing Anthropic");
-      expect(row).toBeDefined();
-      expect(row!.providerDisabled).toBe(true);
     });
   });
 });

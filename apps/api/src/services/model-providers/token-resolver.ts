@@ -102,10 +102,6 @@ async function loadCredentialState(
     throw notFound(`OAuth model provider credential not found: ${credentialId}`);
   }
 
-  // Unfiltered: existing credentials for disabled providers must keep working.
-  // Once a credential row exists, the token resolver continues to serve it
-  // regardless of `MODEL_PROVIDERS_DISABLED` — the admin disables NEW
-  // creation, not in-flight runs.
   const config = getModelProviderConfig(row.providerId);
   if (!config || config.authMode !== "oauth2") {
     throw notFound(

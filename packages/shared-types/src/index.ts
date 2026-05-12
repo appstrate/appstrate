@@ -525,13 +525,6 @@ export interface ModelProviderCredentialInfo {
   oauthExpiresAt?: string | null;
   /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
   needsReconnection?: boolean;
-  /**
-   * True when the credential's provider is listed in `MODEL_PROVIDERS_DISABLED`.
-   * Existing rows keep working (token resolver, refresh worker, llm-proxy
-   * stay unfiltered), but the UI hides "Reconnect" and shows a "Disabled by
-   * admin" badge — admins can still delete the row.
-   */
-  providerDisabled?: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

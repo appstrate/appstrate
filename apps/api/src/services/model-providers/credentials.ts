@@ -24,7 +24,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { getModelProvider, isModelProviderEnabled, listModelProviders } from "./registry.ts";
+import { getModelProvider, listModelProviders } from "./registry.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
@@ -422,11 +422,6 @@ export function resolveProviderIdFromApiKeyForm(
   baseUrl: string,
 ): { providerId: string; baseUrlOverride: string | null } {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
-  // Unfiltered: existing credentials for disabled providers must keep working.
-  // The POST route enforces `isModelProviderEnabled` BEFORE calling this
-  // helper, so disabled providers never reach create. Resolution itself stays
-  // total over the registry so update/delete paths on existing rows keep
-  // matching their canonical providerId.
   for (const cfg of listModelProviders()) {
     if (cfg.authMode !== "api_key") continue;
     if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
@@ -488,7 +483,6 @@ export async function listOrgModelProviderCredentials(
         oauthExpiresAt:
           isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
         needsReconnection: isOauth ? !!blob.needsReconnection : false,
-        providerDisabled: !isModelProviderEnabled(r.providerId),
         createdBy: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),

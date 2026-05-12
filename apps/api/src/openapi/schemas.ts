@@ -833,11 +833,6 @@ export const schemas = {
       oauthEmail: { type: ["string", "null"] },
       oauthExpiresAt: { type: ["string", "null"], format: "date-time" },
       needsReconnection: { type: "boolean" },
-      providerDisabled: {
-        type: "boolean",
-        description:
-          "True when the credential's `providerId` is listed in `MODEL_PROVIDERS_DISABLED`. Existing rows keep working (token resolver, refresh worker, llm-proxy stay unfiltered); the UI hides the Reconnect affordance and shows a 'Disabled by admin' badge.",
-      },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },

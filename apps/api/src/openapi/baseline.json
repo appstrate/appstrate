@@ -6040,7 +6040,7 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "403": {
-            "description": "Forbidden — caller lacks `model-provider-credentials:write`, OR the resolved `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6330,7 +6330,7 @@
                   "providerId": {
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
-                    "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`) AND not soft-disabled via `MODEL_PROVIDERS_DISABLED`. Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
+                    "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
                   }
                 }
               }
@@ -6375,7 +6375,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — caller lacks `model-provider-credentials:write`, OR the `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6571,7 +6571,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — caller lacks `model-provider-credentials:write`, OR the `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19672,10 +19672,6 @@
           },
           "needsReconnection": {
             "type": "boolean"
-          },
-          "providerDisabled": {
-            "type": "boolean",
-            "description": "True when the credential's `providerId` is listed in `MODEL_PROVIDERS_DISABLED`. Existing rows keep working (token resolver, refresh worker, llm-proxy stay unfiltered); the UI hides the Reconnect affordance and shows a 'Disabled by admin' badge."
           },
           "createdBy": {
             "type": ["string", "null"]

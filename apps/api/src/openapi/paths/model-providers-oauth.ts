@@ -21,7 +21,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   pattern: "^[a-z0-9-]+$",
                   description:
-                    "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`) AND not soft-disabled via `MODEL_PROVIDERS_DISABLED`. Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
+                    "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
                 },
               },
             },
@@ -64,8 +64,7 @@ export const modelProvidersOAuthPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description:
-            "Forbidden — caller lacks `model-provider-credentials:write`, OR the `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -210,8 +209,7 @@ export const modelProvidersOAuthPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description:
-            "Forbidden — caller lacks `model-provider-credentials:write`, OR the `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

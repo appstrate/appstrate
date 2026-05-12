@@ -24,7 +24,6 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
-import { getEnv } from "@appstrate/env";
 
 // ---------------------------------------------------------------------------
 // Singleton state
@@ -90,34 +89,4 @@ export function isOAuthModelProvider(providerId: string): boolean {
 /** Iterate all registered model providers (insertion order). */
 export function listModelProviders(): readonly ModelProviderDefinition[] {
   return Array.from(_byId.values());
-}
-
-/**
- * True iff `providerId` is registered AND NOT listed in `MODEL_PROVIDERS_DISABLED`.
- *
- * "Soft disable" — admin-facing surfaces (UI picker, POST creation, OAuth
- * initiate) consult this check; the runtime hot path (token-resolver,
- * refresh-worker, llm-proxy, `executeProviderCall`) deliberately uses the
- * unfiltered accessors so existing credentials for a disabled provider
- * keep working until the admin deletes them.
- */
-export function isModelProviderEnabled(providerId: string): boolean {
-  if (!_byId.has(providerId)) return false;
-  return !getEnv().MODEL_PROVIDERS_DISABLED.includes(providerId);
-}
-
-/**
- * Iterate the subset of registered model providers that are enabled by env.
- *
- * Use this in admin/UI surfaces where disabled providers must NOT appear.
- * Use `listModelProviders()` for any runtime resolver that must keep
- * operating on existing credentials.
- */
-export function listEnabledModelProviders(): readonly ModelProviderDefinition[] {
-  return listModelProviders().filter((p) => isModelProviderEnabled(p.providerId));
-}
-
-/** Provider ids known at this moment — used by the boot env validator. */
-export function getRegisteredProviderIds(): readonly string[] {
-  return Array.from(_byId.keys());
 }

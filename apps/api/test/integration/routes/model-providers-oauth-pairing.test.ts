@@ -8,8 +8,7 @@
  * tenants. This is a security invariant — adjust with care.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -69,27 +68,6 @@ describe("POST /api/model-providers-oauth/pairing", () => {
       body: JSON.stringify({ providerId: "nonexistent-provider" }),
     });
     expect(res.status).toBe(400);
-  });
-
-  describe("MODEL_PROVIDERS_DISABLED gate", () => {
-    const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
-
-    afterEach(() => {
-      if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
-      else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
-      resetEnvCache();
-    });
-
-    it("returns 403 when the providerId is soft-disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "test-oauth";
-      resetEnvCache();
-      const res = await app.request("/api/model-providers-oauth/pairing", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ providerId: "test-oauth" }),
-      });
-      expect(res.status).toBe(403);
-    });
   });
 });
 

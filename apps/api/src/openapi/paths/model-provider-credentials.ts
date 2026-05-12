@@ -197,8 +197,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": {
-          description:
-            "Forbidden — caller lacks `model-provider-credentials:write`, OR the resolved `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

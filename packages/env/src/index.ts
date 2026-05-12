@@ -251,28 +251,6 @@ const envSchema = z
     // Append external specifiers (npm package names) to extend.
     MODULES: z.string().default("oidc,webhooks,core-providers"),
 
-    // MODEL_PROVIDERS_DISABLED — comma-separated `providerId` allowlist removed
-    // from the in-app picker. Soft-disable semantics: existing credentials
-    // for a disabled provider keep working (token resolver, refresh worker,
-    // and llm-proxy all use unfiltered accessors), but the UI hides the
-    // provider and POST creation returns 403.
-    //
-    // Known providerIds come from the runtime model-provider registry
-    // (built from every loaded module's modelProviders() contribution +
-    // the legacy seed). Unknown ids are rejected fail-fast at boot in
-    // `apps/api/src/lib/boot.ts` — that check lives there (not here)
-    // because the registry is a runtime artefact of the API package and
-    // the env schema must remain framework-agnostic.
-    MODEL_PROVIDERS_DISABLED: z
-      .string()
-      .default("")
-      .transform((s) =>
-        s
-          .split(",")
-          .map((id) => id.trim())
-          .filter(Boolean),
-      ),
-
     // App
     APP_URL: z.string().default("http://localhost:3000"),
     TRUSTED_ORIGINS: z

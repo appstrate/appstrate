@@ -15,18 +15,13 @@ import {
   resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
-import {
-  getModelProvider,
-  isModelProviderEnabled,
-  listEnabledModelProviders,
-} from "../services/model-providers/registry.ts";
+import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
   conflict,
-  forbidden,
   invalidRequest,
   notFound,
   internalError,
@@ -87,7 +82,7 @@ export function createModelProviderCredentialsRouter() {
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
-    const data = listEnabledModelProviders().map((p) => ({
+    const data = listModelProviders().map((p) => ({
       providerId: p.providerId,
       displayName: p.displayName,
       iconUrl: p.iconUrl,
@@ -126,9 +121,6 @@ export function createModelProviderCredentialsRouter() {
     // resolve it to the canonical `providerId` (with `baseUrlOverride` for
     // any unrecognized combo) before persisting.
     const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
-    if (!isModelProviderEnabled(providerId)) {
-      throw forbidden(`Provider ${providerId} is disabled by platform admin`);
-    }
     try {
       const id = await createApiKeyCredential({
         orgId,

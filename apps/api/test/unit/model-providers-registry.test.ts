@@ -6,9 +6,6 @@ import {
   getModelProvider,
   isOAuthModelProvider,
   listModelProviders,
-  isModelProviderEnabled,
-  listEnabledModelProviders,
-  getRegisteredProviderIds,
   registerModelProvider,
   registerModelProviders,
   resetModelProviders,
@@ -41,7 +38,7 @@ describe("model-providers runtime registry", () => {
       const def = fakeDef("openai");
       registerModelProvider(def);
       expect(getModelProvider("openai")).toBe(def);
-      expect(getRegisteredProviderIds()).toEqual(["openai"]);
+      expect(listModelProviders().map((p) => p.providerId)).toEqual(["openai"]);
     });
 
     it("returns null for unknown ids", () => {
@@ -67,7 +64,7 @@ describe("model-providers runtime registry", () => {
   describe("registerModelProviders (bulk)", () => {
     it("registers an array of definitions in insertion order", () => {
       registerModelProviders([fakeDef("a"), fakeDef("b"), fakeDef("c")]);
-      expect(getRegisteredProviderIds()).toEqual(["a", "b", "c"]);
+      expect(listModelProviders().map((p) => p.providerId)).toEqual(["a", "b", "c"]);
     });
 
     it("fails fast on a duplicate within the same batch", () => {
@@ -105,32 +102,12 @@ describe("model-providers runtime registry", () => {
     });
   });
 
-  describe("isModelProviderEnabled / listEnabledModelProviders", () => {
-    it("returns false for unknown ids even if not in MODEL_PROVIDERS_DISABLED", () => {
-      // Soft-disable semantics keep registered-but-disabled credentials
-      // resolvable in the hot path; unknown ids are simply not registered.
-      expect(isModelProviderEnabled("ghost")).toBe(false);
-    });
-
-    it("returns true when registered and not present in MODEL_PROVIDERS_DISABLED", () => {
-      registerModelProvider(fakeDef("openai"));
-      // MODEL_PROVIDERS_DISABLED defaults to empty in tests.
-      expect(isModelProviderEnabled("openai")).toBe(true);
-    });
-
-    it("listEnabledModelProviders mirrors the registered list when no disables apply", () => {
-      registerModelProviders([fakeDef("a"), fakeDef("b")]);
-      expect(listEnabledModelProviders().map((p) => p.providerId)).toEqual(["a", "b"]);
-    });
-  });
-
   describe("resetModelProviders (test-only)", () => {
     it("empties the registry", () => {
       registerModelProvider(fakeDef("openai"));
       expect(listModelProviders()).toHaveLength(1);
       resetModelProviders();
       expect(listModelProviders()).toEqual([]);
-      expect(getRegisteredProviderIds()).toEqual([]);
     });
   });
 

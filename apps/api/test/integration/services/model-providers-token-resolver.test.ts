@@ -37,7 +37,6 @@ import {
   resolveOAuthTokenForSidecar,
 } from "../../../src/services/model-providers/token-resolver.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 // ─── globalThis.fetch swap ───────────────────────────────────
 
@@ -390,48 +389,6 @@ describe("OAuth model providers — token-resolver hardening", () => {
       }
       expect(caught).toBeInstanceOf(ApiError);
       expect((caught as ApiError).status).toBe(404);
-    });
-
-    /**
-     * MODEL_PROVIDERS_DISABLED is a SOFT disable — admins block new credentials,
-     * but existing rows keep resolving. The hot path uses `getModelProviderConfig`
-     * (unfiltered), not `listEnabledModelProviders`, on purpose. This test
-     * guards against a future regression where someone wires the filter in
-     * here and silently kills every active credential.
-     */
-    it("keeps resolving for credentials whose providerId is currently disabled", async () => {
-      const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
-      try {
-        const id = await seedOAuthCredential({
-          orgId,
-          userId,
-          providerId: "test-oauth",
-          accessToken: "still-good",
-          refreshToken: "rt",
-          expiresAtMs: Date.now() + 60 * 60 * 1000,
-        });
-
-        // Admin disables a different provider AFTER the credential was created
-        // — test-oauth stays usable.
-        process.env.MODEL_PROVIDERS_DISABLED = "openai";
-        resetEnvCache();
-
-        let fetchCalled = false;
-        mockFetch(async () => {
-          fetchCalled = true;
-          return new Response("{}", { status: 200 });
-        });
-
-        const result = await resolveOAuthTokenForSidecar(id);
-        expect(result.accessToken).toBe("still-good");
-        expect(result.providerId).toBe("test-oauth");
-        // Cached + far from expiry → no provider call.
-        expect(fetchCalled).toBe(false);
-      } finally {
-        if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
-        else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
-        resetEnvCache();
-      }
     });
   });
 });

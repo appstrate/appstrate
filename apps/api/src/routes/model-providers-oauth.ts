@@ -7,17 +7,14 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
-import {
-  isModelProviderEnabled,
-  isOAuthModelProvider,
-} from "../services/model-providers/registry.ts";
+import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import {
   cancelPairing,
   consumePairing,
   createPairing,
   getPairing,
 } from "../services/model-providers/pairings.ts";
-import { forbidden, invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 
@@ -105,9 +102,6 @@ export function createModelProvidersOAuthRouter() {
         "providerId",
       );
     }
-    if (!isModelProviderEnabled(input.providerId)) {
-      throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
-    }
 
     const result = await importOAuthModelProviderConnection({
       orgId: consumed.orgId,
@@ -179,12 +173,6 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const body = await c.req.json().catch(() => ({}));
       const input = parseBody(createPairingBody, body);
-
-      // Same soft-disable gate as /import — disabled providers cannot have
-      // new pairings minted, but existing credentials keep working.
-      if (!isModelProviderEnabled(input.providerId)) {
-        throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
-      }
 
       const platformUrl = getEnv().APP_URL;
       const { id, token, expiresAt } = await createPairing({
