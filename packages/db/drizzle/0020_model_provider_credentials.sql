@@ -2,7 +2,7 @@
 --
 -- Retires `org_system_provider_keys` and folds API-key + OAuth credentials
 -- into a single discriminated-blob table keyed by canonical `provider_id`
--- (codex, claude-code, openai, anthropic, openai-compatible). The blob
+-- (free-text registry key contributed by a loaded module). The blob
 -- carries `{ kind: "api_key" | "oauth", ... }` encrypted at rest via
 -- `@appstrate/connect`'s versioned envelope.
 --

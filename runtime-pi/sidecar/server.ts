@@ -7,10 +7,9 @@ import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
-  // OAuth credentials (Codex, Claude Code) ship as a single JSON env var
-  // carrying the full LlmProxyOauthConfig. A malformed payload here is a
-  // launcher bug — let JSON.parse throw rather than fall through silently
-  // to the API-key path.
+  // OAuth credentials ship as a single JSON env var carrying the full
+  // LlmProxyOauthConfig. A malformed payload here is a launcher bug — let
+  // JSON.parse throw rather than fall through silently to the API-key path.
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
   if (oauthJson) return JSON.parse(oauthJson) as LlmProxyConfig;
   if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {

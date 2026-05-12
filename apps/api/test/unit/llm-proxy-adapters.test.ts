@@ -151,7 +151,7 @@ describe("anthropicMessagesAdapter", () => {
   });
 
   // Note: the Anthropic OAuth (sk-ant-oat-…) code path that previously
-  // injected Claude Code identity headers + required betas was removed
+  // injected subscription identity headers + required betas was removed
   // in PR 6 (Anthropic Consumer ToS forbids using OAuth subscription
   // tokens in third-party tools). The adapter now ALWAYS routes through
   // the API-key path — any caller passing an OAuth token gets the same

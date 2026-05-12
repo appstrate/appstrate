@@ -56,7 +56,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "Codex!" }),
+      body: JSON.stringify({ providerId: "Bad!Id" }),
     });
     expect(res.status).toBe(400);
   });

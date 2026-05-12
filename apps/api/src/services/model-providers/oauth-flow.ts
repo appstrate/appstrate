@@ -3,21 +3,21 @@
 /**
  * OAuth Model Providers — token-import flow.
  *
- * Specialized for public PKCE clients (Codex and similar OAuth providers) with no
- * `client_secret`. The official flow in @appstrate/connect requires a secret;
- * we read `clientId` from the runtime registry and skip the secret entirely.
+ * Specialized for public PKCE clients with no `client_secret`. The official
+ * flow in @appstrate/connect requires a secret; we read `clientId` from the
+ * runtime registry and skip the secret entirely.
  *
  * Persisted shape: a single row in `model_provider_credentials` with the
  * encrypted blob carrying `kind: "oauth"` (access + refresh tokens, scopes,
  * accountId, email, …). The same row is the lookup target for the sidecar's
  * `/internal/oauth-token/:id` polling and the BullMQ refresh worker scan.
  *
- * Why no `/initiate` + `/callback` here: the public CLI client_ids
- * (Codex `app_EMoamE…`) only allowlist
- * `http://localhost:PORT/...` redirect_uris baked into the official CLIs.
- * Any platform-hosted callback is rejected. The CLI (`appstrate connect`)
- * does the loopback dance locally via @mariozechner/pi-ai and POSTs the
- * resulting tokens to `/api/model-providers-oauth/import`, which calls
+ * Why no `/initiate` + `/callback` here: the public CLI client_ids only
+ * allowlist `http://localhost:PORT/...` redirect_uris baked into the
+ * official CLIs. Any platform-hosted callback is rejected. The CLI
+ * (`appstrate connect`) does the loopback dance locally via
+ * @mariozechner/pi-ai and POSTs the resulting tokens to
+ * `/api/model-providers-oauth/import`, which calls
  * `importOAuthModelProviderConnection()` below.
  *
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.

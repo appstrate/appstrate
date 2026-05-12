@@ -485,9 +485,8 @@ describe("model-provider-credentials service — aggregator + inference loader",
       // providerId is what the inference probe branches on to apply
       // provider-specific request shaping.
       expect(creds!.providerId).toBe(TEST_OAUTH);
-      // Provider-specific identity-claim plumbing (e.g. Codex's
-      // `chatgpt_account_id` → sidecar header) is covered by each
-      // module's own integration tests.
+      // Provider-specific identity-claim plumbing (e.g. JWT claim →
+      // sidecar header) is covered by each module's own integration tests.
     });
 
     it("returns null when the underlying OAuth credential is flagged needsReconnection", async () => {

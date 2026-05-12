@@ -140,7 +140,6 @@ describe("buildModelTestRequest", () => {
 });
 
 // Provider-specific `buildInferenceProbe` hook behavior (e.g. fail-fast on
-// missing identity claims) is covered in each module's own unit suite —
-// see `packages/module-codex/test/unit/build-inference-probe-request.test.ts`
-// for the canonical example. This file owns only the request-shape branches
-// of `buildModelTestRequest` above.
+// missing identity claims) is covered in each module's own unit suite
+// under `packages/module-*/test/`. This file owns only the request-shape
+// branches of `buildModelTestRequest` above.

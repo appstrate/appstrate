@@ -5772,7 +5772,7 @@
         "operationId": "listModelProviderRegistry",
         "tags": ["Model Provider Credentials"],
         "summary": "List the in-code model provider registry",
-        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
+        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5901,7 +5901,7 @@
         "operationId": "listModelProviderCredentials",
         "tags": ["Model Provider Credentials"],
         "summary": "List organization model provider credentials",
-        "description": "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "description": "Returns all LLM model provider credentials (API-key + OAuth alike) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19661,7 +19661,7 @@
           },
           "providerId": {
             "type": ["string", "null"],
-            "description": "Canonical providerId backing the credential (e.g. `codex`). Set when `authMode === 'oauth2'`."
+            "description": "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`."
           },
           "oauthEmail": {
             "type": ["string", "null"]

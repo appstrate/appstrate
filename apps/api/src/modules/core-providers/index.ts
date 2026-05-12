@@ -11,7 +11,7 @@
  * core-providers,...`).
  *
  * OAuth-flavoured providers live in their own opt-in workspace modules
- * under `packages/module-*` (e.g. `@appstrate/module-codex`) so operators
+ * under `packages/module-*` (or external npm specifiers) so operators
  * can disable them granularly. Removing one from `MODULES` leaves no
  * provider id in the registry, no UI surface, no traffic.
  */

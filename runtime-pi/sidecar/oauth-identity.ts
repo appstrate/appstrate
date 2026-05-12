@@ -9,18 +9,17 @@
  * `ModelProviderDefinition.oauthWireFormat`) and applies three things:
  *
  *   - {@link buildIdentityHeaders}: static fingerprint headers + optional
- *     `accountId` echo (e.g. Anthropic's `x-app: cli`, Codex's
- *     `chatgpt-account-id`). The agent (Pi-AI) cannot be trusted to set
+ *     `accountId` echo. The agent (Pi-AI) cannot be trusted to set
  *     these — they are part of what makes the provider accept a
  *     subscription-bearing call. Forced server-side.
  *   - {@link transformBody}: rewrites the agent-supplied JSON body to
- *     prepend an Anthropic-style system prelude or coerce stream/store
- *     flags. Buffered transform — we trade the streaming upload for
- *     correctness; LLM payloads typically stay well under the sidecar's
- *     10 MB request cap.
+ *     prepend a system prelude or coerce stream/store flags. Buffered
+ *     transform — we trade the streaming upload for correctness; LLM
+ *     payloads typically stay well under the sidecar's 10 MB request
+ *     cap.
  *   - {@link adaptHeaderForRetry}: when an upstream returns a known
  *     status + body pattern, strip a header token and retry once
- *     (Anthropic's long-context beta fallback).
+ *     (e.g. a long-context beta fallback).
  *
  * When `wireFormat` is undefined, all three are no-ops. Add a new OAuth
  * provider by populating `oauthWireFormat` on the module's

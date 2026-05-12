@@ -3,8 +3,8 @@
 /**
  * Operator-log redaction helpers for the OAuth LLM proxy path.
  *
- * Upstream LLM providers (OpenAI, Anthropic, Codex, …) routinely echo
- * sensitive material on auth-failure responses: a fresh access token
+ * Upstream LLM providers routinely echo sensitive material on
+ * auth-failure responses: a fresh access token
  * surfaced via `WWW-Authenticate`, a session cookie set on a 401, a JWT
  * embedded in a JSON error body, and so on. The sidecar's warn log is
  * collected by the operator's log aggregator (pino JSON → stdout), so any

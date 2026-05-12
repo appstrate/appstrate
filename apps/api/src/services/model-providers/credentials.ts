@@ -46,8 +46,8 @@ export interface OAuthBlob {
   needsReconnection: boolean;
   /**
    * Abstract account/tenant identifier — populated by the provider's
-   * `extractTokenIdentity` hook (e.g. Codex maps `chatgpt_account_id`
-   * here). Echoed by the sidecar as a routing header at request time.
+   * `extractTokenIdentity` hook (e.g. JWT claim → account id). Echoed by
+   * the sidecar as a routing header at request time.
    */
   accountId?: string;
   /** Account email — surfaced in the UI; never used in the inference path. */
@@ -259,7 +259,7 @@ export interface UpdateOAuthCredentialTokensInput {
   accessToken: string;
   refreshToken: string;
   expiresAt: number | null;
-  /** Codex only — Codex re-issues this on every token; pass through. */
+  /** Optional — set when the provider re-issues an `accountId` on every refresh; pass through. */
   accountId?: string;
 }
 

@@ -6,12 +6,11 @@
  * Auth: standard API keys (`sk-ant-…`) → `x-api-key: <key>`. OAuth
  * subscription tokens (`sk-ant-oat-…`) are NOT supported by this
  * adapter: Anthropic's Consumer ToS forbids using such tokens with
- * any product other than Claude Code / Claude.ai themselves, so the
- * platform refuses to forward them. Operators with a Claude Pro/Max/
- * Team plan who want to use Claude inside Appstrate must either
- * (a) use the Anthropic API key flow (this adapter), or (b) install
- * a private external module that owns the subscription wire format
- * end-to-end.
+ * any third-party product, so the platform refuses to forward them.
+ * Operators with a subscription plan who want to use Anthropic inside
+ * Appstrate must either (a) use the Anthropic API key flow (this
+ * adapter), or (b) install an external module that owns the
+ * subscription wire format end-to-end.
  *
  * Wire format:
  *   - `anthropic-version` and `anthropic-beta` are forwarded verbatim

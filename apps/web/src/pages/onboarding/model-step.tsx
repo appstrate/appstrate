@@ -22,9 +22,9 @@ import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-crede
 
 /**
  * Resolve a model's provider icon. The static `model-presets.ts` catalog
- * covers most api-key providers (anthropic, openai, mistral, …) but not the
- * registry-only OAuth ones (codex → openai icon). We try the static
- * catalog first, then fall back to the runtime registry's `iconUrl` hint.
+ * covers most api-key providers (anthropic, openai, mistral, …) but not
+ * the registry-only OAuth ones. We try the static catalog first, then
+ * fall back to the runtime registry's `iconUrl` hint.
  */
 function resolveProviderIcon(model: OrgModelInfo, registry: ProviderRegistryEntry[] | undefined) {
   const staticMatch = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl);

@@ -274,12 +274,12 @@ export function createApp(deps: AppDeps): Hono {
   //     through zero-copy.
   //   - oauth: the sidecar resolves a fresh access token from the
   //     platform (`/internal/oauth-token/:id`), injects bearer +
-  //     provider identity headers, applies provider-specific body
-  //     transforms (Claude identity prepend, Codex stream/store
-  //     coercion). Bodies are buffered (transform requirement) but the
-  //     response still streams. On 401 we refresh + retry once; on
-  //     400-with-out-of-extra-usage we strip `context-1m-2025-08-07`
-  //     and retry once.
+  //     provider identity headers, applies the declarative body
+  //     transforms read from `wireFormat` (system-prepend, force-stream,
+  //     force-store). Bodies are buffered (transform requirement) but
+  //     the response still streams. On 401 we refresh + retry once; on
+  //     the wireFormat-configured adaptive-retry trigger we strip the
+  //     designated header token and retry once.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);

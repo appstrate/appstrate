@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cross-cutting integration coverage for OAuth flow behaviors that depend
- * on the `@appstrate/module-codex` workspace package's `extractTokenIdentity`
- * hook and `requiredIdentityClaims` declaration. The test runs because the
- * root test preload (`test/setup/preload.ts`) auto-discovers
- * `packages/module-codex/` and registers it before this file loads — so
- * removing the module from the repo makes this file fail to find the
- * provider in the registry and the codex assertions go away with it.
+ * Cross-cutting integration coverage for OAuth flow behaviors that
+ * depend on the `@appstrate/module-codex` workspace package's
+ * `extractTokenIdentity` hook and the `requiredIdentityClaims`
+ * declaration. The root test preload auto-discovers every workspace
+ * module under `packages` (directories named `module-<id>`) and
+ * registers each module before any test file loads, so the codex
+ * provider is in the runtime registry when this file runs.
+ *
+ * Lives in `apps/api/test/` (not in the module's own test directory)
+ * because it exercises apps/api services + helpers + the encryption
+ * envelope — coupling that doesn't belong inside the module package.
  *
  * Generic flow coverage (unknown providerId, empty label, api-key
- * rejection, refresh, soft-disable, etc.) lives next to this file and is
- * exercised against the synthetic `test-oauth` provider — that suite must
- * not depend on this module being loaded.
+ * rejection, refresh, soft-disable, etc.) lives next to this file and
+ * is exercised against the synthetic `test-oauth` provider — that suite
+ * must not depend on this module being loaded.
  *
  * What this file owns:
  *   - JWT decoding round-trip (CLI sends raw access token → platform

@@ -568,7 +568,7 @@ export interface ModelProviderOAuthConfig {
 /**
  * Context passed to provider-specific proxy hooks. The provider's
  * `beforeLlmProxyRequest` decides which headers to add/override on the
- * outbound LLM call (e.g. Codex `chatgpt-account-id`).
+ * outbound LLM call (e.g. an account-routing header).
  */
 export interface ModelProviderProxyContext {
   providerId: string;
@@ -588,13 +588,14 @@ export interface ModelProviderProxyPatch {
 
 /**
  * Well-known identity slots a provider may surface from an OAuth access
- * token. Modules map their provider-specific claim names (e.g. Codex's
- * `chatgpt_account_id`) into these abstract slots, so the platform never
- * needs to know any provider's internal claim vocabulary.
+ * token. Modules map their provider-specific claim names into these
+ * abstract slots, so the platform never needs to know any provider's
+ * internal claim vocabulary.
  *
  * `accountId` is the stable account/tenant identifier the provider uses
- * for routing (e.g. the value Codex echoes back as the `chatgpt-account-id`
- * header). `email` is the user identity associated with the credential.
+ * for routing (echoed back to the upstream via the configured
+ * `accountIdHeader`). `email` is the user identity associated with the
+ * credential.
  */
 export interface ModelProviderIdentity {
   accountId?: string;
@@ -688,9 +689,8 @@ export interface ModelProviderHooks {
   /**
    * Build the inference probe the platform sends to verify the credential
    * can serve traffic. Modules whose backend doesn't accept the generic
-   * `GET ${baseUrl}/models` discovery probe (e.g. Codex's chatgpt.com
-   * backend, which has no `/models` endpoint at all) implement this hook
-   * to provide the real wire format.
+   * `GET ${baseUrl}/models` discovery probe implement this hook to
+   * provide the real wire format.
    *
    * Returns:
    *  - {@link InferenceProbeRequest} → the platform sends it and reports
@@ -736,9 +736,9 @@ export interface ModelProviderDefinition {
   defaultBaseUrl: string;
   /** Whether the user can override `defaultBaseUrl` per credential row. */
   baseUrlOverridable: boolean;
-  /** Force `stream: true` on outbound bodies (e.g. Codex ChatGPT-account mode). */
+  /** Force `stream: true` on outbound bodies (required by some subscription-flavoured providers). */
   forceStream?: true;
-  /** Force `store: false` on outbound bodies (e.g. Codex ChatGPT-account mode). */
+  /** Force `store: false` on outbound bodies (required by some subscription-flavoured providers). */
   forceStore?: false;
   /** Path rewriting applied at the proxy boundary. */
   rewriteUrlPath?: { from: string; to: string };

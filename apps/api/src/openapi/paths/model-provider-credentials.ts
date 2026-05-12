@@ -7,7 +7,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List the in-code model provider registry",
       description:
-        "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
+        "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -93,7 +93,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List organization model provider credentials",
       description:
-        "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "Returns all LLM model provider credentials (API-key + OAuth alike) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

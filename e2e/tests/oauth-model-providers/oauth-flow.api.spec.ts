@@ -3,31 +3,31 @@
 /**
  * E2E smoke tests for OAuth Model Providers — API surface.
  *
- * Covers the public endpoints exposed by `apps/api/src/routes/model-providers-oauth.ts`:
+ * Covers the public endpoints exposed by
+ * `apps/api/src/routes/model-providers-oauth.ts`:
  *
- *   - `POST /api/model-providers-oauth/import` validates the body shape and
- *     persists a token bundle posted by `appstrate connect <provider>`.
+ *   - `POST /api/model-providers-oauth/import` validates the body shape.
  *   - The internal `/internal/oauth-token/:id` endpoint is not reachable
  *     without the run token (sanity check on auth gating).
  *   - Listing model provider keys returns the OAuth-extended shape
  *     (`authMode`, `needsReconnection`).
  *
- * The legacy `/initiate` + `/callback` browser-OAuth pair was removed in
- * Phase 11 — see `docs/architecture/OAUTH_MODEL_PROVIDERS_PLAN.md` and
- * `apps/cli/src/commands/connect.ts` for why. These tests therefore no
- * longer exercise that path.
+ * Provider-specific OAuth flow (live token import, claim extraction)
+ * is covered by each module's own integration suite under
+ * `packages/module-*/test/` — those tests assert per-provider hook
+ * behavior and don't belong in the platform-level e2e.
  *
  * @tags @smoke
  */
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
 
-const CODEX = "codex";
+const SYNTHETIC_UNKNOWN_PROVIDER = "@example/not-a-real-provider";
 
 test.describe("OAuth Model Providers — API smoke", () => {
   test("import rejects an unknown providerId @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: "@example/not-a-real-provider",
+      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "Should fail",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
@@ -37,7 +37,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
 
   test("import rejects an empty label @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: CODEX,
+      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
@@ -47,7 +47,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
 
   test("import rejects missing accessToken @smoke", async ({ apiClient }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: CODEX,
+      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "Pro",
       refreshToken: "fake-refresh",
     });

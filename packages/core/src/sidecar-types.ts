@@ -23,8 +23,9 @@ export interface SidecarConfig {
  *     the sidecar swaps the placeholder for the real key.
  *   - `oauth`: the sidecar fetches a fresh access token from the platform
  *     (`GET /internal/oauth-token/:connectionId`) and injects it as the
- *     bearer + the per-provider identity headers + applies provider-specific
- *     body transforms (Claude identity prepend, Codex stream/store coercion).
+ *     bearer + the per-provider identity headers + applies the declarative
+ *     body transforms read from `wireFormat` (system-prepend, force-stream,
+ *     force-store).
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
@@ -63,11 +64,11 @@ export interface LlmProxyOauthConfig {
   credentialId: string;
   /** Canonical providerId — used for logging only. The sidecar never branches on this value. */
   providerId: string;
-  /** Path rewrite applied to every outbound URL (e.g. `/v1/responses` → `/codex/responses` for chatgpt-account-mode Codex). */
+  /** Path rewrite applied to every outbound URL (e.g. swap `/v1/responses` for a subscription-flavoured path). */
   rewriteUrlPath?: { from: string; to: string };
-  /** Force `stream: true` in JSON request bodies (required by some chat-account OAuth flows). */
+  /** Force `stream: true` in JSON request bodies (required by some subscription-flavoured OAuth flows). */
   forceStream?: boolean;
-  /** Force `store: false` in JSON request bodies (Codex ChatGPT-account mode). */
+  /** Force `store: false` in JSON request bodies (required by some subscription-flavoured OAuth flows). */
   forceStore?: boolean;
   /**
    * Declarative wire-format contract contributed by the provider module
@@ -82,8 +83,9 @@ export interface LlmProxyOauthConfig {
 /**
  * Declarative wire-format quirks an OAuth model provider needs the sidecar
  * to apply on its behalf. Lives in {@link LlmProxyOauthConfig} (carried at
- * boot via env), so the sidecar runtime stays provider-agnostic — every
- * `claude-code`-style switch branch in the sidecar reads from this struct.
+ * boot via env), so the sidecar runtime stays provider-agnostic — there is
+ * no provider-name switch anywhere; every behavior is data-driven from this
+ * struct.
  *
  * All fields optional. An empty `OAuthWireFormat` is equivalent to "pass
  * the agent's request through with just the bearer attached."
@@ -92,14 +94,13 @@ export interface OAuthWireFormat {
   /**
    * Static headers injected on every OAuth-authenticated upstream call.
    * Lower-cased keys recommended; the sidecar forwards verbatim. Used for
-   * provider fingerprinting (e.g. Anthropic's `anthropic-dangerous-direct-
-   * browser-access`, Codex's `originator: pi`).
+   * provider fingerprinting (a fixed client-identity header the upstream
+   * expects to see on subscription-bearing calls).
    */
   identityHeaders?: Record<string, string>;
   /**
    * Header name to echo the resolved `accountId` as (when the token endpoint
    * surfaced one). Skipped when the cached token carries no `accountId`.
-   * Example: `chatgpt-account-id` for Codex.
    */
   accountIdHeader?: string;
   /**

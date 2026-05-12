@@ -47,8 +47,9 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const [working, setWorking] = useState(false);
 
   // `iconUrl` is the canonical PROVIDER_ICONS key surfaced by the registry
-  // (e.g. `codex → "openai"`, `claude-code → "anthropic"`). Falls back to
-  // a generic plug glyph for providers without a registered brand icon.
+  // (the value points at a brand glyph slug, not at the provider id).
+  // Falls back to a generic plug glyph for providers without a registered
+  // brand icon.
   const Icon = entry.iconUrl ? (PROVIDER_ICONS[entry.iconUrl] ?? null) : null;
 
   const openDialog = () => {

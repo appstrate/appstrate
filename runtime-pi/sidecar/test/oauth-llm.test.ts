@@ -9,6 +9,11 @@
  * beta retry. Mocks both the platform's `/internal/oauth-token/*`
  * endpoints and the upstream LLM provider via a single `fetchFn`
  * dispatcher.
+ *
+ * The two synthetic configs below exercise every wire-format feature
+ * (identityHeaders, accountIdHeader, systemPrepend, forceStream/Store,
+ * adaptiveRetry) without naming any real-world provider — the sidecar
+ * is provider-agnostic, and so are these tests.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -19,6 +24,7 @@ import type { CredentialsResponse, LlmProxyOauthConfig } from "../helpers.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
 const RUN_TOKEN = "run-tok";
+const PREPEND_TEXT = "synthetic-system-prelude";
 
 interface FetchCall {
   url: string;
@@ -85,20 +91,31 @@ function makeDepsWithCache(upstream: MockUpstream): AppDeps {
   };
 }
 
-const CLAUDE_OAUTH: LlmProxyOauthConfig = {
+/**
+ * Synthetic config exercising:
+ *   - identityHeaders (static fingerprint headers)
+ *   - systemPrepend (body transform that injects an Anthropic-style
+ *     `system` array block at index 0)
+ *   - adaptiveRetry (strip a header token on a known 4xx + body pattern,
+ *     replay once)
+ *
+ * Models the shape any subscription-flavoured provider whose ToS
+ * mandates an identity prelude in the `system` block would use.
+ */
+const PREPEND_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
-  baseUrl: "https://api.anthropic.com",
-  credentialId: "conn-abc",
-  providerId: "claude-code",
+  baseUrl: "https://provider-a.example.com",
+  credentialId: "conn-prepend",
+  providerId: "synthetic-prepend",
   wireFormat: {
     identityHeaders: {
       accept: "application/json",
-      "anthropic-dangerous-direct-browser-access": "true",
       "x-app": "cli",
+      "x-fingerprint": "synthetic",
     },
     systemPrepend: {
       type: "text",
-      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+      text: PREPEND_TEXT,
     },
     adaptiveRetry: {
       status: 400,
@@ -109,26 +126,36 @@ const CLAUDE_OAUTH: LlmProxyOauthConfig = {
   },
 };
 
-const CODEX_OAUTH: LlmProxyOauthConfig = {
+/**
+ * Synthetic config exercising:
+ *   - identityHeaders + accountIdHeader (per-account routing)
+ *   - forceStream / forceStore body coercion
+ *   - a non-`/v1/...` path so we verify the sidecar forwards whatever
+ *     path the agent issues without rewriting it
+ *
+ * Models the shape any subscription-flavoured provider that gates calls
+ * on an `accountId` header would use.
+ */
+const ACCOUNT_ID_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
-  baseUrl: "https://chatgpt.com/backend-api",
-  credentialId: "conn-codex",
-  providerId: "codex",
+  baseUrl: "https://provider-b.example.com/backend-api",
+  credentialId: "conn-acct",
+  providerId: "synthetic-account-id",
   forceStream: true,
   forceStore: false,
   wireFormat: {
     identityHeaders: {
-      originator: "pi",
-      "openai-beta": "responses=experimental",
+      "x-originator": "pi",
+      "x-feature-beta": "responses=experimental",
       "user-agent": "pi (linux x86_64)",
       accept: "text/event-stream",
     },
-    accountIdHeader: "chatgpt-account-id",
+    accountIdHeader: "x-account-id",
   },
 };
 
-describe("/llm/* OAuth — Claude path", () => {
-  it("injects bearer + identity headers and prepends Claude Code identity to body", async () => {
+describe("/llm/* OAuth — system-prepend variant", () => {
+  it("injects bearer + identity headers and prepends the configured system block", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
         return new Response(JSON.stringify(buildOAuthTokenResponse()), {
@@ -142,30 +169,28 @@ describe("/llm/* OAuth — Claude path", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", messages: [] }),
+      body: JSON.stringify({ model: "synthetic-model", messages: [] }),
     });
     expect(res.status).toBe(200);
 
     // First call → platform; second call → upstream
     expect(upstream.calls).toHaveLength(2);
     const upstreamCall = upstream.calls[1]!;
-    expect(upstreamCall.url).toBe("https://api.anthropic.com/v1/messages");
+    expect(upstreamCall.url).toBe("https://provider-a.example.com/v1/messages");
     expect(upstreamCall.headers["authorization"]).toBe("Bearer oat-fresh-token");
     expect(upstreamCall.headers["x-app"]).toBe("cli");
     expect(upstreamCall.headers["accept"]).toBe("application/json");
-    expect(upstreamCall.headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
+    expect(upstreamCall.headers["x-fingerprint"]).toBe("synthetic");
 
-    // Body has Claude Code identity prepended into `system`
+    // Body has the configured prepend block injected into `system`
     const body = JSON.parse(upstreamCall.body!);
-    expect(body.system).toEqual([
-      { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
-    ]);
+    expect(body.system).toEqual([{ type: "text", text: PREPEND_TEXT }]);
   });
 
   it("retries once on 401 with a force-refreshed token", async () => {
@@ -196,7 +221,7 @@ describe("/llm/* OAuth — Claude path", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -237,7 +262,7 @@ describe("/llm/* OAuth — Claude path", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -261,7 +286,7 @@ describe("/llm/* OAuth — Claude path", () => {
         }),
     );
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", { method: "POST" });
@@ -270,7 +295,7 @@ describe("/llm/* OAuth — Claude path", () => {
     expect(body.needsReconnection).toBe(true);
   });
 
-  it("strips context-1m beta on 'out of extra usage' 400 and retries", async () => {
+  it("strips the configured adaptive-retry token on a matching 4xx and retries", async () => {
     let upstreamCalls = 0;
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
@@ -292,7 +317,7 @@ describe("/llm/* OAuth — Claude path", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -308,13 +333,13 @@ describe("/llm/* OAuth — Claude path", () => {
 
     const upstreamFetches = upstream.calls.filter((c) => !c.url.startsWith(PLATFORM_API));
     expect(upstreamFetches).toHaveLength(2);
-    // Second call has the long-context beta stripped
+    // Second call has the configured adaptive-retry token stripped
     expect(upstreamFetches[1]!.headers["anthropic-beta"]).toBe("other-beta-x");
   });
 });
 
-describe("/llm/* OAuth — Codex path", () => {
-  it("forwards to /codex/responses, injects chatgpt-account-id + WAF-safe UA, and coerces stream/store flags", async () => {
+describe("/llm/* OAuth — account-id variant", () => {
+  it("forwards the agent's path verbatim, injects accountIdHeader + identity headers, and coerces stream/store flags", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
         return new Response(
@@ -332,16 +357,16 @@ describe("/llm/* OAuth — Codex path", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CODEX_OAUTH;
+    deps.config.llm = ACCOUNT_ID_OAUTH;
     const app = createApp(deps);
 
-    // pi-ai's openai-codex-responses provider hits `${baseUrl}/codex/responses`
-    // natively — the sidecar receives the already-resolved path.
-    const res = await app.request("/llm/codex/responses", {
+    // The agent sends whatever path it wants — the sidecar forwards it
+    // verbatim under the configured `baseUrl`.
+    const res = await app.request("/llm/v2/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-5.5",
+        model: "synthetic-model",
         stream: false,
         store: true,
         input: "hello",
@@ -350,13 +375,13 @@ describe("/llm/* OAuth — Codex path", () => {
     expect(res.status).toBe(200);
 
     const upstreamCall = upstream.calls.find((c) => !c.url.startsWith(PLATFORM_API))!;
-    expect(upstreamCall.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    expect(upstreamCall.url).toBe("https://provider-b.example.com/backend-api/v2/responses");
     expect(upstreamCall.headers["authorization"]).toBe("Bearer oat-fresh-token");
-    expect(upstreamCall.headers["chatgpt-account-id"]).toBe("acc_007");
-    expect(upstreamCall.headers["originator"]).toBe("pi");
-    expect(upstreamCall.headers["openai-beta"]).toBe("responses=experimental");
-    // WAF-safe UA must be set — Cloudflare on chatgpt.com challenges the
-    // OpenAI SDK's default `OpenAI/JS …` UA with `cf-mitigated: challenge`.
+    expect(upstreamCall.headers["x-account-id"]).toBe("acc_007");
+    expect(upstreamCall.headers["x-originator"]).toBe("pi");
+    expect(upstreamCall.headers["x-feature-beta"]).toBe("responses=experimental");
+    // Custom user-agent must be set — agents cannot be trusted to set
+    // their own, so the configured UA is forced server-side.
     expect(upstreamCall.headers["user-agent"]).toBe("pi (linux x86_64)");
     expect(upstreamCall.headers["accept"]).toBe("text/event-stream");
 
@@ -386,7 +411,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
       );
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -418,7 +443,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -446,7 +471,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
       });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -470,7 +495,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
       throw new Error("ENETUNREACH");
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -494,7 +519,7 @@ describe("/llm/* OAuth — provider failure modes (Phase 8)", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
@@ -511,7 +536,7 @@ describe("/llm/* OAuth — config errors", () => {
     const upstream = setupFetchMock(() => new Response("ok", { status: 200 }));
     const deps = makeDepsWithCache(upstream);
     delete deps.oauthTokenCache;
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = PREPEND_OAUTH;
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(503);
@@ -528,7 +553,7 @@ describe("/llm/* OAuth — config errors", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = { ...CLAUDE_OAUTH, baseUrl: "http://10.0.0.1" };
+    deps.config.llm = { ...PREPEND_OAUTH, baseUrl: "http://10.0.0.1" };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);

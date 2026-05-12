@@ -12,10 +12,9 @@
  *   - `adaptHeaderForRetry` strips a configured token from the configured
  *     header when the upstream response matches the configured shape.
  *
- * Test data is shaped to mirror real provider wire-formats (Anthropic
- * Claude Code prelude, Codex chatgpt-account-id), but no provider id
- * leaks into the sidecar code path — everything is driven by the
- * declarative `OAuthWireFormat` struct.
+ * Test data uses two synthetic wire-format fixtures (PREPEND, ACCOUNT_ID)
+ * that exercise every code path without naming any real-world provider —
+ * everything is driven by the declarative `OAuthWireFormat` struct.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -32,15 +31,17 @@ function makeToken(overrides: Partial<CachedToken> = {}): CachedToken {
   };
 }
 
-const CLAUDE_WIRE_FORMAT: OAuthWireFormat = {
+const PREPEND_TEXT = "synthetic-system-prelude";
+
+const PREPEND_WIRE_FORMAT: OAuthWireFormat = {
   identityHeaders: {
     accept: "application/json",
-    "anthropic-dangerous-direct-browser-access": "true",
     "x-app": "cli",
+    "x-fingerprint": "synthetic",
   },
   systemPrepend: {
     type: "text",
-    text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    text: PREPEND_TEXT,
   },
   adaptiveRetry: {
     status: 400,
@@ -50,40 +51,40 @@ const CLAUDE_WIRE_FORMAT: OAuthWireFormat = {
   },
 };
 
-const CODEX_WIRE_FORMAT: OAuthWireFormat = {
+const ACCOUNT_ID_WIRE_FORMAT: OAuthWireFormat = {
   identityHeaders: {
-    originator: "pi",
-    "openai-beta": "responses=experimental",
+    "x-originator": "pi",
+    "x-feature-beta": "responses=experimental",
     "user-agent": "pi (linux x86_64)",
     accept: "text/event-stream",
   },
-  accountIdHeader: "chatgpt-account-id",
+  accountIdHeader: "x-account-id",
 };
 
 describe("buildIdentityHeaders", () => {
   it("forwards identityHeaders from the wireFormat verbatim", () => {
-    const h = buildIdentityHeaders(CLAUDE_WIRE_FORMAT, makeToken());
+    const h = buildIdentityHeaders(PREPEND_WIRE_FORMAT, makeToken());
     expect(h["accept"]).toBe("application/json");
-    expect(h["anthropic-dangerous-direct-browser-access"]).toBe("true");
     expect(h["x-app"]).toBe("cli");
+    expect(h["x-fingerprint"]).toBe("synthetic");
   });
 
   it("echoes accountId via the configured header when set", () => {
-    const h = buildIdentityHeaders(CODEX_WIRE_FORMAT, makeToken({ accountId: "acc_xyz" }));
-    expect(h["originator"]).toBe("pi");
-    expect(h["openai-beta"]).toBe("responses=experimental");
-    expect(h["chatgpt-account-id"]).toBe("acc_xyz");
+    const h = buildIdentityHeaders(ACCOUNT_ID_WIRE_FORMAT, makeToken({ accountId: "acc_xyz" }));
+    expect(h["x-originator"]).toBe("pi");
+    expect(h["x-feature-beta"]).toBe("responses=experimental");
+    expect(h["x-account-id"]).toBe("acc_xyz");
   });
 
   it("omits the accountId header when the token carries no accountId", () => {
-    const h = buildIdentityHeaders(CODEX_WIRE_FORMAT, makeToken());
-    expect(h["chatgpt-account-id"]).toBeUndefined();
-    expect(h["originator"]).toBe("pi");
+    const h = buildIdentityHeaders(ACCOUNT_ID_WIRE_FORMAT, makeToken());
+    expect(h["x-account-id"]).toBeUndefined();
+    expect(h["x-originator"]).toBe("pi");
   });
 
   it("omits the accountId header when no accountIdHeader is configured", () => {
-    const h = buildIdentityHeaders(CLAUDE_WIRE_FORMAT, makeToken({ accountId: "acc_xyz" }));
-    expect(h["chatgpt-account-id"]).toBeUndefined();
+    const h = buildIdentityHeaders(PREPEND_WIRE_FORMAT, makeToken({ accountId: "acc_xyz" }));
+    expect(h["x-account-id"]).toBeUndefined();
   });
 
   it("returns an empty object when wireFormat is undefined", () => {
@@ -96,17 +97,17 @@ describe("buildIdentityHeaders", () => {
 });
 
 describe("transformBody — systemPrepend", () => {
-  const IDENTITY = CLAUDE_WIRE_FORMAT.systemPrepend!.text;
+  const IDENTITY = PREPEND_WIRE_FORMAT.systemPrepend!.text;
 
   it("prepends identity when system is absent", () => {
-    const body = JSON.stringify({ model: "claude-opus", messages: [] });
-    const out = JSON.parse(transformBody(CLAUDE_WIRE_FORMAT, body));
+    const body = JSON.stringify({ model: "synthetic-model", messages: [] });
+    const out = JSON.parse(transformBody(PREPEND_WIRE_FORMAT, body));
     expect(out.system).toEqual([{ type: "text", text: IDENTITY }]);
   });
 
   it("wraps a string system value into an array with identity first", () => {
     const body = JSON.stringify({ system: "You are a helpful assistant.", model: "x" });
-    const out = JSON.parse(transformBody(CLAUDE_WIRE_FORMAT, body));
+    const out = JSON.parse(transformBody(PREPEND_WIRE_FORMAT, body));
     expect(out.system).toEqual([
       { type: "text", text: IDENTITY },
       { type: "text", text: "You are a helpful assistant." },
@@ -115,7 +116,7 @@ describe("transformBody — systemPrepend", () => {
 
   it("collapses an identical-string system to a single identity block", () => {
     const body = JSON.stringify({ system: IDENTITY });
-    const out = JSON.parse(transformBody(CLAUDE_WIRE_FORMAT, body));
+    const out = JSON.parse(transformBody(PREPEND_WIRE_FORMAT, body));
     expect(out.system).toEqual([{ type: "text", text: IDENTITY }]);
   });
 
@@ -123,7 +124,7 @@ describe("transformBody — systemPrepend", () => {
     const body = JSON.stringify({
       system: [{ type: "text", text: "first existing" }],
     });
-    const out = JSON.parse(transformBody(CLAUDE_WIRE_FORMAT, body));
+    const out = JSON.parse(transformBody(PREPEND_WIRE_FORMAT, body));
     expect(out.system).toEqual([
       { type: "text", text: IDENTITY },
       { type: "text", text: "first existing" },
@@ -137,7 +138,7 @@ describe("transformBody — systemPrepend", () => {
         { type: "text", text: "extra" },
       ],
     });
-    const out = JSON.parse(transformBody(CLAUDE_WIRE_FORMAT, body));
+    const out = JSON.parse(transformBody(PREPEND_WIRE_FORMAT, body));
     expect(out.system).toEqual([
       { type: "text", text: IDENTITY },
       { type: "text", text: "extra" },
@@ -147,17 +148,17 @@ describe("transformBody — systemPrepend", () => {
 
 describe("transformBody — stream/store coercion", () => {
   it("forces stream and store flags when set", () => {
-    const body = JSON.stringify({ model: "gpt-5", stream: false, store: true });
+    const body = JSON.stringify({ model: "synthetic-model", stream: false, store: true });
     const out = JSON.parse(
-      transformBody(CODEX_WIRE_FORMAT, body, { forceStream: true, forceStore: false }),
+      transformBody(ACCOUNT_ID_WIRE_FORMAT, body, { forceStream: true, forceStore: false }),
     );
     expect(out.stream).toBe(true);
     expect(out.store).toBe(false);
   });
 
   it("leaves flags untouched when options are not provided", () => {
-    const body = JSON.stringify({ model: "gpt-5", stream: false, store: true });
-    const out = JSON.parse(transformBody(CODEX_WIRE_FORMAT, body));
+    const body = JSON.stringify({ model: "synthetic-model", stream: false, store: true });
+    const out = JSON.parse(transformBody(ACCOUNT_ID_WIRE_FORMAT, body));
     expect(out.stream).toBe(false);
     expect(out.store).toBe(true);
   });
@@ -165,16 +166,16 @@ describe("transformBody — stream/store coercion", () => {
 
 describe("transformBody — defensive paths", () => {
   it("returns input unchanged for empty body", () => {
-    expect(transformBody(CLAUDE_WIRE_FORMAT, "")).toBe("");
+    expect(transformBody(PREPEND_WIRE_FORMAT, "")).toBe("");
   });
 
   it("returns input unchanged when body is not JSON and a transform is requested", () => {
-    expect(transformBody(CLAUDE_WIRE_FORMAT, "not-json")).toBe("not-json");
+    expect(transformBody(PREPEND_WIRE_FORMAT, "not-json")).toBe("not-json");
   });
 
   it("returns input unchanged when wireFormat has no transform fields", () => {
     const body = JSON.stringify({ system: "x" });
-    expect(transformBody(CODEX_WIRE_FORMAT, body)).toBe(body);
+    expect(transformBody(ACCOUNT_ID_WIRE_FORMAT, body)).toBe(body);
   });
 
   it("returns input unchanged when wireFormat is undefined", () => {
@@ -184,7 +185,7 @@ describe("transformBody — defensive paths", () => {
 });
 
 describe("adaptHeaderForRetry", () => {
-  const policy = CLAUDE_WIRE_FORMAT.adaptiveRetry!;
+  const policy = PREPEND_WIRE_FORMAT.adaptiveRetry!;
 
   it("returns null when no policy is configured", () => {
     expect(

@@ -452,8 +452,7 @@ export async function testModelConfig(config: {
   }
 
   // Provider-agnostic inference-probe override — modules whose backend
-  // doesn't accept the generic `/models` discovery probe (e.g. Codex's
-  // chatgpt.com backend has no `/models` endpoint) implement
+  // doesn't accept the generic `/models` discovery probe implement
   // `buildInferenceProbe` to provide the real wire format. The platform
   // sends whatever the module builds without inspecting the contents.
   const provider = config.providerId ? getModelProvider(config.providerId) : null;
