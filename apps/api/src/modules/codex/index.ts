@@ -252,6 +252,25 @@ const codexProvider: ModelProviderDefinition = {
   // credential whose token doesn't carry this claim — failing at import
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
+  // Sidecar wire-format quirks the chatgpt.com Codex backend enforces:
+  //  - `originator: pi` — the only client identifier its allowlist accepts
+  //  - `openai-beta: responses=experimental` — gates the Responses surface
+  //  - `user-agent: pi (linux x86_64)` — Codex is fronted by Cloudflare,
+  //    which bot-mitigates any UA that doesn't look like an approved CLI.
+  //    The OpenAI SDK's `OpenAI/JS …` UA triggers `cf-mitigated: challenge`
+  //    → HTML 403; pi-ai's `openai-codex-responses` provider sends this
+  //    exact string and is verified to pass.
+  //  - `accept: text/event-stream` — Codex's `/codex/responses` only
+  //    streams; non-SSE requests are rejected.
+  oauthWireFormat: {
+    identityHeaders: {
+      originator: "pi",
+      "openai-beta": "responses=experimental",
+      "user-agent": "pi (linux x86_64)",
+      accept: "text/event-stream",
+    },
+    accountIdHeader: "chatgpt-account-id",
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Onboarding-only quick-connect cards for OAuth model providers (Codex).
+ * Onboarding-only quick-connect cards for OAuth model providers.
  * One click opens the pairing dialog; on success the helper seeds the
  * org's `org_models` with the registry's recommended models so the user
  * can hit "Continue" without touching the manual form.
+ *
+ * The list is module-driven: every OAuth provider the platform loaded
+ * (`useProvidersRegistry()` filtered by `authMode === "oauth2"`) gets a
+ * card here. Hiding a card means removing its module from `MODULES` —
+ * core has no per-providerId allowlist.
  *
  * The seeding behavior is intentionally bound to this caller — the generic
  * `OAuthModelProviderDialog` stays neutral so OAuth connections triggered
@@ -28,8 +33,6 @@ import {
 import { useAutoSeedRecommendedModels } from "../hooks/use-auto-seed-models";
 import { useNewOAuthCredential } from "../hooks/use-new-oauth-credential";
 
-const QUICK_CONNECT_PROVIDER_IDS = ["codex"] as const;
-
 interface CardProps {
   entry: ProviderRegistryEntry;
   alreadyConnected: boolean;
@@ -44,8 +47,8 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const [working, setWorking] = useState(false);
 
   // `iconUrl` is the canonical PROVIDER_ICONS key surfaced by the registry
-  // (codex → "openai"). Falls back to a generic plug glyph for future
-  // providers without a registered brand icon.
+  // (e.g. `codex → "openai"`, `claude-code → "anthropic"`). Falls back to
+  // a generic plug glyph for providers without a registered brand icon.
   const Icon = entry.iconUrl ? (PROVIDER_ICONS[entry.iconUrl] ?? null) : null;
 
   const openDialog = () => {
@@ -138,11 +141,7 @@ export function OnboardingQuickConnect() {
   const registryQuery = useProvidersRegistry();
   const credentialsQuery = useModelProviderCredentials();
 
-  const entries = (registryQuery.data ?? []).filter(
-    (p) =>
-      p.authMode === "oauth2" &&
-      (QUICK_CONNECT_PROVIDER_IDS as readonly string[]).includes(p.providerId),
-  );
+  const entries = (registryQuery.data ?? []).filter((p) => p.authMode === "oauth2");
 
   if (entries.length === 0) return null;
 

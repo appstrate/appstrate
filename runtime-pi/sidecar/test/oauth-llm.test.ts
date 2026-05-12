@@ -90,6 +90,23 @@ const CLAUDE_OAUTH: LlmProxyOauthConfig = {
   baseUrl: "https://api.anthropic.com",
   credentialId: "conn-abc",
   providerId: "claude-code",
+  wireFormat: {
+    identityHeaders: {
+      accept: "application/json",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "x-app": "cli",
+    },
+    systemPrepend: {
+      type: "text",
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    },
+    adaptiveRetry: {
+      status: 400,
+      bodyPatterns: ["out of extra usage", "long context beta not available"],
+      headerName: "anthropic-beta",
+      removeToken: "context-1m-2025-08-07",
+    },
+  },
 };
 
 const CODEX_OAUTH: LlmProxyOauthConfig = {
@@ -99,6 +116,15 @@ const CODEX_OAUTH: LlmProxyOauthConfig = {
   providerId: "codex",
   forceStream: true,
   forceStore: false,
+  wireFormat: {
+    identityHeaders: {
+      originator: "pi",
+      "openai-beta": "responses=experimental",
+      "user-agent": "pi (linux x86_64)",
+      accept: "text/event-stream",
+    },
+    accountIdHeader: "chatgpt-account-id",
+  },
 };
 
 describe("/llm/* OAuth — Claude path", () => {

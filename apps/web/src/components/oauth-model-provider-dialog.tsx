@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Modal that walks the user through connecting an OAuth model provider
- * (Codex).
+ * Modal that walks the user through connecting an OAuth model provider.
  *
  * Why a helper, not a browser-only flow:
  *   The public OAuth client_ids baked into the official CLIs only
@@ -11,17 +10,17 @@
  *   delegate the loopback OAuth dance to the user's terminal via the
  *   `npx @appstrate/connect-helper <token>` one-shot helper.
  *
- * Two stages:
- *   1. **ToS warning**: explicit notice that the subscription quota is
- *      shared org-wide, that the connection isn't covered by the provider's
- *      personal-tier ToS, and that Anthropic actively blocks third-party
- *      Pro/Max OAuth tokens server-side since 2026-01-09.
- *   2. **Pairing command + poller**: mints a one-shot pairing token via
- *      `POST /api/model-providers-oauth/pairing`, surfaces the resulting
- *      `npx @appstrate/connect-helper <token>` command, and polls the
- *      pairing status until it flips to `consumed` (helper completed +
- *      credentials saved). On modal close we DELETE the pairing so the
- *      token can't be reused.
+ * Flow:
+ *   On open, the dialog mints a one-shot pairing token via
+ *   `POST /api/model-providers-oauth/pairing`, surfaces the resulting
+ *   `npx @appstrate/connect-helper <token>` command, and polls the
+ *   pairing status until it flips to `consumed` (helper completed +
+ *   credentials saved). On modal close we DELETE the pairing so the
+ *   token can't be reused.
+ *
+ * No ToS gate here — OAuth providers are opt-in at the `MODULES` env-var
+ * level (operator-controlled at install time). Anything reaching this
+ * dialog has already been explicitly enabled.
  *
  * The credential label is picked by the helper (`--label` flag or its own
  * default from `DEFAULT_LABEL[slug]`) — the dashboard never sends one, so
@@ -35,7 +34,6 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
 import {
   useCreateModelProviderPairing,
@@ -58,35 +56,14 @@ interface Props {
 export function OAuthModelProviderDialog({ open, providerId, onClose, onConnected }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
-  const [stage, setStage] = useState<"tos" | "cli">("tos");
-  const [tosAccepted, setTosAccepted] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const createPairing = useCreateModelProviderPairing();
   const cancelPairing = useCancelModelProviderPairing();
   const pairingStatus = useModelProviderPairingStatus(pairing?.id ?? null, {
-    enabled: open && stage === "cli" && !!pairing,
+    enabled: open && !!pairing,
   });
-
-  // When the helper completes + the platform persists the credential, the
-  // pairing flips to `consumed`. Surface the success toast, invalidate the
-  // model-provider-credentials query so the caller's list refreshes, and
-  // close. The pairing row is already consumed server-side — no DELETE
-  // needed on success (the cleanup worker reaps it later).
-  useEffect(() => {
-    if (!open || stage !== "cli") return;
-    if (pairingStatus.data?.status === "consumed") {
-      toast.success(t("providerKeys.oauth.callbackSuccess"));
-      qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
-      onConnected?.();
-      handleClose();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairingStatus.data?.status, open, stage]);
-
-  const isExpired = pairingStatus.data?.status === "expired";
-  const command = pairing?.command ?? "";
 
   // Cancel pairing on close. We keep this in a ref so the cleanup effect
   // can read the latest pairing without re-running on every state update.
@@ -96,8 +73,6 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
   cancelMutateRef.current = cancelPairing.mutate;
 
   function reset() {
-    setStage("tos");
-    setTosAccepted(false);
     setCopied(false);
     setPairing(null);
   }
@@ -116,6 +91,36 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
     onClose();
   }
 
+  // When the helper completes + the platform persists the credential, the
+  // pairing flips to `consumed`. Surface the success toast, invalidate the
+  // model-provider-credentials query so the caller's list refreshes, and
+  // close. The pairing row is already consumed server-side — no DELETE
+  // needed on success (the cleanup worker reaps it later).
+  //
+  // The close is deferred via `queueMicrotask` so we don't trigger a
+  // setState cascade from within the effect body (handleClose → reset
+  // sets two states; the react-hooks rule flags synchronous setState here).
+  useEffect(() => {
+    if (!open) return;
+    if (pairingStatus.data?.status !== "consumed") return;
+    toast.success(t("providerKeys.oauth.callbackSuccess"));
+    qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
+    onConnected?.();
+    queueMicrotask(handleClose);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairingStatus.data?.status, open]);
+
+  // Mint the pairing token as soon as the dialog opens — there's no
+  // intermediate consent step anymore. Re-fires when reopened after a close.
+  useEffect(() => {
+    if (!open || pairing || createPairing.isPending) return;
+    void generatePairing();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const isExpired = pairingStatus.data?.status === "expired";
+  const command = pairing?.command ?? "";
+
   async function generatePairing() {
     try {
       const res = await createPairing.mutateAsync({ providerId });
@@ -123,12 +128,6 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("providerKeys.oauth.pairingCreateFailed"));
     }
-  }
-
-  async function handleAdvanceToCli() {
-    if (!tosAccepted) return;
-    setStage("cli");
-    await generatePairing();
   }
 
   async function handleRegenerate() {
@@ -144,53 +143,6 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
     } catch {
       toast.error(t("providerKeys.oauth.copyFailed"));
     }
-  }
-
-  if (stage === "tos") {
-    return (
-      <Modal
-        open={open}
-        onClose={handleClose}
-        title={t("providerKeys.oauth.tosTitle")}
-        actions={
-          <>
-            <Button variant="ghost" onClick={handleClose}>
-              {t("providerKeys.oauth.cancel")}
-            </Button>
-            <Button onClick={handleAdvanceToCli} disabled={!tosAccepted}>
-              {t("providerKeys.oauth.continue")}
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4 text-sm">
-          <div className="flex flex-col gap-2">
-            <p className="font-medium">{t("providerKeys.oauth.tosWarningTitle")}</p>
-            <ul className="text-muted-foreground list-disc space-y-1 pl-5">
-              <li>{t("providerKeys.oauth.tosBullet1")}</li>
-              <li>{t("providerKeys.oauth.tosBullet2")}</li>
-              <li>{t("providerKeys.oauth.tosBullet3")}</li>
-              <li>{t("providerKeys.oauth.tosBullet4")}</li>
-            </ul>
-          </div>
-
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-            <p className="font-semibold">{t("providerKeys.oauth.tosOpenAiUnclearTitle")}</p>
-            <p className="mt-1">{t("providerKeys.oauth.tosOpenAiUnclearBody")}</p>
-          </div>
-
-          <label className="flex cursor-pointer items-start gap-2 text-xs">
-            <Checkbox
-              id="oauth-tos-accept"
-              checked={tosAccepted}
-              onCheckedChange={(v) => setTosAccepted(v === true)}
-              className="mt-0.5"
-            />
-            <span>{t("providerKeys.oauth.tosCheckboxLabel")}</span>
-          </label>
-        </div>
-      </Modal>
-    );
   }
 
   return (

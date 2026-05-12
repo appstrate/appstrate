@@ -1,26 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Provider-specific identity injection for the OAuth `/llm/*` path.
+ * Provider-agnostic wire-format application for the OAuth `/llm/*` path.
  *
- * Two responsibilities (cf. SPEC §5.4–5.6):
+ * The sidecar never branches on `providerId`. It reads the declarative
+ * {@link OAuthWireFormat} contract from `LlmProxyOauthConfig.wireFormat`
+ * (populated at boot by the platform from each module's
+ * `ModelProviderDefinition.oauthWireFormat`) and applies three things:
  *
- *   - {@link buildIdentityHeaders}: returns the static identity headers
- *     each provider expects when the upstream is hit with an OAuth
- *     subscription token (Codex/Claude). The agent (Pi-AI) cannot be
- *     trusted to set these — they are part of what makes the provider
- *     accept a subscription-bearing call. Forced server-side.
+ *   - {@link buildIdentityHeaders}: static fingerprint headers + optional
+ *     `accountId` echo (e.g. Anthropic's `x-app: cli`, Codex's
+ *     `chatgpt-account-id`). The agent (Pi-AI) cannot be trusted to set
+ *     these — they are part of what makes the provider accept a
+ *     subscription-bearing call. Forced server-side.
  *   - {@link transformBody}: rewrites the agent-supplied JSON body to
- *     prepend the Claude Code identity prelude (Anthropic) or coerce
- *     stream/store flags (Codex). Buffered transform — we trade the
- *     streaming upload for correctness; LLM payloads typically stay
- *     well under the sidecar's 10 MB request cap.
+ *     prepend an Anthropic-style system prelude or coerce stream/store
+ *     flags. Buffered transform — we trade the streaming upload for
+ *     correctness; LLM payloads typically stay well under the sidecar's
+ *     10 MB request cap.
+ *   - {@link adaptHeaderForRetry}: when an upstream returns a known
+ *     status + body pattern, strip a header token and retry once
+ *     (Anthropic's long-context beta fallback).
+ *
+ * When `wireFormat` is undefined, all three are no-ops. Add a new OAuth
+ * provider by populating `oauthWireFormat` on the module's
+ * `ModelProviderDefinition` — no sidecar code changes.
  */
 
-import {
-  CLAUDE_CODE_IDENTITY_HEADERS,
-  CLAUDE_CODE_IDENTITY_PROMPT,
-} from "@appstrate/core/sidecar-types";
+import type { OAuthWireFormat, OAuthAdaptiveRetryPolicy } from "@appstrate/core/sidecar-types";
 import type { CachedToken } from "./oauth-token-cache.ts";
 import { MAX_REQUEST_BODY_SIZE } from "./helpers.ts";
 
@@ -44,39 +51,20 @@ export class TransformBodyTooLargeError extends Error {
  * Provider identity headers. Returns hop-by-hop-safe lower-cased keys —
  * caller is responsible for ensuring these aren't filtered out by
  * downstream `filterHeaders()` calls.
+ *
+ * When `wireFormat` is undefined or carries no identity fields, returns
+ * an empty object (the agent's own headers still flow through).
  */
 export function buildIdentityHeaders(
-  providerId: string,
+  wireFormat: OAuthWireFormat | undefined,
   token: CachedToken,
 ): Record<string, string> {
-  switch (providerId) {
-    case "claude-code":
-      return {
-        accept: "application/json",
-        ...CLAUDE_CODE_IDENTITY_HEADERS,
-      };
-
-    case "codex": {
-      // Codex traffic is fronted by Cloudflare which bot-mitigates any
-      // request whose `User-Agent` doesn't look like an approved client.
-      // The agent's openai-responses provider goes through the OpenAI
-      // SDK which sets `User-Agent: OpenAI/JS …` — that triggers
-      // `cf-mitigated: challenge` → HTML 403. Force the same UA pi-ai's
-      // openai-codex-responses provider uses (verified to pass WAF), and
-      // keep `originator: pi` consistent with it.
-      const headers: Record<string, string> = {
-        originator: "pi",
-        "openai-beta": "responses=experimental",
-        "user-agent": "pi (linux x86_64)",
-        accept: "text/event-stream",
-      };
-      if (token.accountId) headers["chatgpt-account-id"] = token.accountId;
-      return headers;
-    }
-
-    default:
-      return {};
+  if (!wireFormat) return {};
+  const headers: Record<string, string> = { ...(wireFormat.identityHeaders ?? {}) };
+  if (wireFormat.accountIdHeader && token.accountId) {
+    headers[wireFormat.accountIdHeader] = token.accountId;
   }
+  return headers;
 }
 
 /**
@@ -84,7 +72,8 @@ export function buildIdentityHeaders(
  * text — the caller has already buffered the body (the OAuth path is
  * incompatible with streaming uploads anyway).
  *
- * Returns the same input unchanged when no transform is needed.
+ * Returns the same input unchanged when `wireFormat` carries no body-level
+ * transform and the caller didn't ask for `forceStream` / `forceStore`.
  *
  * The `/llm/*` route does NOT share the MCP envelope cap enforced inside
  * `mcp.ts` (that one only governs `provider_call`'s base64-decoded body),
@@ -96,7 +85,7 @@ export function buildIdentityHeaders(
  * silent slow-downs.
  */
 export function transformBody(
-  providerId: string,
+  wireFormat: OAuthWireFormat | undefined,
   bodyText: string,
   options: { forceStream?: boolean; forceStore?: boolean } = {},
 ): string {
@@ -107,6 +96,12 @@ export function transformBody(
     throw new TransformBodyTooLargeError(byteLength, MAX_REQUEST_BODY_SIZE);
   }
 
+  const wantsBodyTransform =
+    !!wireFormat?.systemPrepend ||
+    options.forceStream !== undefined ||
+    options.forceStore !== undefined;
+  if (!wantsBodyTransform) return bodyText;
+
   let json: unknown;
   try {
     json = JSON.parse(bodyText);
@@ -116,102 +111,88 @@ export function transformBody(
   }
   if (!isPlainObject(json)) return bodyText;
 
-  switch (providerId) {
-    case "claude-code":
-      return JSON.stringify(applyClaudeIdentityPrepend(json));
-    case "codex":
-      return JSON.stringify(applyCodexCoercion(json, options));
-    default:
-      return bodyText;
+  if (wireFormat?.systemPrepend) {
+    applySystemPrepend(json, wireFormat.systemPrepend);
   }
+  if (options.forceStream !== undefined) json.stream = options.forceStream;
+  if (options.forceStore !== undefined) json.store = options.forceStore;
+
+  return JSON.stringify(json);
 }
 
-interface ClaudeTextBlock {
+interface SystemTextBlock {
   type: "text";
   text: string;
 }
 
-function applyClaudeIdentityPrepend(json: Record<string, unknown>): Record<string, unknown> {
-  const identityBlock: ClaudeTextBlock = { type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT };
+function applySystemPrepend(
+  json: Record<string, unknown>,
+  prepend: { type: "text"; text: string },
+): void {
+  const identityBlock: SystemTextBlock = { type: "text", text: prepend.text };
 
   const system = json.system;
   if (Array.isArray(system)) {
-    const first = system[0] as ClaudeTextBlock | undefined;
-    const alreadyPrepended = first?.type === "text" && first.text === CLAUDE_CODE_IDENTITY_PROMPT;
+    const first = system[0] as SystemTextBlock | undefined;
+    const alreadyPrepended = first?.type === "text" && first.text === prepend.text;
     json.system = alreadyPrepended ? system : [identityBlock, ...system];
   } else if (typeof system === "string") {
     json.system =
-      system === CLAUDE_CODE_IDENTITY_PROMPT
-        ? [identityBlock]
-        : [identityBlock, { type: "text", text: system }];
+      system === prepend.text ? [identityBlock] : [identityBlock, { type: "text", text: system }];
   } else {
     json.system = [identityBlock];
   }
-
-  return json;
-}
-
-function applyCodexCoercion(
-  json: Record<string, unknown>,
-  options: { forceStream?: boolean; forceStore?: boolean },
-): Record<string, unknown> {
-  if (options.forceStream !== undefined) json.stream = options.forceStream;
-  if (options.forceStore !== undefined) json.store = options.forceStore;
-  return json;
 }
 
 /**
- * Adaptive Anthropic beta exclusion (SPEC §5.6). When the provider
- * returns an "out of extra usage" / "long context beta not available"
- * 400, retry once with the `context-1m-2025-08-07` beta token stripped
- * from the `anthropic-beta` header.
+ * Adaptive header retry (SPEC §5.6). When the provider returns the
+ * configured `status` and the response body matches any of the policy's
+ * `bodyPatterns`, strip `removeToken` from the comma-separated header
+ * named `headerName` and let the caller replay the request once.
  *
  * Returns:
  *   - a {@link AdaptiveBetaResult} with the rewritten headers when an
  *     adaptive retry is warranted,
- *   - `null` when the response shouldn't trigger one (status mismatch,
- *     unknown body shape, header already free of the offending beta).
+ *   - `null` when the response shouldn't trigger one (no policy, status
+ *     mismatch, body pattern mismatch, header absent, or token not
+ *     present in the header value).
  *
  * Pure function — does not mutate inputs.
  */
-const LONG_CONTEXT_BETA = "context-1m-2025-08-07";
-const ADAPTIVE_BETA_PATTERNS = [/out of extra usage/i, /long context beta not available/i];
-
 export interface AdaptiveBetaResult {
   headers: Record<string, string>;
 }
 
-export function adaptBetaHeaderForRetry(
+export function adaptHeaderForRetry(
+  policy: OAuthAdaptiveRetryPolicy | undefined,
   status: number,
   responseBodyText: string,
   currentHeaders: Record<string, string>,
 ): AdaptiveBetaResult | null {
-  if (status !== 400) return null;
-  if (!ADAPTIVE_BETA_PATTERNS.some((re) => re.test(responseBodyText))) return null;
+  if (!policy) return null;
+  if (status !== policy.status) return null;
+  const matched = policy.bodyPatterns.some((p) => new RegExp(p, "i").test(responseBodyText));
+  if (!matched) return null;
 
-  const lowered: Record<string, string> = {};
-  for (const [k, v] of Object.entries(currentHeaders)) {
-    lowered[k.toLowerCase()] = v;
-  }
-  const beta = lowered["anthropic-beta"];
-  if (!beta) return null;
-
-  const tokens = beta
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!tokens.includes(LONG_CONTEXT_BETA)) return null;
-
-  const filtered = tokens.filter((t) => t !== LONG_CONTEXT_BETA);
-  const next: Record<string, string> = { ...currentHeaders };
-  // Find the original-cased key (case-insensitive lookup) and overwrite.
-  let originalKey = "anthropic-beta";
+  const targetKey = policy.headerName.toLowerCase();
+  let originalKey: string | null = null;
   for (const k of Object.keys(currentHeaders)) {
-    if (k.toLowerCase() === "anthropic-beta") {
+    if (k.toLowerCase() === targetKey) {
       originalKey = k;
       break;
     }
   }
+  if (!originalKey) return null;
+
+  const value = currentHeaders[originalKey] ?? "";
+  const tokens = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!tokens.includes(policy.removeToken)) return null;
+
+  const filtered = tokens.filter((t) => t !== policy.removeToken);
+  const next: Record<string, string> = { ...currentHeaders };
   if (filtered.length === 0) {
     delete next[originalKey];
   } else {

@@ -61,21 +61,80 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Used to look up the identity-header / body-transform strategy. Canonical providerId (e.g. "codex"). */
+  /** Canonical providerId (e.g. "codex") — used for logging only. The sidecar never branches on this value. */
   providerId: string;
-  /** Fallback URL rewrite — overridden per request by the token-endpoint response (e.g. Codex `/v1/responses` → `/codex/responses`). */
+  /** Path rewrite applied to every outbound URL (e.g. Codex `/v1/responses` → `/codex/responses`). */
   rewriteUrlPath?: { from: string; to: string };
-  /** Codex fallback: force `stream: true` in the request body. */
+  /** Force `stream: true` in JSON request bodies (Codex ChatGPT-account mode). */
   forceStream?: boolean;
-  /** Codex fallback: force `store: false` in the request body. */
+  /** Force `store: false` in JSON request bodies (Codex ChatGPT-account mode). */
   forceStore?: boolean;
+  /**
+   * Declarative wire-format contract contributed by the provider module
+   * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header
+   * injection, body transforms, and adaptive header retries without the
+   * sidecar needing to know any provider name. When absent, no identity
+   * headers or transforms apply.
+   */
+  wireFormat?: OAuthWireFormat;
+}
+
+/**
+ * Declarative wire-format quirks an OAuth model provider needs the sidecar
+ * to apply on its behalf. Lives in {@link LlmProxyOauthConfig} (carried at
+ * boot via env), so the sidecar runtime stays provider-agnostic — every
+ * `claude-code`-style switch branch in the sidecar reads from this struct.
+ *
+ * All fields optional. An empty `OAuthWireFormat` is equivalent to "pass
+ * the agent's request through with just the bearer attached."
+ */
+export interface OAuthWireFormat {
+  /**
+   * Static headers injected on every OAuth-authenticated upstream call.
+   * Lower-cased keys recommended; the sidecar forwards verbatim. Used for
+   * provider fingerprinting (e.g. Anthropic's `anthropic-dangerous-direct-
+   * browser-access`, Codex's `originator: pi`).
+   */
+  identityHeaders?: Record<string, string>;
+  /**
+   * Header name to echo the resolved `accountId` as (when the token endpoint
+   * surfaced one). Skipped when the cached token carries no `accountId`.
+   * Example: `chatgpt-account-id` for Codex.
+   */
+  accountIdHeader?: string;
+  /**
+   * Anthropic-style system-prompt prelude prepended to outbound JSON
+   * bodies. Applied only when the request body is a JSON object with a
+   * `system` field — otherwise pass-through.
+   */
+  systemPrepend?: { type: "text"; text: string };
+  /**
+   * Single adaptive retry policy: when an upstream returns `status` and
+   * the response body matches any of `bodyPatterns` (case-insensitive
+   * regex), strip `removeToken` from the comma-separated header named
+   * `headerName` and replay the request once. Used by Anthropic to fall
+   * back when the long-context beta isn't available on the account.
+   */
+  adaptiveRetry?: OAuthAdaptiveRetryPolicy;
+}
+
+/** See {@link OAuthWireFormat.adaptiveRetry}. */
+export interface OAuthAdaptiveRetryPolicy {
+  /** HTTP status code triggering the retry (typically 400). */
+  status: number;
+  /** Body-text patterns (case-insensitive regex strings). Any match triggers retry. */
+  bodyPatterns: readonly string[];
+  /** Header name to mutate (case-insensitive lookup). */
+  headerName: string;
+  /** Comma-separated token to remove from the header value before retry. */
+  removeToken: string;
 }
 
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
  * refresh — provider invariants (baseUrl, rewriteUrlPath, forceStream,
- * forceStore, providerId, apiShape) live in {@link LlmProxyOauthConfig},
+ * forceStore, providerId, wireFormat) live in {@link LlmProxyOauthConfig},
  * which the sidecar already received at boot.
  */
 export interface OAuthTokenResponse {
@@ -84,8 +143,8 @@ export interface OAuthTokenResponse {
   expiresAt: number | null;
   /**
    * Abstract account/tenant identifier surfaced by the provider's
-   * `extractTokenIdentity` hook. The sidecar's identity layer (per
-   * `providerId`) decides which routing header to echo it as.
+   * `extractTokenIdentity` hook. Echoed by the sidecar as the header
+   * named by {@link OAuthWireFormat.accountIdHeader} (when both are set).
    */
   accountId?: string;
 }
@@ -99,43 +158,3 @@ export interface OAuthTokenResponse {
  * when the token expires.
  */
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
-
-// Anthropic Consumer ToS (https://www.anthropic.com/legal/consumer-terms)
-// forbids using OAuth subscription tokens with any third-party product,
-// tool, or service — including the Agent SDK. The OSS default ships no
-// Anthropic OAuth provider; operators who reviewed the ToS posture and
-// want to wire their Claude Pro / Max / Team subscription enable the
-// opt-in `claude-code` module (apps/api/src/modules/claude-code/) by
-// appending it to `MODULES`. Operators who want plain API-key Anthropic
-// stay on the `anthropic` provider in `core-providers`.
-//
-// The two constants below are the sidecar's wire-format knowledge for
-// the `claude-code` providerId. They live in core (not the module) so
-// the sidecar build doesn't depend on the optional module — when the
-// module is not loaded no traffic carries `providerId="claude-code"`,
-// so the sidecar branch reading these constants is dead at runtime.
-
-/**
- * System-prompt prelude Anthropic's third-party-tier filter requires on
- * every OAuth-authenticated `/v1/messages` call. Reproduced verbatim from
- * `anthropic-ai/claude-code`'s `THIRD_PARTY_TIER_FILTER_PREFIX`; both the
- * platform's claude-code module and the sidecar runtime
- * (`runtime-pi/sidecar/oauth-identity.ts`) reference this constant —
- * paraphrasing it (even capitalisation) trips Anthropic's third-party
- * tier filter and silently 429s every request.
- */
-export const CLAUDE_CODE_IDENTITY_PROMPT =
-  "You are Claude Code, Anthropic's official CLI for Claude.";
-
-/**
- * Static identity headers Anthropic enforces on every OAuth-authenticated
- * `/v1/messages` call. Lives here so the sidecar runtime can inject them
- * without taking a dependency on the optional `claude-code` module.
- * `accept` and `content-type` are NOT in this set — each call site picks
- * the right pair (`application/json` non-stream, `text/event-stream`
- * streaming).
- */
-export const CLAUDE_CODE_IDENTITY_HEADERS = {
-  "anthropic-dangerous-direct-browser-access": "true",
-  "x-app": "cli",
-} as const;

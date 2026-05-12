@@ -13,7 +13,7 @@
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
-import type { ModelApiShape } from "./sidecar-types.ts";
+import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
 import type {
   Actor,
   ContainerOrchestrator,
@@ -506,10 +506,11 @@ export interface ModuleEvents {
 // and refresh worker.
 //
 // Behavior that varies per provider but stays declarative (apiShape,
-// forceStream, base URL, OAuth endpoints, model catalog) lives in the
-// definition itself. Behavior that requires arbitrary code (header
-// injection, JWT decoding, post-refresh enrichment) lives in `hooks`,
-// which the platform dispatches by `providerId` rather than by hook name.
+// forceStream, base URL, OAuth endpoints, model catalog, sidecar wire-
+// format quirks) lives in the definition itself. Behavior that requires
+// arbitrary code (JWT decoding, post-refresh enrichment, inference
+// probe construction) lives in `hooks`, which the platform dispatches
+// per provider definition rather than by hook name.
 // ---------------------------------------------------------------------------
 
 /** Capabilities surfaced for model selection UIs. */
@@ -746,6 +747,17 @@ export interface ModelProviderDefinition {
   authMode: "api_key" | "oauth2";
   /** Required iff `authMode === "oauth2"`. */
   oauth?: ModelProviderOAuthConfig;
+  /**
+   * Declarative wire-format quirks the sidecar must apply on this
+   * provider's behalf (static identity headers, accountId routing
+   * header, system-prompt prepend, adaptive header retries).
+   *
+   * Only meaningful for OAuth providers. The platform forwards this
+   * struct verbatim into the sidecar's `LlmProxyOauthConfig.wireFormat`
+   * at boot, so the sidecar runtime never branches on `providerId` —
+   * adding a new OAuth provider is a pure declarative change.
+   */
+  oauthWireFormat?: OAuthWireFormat;
 
   // — Catalog —
   /** Selectable models. May be empty for providers whose model list is user-supplied. */

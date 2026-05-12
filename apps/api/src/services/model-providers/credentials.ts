@@ -25,7 +25,7 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider, listModelProviders } from "./registry.ts";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, OAuthWireFormat } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -78,8 +78,10 @@ export interface DecryptedModelProviderCredentials {
   forceStream?: boolean;
   forceStore?: false;
   rewriteUrlPath?: { from: string; to: string };
-  /** Codex only. */
+  /** OAuth only — abstract account/tenant identifier (echoed by the sidecar as `wireFormat.accountIdHeader`). */
   accountId?: string;
+  /** OAuth only — declarative wire-format quirks from the provider definition. */
+  wireFormat?: OAuthWireFormat;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
   /** OAuth only — epoch ms. Refresh worker uses this to schedule renewals. */
@@ -402,6 +404,7 @@ async function loadDbCredential(
     ...common,
     apiKey: blob.accessToken,
     accountId: blob.accountId,
+    ...(cfg.oauthWireFormat ? { wireFormat: cfg.oauthWireFormat } : {}),
     needsReconnection: blob.needsReconnection,
     expiresAt: blob.expiresAt,
   };

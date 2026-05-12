@@ -29,6 +29,7 @@ import {
   useUpdateModelProviderCredential,
   useDeleteModelProviderCredential,
   useTestModelProviderCredential,
+  useProvidersRegistry,
   deduplicateLabel,
 } from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
@@ -250,6 +251,12 @@ function ProviderKeysSection({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  // Surface only OAuth providers the platform actually loaded — the
+  // contract is module-driven (modules inject providers, not the other
+  // way around). Removing a module from `MODULES` hides its entry from
+  // this dropdown with zero UI footprint.
+  const registryQuery = useProvidersRegistry();
+  const oauthProviders = registryQuery.data?.filter((p) => p.authMode === "oauth2") ?? [];
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -265,9 +272,11 @@ function ProviderKeysSection({
         <DropdownMenuItem onSelect={onCreate}>
           <KeyRound className="size-4" /> {t("providerKeys.add")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onConnectOAuth("codex")}>
-          {t("providerKeys.oauth.connectCodex")}
-        </DropdownMenuItem>
+        {oauthProviders.map((p) => (
+          <DropdownMenuItem key={p.providerId} onSelect={() => onConnectOAuth(p.providerId)}>
+            {t("providerKeys.oauth.connect", { provider: p.displayName })}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

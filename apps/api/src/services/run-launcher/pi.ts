@@ -119,6 +119,7 @@ export async function runPlatformContainer(
         ...(llmConfig.rewriteUrlPath ? { rewriteUrlPath: llmConfig.rewriteUrlPath } : {}),
         ...(llmConfig.forceStream !== undefined ? { forceStream: llmConfig.forceStream } : {}),
         ...(llmConfig.forceStore !== undefined ? { forceStore: llmConfig.forceStore } : {}),
+        ...(llmConfig.wireFormat ? { wireFormat: llmConfig.wireFormat } : {}),
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {

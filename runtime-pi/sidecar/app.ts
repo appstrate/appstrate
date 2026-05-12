@@ -23,7 +23,7 @@ import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oau
 import {
   buildIdentityHeaders,
   transformBody,
-  adaptBetaHeaderForRetry,
+  adaptHeaderForRetry,
   TransformBodyTooLargeError,
 } from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
@@ -382,7 +382,7 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    const identityHeaders = buildIdentityHeaders(llmConfig.providerId, token);
+    const identityHeaders = buildIdentityHeaders(llmConfig.wireFormat, token);
     let forwardedHeaders: Record<string, string> = {
       ...baseHeaders,
       ...identityHeaders,
@@ -394,7 +394,7 @@ export function createApp(deps: AppDeps): Hono {
       bodyText = await c.req.raw.text();
       if (bodyText) {
         try {
-          bodyText = transformBody(llmConfig.providerId, bodyText, {
+          bodyText = transformBody(llmConfig.wireFormat, bodyText, {
             forceStream: llmConfig.forceStream,
             forceStore: llmConfig.forceStore,
           });
@@ -462,7 +462,7 @@ export function createApp(deps: AppDeps): Hono {
       }
       forwardedHeaders = {
         ...forwardedHeaders,
-        ...buildIdentityHeaders(llmConfig.providerId, refreshed),
+        ...buildIdentityHeaders(llmConfig.wireFormat, refreshed),
         authorization: `Bearer ${refreshed.accessToken}`,
       };
       try {
@@ -474,11 +474,13 @@ export function createApp(deps: AppDeps): Hono {
       // No second-level retry on the retry — propagate whatever we got.
     }
 
-    // Adaptive Anthropic beta exclusion: best-effort retry once after
-    // stripping `context-1m-2025-08-07` from `anthropic-beta`.
-    if (upstream.status === 400 && llmConfig.providerId === "claude-code") {
+    // Adaptive header retry: provider declares the policy (status +
+    // body pattern → header-token strip) via `wireFormat.adaptiveRetry`.
+    // Best-effort, replays the request once.
+    const adaptivePolicy = llmConfig.wireFormat?.adaptiveRetry;
+    if (adaptivePolicy && upstream.status === adaptivePolicy.status) {
       const text = await upstream.clone().text();
-      const adapted = adaptBetaHeaderForRetry(upstream.status, text, forwardedHeaders);
+      const adapted = adaptHeaderForRetry(adaptivePolicy, upstream.status, text, forwardedHeaders);
       if (adapted) {
         try {
           upstream = await doFetch(adapted.headers, bodyText);

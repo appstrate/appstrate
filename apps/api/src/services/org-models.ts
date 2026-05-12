@@ -7,6 +7,7 @@ import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-re
 import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import type { OAuthWireFormat } from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -242,6 +243,8 @@ export interface ResolvedModel {
   rewriteUrlPath?: { from: string; to: string };
   forceStream?: boolean;
   forceStore?: false;
+  /** OAuth registry overlay — declarative wire-format quirks forwarded to the sidecar. */
+  wireFormat?: OAuthWireFormat;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -308,6 +311,7 @@ export async function resolveModel(
         rewriteUrlPath: creds.rewriteUrlPath,
         forceStream: creds.forceStream,
         forceStore: creds.forceStore,
+        wireFormat: creds.wireFormat,
       };
     }
   }
@@ -374,6 +378,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     rewriteUrlPath: creds.rewriteUrlPath,
     forceStream: creds.forceStream,
     forceStore: creds.forceStore,
+    wireFormat: creds.wireFormat,
   };
 }
 
