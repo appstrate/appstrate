@@ -25,7 +25,7 @@ import { randomBytes } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderPairings } from "@appstrate/db/schema";
-import { encodePairingToken, hashPairingSecret } from "@appstrate/connect-helper/pairing-token";
+import { encodePairingToken, hashPairingSecret } from "@appstrate/core/pairing-token";
 import { gone } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 

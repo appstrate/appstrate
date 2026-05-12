@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/connect-helper",
   "version": "0.1.0",
-  "description": "One-shot OAuth helper for Appstrate model-provider subscriptions (ChatGPT Codex, Claude Pro/Max). Run via `npx @appstrate/connect-helper <token>`.",
+  "description": "One-shot OAuth helper for Appstrate model-provider subscriptions. Run via `npx @appstrate/connect-helper <token>`.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -25,19 +25,13 @@
   "keywords": [
     "appstrate",
     "oauth",
-    "codex",
-    "claude",
     "pairing"
   ],
   "bin": {
     "appstrate-connect": "./dist/cli.js"
   },
-  "exports": {
-    "./pairing-token": "./src/pairing-token.ts"
-  },
   "files": [
     "dist",
-    "src",
     "README.md",
     "LICENSE"
   ],
@@ -48,6 +42,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@appstrate/core": "^2.19.0",
     "@mariozechner/pi-ai": "^0.70.6",
     "open": "^11.0.0"
   },

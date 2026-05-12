@@ -1,12 +1,16 @@
 # @appstrate/connect-helper
 
-One-shot OAuth helper for connecting personal ChatGPT (Codex) and Claude (Pro / Max) subscriptions to an [Appstrate](https://github.com/appstrate/appstrate) organization.
+One-shot OAuth helper for connecting personal OAuth model-provider subscriptions to an [Appstrate](https://github.com/appstrate/appstrate) organization.
 
 ## Why this exists
 
-The official ChatGPT and Claude Code CLIs use OAuth client_ids that only allowlist `http://localhost:PORT/...` redirect URIs. The Appstrate dashboard cannot host the OAuth callback itself — the providers' authorization servers reject any redirect that isn't loopback. This helper bridges that gap: it runs on the user's machine, binds the loopback port the providers expect, completes the OAuth dance, and ships the resulting credentials back to the Appstrate platform.
+Subscription-based OAuth providers (ChatGPT Codex, Claude Code, …) ship official CLIs with OAuth `client_id`s that only allowlist `http://localhost:PORT/...` redirect URIs. The Appstrate dashboard cannot host the OAuth callback itself — the providers' authorization servers reject any redirect that isn't loopback. This helper bridges that gap: it runs on the user's machine, binds the loopback port the provider expects, completes the OAuth dance, and ships the resulting credentials back to the Appstrate platform.
 
-The dashboard is the entry point — the user clicks "Connect Claude Pro", the platform mints a short-lived pairing token, and the user copy-pastes a one-line `npx` command.
+The dashboard is the entry point — the user clicks "Connect <provider>", the platform mints a short-lived pairing token, and the user copy-pastes a one-line `npx` command.
+
+## Supported providers
+
+Providers are registered data-driven in `src/loopback-oauth.ts#PROVIDERS`. Adding one is a single entry — `{ login, displayName, defaultLabel }` — and requires no other change in the helper. The platform side ships each provider as an opt-in module (see the main repo's `MODULES` env var).
 
 ## Usage
 

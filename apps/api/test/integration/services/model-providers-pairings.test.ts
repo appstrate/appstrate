@@ -19,7 +19,7 @@ import {
   createPairing,
   getPairing,
 } from "../../../src/services/model-providers/pairings.ts";
-import { hashPairingSecret } from "@appstrate/connect-helper/pairing-token";
+import { hashPairingSecret } from "@appstrate/core/pairing-token";
 import { modelProviderPairings } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../../../src/lib/errors.ts";

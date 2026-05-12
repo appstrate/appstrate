@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { encodePairingToken, decodePairingToken, hashPairingSecret } from "../src/pairing-token.ts";
+import {
+  encodePairingToken,
+  decodePairingToken,
+  hashPairingSecret,
+} from "@appstrate/core/pairing-token";
 
 const VALID_SECRET = "abcd_efgh-IJKL_mnop-qrstuvwxyz0123456789ABCD";
 

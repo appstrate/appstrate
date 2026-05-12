@@ -1,33 +1,61 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Wrapper around `@mariozechner/pi-ai`'s loopback PKCE flow for the OAuth
- * model providers Appstrate supports today. Currently only OpenAI Codex
- * ships in OSS; additional OAuth providers can be added by extending the
- * slug map below (operator-installed modules can extend it at runtime).
+ * Data-driven wrapper around `@mariozechner/pi-ai`'s loopback PKCE flow.
  *
- * Internal-only — driven by the helper binary (`apps/connect-helper/src/cli.ts`)
- * after it decodes a pairing token from the dashboard. The `codex` slug is
- * a pi-ai surface concern (which loopback to invoke); the dashboard /
- * platform speak only in canonical `providerId` values.
+ * Each entry in {@link PROVIDERS} binds a canonical platform `providerId`
+ * to the pi-ai login function that runs the loopback dance, plus the
+ * display strings the CLI surfaces to the user. New OAuth providers are
+ * added by appending an entry — there is no provider-specific branching
+ * anywhere else in this file or in the CLI.
+ *
+ * Internal-only — driven by `apps/connect-helper/src/cli.ts` after it
+ * decodes a pairing token from the dashboard. The dashboard and platform
+ * speak only in canonical `providerId` values; pi-ai's per-provider login
+ * function is an implementation detail isolated to this registry.
  */
 
 import { loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
 
-/** Provider slugs accepted by pi-ai's loopback helpers. */
-export type ConnectProviderSlug = "codex";
+/** Pi-AI callback signature shared by every loopback login function. */
+type PiCallbacks = {
+  onAuth: (info: { url: string; instructions?: string }) => void;
+  onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
+  onProgress: (message: string) => void;
+};
 
-/** Map the platform's canonical `providerId` to the slug pi-ai expects. */
-export const PROVIDER_ID_TO_SLUG: Readonly<Record<string, ConnectProviderSlug>> = Object.freeze({
-  codex: "codex",
-});
+/**
+ * Pi-AI's `OAuthCredentials` shape. Defensively typed as a permissive
+ * record because pi-ai surfaces `[key: string]: unknown` extras — narrowed
+ * below in {@link normalisePiCreds}.
+ */
+type PiOAuthCredentials = {
+  access: string;
+  refresh: string;
+  expires?: number;
+} & Record<string, unknown>;
 
-export const DISPLAY_NAME: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "ChatGPT (Codex / Plus / Pro / Business)",
-});
+type PiLoginFn = (callbacks: PiCallbacks) => Promise<PiOAuthCredentials>;
 
-export const DEFAULT_LABEL: Readonly<Record<ConnectProviderSlug, string>> = Object.freeze({
-  codex: "ChatGPT",
+interface ProviderLoopback {
+  /** Pi-AI login function that runs the loopback dance for this provider. */
+  login: PiLoginFn;
+  /** Long-form name surfaced in the helper banner. */
+  displayName: string;
+  /** Default credential label used when the user does not pass `--label`. */
+  defaultLabel: string;
+}
+
+/**
+ * Registry of supported OAuth providers. The platform's canonical
+ * `providerId` is the key; adding a new provider means adding one entry.
+ */
+export const PROVIDERS: Readonly<Record<string, ProviderLoopback>> = Object.freeze({
+  codex: {
+    login: loginOpenAICodex,
+    displayName: "ChatGPT (Codex / Plus / Pro / Business)",
+    defaultLabel: "ChatGPT",
+  },
 });
 
 /** Normalised credential shape returned by the loopback flow. */
@@ -37,13 +65,13 @@ export interface NormalisedOAuthCredentials {
   /** Epoch milliseconds. `0` means the upstream did not surface an expiry. */
   expiresAt: number;
   email?: string;
-  /** Codex only — extracted from JWT by pi-ai. */
+  /** Pi-AI surfaces this for some providers (Codex JWT, etc.) when present. */
   accountId?: string;
 }
 
 /**
  * UI hooks injected by the caller. Both the CLI and the helper supply a
- * {@link spinner}-flavoured implementation; tests inject silent stubs.
+ * spinner-flavoured implementation; tests inject silent stubs.
  */
 export interface LoopbackCallbacks {
   /** Display the authorize URL the user should visit. */
@@ -55,39 +83,57 @@ export interface LoopbackCallbacks {
 }
 
 /**
- * Run the loopback PKCE flow for the chosen provider via Pi's helpers.
- * Pi spins up an HTTP listener on the provider-specific loopback port
- * (`127.0.0.1:1455` for Codex), exchanges the authorization code, and
- * returns Pi's `OAuthCredentials` shape. This function normalises that
- * shape into {@link NormalisedOAuthCredentials}.
+ * Resolve a registered provider by canonical id, or `undefined` when the
+ * helper does not support it (typically because a private platform module
+ * registered a providerId that the OSS helper does not know about).
+ */
+export function getProvider(providerId: string): ProviderLoopback | undefined {
+  return PROVIDERS[providerId];
+}
+
+/**
+ * Run the loopback PKCE flow for the chosen provider. Pi spins up an
+ * HTTP listener on the provider-specific loopback port, exchanges the
+ * authorization code, and returns Pi's `OAuthCredentials` shape — this
+ * function normalises it into {@link NormalisedOAuthCredentials}.
+ *
+ * Throws if `providerId` is not registered; callers should first check
+ * with {@link getProvider} and surface a friendly error.
  */
 export async function runLoopbackOAuth(
-  _slug: ConnectProviderSlug,
+  providerId: string,
   callbacks: LoopbackCallbacks = {},
 ): Promise<NormalisedOAuthCredentials> {
-  const piCallbacks = {
-    onAuth: (info: { url: string; instructions?: string }) => callbacks.onAuth?.(info),
-    onPrompt: async (prompt: { message: string; placeholder?: string }) =>
+  const provider = PROVIDERS[providerId];
+  if (!provider) {
+    throw new Error(`Unsupported providerId: ${providerId}`);
+  }
+
+  const piCallbacks: PiCallbacks = {
+    onAuth: (info) => callbacks.onAuth?.(info),
+    onPrompt: async (prompt) =>
       callbacks.onPrompt
         ? callbacks.onPrompt(prompt)
         : Promise.reject(new Error("Manual code paste-back required but no onPrompt handler")),
-    onProgress: (message: string) => callbacks.onProgress?.(message),
+    onProgress: (message) => callbacks.onProgress?.(message),
   };
 
-  const creds = await loginOpenAICodex(piCallbacks);
+  const creds = await provider.login(piCallbacks);
+  return normalisePiCreds(creds);
+}
 
-  // pi-ai's `OAuthCredentials` shape: `{ access, refresh, expires (ms epoch), [extras] }`.
-  // Surrounding code defensively narrows extras because pi-ai types extras as `[key: string]: unknown`
-  // — a future rename of `accountId` would silently drop the field otherwise.
-  const extras = creds as Record<string, unknown>;
-
-  const account = extras.account as Record<string, unknown> | undefined;
+/**
+ * Narrow pi-ai's `[key: string]: unknown` extras into our normalised shape.
+ * A future pi-ai rename of `accountId` / `email` / `account.email_address`
+ * would silently drop the field if we did naive casts — the defensive
+ * `typeof` checks turn that into a `undefined` we can detect.
+ */
+function normalisePiCreds(creds: PiOAuthCredentials): NormalisedOAuthCredentials {
+  const account = creds.account as Record<string, unknown> | undefined;
   const accountEmail =
-    account && typeof account.email_address === "string"
-      ? (account.email_address as string)
-      : undefined;
-  const directEmail = typeof extras.email === "string" ? (extras.email as string) : undefined;
-  const accountId = typeof extras.accountId === "string" ? (extras.accountId as string) : undefined;
+    account && typeof account.email_address === "string" ? account.email_address : undefined;
+  const directEmail = typeof creds.email === "string" ? creds.email : undefined;
+  const accountId = typeof creds.accountId === "string" ? creds.accountId : undefined;
 
   const normalised: NormalisedOAuthCredentials = {
     accessToken: creds.access,
