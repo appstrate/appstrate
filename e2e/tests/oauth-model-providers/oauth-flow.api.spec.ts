@@ -6,7 +6,17 @@
  * Covers the public endpoints exposed by
  * `apps/api/src/routes/model-providers-oauth.ts`:
  *
- *   - `POST /api/model-providers-oauth/import` validates the body shape.
+ *   - `POST /api/model-providers-oauth/import` is bearer-pairing-only —
+ *     any request that arrives with cookie auth (no `Bearer appp_…`)
+ *     short-circuits at the route's first check and returns 401 BEFORE
+ *     body validation runs. This is the contract integration tests in
+ *     `apps/api/test/integration/routes/model-providers-oauth-import-pairing-bearer.test.ts`
+ *     pin in-process; the e2e equivalent walks the live HTTP pipeline
+ *     to prove the auth gate survives all the way out of the handler.
+ *     Body-shape validation (unknown providerId, empty label, missing
+ *     accessToken) is covered by Zod and integration tests inside the
+ *     bearer-authenticated path — adding cookie-auth body-validation
+ *     coverage would assert behavior that cannot happen in production.
  *   - The internal `/internal/oauth-token/:id` endpoint is not reachable
  *     without the run token (sanity check on auth gating).
  *   - Listing model provider credentials returns the OAuth-extended shape
@@ -26,33 +36,39 @@ import { test, expect } from "../../fixtures/api.fixture.ts";
 const SYNTHETIC_UNKNOWN_PROVIDER = "@example/not-a-real-provider";
 
 test.describe("OAuth Model Providers — API smoke", () => {
-  test("import rejects an unknown providerId @smoke", async ({ apiClient }) => {
+  test("import rejects cookie-auth requests (bearer-only) — providerId variant @smoke", async ({
+    apiClient,
+  }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
       providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "Should fail",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(401);
   });
 
-  test("import rejects an empty label @smoke", async ({ apiClient }) => {
+  test("import rejects cookie-auth requests (bearer-only) — empty label variant @smoke", async ({
+    apiClient,
+  }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
       providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "",
       accessToken: "fake-access",
       refreshToken: "fake-refresh",
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(401);
   });
 
-  test("import rejects missing accessToken @smoke", async ({ apiClient }) => {
+  test("import rejects cookie-auth requests (bearer-only) — missing accessToken variant @smoke", async ({
+    apiClient,
+  }) => {
     const res = await apiClient.post("/model-providers-oauth/import", {
       providerId: SYNTHETIC_UNKNOWN_PROVIDER,
       label: "Pro",
       refreshToken: "fake-refresh",
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(401);
   });
 
   test("internal OAuth token endpoint requires a run token (no anonymous read) @smoke", async ({

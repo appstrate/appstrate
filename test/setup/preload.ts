@@ -59,7 +59,7 @@ process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789a
 ); // 32 bytes
 process.env.S3_BUCKET = "test-bucket";
 process.env.S3_REGION = "us-east-1";
-process.env.S3_ENDPOINT = "http://localhost:9002";
+process.env.S3_ENDPOINT = "http://localhost:9012";
 process.env.AWS_ACCESS_KEY_ID = "minioadmin";
 process.env.AWS_SECRET_ACCESS_KEY = "minioadmin";
 process.env.APP_URL = "http://localhost:3000";

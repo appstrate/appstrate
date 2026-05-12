@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
   getModelProvider,
@@ -10,6 +10,7 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
+import { seedTestModelProviders } from "../helpers/app.ts";
 
 function fakeDef(
   id: string,
@@ -31,6 +32,13 @@ function fakeDef(
 describe("model-providers runtime registry", () => {
   beforeEach(() => {
     resetModelProviders();
+  });
+  afterAll(() => {
+    // Restore the canonical test baseline so subsequent files in the
+    // same `bun test` process see a fully-seeded registry — this test
+    // exercises the registry in isolation by emptying it, which would
+    // otherwise poison cross-file isolation.
+    seedTestModelProviders();
   });
 
   describe("registerModelProvider", () => {

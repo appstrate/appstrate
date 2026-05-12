@@ -10,7 +10,7 @@
  * specifics are covered in each module's own unit suite.
  */
 
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import {
   getModelProvider as getModelProviderConfig,
   isOAuthModelProvider,
@@ -19,10 +19,18 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
+import { seedTestModelProviders } from "../../helpers/app.ts";
 
 beforeAll(() => {
   resetModelProviders();
   registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
+});
+afterAll(() => {
+  // Restore the canonical test baseline so subsequent files in the same
+  // `bun test` process see a fully-seeded registry — this file scopes the
+  // registry to core-providers only, which would otherwise poison
+  // anything that depends on `test-oauth` / `test-oauth-hooks`.
+  seedTestModelProviders();
 });
 
 const CORE_PROVIDER_IDS = [

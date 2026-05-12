@@ -17,10 +17,8 @@ import {
   _deriveKeyPlaceholderForTesting as deriveKeyPlaceholder,
   _deriveOauthPlaceholderForTesting as deriveOauthPlaceholder,
 } from "../../src/services/run-launcher/pi.ts";
-import {
-  registerModelProviders,
-  resetModelProviders,
-} from "../../src/services/model-providers/registry.ts";
+import { registerModelProviders } from "../../src/services/model-providers/registry.ts";
+import { seedTestModelProviders } from "../helpers/app.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 
 const SYNTH_PROVIDER_ID = "test-placeholder-oauth";
@@ -61,7 +59,11 @@ describe("deriveOauthPlaceholder", () => {
     registerModelProviders([synthProvider]);
   });
   afterAll(() => {
-    resetModelProviders();
+    // Restore the canonical test baseline so subsequent files in the
+    // same `bun test` process see a fully-seeded registry — otherwise the
+    // synthetic provider we added (and the empty-on-clear path that some
+    // tests in this file may follow) would poison cross-file isolation.
+    seedTestModelProviders();
   });
 
   describe("provider with buildApiKeyPlaceholder hook", () => {

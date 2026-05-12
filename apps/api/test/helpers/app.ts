@@ -101,31 +101,35 @@ initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in 
 initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
-// Seed the runtime model-provider registry. Tests bypass boot.ts so the
-// usual aggregation (module contributions) has to happen here.
-//
-// Reset upfront because the preload may have already populated the
-// registry for other test files in the same process — we want a fresh
-// seed every time the app helper is loaded so test order doesn't matter.
-//
-// Two layers, in this order:
-//   1. Synthetic `test-oauth` provider — core integration tests for the
-//      OAuth flow (pairing, import, refresh, token resolver) seed against
-//      THIS provider, not any module's. The zero-footprint invariant
-//      requires that removing a module never breaks core tests.
-//   2. Every discovered module's `modelProviders()` contribution —
-//      modules can layer their own definitions on top. Module-specific
-//      integration tests live in `<module>/test/integration/`.
-resetModelProviders();
-_resetTestOAuthProviderRegistration();
-registerTestOAuthProvider();
-registerTestOAuthHooksProvider();
-{
+/**
+ * Reset + re-seed the runtime model-provider registry to the canonical
+ * test baseline (test-oauth + test-oauth-hooks + every discovered
+ * module's contribution). Tests bypass boot.ts so the usual aggregation
+ * has to happen here. Idempotent — safe to call from `afterEach` to
+ * cleanse pollution from unit tests that legitimately empty the registry
+ * to test it in isolation.
+ *
+ * Two layers, in this order:
+ *   1. Synthetic `test-oauth` provider — core integration tests for the
+ *      OAuth flow (pairing, import, refresh, token resolver) seed against
+ *      THIS provider, not any module's. The zero-footprint invariant
+ *      requires that removing a module never breaks core tests.
+ *   2. Every discovered module's `modelProviders()` contribution —
+ *      modules can layer their own definitions on top. Module-specific
+ *      integration tests live in `<module>/test/integration/`.
+ */
+export function seedTestModelProviders(): void {
+  resetModelProviders();
+  _resetTestOAuthProviderRegistration();
+  registerTestOAuthProvider();
+  registerTestOAuthHooksProvider();
   const moduleContributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
     .flat();
   registerModelProviders(moduleContributions);
 }
+
+seedTestModelProviders();
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**

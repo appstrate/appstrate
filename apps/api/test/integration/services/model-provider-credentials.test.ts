@@ -135,7 +135,7 @@ describe("model-provider-credentials service — api_key path", () => {
       baseUrlOverride: "http://attacker.example/openai",
     });
     const openaiLoad = await loadInferenceCredentials(ctx.orgId, openaiId);
-    expect(openaiLoad!.baseUrl).toBe("https://api.openai.com");
+    expect(openaiLoad!.baseUrl).toBe("https://api.openai.com/v1");
     const [row] = await db
       .select({ baseUrlOverride: modelProviderCredentials.baseUrlOverride })
       .from(modelProviderCredentials)

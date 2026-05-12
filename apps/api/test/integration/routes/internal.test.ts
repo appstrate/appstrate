@@ -901,9 +901,12 @@ describe("Internal API", () => {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { accessToken: string; providerId: string };
+      // The response wire shape (OAuthTokenResponse) deliberately omits
+      // provider invariants (providerId, baseUrl, wireFormat) — those live
+      // in the LlmProxyOauthConfig delivered to the sidecar at /configure
+      // and never change per refresh. See packages/core/src/sidecar-types.ts.
+      const body = (await res.json()) as { accessToken: string };
       expect(body.accessToken).toBe("test-access-token");
-      expect(body.providerId).toBe("test-oauth");
     });
 
     it("rejects api_key credentials (only OAuth rows are valid here)", async () => {
