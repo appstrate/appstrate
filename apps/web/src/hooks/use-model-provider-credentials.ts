@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelCost, ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 
 export function useModelProviderCredentials() {
   const orgId = useCurrentOrgId();
@@ -20,14 +20,6 @@ export function useModelProviderCredentials() {
  * picker so OAuth providers and any future entries don't need to be
  * re-declared client-side.
  */
-/** Per-1M-token cost (USD). Mirrors the server's `ModelProviderModelCost`. */
-export interface ProviderRegistryModelCost {
-  input: number;
-  output: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-}
-
 export interface ProviderRegistryEntry {
   providerId: string;
   displayName: string;
@@ -46,7 +38,7 @@ export interface ProviderRegistryEntry {
     maxTokens: number | null;
     capabilities: readonly string[];
     /** Per-1M-token pricing; null when the provider doesn't publish it. */
-    cost: ProviderRegistryModelCost | null;
+    cost: ModelCost | null;
     /**
      * Curated default for first-connection auto-seed (onboarding
      * quick-connect). When at least one model carries the flag, the seeder

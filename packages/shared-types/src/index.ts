@@ -336,14 +336,22 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
 
 // --- Model Cost Types ---
 
-/** Per-model pricing in $/M tokens (margin included). */
+/**
+ * Per-1M-token pricing. Canonical shape is {@link ModelProviderModelCost}
+ * in `@appstrate/core/module`; this re-export keeps the storage-layer
+ * vocabulary (`ModelCost` on `OrgModel`, `RunMessage`, etc.) aligned with
+ * the registry vocabulary. `cacheRead` / `cacheWrite` are optional —
+ * providers without prompt caching simply omit them.
+ */
+import type { ModelProviderModelCost } from "@appstrate/core/module";
+export type ModelCost = ModelProviderModelCost;
+
 export const modelCostSchema = z.object({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative(),
-  cacheWrite: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheWrite: z.number().nonnegative().optional(),
 });
-export type ModelCost = z.infer<typeof modelCostSchema>;
 
 /**
  * Token usage as reported by an LLM provider for a single completion call.

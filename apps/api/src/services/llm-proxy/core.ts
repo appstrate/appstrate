@@ -336,7 +336,7 @@ function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
   const perMillion = 1_000_000;
   const inputCost = (usage.inputTokens * cost.input) / perMillion;
   const outputCost = (usage.outputTokens * cost.output) / perMillion;
-  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * cost.cacheRead) / perMillion;
-  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * cost.cacheWrite) / perMillion;
+  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * (cost.cacheRead ?? 0)) / perMillion;
+  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * (cost.cacheWrite ?? 0)) / perMillion;
   return inputCost + outputCost + cacheReadCost + cacheWriteCost;
 }
