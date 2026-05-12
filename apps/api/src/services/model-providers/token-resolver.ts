@@ -15,19 +15,15 @@
  * cache provides the primary deduplication).
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
-  decryptCredentials,
   parseTokenResponse,
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
 } from "@appstrate/connect";
 import type { ModelProviderDefinition as ModelProviderConfig } from "@appstrate/core/module";
-import { getModelProvider as getModelProviderConfig } from "./registry.ts";
 import {
+  loadCredentialRow,
   markCredentialNeedsReconnection,
   updateOAuthCredentialTokens,
   type OAuthBlob,
@@ -79,54 +75,28 @@ async function loadCredentialState(
   credentialId: string,
   expectedOrgId?: string,
 ): Promise<CredentialState> {
-  const [row] = await db
-    .select({
-      id: modelProviderCredentials.id,
-      orgId: modelProviderCredentials.orgId,
-      providerId: modelProviderCredentials.providerId,
-      credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
-    })
-    .from(modelProviderCredentials)
-    .where(eq(modelProviderCredentials.id, credentialId))
-    .limit(1);
-  if (!row) {
+  // Defense-in-depth: `loadCredentialRow` enforces `expectedOrgId` when
+  // provided. Even if the route's `assertOAuthModelCredential` gate is
+  // ever bypassed by a refactor, the data layer refuses to surface a
+  // credential outside the caller's org.
+  const loaded = await loadCredentialRow(credentialId, expectedOrgId);
+  if (!loaded) {
     throw notFound(`OAuth model provider credential not found: ${credentialId}`);
   }
-  // Defense-in-depth: even if the route's `assertOAuthModelCredential`
-  // gate is ever bypassed by a refactor, the data layer refuses to surface
-  // a credential outside the caller's org. Internally this branch is dead
-  // when callers pass `expectedOrgId` correctly — its job is to make
-  // accidental cross-org access fail loudly during refactors instead of
-  // silently leaking a token.
-  if (expectedOrgId !== undefined && row.orgId !== expectedOrgId) {
-    throw notFound(`OAuth model provider credential not found: ${credentialId}`);
-  }
-
-  const config = getModelProviderConfig(row.providerId);
-  if (!config || config.authMode !== "oauth2") {
+  if (!loaded.config || loaded.config.authMode !== "oauth2") {
     throw notFound(
-      `Credential ${credentialId} references provider ${row.providerId} which is not OAuth-enabled`,
+      `Credential ${credentialId} references provider ${loaded.providerId} which is not OAuth-enabled`,
     );
   }
-
-  let blob: OAuthBlob;
-  try {
-    const decrypted = decryptCredentials<OAuthBlob>(row.credentialsEncrypted);
-    if (decrypted.kind !== "oauth") {
-      throw notFound(`Credential ${credentialId} stores api_key data, not OAuth tokens`);
-    }
-    blob = decrypted;
-  } catch (err) {
-    throw notFound(
-      `Credential ${credentialId} ciphertext failed to decrypt: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  if (loaded.blob.kind !== "oauth") {
+    throw notFound(`Credential ${credentialId} stores api_key data, not OAuth tokens`);
   }
 
   return {
-    credentialId: row.id,
-    orgId: row.orgId,
-    blob,
-    config: config as ModelProviderConfig & { authMode: "oauth2" },
+    credentialId: loaded.id,
+    orgId: loaded.orgId,
+    blob: loaded.blob,
+    config: loaded.config as ModelProviderConfig & { authMode: "oauth2" },
   };
 }
 

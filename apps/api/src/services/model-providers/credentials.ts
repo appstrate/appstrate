@@ -102,6 +102,62 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
   }
 }
 
+/**
+ * Shared "raw load" used by both `loadDbCredential` (inference read path)
+ * and the OAuth token resolver. Returns the decrypted blob + the registry
+ * overlay + the row id/orgId, or `null` when the row is missing, the
+ * provider is unknown, or decryption fails. Caller maps `null` to its
+ * preferred error mode (notFound() vs silent fallback).
+ *
+ * `expectedOrgId` is enforced when provided — used as defense-in-depth by
+ * the sidecar token-resolver path (run pinned to a specific org).
+ */
+export interface RawCredentialLoad {
+  id: string;
+  orgId: string;
+  providerId: string;
+  baseUrlOverride: string | null;
+  blob: CredentialsBlob;
+  config: ReturnType<typeof getModelProvider>;
+}
+
+export async function loadCredentialRow(
+  id: string,
+  expectedOrgId?: string,
+): Promise<RawCredentialLoad | null> {
+  const [row] = await db
+    .select({
+      id: modelProviderCredentials.id,
+      orgId: modelProviderCredentials.orgId,
+      providerId: modelProviderCredentials.providerId,
+      baseUrlOverride: modelProviderCredentials.baseUrlOverride,
+      credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
+    })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, id))
+    .limit(1);
+  if (!row) return null;
+  if (expectedOrgId !== undefined && row.orgId !== expectedOrgId) return null;
+  const config = getModelProvider(row.providerId);
+  if (!config) {
+    logger.warn("model-provider-credentials: unknown providerId in DB row", {
+      credentialId: id,
+      providerId: row.providerId,
+    });
+    return null;
+  }
+  const blob = decryptBlob(row.credentialsEncrypted);
+  if (!blob) return null;
+  return {
+    id: row.id,
+    orgId: row.orgId,
+    providerId: row.providerId,
+    baseUrlOverride: row.baseUrlOverride,
+    blob,
+    config,
+  };
+}
+
 // ─── Create ────────────────────────────────────────────────────────────────
 
 export interface CreateApiKeyCredentialInput {
@@ -358,48 +414,28 @@ async function loadDbCredential(
   orgId: string,
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
-  const [row] = await db
-    .select()
-    .from(modelProviderCredentials)
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    )
-    .limit(1);
-  if (!row) return null;
+  const loaded = await loadCredentialRow(id, orgId);
+  if (!loaded || !loaded.config) return null;
 
-  const cfg = getModelProvider(row.providerId);
-  if (!cfg) {
-    logger.warn("model-provider-credentials: unknown providerId in DB row", {
-      credentialId: id,
-      providerId: row.providerId,
-    });
-    return null;
-  }
-  const baseUrl = effectiveBaseUrl(row.providerId, row.baseUrlOverride);
+  const baseUrl = effectiveBaseUrl(loaded.providerId, loaded.baseUrlOverride);
   if (!baseUrl) return null;
 
-  const blob = decryptBlob(row.credentialsEncrypted);
-  if (!blob) return null;
-
   const common = {
-    providerId: row.providerId,
-    apiShape: cfg.apiShape,
+    providerId: loaded.providerId,
+    apiShape: loaded.config.apiShape,
     baseUrl,
   };
 
-  if (blob.kind === "api_key") {
-    return { ...common, apiKey: blob.apiKey };
+  if (loaded.blob.kind === "api_key") {
+    return { ...common, apiKey: loaded.blob.apiKey };
   }
 
   return {
     ...common,
-    apiKey: blob.accessToken,
-    accountId: blob.accountId,
-    needsReconnection: blob.needsReconnection,
-    expiresAt: blob.expiresAt,
+    apiKey: loaded.blob.accessToken,
+    accountId: loaded.blob.accountId,
+    needsReconnection: loaded.blob.needsReconnection,
+    expiresAt: loaded.blob.expiresAt,
   };
 }
 
