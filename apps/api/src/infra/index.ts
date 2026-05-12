@@ -16,12 +16,7 @@ import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
 import { LocalEventBuffer } from "./event-buffer/local-event-buffer.ts";
 import { logger } from "../lib/logger.ts";
 
-// Re-exports for convenience
 export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
-export type { PubSub } from "./pubsub/interface.ts";
-export type { KeyValueCache, CacheSetOptions } from "./cache/interface.ts";
-export type { RateLimiterFactory } from "./rate-limit/interface.ts";
-export type { EventBuffer, BufferedEvent } from "./event-buffer/interface.ts";
 
 // ---------------------------------------------------------------------------
 // Singletons — Redis implementations are loaded lazily via dynamic import()
