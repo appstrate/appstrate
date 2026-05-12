@@ -21,11 +21,14 @@
  * race the partial index was designed to close.
  */
 
-import { randomBytes } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderPairings } from "@appstrate/db/schema";
-import { encodePairingToken, hashPairingSecret } from "@appstrate/core/pairing-token";
+import {
+  encodePairingToken,
+  hashPairingSecret,
+  randomBase64Url,
+} from "@appstrate/core/pairing-token";
 import { gone } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -79,21 +82,12 @@ export interface PairingRow {
 }
 
 function generateSecret(): string {
-  return randomBytes(SECRET_BYTES)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return randomBase64Url(SECRET_BYTES);
 }
 
 function generatePairingId(): string {
   // Same shape as `pair_<22 chars>` — opaque to the user, included in logs/UI.
-  const suffix = randomBytes(16)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  return `${PAIRING_ID_PREFIX}${suffix}`;
+  return `${PAIRING_ID_PREFIX}${randomBase64Url(16)}`;
 }
 
 /**

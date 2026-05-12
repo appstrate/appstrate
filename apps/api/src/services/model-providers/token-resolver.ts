@@ -105,18 +105,16 @@ function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
   // `extractTokenIdentity` at import time and re-populated on every
   // refresh in `doRefresh`. Re-decoding the JWT on every sidecar poll
   // would burn cycles for no gain.
-  const accountId = state.blob.accountId;
+  const { accessToken, expiresAt, accountId } = state.blob;
   if (!accountId && state.config.requiredIdentityClaims?.includes("accountId")) {
     logger.warn("oauth model provider: accountId missing in stored creds", {
       credentialId: state.credentialId,
       providerId: state.config.providerId,
     });
   }
-  return {
-    accessToken: state.blob.accessToken,
-    expiresAt: state.blob.expiresAt,
-    ...(accountId ? { accountId } : {}),
-  };
+  return accountId !== undefined
+    ? { accessToken, expiresAt, accountId }
+    : { accessToken, expiresAt };
 }
 
 /**

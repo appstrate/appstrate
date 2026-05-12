@@ -26,8 +26,24 @@
  * identifiable.
  */
 
+import { randomBytes } from "node:crypto";
+
 const TOKEN_PREFIX = "appp_";
 const HEADER_VERSION = 1;
+
+/**
+ * Generate `bytes` of cryptographic randomness, base64url-encoded (no
+ * padding). Used to mint both the random `secret` portion of a pairing
+ * token and opaque `pair_<suffix>` row ids — the codec lives here so the
+ * inline `+/=` → `-_` re-implementations callers used to write all decay
+ * into a single source of truth.
+ */
+export function randomBase64Url(bytes: number): string {
+  return stripTrailing(
+    randomBytes(bytes).toString("base64").replace(/\+/g, "-").replace(/\//g, "_"),
+    "=",
+  );
+}
 
 export interface PairingTokenHeader {
   /** Base URL of the platform that minted the token (e.g. `https://app.appstrate.dev`). */

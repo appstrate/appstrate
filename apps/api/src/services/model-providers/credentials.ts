@@ -25,7 +25,7 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -37,22 +37,21 @@ export interface ApiKeyBlob {
   apiKey: string;
 }
 
-export interface OAuthBlob {
+/**
+ * OAuth credential as stored at rest. Structurally a superset of
+ * {@link OAuthTokenResponse} (the wire shape consumed by the sidecar) plus
+ * the fields the platform keeps private: the rotating `refreshToken`, the
+ * `needsReconnection` death flag, and the surface-only `email`. Keeping the
+ * relationship explicit (intersection, not parallel declaration) means a
+ * field added to the wire contract is automatically required here.
+ */
+export type OAuthBlob = OAuthTokenResponse & {
   kind: "oauth";
-  accessToken: string;
   refreshToken: string;
-  /** Epoch milliseconds. `null` when the upstream did not return an expiry. */
-  expiresAt: number | null;
   needsReconnection: boolean;
-  /**
-   * Abstract account/tenant identifier — populated by the provider's
-   * `extractTokenIdentity` hook (e.g. JWT claim → account id). Echoed by
-   * the sidecar as a routing header at request time.
-   */
-  accountId?: string;
   /** Account email — surfaced in the UI; never used in the inference path. */
   email?: string;
-}
+};
 
 export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
