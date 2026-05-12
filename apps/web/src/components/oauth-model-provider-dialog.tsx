@@ -47,10 +47,10 @@ interface Props {
   onClose: () => void;
   /**
    * Fires once the helper has consumed the pairing token and the platform
-   * has persisted the credential. Callers can use this to refresh their
-   * credential list and auto-select the freshly-created row.
+   * has persisted the credential. Receives the new credential id so callers
+   * can auto-select the row without diffing the credential list.
    */
-  onConnected?: () => void;
+  onConnected?: (credentialId: string) => void;
 }
 
 export function OAuthModelProviderDialog({ open, providerId, onClose, onConnected }: Props) {
@@ -105,10 +105,11 @@ export function OAuthModelProviderDialog({ open, providerId, onClose, onConnecte
     if (pairingStatus.data?.status !== "consumed") return;
     toast.success(t("providerKeys.oauth.callbackSuccess"));
     qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
-    onConnected?.();
+    const credentialId = pairingStatus.data.credentialId;
+    if (credentialId) onConnected?.(credentialId);
     queueMicrotask(handleClose);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairingStatus.data?.status, open]);
+  }, [pairingStatus.data?.status, pairingStatus.data?.credentialId, open]);
 
   // Mint the pairing token as soon as the dialog opens — there's no
   // intermediate consent step anymore. Re-fires when reopened after a close.

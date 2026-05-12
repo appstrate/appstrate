@@ -234,6 +234,13 @@ export const modelProviderPairings = pgTable(
     consumedAt: timestamp("consumed_at"),
     /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
     consumedFromIp: text("consumed_from_ip"),
+    /**
+     * `model_provider_credentials.id` created by the helper's POST /import.
+     * NULL while pending; populated atomically with `consumed_at`. Surfaced
+     * to the dashboard via `GET /pairing/:id` so the UI can act on the new
+     * credential without polling the credential list.
+     */
+    credentialId: uuid("credential_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

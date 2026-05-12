@@ -27,6 +27,8 @@ export interface PairingStatus {
   status: "pending" | "consumed" | "expired";
   consumedAt: string | null;
   expiresAt: string;
+  /** Set after the helper consumed the pairing — null while pending. */
+  credentialId: string | null;
 }
 
 export function useCreateModelProviderPairing() {

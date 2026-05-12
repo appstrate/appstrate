@@ -98,7 +98,7 @@ export const modelProvidersOAuthPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "status", "consumedAt", "expiresAt"],
+                required: ["id", "status", "consumedAt", "expiresAt", "credentialId"],
                 properties: {
                   id: { type: "string", pattern: "^pair_[A-Za-z0-9_-]+$" },
                   status: {
@@ -110,6 +110,12 @@ export const modelProvidersOAuthPaths = {
                     format: "date-time",
                   },
                   expiresAt: { type: "string", format: "date-time" },
+                  credentialId: {
+                    type: ["string", "null"],
+                    format: "uuid",
+                    description:
+                      "ID of the model_provider_credentials row created by the helper. Null while the pairing is still pending or expired without consumption.",
+                  },
                 },
               },
             },

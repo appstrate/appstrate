@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS "model_provider_pairings" (
   "expires_at" timestamp NOT NULL,
   "consumed_at" timestamp,
   "consumed_from_ip" text,
+  "credential_id" uuid,
   "created_at" timestamp NOT NULL DEFAULT now(),
   CONSTRAINT "model_provider_pairings_token_hash_unique" UNIQUE ("token_hash")
 );

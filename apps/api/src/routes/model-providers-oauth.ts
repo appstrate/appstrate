@@ -13,6 +13,7 @@ import {
   consumePairing,
   createPairing,
   getPairing,
+  linkPairingCredential,
 } from "../services/model-providers/pairings.ts";
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -108,6 +109,10 @@ export function createModelProvidersOAuthRouter() {
       orgId: consumed.orgId,
       userId: consumed.userId,
     });
+
+    // Link the new credential back to the pairing row so the dashboard's
+    // GET /pairing/:id poll surfaces it without a separate list call.
+    await linkPairingCredential(consumed.id, result.credentialId);
 
     await recordAuditFromContext(c, {
       action: "oauth_model_provider.imported",
@@ -224,6 +229,7 @@ export function createModelProvidersOAuthRouter() {
       status,
       consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
       expiresAt: row.expiresAt.toISOString(),
+      credentialId: row.credentialId,
     });
   });
 

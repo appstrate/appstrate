@@ -31,7 +31,6 @@ import {
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { useAutoSeedRecommendedModels } from "../hooks/use-auto-seed-models";
-import { useNewOAuthCredential } from "../hooks/use-new-oauth-credential";
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -41,7 +40,6 @@ interface CardProps {
 function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { seed } = useAutoSeedRecommendedModels();
-  const { captureBeforeConnect, findAfterConnect } = useNewOAuthCredential();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
@@ -54,15 +52,12 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
 
   const openDialog = () => {
     if (alreadyConnected || working) return;
-    captureBeforeConnect();
     setDialogOpen(true);
   };
 
-  const handleConnected = async () => {
+  const handleConnected = async (newId: string) => {
     setWorking(true);
     try {
-      const newId = await findAfterConnect(entry.providerId);
-      if (!newId) return;
       const { created, promotedDefault } = await seed(newId, entry.providerId);
       if (created > 0) {
         toast.success(
@@ -129,8 +124,8 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
           open
           providerId={entry.providerId}
           onClose={() => setDialogOpen(false)}
-          onConnected={() => {
-            void handleConnected();
+          onConnected={(newId) => {
+            void handleConnected(newId);
           }}
         />
       )}

@@ -35,7 +35,6 @@ import {
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthModelProviderDialog } from "./oauth-model-provider-dialog";
-import { useNewOAuthCredential } from "../hooks/use-new-oauth-credential";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -370,24 +369,19 @@ function ModelFormBody({
   // user must either pick or click "Connect".
   const inlineKeyMode = !isOauthProvider && !selectedKey && !credentialId;
 
-  // OAuth connect dialog — `useNewOAuthCredential` captures a snapshot before
-  // open + resolves the freshly-minted credential id on success so we can
-  // auto-select it in the form.
+  // OAuth connect dialog — the pairing endpoint now returns the new
+  // credentialId directly via `onConnected`, so we auto-select it in the
+  // form without diffing the credential list.
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
-  const { captureBeforeConnect, findAfterConnect } = useNewOAuthCredential();
 
   const handleOpenOauthDialog = () => {
-    captureBeforeConnect();
     setOauthDialogOpen(true);
   };
 
-  const handleOauthConnected = async () => {
-    const newId = await findAfterConnect(providerId);
-    if (newId) {
-      setValue("credentialId", newId);
-      setValue("inlineApiKey", "");
-      clearErrors("credentialId");
-    }
+  const handleOauthConnected = (newId: string) => {
+    setValue("credentialId", newId);
+    setValue("inlineApiKey", "");
+    clearErrors("credentialId");
   };
 
   const [openRouterSearch, setOpenRouterSearch] = useState("");
@@ -772,9 +766,7 @@ function ModelFormBody({
             open
             providerId={providerId}
             onClose={() => setOauthDialogOpen(false)}
-            onConnected={() => {
-              void handleOauthConnected();
-            }}
+            onConnected={handleOauthConnected}
           />
         )}
 

@@ -74,6 +74,7 @@ export interface PairingRow {
   providerId: string;
   expiresAt: Date;
   consumedAt: Date | null;
+  credentialId: string | null;
   createdAt: Date;
 }
 
@@ -182,12 +183,30 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
       providerId: modelProviderPairings.providerId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
+      credentialId: modelProviderPairings.credentialId,
       createdAt: modelProviderPairings.createdAt,
     })
     .from(modelProviderPairings)
     .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Link the credential created by the helper's POST /import back to its
+ * pairing row, so the dashboard's poll endpoint can surface the resulting
+ * credential id without a separate list call. Best-effort: if the pairing
+ * disappears between consume and link (TTL purge race), log and continue —
+ * the credential is already persisted.
+ */
+export async function linkPairingCredential(
+  pairingId: string,
+  credentialId: string,
+): Promise<void> {
+  await db
+    .update(modelProviderPairings)
+    .set({ credentialId })
+    .where(eq(modelProviderPairings.id, pairingId));
 }
 
 /**
