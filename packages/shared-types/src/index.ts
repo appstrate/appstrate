@@ -337,14 +337,14 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
 // --- Model Cost Types ---
 
 /**
- * Per-1M-token pricing. Canonical shape is {@link ModelProviderModelCost}
- * in `@appstrate/core/module`; this re-export keeps the storage-layer
- * vocabulary (`ModelCost` on `OrgModel`, `RunMessage`, etc.) aligned with
- * the registry vocabulary. `cacheRead` / `cacheWrite` are optional —
- * providers without prompt caching simply omit them.
+ * Per-1M-token pricing. Canonical shape lives in `@appstrate/core/module`
+ * (the registry contract); re-exported here so storage-layer consumers
+ * (`OrgModel.cost`, `RunMessage.cost`) reference the same name.
+ * `cacheRead` / `cacheWrite` are optional — providers without prompt
+ * caching simply omit them.
  */
-import type { ModelProviderModelCost } from "@appstrate/core/module";
-export type ModelCost = ModelProviderModelCost;
+import type { ModelCost } from "@appstrate/core/module";
+export type { ModelCost };
 
 export const modelCostSchema = z.object({
   input: z.number().nonnegative(),

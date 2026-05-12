@@ -516,8 +516,8 @@ export interface ModuleEvents {
 /** Capabilities surfaced for model selection UIs. */
 export type ModelProviderCapability = "text" | "image" | "reasoning" | "long-context-1m";
 
-/** Per-1M-token cost (USD). All fields optional — providers may omit pricing. */
-export interface ModelProviderModelCost {
+/** Per-1M-token cost (USD). All cache fields optional — providers may omit pricing. */
+export interface ModelCost {
   /** USD per 1M input tokens. */
   input: number;
   /** USD per 1M output tokens. */
@@ -541,7 +541,7 @@ export interface ModelProviderModelEntry {
   /** Surfaced capabilities for selection UIs. */
   capabilities: readonly ModelProviderCapability[];
   /** Default per-token cost. Self-hosters can override via env. */
-  cost?: ModelProviderModelCost;
+  cost?: ModelCost;
   /**
    * Curated default for first-connection auto-seed flows. When `true`, the
    * model is created in `org_models` automatically right after a fresh
