@@ -256,6 +256,41 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   };
 }
 
+interface OrgModelRow {
+  apiShape: string;
+  baseUrl: string;
+  modelId: string;
+  credentialId: string;
+  label: string;
+  input: unknown;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  reasoning: boolean | null;
+  cost: unknown;
+}
+
+function dbRowToResolved(
+  row: OrgModelRow,
+  creds: { apiKey: string; providerId?: string; accountId?: string },
+): ResolvedModel {
+  return {
+    apiShape: row.apiShape,
+    baseUrl: row.baseUrl,
+    modelId: row.modelId,
+    apiKey: creds.apiKey,
+    label: row.label,
+    input: row.input as string[] | null,
+    contextWindow: row.contextWindow,
+    maxTokens: row.maxTokens,
+    reasoning: row.reasoning,
+    cost: row.cost as ModelCost | null,
+    isSystemModel: false,
+    providerId: creds.providerId,
+    accountId: creds.accountId,
+    credentialId: row.credentialId,
+  };
+}
+
 export async function resolveModel(
   orgId: string,
   packageId: string,
@@ -285,24 +320,7 @@ export async function resolveModel(
 
   if (dbDefault) {
     const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
-    if (creds) {
-      return {
-        apiShape: dbDefault.apiShape,
-        baseUrl: dbDefault.baseUrl,
-        modelId: dbDefault.modelId,
-        apiKey: creds.apiKey,
-        label: dbDefault.label,
-        input: dbDefault.input as string[] | null,
-        contextWindow: dbDefault.contextWindow,
-        maxTokens: dbDefault.maxTokens,
-        reasoning: dbDefault.reasoning,
-        cost: dbDefault.cost as ModelCost | null,
-        isSystemModel: false,
-        providerId: creds.providerId,
-        accountId: creds.accountId,
-        credentialId: dbDefault.credentialId,
-      };
-    }
+    if (creds) return dbRowToResolved(dbDefault, creds);
   }
 
   // 3. System default
@@ -349,22 +367,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return {
-    apiShape: row.apiShape,
-    baseUrl: row.baseUrl,
-    modelId: row.modelId,
-    apiKey: creds.apiKey,
-    label: row.label,
-    input: row.input as string[] | null,
-    contextWindow: row.contextWindow,
-    maxTokens: row.maxTokens,
-    reasoning: row.reasoning,
-    cost: row.cost as ModelCost | null,
-    isSystemModel: false,
-    providerId: creds.providerId,
-    accountId: creds.accountId,
-    credentialId: row.credentialId,
-  };
+  return dbRowToResolved(row, creds);
 }
 
 // --- Connection test ---
