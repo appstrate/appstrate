@@ -356,14 +356,14 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: `OAuth token resolution failed: ${stringifyError(err)}` }, 502);
     }
 
-    const baseUrl = token.baseUrl || llmConfig.baseUrl;
+    const baseUrl = llmConfig.baseUrl;
     if (isBlockedUrl(baseUrl)) {
       return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
     }
 
     const incomingPath = c.req.path.slice("/llm".length) || "/";
     const qs = new URL(c.req.url).search;
-    const rewrite = token.rewriteUrlPath ?? llmConfig.rewriteUrlPath;
+    const rewrite = llmConfig.rewriteUrlPath;
     const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
     const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
 
@@ -395,8 +395,8 @@ export function createApp(deps: AppDeps): Hono {
       if (bodyText) {
         try {
           bodyText = transformBody(llmConfig.providerId, bodyText, {
-            forceStream: token.forceStream ?? llmConfig.forceStream,
-            forceStore: token.forceStore ?? llmConfig.forceStore,
+            forceStream: llmConfig.forceStream,
+            forceStore: llmConfig.forceStore,
           });
         } catch (err) {
           if (err instanceof TransformBodyTooLargeError) {

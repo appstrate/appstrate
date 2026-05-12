@@ -19,16 +19,12 @@ export interface SidecarConfig {
 /**
  * Discriminated union covering the two LLM auth modes the sidecar can serve:
  *
- *   - `api_key`: legacy path. The agent SDK builds the auth header with a
- *     placeholder and the sidecar swaps the placeholder for the real key.
+ *   - `api_key`: the agent SDK builds the auth header with a placeholder and
+ *     the sidecar swaps the placeholder for the real key.
  *   - `oauth`: the sidecar fetches a fresh access token from the platform
  *     (`GET /internal/oauth-token/:connectionId`) and injects it as the
  *     bearer + the per-provider identity headers + applies provider-specific
  *     body transforms (Claude identity prepend, Codex stream/store coercion).
- *
- * Backward compat: a config object without `authMode` is treated as
- * `api_key` (the historical default) so existing pooled sidecars continue
- * to work after upgrade.
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
@@ -53,7 +49,7 @@ export type ModelApiShape =
 export type OauthModelApiShape = Exclude<ModelApiShape, "openai-chat">;
 
 export interface LlmProxyApiKeyConfig {
-  authMode?: "api_key";
+  authMode: "api_key";
   baseUrl: string;
   apiKey: string;
   placeholder: string;
@@ -77,28 +73,21 @@ export interface LlmProxyOauthConfig {
 
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
- * (and `POST .../refresh`) endpoint. Single source of truth — both the platform
- * resolver (`apps/api/src/services/model-providers/token-resolver.ts`) and
- * the sidecar cache (`runtime-pi/sidecar/oauth-token-cache.ts`) reference this
- * type so a new field added on either side cannot silently drift.
+ * (and `POST .../refresh`) endpoint. Carries only the fields that change per
+ * refresh — provider invariants (baseUrl, rewriteUrlPath, forceStream,
+ * forceStore, providerId, apiShape) live in {@link LlmProxyOauthConfig},
+ * which the sidecar already received at boot.
  */
 export interface OAuthTokenResponse {
   accessToken: string;
   /** Epoch milliseconds. `null` when expiry is unknown — sidecar treats this as "always refresh". */
   expiresAt: number | null;
-  apiShape: OauthModelApiShape;
-  baseUrl: string;
-  rewriteUrlPath?: { from: string; to: string };
-  forceStream?: boolean;
-  forceStore?: boolean;
   /**
    * Abstract account/tenant identifier surfaced by the provider's
    * `extractTokenIdentity` hook. The sidecar's identity layer (per
    * `providerId`) decides which routing header to echo it as.
    */
   accountId?: string;
-  /** Canonical providerId. */
-  providerId: string;
 }
 
 /**

@@ -15,6 +15,7 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   if (oauthJson) return JSON.parse(oauthJson) as LlmProxyConfig;
   if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
     return {
+      authMode: "api_key",
       baseUrl: process.env.PI_BASE_URL,
       apiKey: process.env.PI_API_KEY,
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",

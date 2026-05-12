@@ -123,6 +123,7 @@ export async function runPlatformContainer(
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
       sidecarLlm = {
+        authMode: "api_key",
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
         placeholder: llmPlaceholder,

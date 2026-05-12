@@ -104,15 +104,9 @@ export function createModelProvidersOAuthRouter() {
     }
 
     const result = await importOAuthModelProviderConnection({
+      ...input,
       orgId: consumed.orgId,
       userId: consumed.userId,
-      providerId: input.providerId,
-      label: input.label,
-      accessToken: input.accessToken,
-      refreshToken: input.refreshToken,
-      expiresAt: input.expiresAt ?? null,
-      email: input.email,
-      accountId: input.accountId,
     });
 
     await recordAuditFromContext(c, {

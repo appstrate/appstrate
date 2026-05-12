@@ -19805,8 +19805,8 @@
       },
       "OAuthTokenResponse": {
         "type": "object",
-        "description": "Resolved access token + provider runtime config returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
-        "required": ["accessToken", "apiShape", "baseUrl", "providerId"],
+        "description": "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, rewriteUrlPath, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+        "required": ["accessToken", "expiresAt"],
         "properties": {
           "accessToken": {
             "type": "string"
@@ -19815,38 +19815,9 @@
             "type": ["integer", "null"],
             "description": "Epoch milliseconds. null when expiry is unknown."
           },
-          "apiShape": {
-            "type": "string",
-            "enum": ["anthropic-messages", "openai-responses", "openai-codex-responses"]
-          },
-          "baseUrl": {
-            "type": "string",
-            "format": "uri"
-          },
-          "rewriteUrlPath": {
-            "type": "object",
-            "required": ["from", "to"],
-            "properties": {
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            }
-          },
-          "forceStream": {
-            "type": "boolean"
-          },
-          "forceStore": {
-            "type": "boolean"
-          },
           "accountId": {
             "type": "string",
-            "description": "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by `providerId`) decides which routing header to echo it as."
-          },
-          "providerId": {
-            "type": "string"
+            "description": "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as."
           }
         }
       },

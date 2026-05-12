@@ -5,8 +5,10 @@
  *
  * Backs the OAuth code path (cf. SPEC §5.2): the sidecar polls
  * `GET /internal/oauth-token/:credentialId` on the platform API to
- * obtain a fresh access token + provider runtime config (apiShape,
- * baseUrl, identity hints), then caches the result for 30s.
+ * obtain a fresh access token (+ optional `accountId` re-derived from
+ * the token's claims), then caches the result for 30s. Provider
+ * invariants (baseUrl, rewriteUrlPath, …) live in the boot-time
+ * `LlmProxyOauthConfig`, not in the per-refresh response.
  *
  * Two layers of deduplication:
  *

@@ -24,9 +24,6 @@ function makeTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTo
   return {
     accessToken: "tok-fresh",
     expiresAt: Date.now() + 60 * 60_000, // 1h
-    apiShape: "anthropic-messages",
-    baseUrl: "https://api.anthropic.com",
-    providerId: "claude-code",
     ...overrides,
   };
 }

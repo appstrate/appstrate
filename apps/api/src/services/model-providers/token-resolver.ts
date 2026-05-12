@@ -161,31 +161,6 @@ function resolveAccountIdViaHook(
   return undefined;
 }
 
-/**
- * Map registry config + fresh token material to the sidecar's wire shape.
- *
- * The `authMode: "oauth2"` constraint guarantees `apiShape` is one of the
- * OAuth-reachable shapes (never `openai-chat`, which is API-key-only).
- */
-function toResolvedToken(
-  config: ModelProviderConfig & { authMode: "oauth2" },
-  accessToken: string,
-  expiresAt: number | null,
-  accountId: string | undefined,
-): OAuthTokenResponse {
-  return {
-    accessToken,
-    expiresAt,
-    apiShape: config.apiShape as OAuthTokenResponse["apiShape"],
-    baseUrl: config.defaultBaseUrl,
-    rewriteUrlPath: config.rewriteUrlPath,
-    forceStream: config.forceStream,
-    forceStore: config.forceStore,
-    accountId,
-    providerId: config.providerId,
-  };
-}
-
 function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
   const accountId = resolveAccountIdViaHook(
     state.config,
@@ -193,7 +168,11 @@ function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
     state.blob.accountId,
     state.credentialId,
   );
-  return toResolvedToken(state.config, state.blob.accessToken, state.blob.expiresAt, accountId);
+  return {
+    accessToken: state.blob.accessToken,
+    expiresAt: state.blob.expiresAt,
+    ...(accountId ? { accountId } : {}),
+  };
 }
 
 /**
@@ -424,5 +403,9 @@ async function doRefresh(
     ...(accountId ? { accountId } : {}),
   });
 
-  return toResolvedToken(state.config, parsed.accessToken, expiresAtMs, accountId);
+  return {
+    accessToken: parsed.accessToken,
+    expiresAt: expiresAtMs,
+    ...(accountId ? { accountId } : {}),
+  };
 }

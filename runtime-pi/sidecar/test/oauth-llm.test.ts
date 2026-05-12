@@ -37,9 +37,6 @@ function buildOAuthTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): O
   return {
     accessToken: "oat-fresh-token",
     expiresAt: Date.now() + 60 * 60_000,
-    apiShape: "anthropic-messages",
-    baseUrl: "https://api.anthropic.com",
-    providerId: "claude-code",
     ...overrides,
   };
 }
@@ -297,11 +294,6 @@ describe("/llm/* OAuth — Codex path", () => {
         return new Response(
           JSON.stringify(
             buildOAuthTokenResponse({
-              providerId: "codex",
-              apiShape: "openai-codex-responses",
-              baseUrl: "https://chatgpt.com/backend-api",
-              forceStream: true,
-              forceStore: false,
               accountId: "acc_007",
             }),
           ),
@@ -499,18 +491,18 @@ describe("/llm/* OAuth — config errors", () => {
     expect(res.status).toBe(503);
   });
 
-  it("returns 403 when resolved baseUrl is blocked", async () => {
+  it("returns 403 when llmConfig.baseUrl targets a blocked network range", async () => {
     const upstream = setupFetchMock((url) => {
       if (url.startsWith(PLATFORM_API)) {
-        return new Response(
-          JSON.stringify(buildOAuthTokenResponse({ baseUrl: "http://10.0.0.1" })),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }
       return new Response("ok", { status: 200 });
     });
     const deps = makeDepsWithCache(upstream);
-    deps.config.llm = CLAUDE_OAUTH;
+    deps.config.llm = { ...CLAUDE_OAUTH, baseUrl: "http://10.0.0.1" };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);

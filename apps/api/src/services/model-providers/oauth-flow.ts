@@ -23,32 +23,10 @@
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
-import { createOAuthCredential } from "./credentials.ts";
+import { createOAuthCredential, type CreateOAuthCredentialInput } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-
-export interface ImportOAuthModelProviderInput {
-  orgId: string;
-  userId: string;
-  /** Canonical providerId — must be registered + `authMode: "oauth2"`. */
-  providerId: string;
-  label: string;
-  accessToken: string;
-  refreshToken: string;
-  /** Unix milliseconds since epoch. The CLI converts the provider's `expires_in`. */
-  expiresAt?: number | null;
-  /** Account email — body takes precedence over the value the hook re-derives. */
-  email?: string;
-  /**
-   * Abstract account/tenant identifier — the well-known `accountId` slot
-   * from {@link ModelProviderIdentity}. Forwarded by the CLI when the
-   * upstream OAuth response surfaces it as a top-level field; the
-   * provider's `extractTokenIdentity` hook fills it in server-side as a
-   * defense-in-depth fallback.
-   */
-  accountId?: string;
-}
 
 export interface ImportOAuthModelProviderResult {
   /** UUID of the `model_provider_credentials` row. */
@@ -69,7 +47,7 @@ export interface ImportOAuthModelProviderResult {
  * refuses to persist a credential whose mandatory slots can't be resolved.
  */
 export async function importOAuthModelProviderConnection(
-  input: ImportOAuthModelProviderInput,
+  input: CreateOAuthCredentialInput,
 ): Promise<ImportOAuthModelProviderResult> {
   const config = getModelProvider(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
@@ -116,19 +94,13 @@ export async function importOAuthModelProviderConnection(
   });
 
   const credentialId = await createOAuthCredential({
-    orgId: input.orgId,
-    userId: input.userId,
-    label: input.label,
-    providerId: config.providerId,
-    accessToken: input.accessToken,
-    refreshToken: input.refreshToken,
-    expiresAt: input.expiresAt ?? null,
+    ...input,
     ...(accountId ? { accountId } : {}),
     ...(email ? { email } : {}),
   });
 
   return {
-    credentialId: credentialId,
+    credentialId,
     providerId: input.providerId,
     email,
     availableModelIds: config.models.map((m) => m.id),

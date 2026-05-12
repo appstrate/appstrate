@@ -148,8 +148,8 @@ export interface CreateOAuthCredentialInput {
   providerId: string;
   accessToken: string;
   refreshToken: string;
-  /** Epoch ms. */
-  expiresAt: number | null;
+  /** Epoch ms. `null` / unset = unknown expiry (sidecar treats as "always refresh"). */
+  expiresAt?: number | null;
   accountId?: string;
   email?: string;
 }
@@ -164,11 +164,12 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       `Provider ${input.providerId} is api-key only (authMode=${cfg.authMode}); use createApiKeyCredential instead`,
     );
   }
+  const expiresAt = input.expiresAt ?? null;
   const blob: OAuthBlob = {
     kind: "oauth",
     accessToken: input.accessToken,
     refreshToken: input.refreshToken,
-    expiresAt: input.expiresAt,
+    expiresAt,
     needsReconnection: false,
     ...(input.accountId ? { accountId: input.accountId } : {}),
     ...(input.email ? { email: input.email } : {}),
@@ -182,7 +183,7 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
       // Mirror `blob.expiresAt` onto the dedicated column so the refresh
       // worker scan can filter at SQL level. Blob remains source of truth.
-      expiresAt: input.expiresAt !== null ? new Date(input.expiresAt) : null,
+      expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
       createdBy: input.userId,
     })
     .returning({ id: modelProviderCredentials.id });

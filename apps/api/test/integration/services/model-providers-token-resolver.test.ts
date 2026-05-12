@@ -322,7 +322,6 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       const result = await resolveOAuthTokenForSidecar(id);
       expect(result.accessToken).toBe("cached-access");
-      expect(result.providerId).toBe("test-oauth");
       expect(fetchCalled).toBe(false);
     });
 
