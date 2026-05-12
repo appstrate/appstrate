@@ -12,10 +12,8 @@ import {
   seedPackage,
   seedEndUser,
   seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
-import { modelProviderCredentials } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
-import type { OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
 import { userProviderConnections } from "@appstrate/db/schema";
@@ -863,24 +861,8 @@ describe("Internal API", () => {
 
   describe("GET /internal/oauth-token/:credentialId", () => {
     async function seedOAuthCredential(orgId: string): Promise<string> {
-      const blob: OAuthBlob = {
-        kind: "oauth",
-        accessToken: "test-access-token",
-        refreshToken: "test-refresh-token",
-        expiresAt: Date.now() + 3600_000,
-        needsReconnection: false,
-      };
-      const [row] = await db
-        .insert(modelProviderCredentials)
-        .values({
-          orgId,
-          label: "Test OAuth Credential",
-          providerId: "test-oauth",
-          credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-          createdBy: null,
-        })
-        .returning({ id: modelProviderCredentials.id });
-      return row!.id;
+      const row = await seedOrgModelProviderOAuth({ orgId });
+      return row.id;
     }
 
     it("returns 401 without a run token", async () => {

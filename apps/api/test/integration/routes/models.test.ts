@@ -4,10 +4,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import {
+  seedOrgModelProviderKey,
+  seedOrgModel,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { orgModels } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
@@ -242,23 +245,16 @@ describe("Models API", () => {
      * `models[]` list.
      */
     async function seedTestOAuthCredential(): Promise<string> {
-      const [row] = await db
-        .insert(modelProviderCredentials)
-        .values({
-          orgId: ctx.orgId,
-          label: "Test OAuth",
-          providerId: TEST_OAUTH_PROVIDER_ID,
-          credentialsEncrypted: encryptCredentials({
-            kind: "oauth",
-            accessToken: "test-access",
-            refreshToken: "test-refresh",
-            expiresAt: null,
-            needsReconnection: false,
-          }),
-          createdBy: ctx.user.id,
-        })
-        .returning();
-      return row!.id;
+      const row = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      return row.id;
     }
 
     it("seeds models atomically and promotes the first as default", async () => {

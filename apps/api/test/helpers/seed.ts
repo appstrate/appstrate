@@ -297,6 +297,48 @@ export async function seedOrgModelProviderKey(
   return row!;
 }
 
+interface OAuthCredentialSeed {
+  orgId: string;
+  providerId?: string;
+  label?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  /** Epoch ms. `null` means "no upstream expiry" — passes through to the resolver as-is. */
+  expiresAt?: number | null;
+  needsReconnection?: boolean;
+  createdBy?: string | null;
+}
+
+/**
+ * Companion to `seedOrgModelProviderKey` for OAuth-backed model provider
+ * credentials. Both call-sites (`/internal/oauth-token` route tests,
+ * `/api/models/seed` integration tests, token-resolver tests, etc.)
+ * were repeating the same `db.insert(modelProviderCredentials)` boilerplate
+ * with slightly different blob fields — centralizing here keeps drift
+ * (e.g. a `kind` rename in the blob shape) to a single update.
+ */
+export async function seedOrgModelProviderOAuth(
+  overrides: OAuthCredentialSeed,
+): Promise<InferSelectModel<typeof modelProviderCredentials>> {
+  const [row] = await db
+    .insert(modelProviderCredentials)
+    .values({
+      orgId: overrides.orgId,
+      label: overrides.label ?? "Test OAuth Credential",
+      providerId: overrides.providerId ?? "test-oauth",
+      credentialsEncrypted: encryptCredentials({
+        kind: "oauth",
+        accessToken: overrides.accessToken ?? "test-access-token",
+        refreshToken: overrides.refreshToken ?? "test-refresh-token",
+        expiresAt: overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt,
+        needsReconnection: overrides.needsReconnection ?? false,
+      }),
+      createdBy: overrides.createdBy ?? null,
+    })
+    .returning();
+  return row!;
+}
+
 // ─── Org Models ───────────────────────────────────────────
 
 type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & {
