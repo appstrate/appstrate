@@ -363,7 +363,7 @@ export function createApp(deps: AppDeps): Hono {
 
     const incomingPath = c.req.path.slice("/llm".length) || "/";
     const qs = new URL(c.req.url).search;
-    const rewrite = llmConfig.rewriteUrlPath;
+    const rewrite = llmConfig.wireFormat?.rewriteUrlPath;
     const rewrittenPath = rewrite ? incomingPath.replace(rewrite.from, rewrite.to) : incomingPath;
     const targetUrl = `${baseUrl}${rewrittenPath}${qs}`;
 
@@ -394,10 +394,7 @@ export function createApp(deps: AppDeps): Hono {
       bodyText = await c.req.raw.text();
       if (bodyText) {
         try {
-          bodyText = transformBody(llmConfig.wireFormat, bodyText, {
-            forceStream: llmConfig.forceStream,
-            forceStore: llmConfig.forceStore,
-          });
+          bodyText = transformBody(llmConfig.wireFormat, bodyText);
         } catch (err) {
           if (err instanceof TransformBodyTooLargeError) {
             return c.json(

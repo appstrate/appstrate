@@ -736,12 +736,6 @@ export interface ModelProviderDefinition {
   defaultBaseUrl: string;
   /** Whether the user can override `defaultBaseUrl` per credential row. */
   baseUrlOverridable: boolean;
-  /** Force `stream: true` on outbound bodies (required by some subscription-flavoured providers). */
-  forceStream?: true;
-  /** Force `store: false` on outbound bodies (required by some subscription-flavoured providers). */
-  forceStore?: false;
-  /** Path rewriting applied at the proxy boundary. */
-  rewriteUrlPath?: { from: string; to: string };
 
   // — Auth —
   authMode: "api_key" | "oauth2";
@@ -749,8 +743,9 @@ export interface ModelProviderDefinition {
   oauth?: ModelProviderOAuthConfig;
   /**
    * Declarative wire-format quirks the sidecar must apply on this
-   * provider's behalf (static identity headers, accountId routing
-   * header, system-prompt prepend, adaptive header retries).
+   * provider's behalf — static identity headers, accountId routing
+   * header, system-prompt prepend, body coercions (`forceStream`/
+   * `forceStore`), URL path rewriting, adaptive header retries.
    *
    * Only meaningful for OAuth providers. The platform forwards this
    * struct verbatim into the sidecar's `LlmProxyOauthConfig.wireFormat`

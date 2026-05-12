@@ -218,8 +218,6 @@ const codexProvider: ModelProviderDefinition = {
   apiShape: "openai-codex-responses",
   defaultBaseUrl: "https://chatgpt.com/backend-api",
   baseUrlOverridable: false,
-  forceStream: true,
-  forceStore: false,
   authMode: "oauth2",
   oauth: {
     clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
@@ -270,6 +268,8 @@ const codexProvider: ModelProviderDefinition = {
       accept: "text/event-stream",
     },
     accountIdHeader: "chatgpt-account-id",
+    forceStream: true,
+    forceStore: false,
   },
 };
 

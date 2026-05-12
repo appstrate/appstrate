@@ -141,8 +141,6 @@ const ACCOUNT_ID_OAUTH: LlmProxyOauthConfig = {
   baseUrl: "https://provider-b.example.com/backend-api",
   credentialId: "conn-acct",
   providerId: "synthetic-account-id",
-  forceStream: true,
-  forceStore: false,
   wireFormat: {
     identityHeaders: {
       "x-originator": "pi",
@@ -151,6 +149,8 @@ const ACCOUNT_ID_OAUTH: LlmProxyOauthConfig = {
       accept: "text/event-stream",
     },
     accountIdHeader: "x-account-id",
+    forceStream: true,
+    forceStore: false,
   },
 };
 

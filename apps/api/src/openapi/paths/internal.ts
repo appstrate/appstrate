@@ -255,7 +255,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch a fresh access token for an OAuth model provider connection",
       description:
-        "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, rewriteUrlPath, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
+        "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         {

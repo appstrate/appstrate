@@ -116,9 +116,6 @@ export async function runPlatformContainer(
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
         providerId: llmConfig.providerId!,
-        ...(llmConfig.rewriteUrlPath ? { rewriteUrlPath: llmConfig.rewriteUrlPath } : {}),
-        ...(llmConfig.forceStream !== undefined ? { forceStream: llmConfig.forceStream } : {}),
-        ...(llmConfig.forceStore !== undefined ? { forceStore: llmConfig.forceStore } : {}),
         ...(llmConfig.wireFormat ? { wireFormat: llmConfig.wireFormat } : {}),
       };
       sidecarLlm = oauthCfg;

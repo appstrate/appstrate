@@ -61,8 +61,8 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 /**
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
  * (the only public read path). Carries the registry overlay (apiShape,
- * baseUrl, rewriteUrlPath, forceStream/Store) inline so downstream consumers
- * (pi.ts, llm-proxy) don't have to re-look-up `getModelProvider`.
+ * baseUrl, wireFormat) inline so downstream consumers (pi.ts, llm-proxy)
+ * don't have to re-look-up `getModelProvider`.
  *
  * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
  * entries have no registry providerId — they are flat wire-format
@@ -75,12 +75,9 @@ export interface DecryptedModelProviderCredentials {
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
   apiKey: string;
-  forceStream?: boolean;
-  forceStore?: false;
-  rewriteUrlPath?: { from: string; to: string };
   /** OAuth only — abstract account/tenant identifier (echoed by the sidecar as `wireFormat.accountIdHeader`). */
   accountId?: string;
-  /** OAuth only — declarative wire-format quirks from the provider definition. */
+  /** OAuth only — declarative wire-format quirks from the provider definition (identity headers, body coercions, URL rewrites, adaptive retries). */
   wireFormat?: OAuthWireFormat;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
@@ -391,9 +388,6 @@ async function loadDbCredential(
     providerId: row.providerId,
     apiShape: cfg.apiShape,
     baseUrl,
-    forceStream: cfg.forceStream,
-    forceStore: cfg.forceStore,
-    rewriteUrlPath: cfg.rewriteUrlPath,
   };
 
   if (blob.kind === "api_key") {
@@ -502,9 +496,9 @@ export async function listOrgModelProviderCredentials(
  * DB-stored credentials (api-key or OAuth, decrypted on demand) — and
  * gates dead OAuth rows (`needsReconnection`).
  *
- * The returned shape carries the registry overlay (rewriteUrlPath,
- * forceStream/Store) inline so downstream consumers (pi.ts, llm-proxy)
- * don't have to re-look-up `getModelProvider(providerId)`.
+ * The returned shape carries the registry overlay (apiShape, baseUrl,
+ * wireFormat) inline so downstream consumers (pi.ts, llm-proxy) don't
+ * have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the
  * OAuth credential is dead and the caller must treat it as missing.

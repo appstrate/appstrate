@@ -239,11 +239,7 @@ export interface ResolvedModel {
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
   credentialId?: string;
-  /** OAuth registry overlay — passed through so the sidecar config can be built without a second `getModelProviderConfig` lookup downstream. */
-  rewriteUrlPath?: { from: string; to: string };
-  forceStream?: boolean;
-  forceStore?: false;
-  /** OAuth registry overlay — declarative wire-format quirks forwarded to the sidecar. */
+  /** OAuth registry overlay — declarative wire-format quirks (identity headers, body coercions, URL rewrites, adaptive retries) forwarded to the sidecar. */
   wireFormat?: OAuthWireFormat;
 }
 
@@ -308,9 +304,6 @@ export async function resolveModel(
         providerId: creds.providerId,
         accountId: creds.accountId,
         credentialId: dbDefault.credentialId,
-        rewriteUrlPath: creds.rewriteUrlPath,
-        forceStream: creds.forceStream,
-        forceStore: creds.forceStore,
         wireFormat: creds.wireFormat,
       };
     }
@@ -375,9 +368,6 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     providerId: creds.providerId,
     accountId: creds.accountId,
     credentialId: row.credentialId,
-    rewriteUrlPath: creds.rewriteUrlPath,
-    forceStream: creds.forceStream,
-    forceStore: creds.forceStore,
     wireFormat: creds.wireFormat,
   };
 }

@@ -72,7 +72,7 @@ export function buildIdentityHeaders(
  * incompatible with streaming uploads anyway).
  *
  * Returns the same input unchanged when `wireFormat` carries no body-level
- * transform and the caller didn't ask for `forceStream` / `forceStore`.
+ * transform (no `systemPrepend`, no `forceStream`, no `forceStore`).
  *
  * The `/llm/*` route does NOT share the MCP envelope cap enforced inside
  * `mcp.ts` (that one only governs `provider_call`'s base64-decoded body),
@@ -83,11 +83,7 @@ export function buildIdentityHeaders(
  * LLM traffic, and guarantees a loud, structured failure rather than
  * silent slow-downs.
  */
-export function transformBody(
-  wireFormat: OAuthWireFormat | undefined,
-  bodyText: string,
-  options: { forceStream?: boolean; forceStore?: boolean } = {},
-): string {
+export function transformBody(wireFormat: OAuthWireFormat | undefined, bodyText: string): string {
   if (!bodyText) return bodyText;
 
   const byteLength = new TextEncoder().encode(bodyText).byteLength;
@@ -97,8 +93,8 @@ export function transformBody(
 
   const wantsBodyTransform =
     !!wireFormat?.systemPrepend ||
-    options.forceStream !== undefined ||
-    options.forceStore !== undefined;
+    wireFormat?.forceStream !== undefined ||
+    wireFormat?.forceStore !== undefined;
   if (!wantsBodyTransform) return bodyText;
 
   let json: unknown;
@@ -113,8 +109,8 @@ export function transformBody(
   if (wireFormat?.systemPrepend) {
     applySystemPrepend(json, wireFormat.systemPrepend);
   }
-  if (options.forceStream !== undefined) json.stream = options.forceStream;
-  if (options.forceStore !== undefined) json.store = options.forceStore;
+  if (wireFormat?.forceStream !== undefined) json.stream = wireFormat.forceStream;
+  if (wireFormat?.forceStore !== undefined) json.store = wireFormat.forceStore;
 
   return JSON.stringify(json);
 }

@@ -147,16 +147,20 @@ describe("transformBody — systemPrepend", () => {
 });
 
 describe("transformBody — stream/store coercion", () => {
-  it("forces stream and store flags when set", () => {
+  const COERCE_WIRE_FORMAT = {
+    ...ACCOUNT_ID_WIRE_FORMAT,
+    forceStream: true,
+    forceStore: false,
+  };
+
+  it("forces stream and store flags when set on wireFormat", () => {
     const body = JSON.stringify({ model: "synthetic-model", stream: false, store: true });
-    const out = JSON.parse(
-      transformBody(ACCOUNT_ID_WIRE_FORMAT, body, { forceStream: true, forceStore: false }),
-    );
+    const out = JSON.parse(transformBody(COERCE_WIRE_FORMAT, body));
     expect(out.stream).toBe(true);
     expect(out.store).toBe(false);
   });
 
-  it("leaves flags untouched when options are not provided", () => {
+  it("leaves flags untouched when wireFormat carries no coercion", () => {
     const body = JSON.stringify({ model: "synthetic-model", stream: false, store: true });
     const out = JSON.parse(transformBody(ACCOUNT_ID_WIRE_FORMAT, body));
     expect(out.stream).toBe(false);

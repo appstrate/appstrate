@@ -165,13 +165,13 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     // the module's hooks (`buildInferenceProbe`, `buildApiKeyPlaceholder`,
     // `extractTokenIdentity`).
     expect(creds!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
-    // apiShape + baseUrl + force* are sidecar resolution inputs — they
-    // must propagate through `loadInferenceCredentials` so the proxy
+    // apiShape + baseUrl + wireFormat are sidecar resolution inputs —
+    // they must propagate through `loadInferenceCredentials` so the proxy
     // doesn't need to re-walk the registry on the hot path.
     expect(creds!.apiShape).toBe(TEST_OAUTH_HOOKS_API_SHAPE);
     expect(creds!.baseUrl).toBe(TEST_OAUTH_HOOKS_BASE_URL);
-    expect(creds!.rewriteUrlPath).toBeUndefined();
-    expect(creds!.forceStream).toBe(true);
-    expect(creds!.forceStore).toBe(false);
+    expect(creds!.wireFormat?.rewriteUrlPath).toBeUndefined();
+    expect(creds!.wireFormat?.forceStream).toBe(true);
+    expect(creds!.wireFormat?.forceStore).toBe(false);
   });
 });

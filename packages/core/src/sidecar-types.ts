@@ -64,18 +64,13 @@ export interface LlmProxyOauthConfig {
   credentialId: string;
   /** Canonical providerId — used for logging only. The sidecar never branches on this value. */
   providerId: string;
-  /** Path rewrite applied to every outbound URL (e.g. swap `/v1/responses` for a subscription-flavoured path). */
-  rewriteUrlPath?: { from: string; to: string };
-  /** Force `stream: true` in JSON request bodies (required by some subscription-flavoured OAuth flows). */
-  forceStream?: boolean;
-  /** Force `store: false` in JSON request bodies (required by some subscription-flavoured OAuth flows). */
-  forceStore?: boolean;
   /**
    * Declarative wire-format contract contributed by the provider module
    * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header
-   * injection, body transforms, and adaptive header retries without the
-   * sidecar needing to know any provider name. When absent, no identity
-   * headers or transforms apply.
+   * injection, body transforms (system prepend, `forceStream`, `forceStore`),
+   * URL path rewriting, and adaptive header retries without the sidecar
+   * needing to know any provider name. When absent, no identity headers or
+   * transforms apply.
    */
   wireFormat?: OAuthWireFormat;
 }
@@ -109,6 +104,12 @@ export interface OAuthWireFormat {
    * `system` field — otherwise pass-through.
    */
   systemPrepend?: { type: "text"; text: string };
+  /** Force `stream: true` on outbound JSON bodies (required by some subscription-flavoured providers). */
+  forceStream?: boolean;
+  /** Force `store: false` on outbound JSON bodies (required by some subscription-flavoured providers). */
+  forceStore?: boolean;
+  /** Path rewriting applied at the proxy boundary. */
+  rewriteUrlPath?: { from: string; to: string };
   /**
    * Single adaptive retry policy: when an upstream returns `status` and
    * the response body matches any of `bodyPatterns` (case-insensitive
@@ -134,9 +135,8 @@ export interface OAuthAdaptiveRetryPolicy {
 /**
  * Wire-format response from the platform's `GET /internal/oauth-token/:credentialId`
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
- * refresh — provider invariants (baseUrl, rewriteUrlPath, forceStream,
- * forceStore, providerId, wireFormat) live in {@link LlmProxyOauthConfig},
- * which the sidecar already received at boot.
+ * refresh — provider invariants (baseUrl, providerId, wireFormat) live in
+ * {@link LlmProxyOauthConfig}, which the sidecar already received at boot.
  */
 export interface OAuthTokenResponse {
   accessToken: string;

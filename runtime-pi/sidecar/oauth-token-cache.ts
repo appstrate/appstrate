@@ -7,7 +7,7 @@
  * `GET /internal/oauth-token/:credentialId` on the platform API to
  * obtain a fresh access token (+ optional `accountId` re-derived from
  * the token's claims), then caches the result for 30s. Provider
- * invariants (baseUrl, rewriteUrlPath, …) live in the boot-time
+ * invariants (baseUrl, wireFormat, …) live in the boot-time
  * `LlmProxyOauthConfig`, not in the per-refresh response.
  *
  * Two layers of deduplication:

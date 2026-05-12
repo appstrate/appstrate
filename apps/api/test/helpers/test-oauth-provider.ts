@@ -71,8 +71,10 @@ const testOAuthHooksProvider: ModelProviderDefinition = {
   defaultBaseUrl: TEST_OAUTH_HOOKS_BASE_URL,
   baseUrlOverridable: false,
   authMode: "oauth2",
-  forceStream: true,
-  forceStore: false,
+  oauthWireFormat: {
+    forceStream: true,
+    forceStore: false,
+  },
   oauth: {
     clientId: "test-hooks-client-id",
     authorizationUrl: "https://auth.example-hooks.test/authorize",

@@ -13,10 +13,10 @@ describe("codex module", () => {
   it("codex provider keeps the chatgpt.com wire-format quirks", () => {
     const codex = codexModule.modelProviders?.()[0];
     expect(codex?.apiShape).toBe("openai-codex-responses");
-    expect(codex?.forceStream).toBe(true);
-    expect(codex?.forceStore).toBe(false);
+    expect(codex?.oauthWireFormat?.forceStream).toBe(true);
+    expect(codex?.oauthWireFormat?.forceStore).toBe(false);
+    expect(codex?.oauthWireFormat?.rewriteUrlPath).toBeUndefined();
     expect(codex?.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
-    expect(codex?.rewriteUrlPath).toBeUndefined();
   });
 
   it("OAuth metadata points at the openai authorization server", () => {
