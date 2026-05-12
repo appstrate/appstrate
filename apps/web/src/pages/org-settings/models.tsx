@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BrainCircuit, ChevronDown, KeyRound } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -427,24 +426,6 @@ export function OrgSettingsModelsPage() {
   const deletePkMutation = useDeleteModelProviderCredential();
 
   const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
-
-  // Surface OAuth callback outcomes — `?connected=:credentialId` or `?error=...`.
-  const [searchParams, setSearchParams] = useSearchParams();
-  useEffect(() => {
-    const connected = searchParams.get("oauthConnected");
-    const error = searchParams.get("oauthError");
-    if (connected) {
-      toast.success(t("providerKeys.oauth.callbackSuccess"));
-      const next = new URLSearchParams(searchParams);
-      next.delete("oauthConnected");
-      setSearchParams(next, { replace: true });
-    } else if (error) {
-      toast.error(t("providerKeys.oauth.callbackError", { error }));
-      const next = new URLSearchParams(searchParams);
-      next.delete("oauthError");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams, t]);
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 

@@ -282,7 +282,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
     await tx.delete(runs).where(eq(runs.orgId, orgId));
-    // Org-scoped tables (package_schedules, org_models, org_system_provider_keys,
+    // Org-scoped tables (package_schedules, org_models, model_provider_credentials,
     // and module-owned tables like webhooks) cascade via their orgId FK —
     // no explicit delete needed.
     // applicationPackages cascade through applications → orgId

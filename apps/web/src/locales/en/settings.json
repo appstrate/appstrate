@@ -668,7 +668,6 @@
   "providerKeys.oauth.badgeOauth": "OAuth",
   "providerKeys.oauth.badgeApiKey": "API Key",
   "providerKeys.oauth.callbackSuccess": "OAuth provider connected successfully",
-  "providerKeys.oauth.callbackError": "OAuth connection failed: {{error}}",
   "providerKeys.oauth.cliStageTitle": "Connect via CLI",
   "providerKeys.oauth.cliInstructions": "Run this command in your terminal to complete the connection:",
   "providerKeys.oauth.cliHint": "If you don't have Bun yet, install it via: curl -fsSL https://bun.sh/install | bash",

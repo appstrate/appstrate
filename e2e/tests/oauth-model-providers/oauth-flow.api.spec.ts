@@ -9,13 +9,14 @@
  *   - `POST /api/model-providers-oauth/import` validates the body shape.
  *   - The internal `/internal/oauth-token/:id` endpoint is not reachable
  *     without the run token (sanity check on auth gating).
- *   - Listing model provider keys returns the OAuth-extended shape
+ *   - Listing model provider credentials returns the OAuth-extended shape
  *     (`authMode`, `needsReconnection`).
  *
  * Provider-specific OAuth flow (live token import, claim extraction)
- * is covered by each module's own integration suite under
- * `packages/module-*/test/` — those tests assert per-provider hook
- * behavior and don't belong in the platform-level e2e.
+ * is covered by each module's own integration suite under their
+ * respective `packages/module-XXX/test/` directories — those tests
+ * assert per-provider hook behavior and don't belong in the
+ * platform-level e2e.
  *
  * @tags @smoke
  */
@@ -66,15 +67,17 @@ test.describe("OAuth Model Providers — API smoke", () => {
     expect([401, 403]).toContain(res.status());
   });
 
-  test("listing model provider keys returns OAuth-extended shape @smoke", async ({ apiClient }) => {
-    const res = await apiClient.get("/model-provider-keys");
+  test("listing model provider credentials returns OAuth-extended shape @smoke", async ({
+    apiClient,
+  }) => {
+    const res = await apiClient.get("/model-provider-credentials");
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { data?: Array<Record<string, unknown>> };
     const rows = body.data ?? [];
     expect(Array.isArray(rows)).toBe(true);
-    // Smoke: every row carries an `authMode` field (extended in Phase 6.2).
-    // Even an empty list passes — but if there's at least one (system-provided),
-    // it must have the field.
+    // Smoke: every row carries an `authMode` field. Even an empty list
+    // passes — but if there's at least one (system-provided), it must
+    // have the field.
     for (const row of rows) {
       expect(row).toHaveProperty("authMode");
     }

@@ -16,7 +16,7 @@ export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string };
 
-/** Preset model resolved against `org_models` + `org_system_provider_keys`. */
+/** Preset model resolved against `org_models` + `model_provider_credentials`. */
 export interface ResolvedProxyModel {
   /** The preset id the caller asked for (echoed into usage rows for audit). */
   presetId: string;

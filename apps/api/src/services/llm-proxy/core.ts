@@ -6,7 +6,7 @@
  * Pipeline:
  *   1. Parse the JSON body, extract `model` (the preset id), reject
  *      anything that doesn't look like a chat/messages payload.
- *   2. Resolve the preset against `org_models` + `org_system_provider_keys`
+ *   2. Resolve the preset against `org_models` + `model_provider_credentials`
  *      via `loadModel()`. Fail closed on protocol mismatch.
  *   3. Substitute `model` → real upstream id, forward to the adapter's
  *      upstream base URL with adapter-specific headers.
