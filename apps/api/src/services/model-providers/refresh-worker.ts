@@ -3,7 +3,11 @@
 /**
  * OAuth model provider refresh worker.
  *
- * Two responsibilities:
+ * Single responsibility: proactively refresh OAuth credentials whose
+ * `expiresAt` falls inside the {@link REFRESH_LEAD_HOURS} window before
+ * the next agent run pays a 401-retry on the hot path. Opt-in via
+ * `OAUTH_REFRESH_WORKER_ENABLED` — the sidecar's reactive 401-retry
+ * path and the on-demand token resolver cover correctness without it.
  *
  *   1. **Recurring scan** (every {@link SCAN_CRON}): finds rows in
  *      `model_provider_credentials` whose blob is `kind: "oauth"`,
@@ -16,6 +20,9 @@
  *      Failures are logged structured but do NOT bubble — the worker
  *      treats every refresh as best-effort; the sidecar still has its
  *      reactive 401-retry path.
+ *
+ * Pairing-table cleanup lives in `pairing-cleanup-worker.ts` and runs
+ * unconditionally — it has no relationship to the refresh hot path.
  *
  * Filter strategy: `expires_at` is denormalized onto its own indexed
  * column (mirrored from `blob.expiresAt` by `createOAuthCredential` /
@@ -39,23 +46,13 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { listModelProviders } from "./registry.ts";
 import { type OAuthBlob } from "./credentials.ts";
 import { forceRefreshOAuthModelProviderToken } from "./token-resolver.ts";
-import { cleanupExpiredPairings } from "./pairings.ts";
 
 const SCAN_QUEUE_NAME = "oauth-model-refresh-scan";
 const REFRESH_QUEUE_NAME = "oauth-model-refresh";
-const PAIRING_CLEANUP_QUEUE_NAME = "oauth-model-pairing-cleanup";
 
 /** Cron pattern: every 6 hours (00:00, 06:00, 12:00, 18:00 UTC). */
 const SCAN_CRON = "0 */6 * * *";
 const SCAN_SCHEDULER_ID = "oauth-model-refresh-scan";
-
-/**
- * Pairing cleanup runs every 15 minutes — pairings have a 5-minute TTL +
- * a 1-hour grace window before deletion, so a 15-minute sweep keeps the
- * table tail bounded without thrashing.
- */
-const PAIRING_CLEANUP_CRON = "*/15 * * * *";
-const PAIRING_CLEANUP_SCHEDULER_ID = "oauth-model-pairing-cleanup";
 
 /** Refresh lead time — anything expiring sooner gets refreshed proactively. */
 const REFRESH_LEAD_HOURS = 24;
@@ -77,7 +74,6 @@ type ScanJobData = Record<string, never>;
 
 let scanQueue: JobQueue<ScanJobData> | null = null;
 let refreshQueue: JobQueue<RefreshJobData> | null = null;
-let pairingCleanupQueue: JobQueue<ScanJobData> | null = null;
 
 async function getScanQueue(): Promise<JobQueue<ScanJobData>> {
   if (!scanQueue) scanQueue = await createQueue<ScanJobData>(SCAN_QUEUE_NAME);
@@ -87,12 +83,6 @@ async function getScanQueue(): Promise<JobQueue<ScanJobData>> {
 async function getRefreshQueue(): Promise<JobQueue<RefreshJobData>> {
   if (!refreshQueue) refreshQueue = await createQueue<RefreshJobData>(REFRESH_QUEUE_NAME);
   return refreshQueue;
-}
-
-async function getPairingCleanupQueue(): Promise<JobQueue<ScanJobData>> {
-  if (!pairingCleanupQueue)
-    pairingCleanupQueue = await createQueue<ScanJobData>(PAIRING_CLEANUP_QUEUE_NAME);
-  return pairingCleanupQueue;
 }
 
 /**
@@ -222,31 +212,13 @@ async function handleRefreshJob(job: QueueJob<RefreshJobData>): Promise<void> {
   }
 }
 
-async function handlePairingCleanupJob(_job: QueueJob<ScanJobData>): Promise<void> {
-  const startedAt = Date.now();
-  try {
-    const deleted = await cleanupExpiredPairings();
-    logger.info("oauth_model_pairing_cleanup_done", {
-      deleted,
-      durationMs: Date.now() - startedAt,
-    });
-  } catch (err) {
-    logger.error("oauth_model_pairing_cleanup_failed", {
-      error: getErrorMessage(err),
-      durationMs: Date.now() - startedAt,
-    });
-  }
-}
-
 /** Initialize the OAuth model provider refresh worker. Idempotent. */
 export async function initOAuthModelRefreshWorker(): Promise<void> {
   const scan = await getScanQueue();
   const refresh = await getRefreshQueue();
-  const pairingCleanup = await getPairingCleanupQueue();
 
   scan.process(handleScanJob, { concurrency: 1 });
   refresh.process(handleRefreshJob, { concurrency: 4 });
-  pairingCleanup.process(handlePairingCleanupJob, { concurrency: 1 });
 
   // One-shot upsert of the recurring scan scheduler — BullMQ stores it in
   // Redis so this is safe across restarts.
@@ -256,16 +228,9 @@ export async function initOAuthModelRefreshWorker(): Promise<void> {
     { name: "scan", data: {} },
   );
 
-  await pairingCleanup.upsertScheduler(
-    PAIRING_CLEANUP_SCHEDULER_ID,
-    { pattern: PAIRING_CLEANUP_CRON, tz: "UTC" },
-    { name: "cleanup", data: {} },
-  );
-
   logger.info("OAuth model refresh worker initialized", {
     scanCron: SCAN_CRON,
     refreshLeadHours: REFRESH_LEAD_HOURS,
-    pairingCleanupCron: PAIRING_CLEANUP_CRON,
   });
 }
 
@@ -273,9 +238,7 @@ export async function initOAuthModelRefreshWorker(): Promise<void> {
 export async function shutdownOAuthModelRefreshWorker(): Promise<void> {
   await scanQueue?.shutdown();
   await refreshQueue?.shutdown();
-  await pairingCleanupQueue?.shutdown();
   scanQueue = null;
   refreshQueue = null;
-  pairingCleanupQueue = null;
   logger.info("OAuth model refresh worker stopped");
 }

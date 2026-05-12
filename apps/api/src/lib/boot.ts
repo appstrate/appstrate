@@ -46,6 +46,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
+import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -270,9 +271,7 @@ export async function boot(): Promise<void> {
     // sidecar's reactive 401-retry path and the on-demand token resolver
     // cover correctness without it; the worker only matters for credentials
     // that go dormant long enough that their refresh_token would expire
-    // upstream. Pairing cleanup still runs inside it when enabled — when
-    // disabled, expired pairings remain until their normal TTL elapses
-    // (cleanup just defers; nothing leaks).
+    // upstream.
     (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
       (err) => {
         logger.warn("Could not initialize OAuth model refresh worker", {
@@ -280,6 +279,14 @@ export async function boot(): Promise<void> {
         });
       },
     ),
+    // Pairing-table cleanup runs unconditionally — pure table-bloat
+    // janitor for `model_provider_pairings`, unrelated to the refresh
+    // hot path.
+    initPairingCleanupWorker().catch((err) => {
+      logger.warn("Could not initialize OAuth model pairing cleanup worker", {
+        error: getErrorMessage(err),
+      });
+    }),
     startRunWatchdog({
       intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
       stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
