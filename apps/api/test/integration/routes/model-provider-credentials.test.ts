@@ -40,8 +40,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test Key",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
+          providerId: "openai",
           apiKey: "sk-test-key-123",
         }),
       });
@@ -61,8 +60,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Original Label",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
+          providerId: "openai",
           apiKey: "sk-test-key-123",
         }),
       });
@@ -90,8 +88,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "To Delete",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
+          providerId: "openai",
           apiKey: "sk-test-key-123",
         }),
       });
@@ -122,8 +119,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Pinned",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
+          providerId: "anthropic",
           apiKey: "sk-anth-test",
         }),
       });
@@ -200,8 +196,8 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Org A key",
-          apiShape: "openai-responses",
-          baseUrl: "https://api.openai.com/v1",
+          providerId: "openai-compatible",
+          baseUrlOverride: "https://api.openai.com/v1",
           apiKey: "sk-org-a",
         }),
       });
@@ -226,8 +222,8 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Local",
-          apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          providerId: "openai-compatible",
+          baseUrlOverride: "http://127.0.0.1:9",
           apiKey: "sk-local",
         }),
       });
@@ -308,8 +304,8 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Inline-existing",
-          apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          providerId: "openai-compatible",
+          baseUrlOverride: "http://127.0.0.1:9",
           apiKey: "sk-stored",
         }),
       });

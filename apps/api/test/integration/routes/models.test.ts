@@ -28,8 +28,7 @@ describe("Models API", () => {
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         label: "Test Model Provider Key",
-        apiShape: "openai",
-        baseUrl: "https://api.openai.com",
+        providerId: "openai",
         apiKey: "sk-test-key-123",
       }),
     });

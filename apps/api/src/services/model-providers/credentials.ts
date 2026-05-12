@@ -24,7 +24,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { getModelProvider, listModelProviders } from "./registry.ts";
+import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
@@ -440,30 +440,6 @@ async function loadDbCredential(
 }
 
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
-
-/**
- * Resolve `(apiShape, baseUrl)` to a registry providerId. Matches an `api_key`
- * provider whose `apiShape` and `defaultBaseUrl` align; falls back to
- * `openai-compatible` with a `baseUrlOverride` for any unrecognized combo.
- *
- * Kept exported because the POST route still accepts the historic
- * `(apiShape, baseUrl, apiKey)` form and reverse-resolves it to a canonical
- * providerId before creating the credential.
- */
-export function resolveProviderIdFromApiKeyForm(
-  apiShape: string,
-  baseUrl: string,
-): { providerId: string; baseUrlOverride: string | null } {
-  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
-  for (const cfg of listModelProviders()) {
-    if (cfg.authMode !== "api_key") continue;
-    if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
-    if (cfg.apiShape === apiShape && cfg.defaultBaseUrl.replace(/\/+$/, "") === normalizedBaseUrl) {
-      return { providerId: cfg.providerId, baseUrlOverride: null };
-    }
-  }
-  return { providerId: "openai-compatible", baseUrlOverride: baseUrl };
-}
 
 /**
  * List the aggregated UI view of an organization's model provider credentials.

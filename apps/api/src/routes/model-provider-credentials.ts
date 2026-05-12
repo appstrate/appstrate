@@ -12,7 +12,6 @@ import {
   deleteModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
-  resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
@@ -32,9 +31,10 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
   label: z.string().min(1, "label is required"),
-  apiShape: z.string().min(1, "apiShape is required"),
-  baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
+  providerId: z.string().min(1, "providerId is required"),
   apiKey: z.string().min(1, "apiKey is required"),
+  /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
+  baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
 });
 
 /**
@@ -116,11 +116,19 @@ export function createModelProviderCredentialsRouter() {
     const user = c.get("user");
     const body = await c.req.json();
     const data = parseBody(createSchema, body);
-    const { label, apiShape, baseUrl, apiKey } = data;
-    // The route still accepts the historic `(apiShape, baseUrl)` form — reverse-
-    // resolve it to the canonical `providerId` (with `baseUrlOverride` for
-    // any unrecognized combo) before persisting.
-    const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
+    const { label, providerId, apiKey, baseUrlOverride } = data;
+
+    const cfg = getModelProvider(providerId);
+    if (!cfg) {
+      throw invalidRequest(`Unknown providerId: ${providerId}`, "providerId");
+    }
+    if (cfg.authMode !== "api_key") {
+      throw invalidRequest(
+        `Provider ${providerId} requires OAuth; use the OAuth pairing flow instead`,
+        "providerId",
+      );
+    }
+
     try {
       const id = await createApiKeyCredential({
         orgId,
@@ -128,13 +136,13 @@ export function createModelProviderCredentialsRouter() {
         label,
         providerId,
         apiKey,
-        baseUrlOverride,
+        baseUrlOverride: baseUrlOverride ?? null,
       });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.created",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: { label, apiShape, baseUrl },
+        after: { label, providerId, baseUrlOverride: baseUrlOverride ?? null },
       });
       return c.json({ id }, 201);
     } catch (err) {

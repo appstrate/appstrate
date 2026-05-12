@@ -34,7 +34,6 @@ import {
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
-  resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
   updateOAuthCredentialTokens,
 } from "../../../src/services/model-providers/credentials.ts";
@@ -371,28 +370,6 @@ describe("model-provider-credentials service — aggregator + inference loader",
 
   beforeEach(async () => {
     await truncateAll();
-  });
-
-  describe("resolveProviderIdFromApiKeyForm", () => {
-    it("matches a registered (api, baseUrl) pair to its canonical providerId", () => {
-      const r = resolveProviderIdFromApiKeyForm("anthropic-messages", "https://api.anthropic.com");
-      expect(r.providerId).toBe("anthropic");
-      expect(r.baseUrlOverride).toBeNull();
-    });
-
-    it("tolerates a trailing slash on baseUrl", () => {
-      const r = resolveProviderIdFromApiKeyForm("anthropic-messages", "https://api.anthropic.com/");
-      expect(r.providerId).toBe("anthropic");
-    });
-
-    it("falls back to openai-compatible + baseUrlOverride for unknown combos", () => {
-      const r = resolveProviderIdFromApiKeyForm(
-        "openai-completions",
-        "https://self-hosted.example.com/v1",
-      );
-      expect(r.providerId).toBe("openai-compatible");
-      expect(r.baseUrlOverride).toBe("https://self-hosted.example.com/v1");
-    });
   });
 
   describe("listOrgModelProviderCredentials (system + DB merge)", () => {

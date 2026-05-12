@@ -240,41 +240,57 @@ export async function seedOrgProxy(
 // ─── Model Provider Credentials ─────────────────────────────
 
 import { encryptCredentials } from "@appstrate/connect";
-import { resolveProviderIdFromApiKeyForm } from "../../src/services/model-providers/credentials.ts";
 
 interface ModelProviderCredentialSeed {
   orgId: string;
   label?: string;
-  /** Wire format the legacy contract expects. Used to derive `providerId` if not given explicitly. */
+  /** Convenience alias for callers that think in apiShape terms — mapped to a built-in providerId. */
   apiShape?: string;
-  /** Base URL — combined with `apiShape` to reverse-resolve `providerId` against the registry. */
   baseUrl?: string;
   /** Plaintext API key, wrapped into a `kind: "api_key"` blob before encryption. */
   apiKey?: string;
-  /** Skips reverse-resolution when provided. Must be a registered registry id. */
+  /** Canonical registry providerId. Defaults derive from `apiShape` if absent. */
   providerId?: string;
+  /** Override for self-hosted endpoints; honored only by providers with `baseUrlOverridable: true`. */
+  baseUrlOverride?: string | null;
   createdBy?: string | null;
+}
+
+/**
+ * Best-effort default mapping for the built-in api shapes the test suite
+ * uses. Real production code uses the registry directly — this stays in
+ * the helper so existing tests calling `seedOrgModelProviderKey({ apiShape: "openai" })`
+ * keep working without each one knowing about providerIds.
+ */
+function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
+  if (apiShape === "anthropic-messages") return "anthropic";
+  if (apiShape === "openai" || apiShape === "openai-chat") return "openai";
+  if (baseUrl && /openai\.com/i.test(baseUrl)) return "openai";
+  if (baseUrl && /anthropic\.com/i.test(baseUrl)) return "anthropic";
+  return "openai-compatible";
 }
 
 export async function seedOrgModelProviderKey(
   overrides: ModelProviderCredentialSeed,
 ): Promise<InferSelectModel<typeof modelProviderCredentials>> {
-  const apiShape = overrides.apiShape ?? "anthropic-messages";
-  const baseUrl = overrides.baseUrl ?? "https://api.anthropic.com";
   const apiKey = overrides.apiKey ?? "sk-test-placeholder";
-
-  const resolved = overrides.providerId
-    ? { providerId: overrides.providerId, baseUrlOverride: null }
-    : resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
+  const providerId =
+    overrides.providerId ?? defaultProviderId(overrides.apiShape, overrides.baseUrl);
+  const baseUrlOverride =
+    overrides.baseUrlOverride !== undefined
+      ? overrides.baseUrlOverride
+      : providerId === "openai-compatible" && overrides.baseUrl
+        ? overrides.baseUrl
+        : null;
 
   const [row] = await db
     .insert(modelProviderCredentials)
     .values({
       orgId: overrides.orgId,
       label: overrides.label ?? "Test Model Provider Key",
-      providerId: resolved.providerId,
+      providerId,
       credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
-      baseUrlOverride: resolved.baseUrlOverride,
+      baseUrlOverride,
       createdBy: overrides.createdBy ?? null,
     })
     .returning();

@@ -9,6 +9,7 @@ import type { ModelFormData } from "../components/model-form-modal";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
+  useProvidersRegistry,
   deduplicateLabel,
 } from "./use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/model-presets";
@@ -177,6 +178,7 @@ export function useModelFormHandler(opts: {
   const updateModel = useUpdateModel();
   const createPk = useCreateModelProviderCredential();
   const { data: providerKeys } = useModelProviderCredentials();
+  const { data: registry } = useProvidersRegistry();
 
   const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
 
@@ -184,12 +186,20 @@ export function useModelFormHandler(opts: {
     const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
       const provider = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl);
       const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
+      const matched = registry?.find(
+        (p) =>
+          p.authMode === "api_key" &&
+          p.apiShape === data.apiShape &&
+          p.defaultBaseUrl.replace(/\/+$/, "") === data.baseUrl.replace(/\/+$/, ""),
+      );
+      const providerId = matched?.providerId ?? "openai-compatible";
+      const baseUrlOverride = matched ? null : data.baseUrl;
       createPk.mutate(
         {
           label,
-          apiShape: data.apiShape,
-          baseUrl: data.baseUrl,
+          providerId,
           apiKey: data.newProviderKey!.apiKey,
+          ...(baseUrlOverride ? { baseUrlOverride } : {}),
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );

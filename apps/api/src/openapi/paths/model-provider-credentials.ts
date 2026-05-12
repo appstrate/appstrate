@@ -152,25 +152,26 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "apiShape", "baseUrl", "apiKey"],
+              required: ["label", "providerId", "apiKey"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
                   description: "Display name for the model provider credential",
                 },
-                apiShape: {
+                providerId: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Wire format / API shape used to reverse-resolve the registry providerId together with baseUrl. Accepted values match `ModelApiShape` (anthropic-messages, openai-chat, openai-responses, openai-codex-responses) plus the legacy `openai-compatible`-fallback strings the picker still emits for self-hosted endpoints.",
-                },
-                baseUrl: {
-                  type: "string",
-                  format: "uri",
-                  description: "Model provider API base URL",
+                    "Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow.",
                 },
                 apiKey: { type: "string", minLength: 1, description: "API key for authentication" },
+                baseUrlOverride: {
+                  type: ["string", "null"],
+                  format: "uri",
+                  description:
+                    "Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.",
+                },
               },
             },
           },

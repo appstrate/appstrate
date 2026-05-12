@@ -59,9 +59,9 @@ export function useCreateModelProviderCredential() {
   return useMutation({
     mutationFn: async (data: {
       label: string;
-      apiShape: string;
-      baseUrl: string;
+      providerId: string;
       apiKey: string;
+      baseUrlOverride?: string | null;
     }) => {
       return api<{ id: string }>("/model-provider-credentials", {
         method: "POST",

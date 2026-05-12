@@ -424,6 +424,7 @@ export function OrgSettingsModelsPage() {
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
+  const registryQuery = useProvidersRegistry();
 
   const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
 
@@ -514,12 +515,24 @@ export function OrgSettingsModelsPage() {
             );
           } else {
             const uniqueLabel = deduplicateLabel(data.label, providerKeys ?? []);
+            // Form still emits (apiShape, baseUrl) for UX presets; map to the
+            // canonical (providerId, baseUrlOverride) the API expects. The
+            // registry exposes the same matching server-side; any future
+            // registry-aware form can drop this translation.
+            const matchedProvider = registryQuery.data?.find(
+              (p) =>
+                p.authMode === "api_key" &&
+                p.apiShape === data.apiShape &&
+                p.defaultBaseUrl.replace(/\/+$/, "") === data.baseUrl.replace(/\/+$/, ""),
+            );
+            const providerId = matchedProvider?.providerId ?? "openai-compatible";
+            const baseUrlOverride = matchedProvider ? null : data.baseUrl;
             createPkMutation.mutate(
-              { ...data, label: uniqueLabel } as {
-                label: string;
-                apiShape: string;
-                baseUrl: string;
-                apiKey: string;
+              {
+                label: uniqueLabel,
+                providerId,
+                apiKey: data.apiKey ?? "",
+                ...(baseUrlOverride ? { baseUrlOverride } : {}),
               },
               { onSuccess: () => setPkModalOpen(false) },
             );
