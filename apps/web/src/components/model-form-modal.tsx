@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,7 +27,9 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
-import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
+import { type OpenRouterModel, type ModelCost } from "../hooks/use-models";
+import { CapabilitiesSection } from "./model-form/capabilities-section";
+import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
@@ -384,19 +385,8 @@ function ModelFormBody({
     clearErrors("credentialId");
   };
 
-  const [openRouterSearch, setOpenRouterSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(openRouterSearch), 300);
-    return () => clearTimeout(timer);
-  }, [openRouterSearch]);
-
-  const openRouterQuery = useOpenRouterModels(
-    providerId === "openrouter" ? debouncedSearch : undefined,
-  );
-
   const isOpenRouter = providerId === "openrouter";
+  const openRouterSearch = useOpenRouterSearch(isOpenRouter);
   const isCustomProvider = providerId === CUSTOM_ID;
   const isCustomModel = selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
@@ -434,7 +424,7 @@ function ModelFormBody({
       }
     }
     resetModelFields();
-    setOpenRouterSearch("");
+    openRouterSearch.setSearch("");
   };
 
   const handleModelChange = (id: string) => {
@@ -569,10 +559,10 @@ function ModelFormBody({
             <Label>{t("models.form.modelId")}</Label>
             <OpenRouterCombobox
               value={modelId}
-              search={openRouterSearch}
-              onSearchChange={setOpenRouterSearch}
-              models={openRouterQuery.data ?? []}
-              isLoading={openRouterQuery.isLoading}
+              search={openRouterSearch.search}
+              onSearchChange={openRouterSearch.setSearch}
+              models={openRouterSearch.models}
+              isLoading={openRouterSearch.isLoading}
               placeholder={t("models.form.openRouterSearchPlaceholder")}
               emptyText={t("models.form.openRouterNoResults")}
               searchingText={t("models.form.openRouterSearching")}
@@ -855,67 +845,16 @@ function ModelFormBody({
 
         {/* Capabilities — visible for custom provider/model only (preset + OpenRouter auto-fill from source of truth) */}
         {isCustom && (
-          <div className="mt-2 space-y-4 border-t pt-4">
-            <Label className="text-muted-foreground text-sm font-medium">
-              {t("models.form.capabilities")}
-            </Label>
-            <div className="space-y-2">
-              <Label>{t("models.form.input")}</Label>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="mdl-input-text"
-                    checked={inputText}
-                    onCheckedChange={(checked) => setValue("inputText", Boolean(checked))}
-                  />
-                  <Label htmlFor="mdl-input-text" className="cursor-pointer font-normal">
-                    {t("models.form.inputText")}
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="mdl-input-image"
-                    checked={inputImage}
-                    onCheckedChange={(checked) => setValue("inputImage", Boolean(checked))}
-                  />
-                  <Label htmlFor="mdl-input-image" className="cursor-pointer font-normal">
-                    {t("models.form.inputImage")}
-                  </Label>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-                <Input
-                  id="mdl-ctx"
-                  type="number"
-                  {...register("contextWindow")}
-                  placeholder="200000"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-                <Input
-                  id="mdl-maxtok"
-                  type="number"
-                  {...register("maxTokens")}
-                  placeholder="16384"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="mdl-reasoning"
-                checked={reasoning}
-                onCheckedChange={(checked) => setValue("reasoning", Boolean(checked))}
-              />
-              <Label htmlFor="mdl-reasoning" className="cursor-pointer font-normal">
-                {t("models.form.reasoning")}
-              </Label>
-            </div>
-            <div className="text-muted-foreground text-sm">{t("models.form.capabilitiesHint")}</div>
-          </div>
+          <CapabilitiesSection
+            contextWindowProps={register("contextWindow")}
+            maxTokensProps={register("maxTokens")}
+            inputText={inputText}
+            inputImage={inputImage}
+            reasoning={reasoning}
+            onInputTextChange={(v) => setValue("inputText", v)}
+            onInputImageChange={(v) => setValue("inputImage", v)}
+            onReasoningChange={(v) => setValue("reasoning", v)}
+          />
         )}
       </form>
     </Modal>
