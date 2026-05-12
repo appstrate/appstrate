@@ -266,11 +266,20 @@ export async function boot(): Promise<void> {
         error: getErrorMessage(err),
       });
     }),
-    initOAuthModelRefreshWorker().catch((err) => {
-      logger.warn("Could not initialize OAuth model refresh worker", {
-        error: getErrorMessage(err),
-      });
-    }),
+    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
+    // sidecar's reactive 401-retry path and the on-demand token resolver
+    // cover correctness without it; the worker only matters for credentials
+    // that go dormant long enough that their refresh_token would expire
+    // upstream. Pairing cleanup still runs inside it when enabled — when
+    // disabled, expired pairings remain until their normal TTL elapses
+    // (cleanup just defers; nothing leaks).
+    (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
+      (err) => {
+        logger.warn("Could not initialize OAuth model refresh worker", {
+          error: getErrorMessage(err),
+        });
+      },
+    ),
     startRunWatchdog({
       intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
       stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
