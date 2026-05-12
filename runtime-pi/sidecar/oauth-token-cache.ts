@@ -5,29 +5,22 @@
  *
  * Backs the OAuth code path (cf. SPEC §5.2): the sidecar polls
  * `GET /internal/oauth-token/:credentialId` on the platform API to
- * obtain a fresh access token (+ optional `accountId` re-derived from
- * the token's claims), then caches the result for 30s. Provider
- * invariants (baseUrl, wireFormat, …) live in the boot-time
- * `LlmProxyOauthConfig`, not in the per-refresh response.
+ * obtain a fresh access token (+ optional `accountId`), then caches the
+ * result for {@link CACHE_TTL_MS}. The platform's read endpoint already
+ * proactively refreshes whenever the token is within
+ * `OAUTH_REFRESH_LEAD_MS` of expiry, so the sidecar trusts whatever it
+ * returns and only round-trips again on 401 via {@link forceRefresh}.
  *
  * Two layers of deduplication:
  *
  *   - **Cache**: an in-memory `Map<credentialId, CachedToken>` that
- *     answers most reads in O(1). Entries are valid for {@link CACHE_TTL_MS}
- *     **and** until the underlying access token reaches the
- *     {@link OAUTH_REFRESH_LEAD_MS} expiry lead time.
+ *     answers most reads in O(1). Entries are valid for {@link CACHE_TTL_MS}.
  *   - **Singleflight**: a parallel `Map<credentialId, Promise>` that
  *     coalesces concurrent in-flight fetches. 50 simultaneous LLM
  *     requests with a stale token yield exactly 1 platform fetch.
- *
- * Refresh strategy: when the cached token's `expiresAt` is within
- * {@link OAUTH_REFRESH_LEAD_MS} of now, the cache calls
- * `POST /internal/oauth-token/:id/refresh` instead of the read endpoint
- * — proactive refresh ahead of expiry to avoid 401-bounce on the agent
- * request path.
  */
 
-import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
+import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
 export type CachedToken = OAuthTokenResponse & { fetchedAt: number };
 
@@ -125,26 +118,23 @@ export class OAuthTokenCache {
     const now = Date.now();
     if (now - entry.fetchedAt >= CACHE_TTL_MS) return false;
     if (entry.expiresAt === null) return false;
-    if (entry.expiresAt - now <= OAUTH_REFRESH_LEAD_MS) return false;
+    // Belt-and-suspenders: don't serve an expired token even if it's
+    // within the cache TTL window. The platform's read endpoint refreshes
+    // proactively, so this branch is unreachable in practice — kept as a
+    // last-resort guardrail against clock skew or platform bugs.
+    if (entry.expiresAt <= now) return false;
     return true;
   }
 
   private async fetchAndStore(credentialId: string): Promise<CachedToken> {
+    // Trust the platform's read endpoint — it already proactively
+    // refreshes when the token is within `OAUTH_REFRESH_LEAD_MS` of
+    // expiry. The sidecar's only refresh path is reactive via
+    // `forceRefresh()` on 401.
     const fresh = await this.callRead(credentialId);
-    if (this.needsProactiveRefresh(fresh.expiresAt)) {
-      const refreshed = await this.callRefresh(credentialId);
-      const entry = this.toCached(refreshed);
-      this.cache.set(credentialId, entry);
-      return entry;
-    }
     const entry = this.toCached(fresh);
     this.cache.set(credentialId, entry);
     return entry;
-  }
-
-  private needsProactiveRefresh(expiresAt: number | null): boolean {
-    if (expiresAt === null) return true;
-    return expiresAt - Date.now() <= OAUTH_REFRESH_LEAD_MS;
   }
 
   private toCached(payload: OAuthTokenResponse): CachedToken {

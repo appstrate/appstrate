@@ -18,7 +18,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { OAuthTokenCache, NeedsReconnectionError, CACHE_TTL_MS } from "../oauth-token-cache.ts";
-import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
+import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
 function makeTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
   return {
@@ -113,47 +113,24 @@ describe("OAuthTokenCache.getToken — basic", () => {
   });
 });
 
-describe("OAuthTokenCache.getToken — proactive refresh", () => {
-  it("calls /refresh when initial response shows near-expiry", async () => {
-    let firstCallReturned: OAuthTokenResponse | null = null;
-    const { cache, calls } = makeHarness((url) => {
-      if (url.endsWith("/refresh")) {
-        return makeJsonResponse(
-          makeTokenResponse({
-            accessToken: "tok-after-refresh",
-            expiresAt: Date.now() + 60 * 60_000,
-          }),
-        );
-      }
-      firstCallReturned = makeTokenResponse({
-        accessToken: "tok-near-expiry",
-        // Within OAUTH_REFRESH_LEAD_MS — should trigger proactive refresh
-        expiresAt: Date.now() + (OAUTH_REFRESH_LEAD_MS - 1_000),
-      });
-      return makeJsonResponse(firstCallReturned);
-    });
+describe("OAuthTokenCache.getToken — platform owns proactive refresh", () => {
+  it("returns the token the platform sent without a second-round-trip refresh", async () => {
+    // The platform's read endpoint proactively refreshes within
+    // OAUTH_REFRESH_LEAD_MS — the sidecar trusts whatever it returns.
+    const { cache, calls } = makeHarness(() =>
+      makeJsonResponse(
+        makeTokenResponse({
+          accessToken: "tok-from-platform",
+          expiresAt: Date.now() + 60 * 60_000,
+        }),
+      ),
+    );
 
     const t = await cache.getToken("c1");
-    expect(t.accessToken).toBe("tok-after-refresh");
-    expect(calls()).toHaveLength(2);
+    expect(t.accessToken).toBe("tok-from-platform");
+    expect(calls()).toHaveLength(1);
     expect(calls()[0]?.url).toBe("http://platform/internal/oauth-token/c1");
-    expect(calls()[1]?.url).toBe("http://platform/internal/oauth-token/c1/refresh");
-    expect(calls()[1]?.method).toBe("POST");
-  });
-
-  it("calls /refresh when expiresAt is null (unknown)", async () => {
-    const { cache, calls } = makeHarness((url) => {
-      if (url.endsWith("/refresh")) {
-        return makeJsonResponse(
-          makeTokenResponse({ accessToken: "tok-refresh", expiresAt: Date.now() + 60 * 60_000 }),
-        );
-      }
-      return makeJsonResponse(makeTokenResponse({ accessToken: "tok-no-expiry", expiresAt: null }));
-    });
-
-    const t = await cache.getToken("c1");
-    expect(t.accessToken).toBe("tok-refresh");
-    expect(calls()).toHaveLength(2);
+    expect(calls()[0]?.method).toBe("GET");
   });
 });
 
