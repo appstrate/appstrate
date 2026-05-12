@@ -130,44 +130,18 @@ async function loadCredentialState(
   };
 }
 
-/**
- * Resolve the abstract `accountId` identity slot via the provider's
- * `extractTokenIdentity` hook, with the stored value as fallback. Returns
- * `undefined` for providers that don't surface the slot.
- *
- * Always prefers the freshly-extracted hook value over the stored one —
- * providers that re-issue a token on every refresh (e.g. JWT-bearing
- * OAuth providers) make the wire token the source of truth. Falls back to
- * stored only when the hook returns null. Logs once at warn level when
- * the provider declares `accountId` as a required identity slot yet
- * neither source yields one (visibility on broken rows).
- */
-function resolveAccountIdViaHook(
-  config: ModelProviderConfig,
-  accessToken: string,
-  stored: string | undefined,
-  credentialId: string,
-): string | undefined {
-  const claims = config.hooks?.extractTokenIdentity?.(accessToken) ?? null;
-  if (claims?.accountId) return claims.accountId;
-  if (stored) return stored;
-  if (config.requiredIdentityClaims?.includes("accountId")) {
+function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
+  // Trust the stored `accountId` — it was populated by
+  // `extractTokenIdentity` at import time and re-populated on every
+  // refresh in `doRefresh`. Re-decoding the JWT on every sidecar poll
+  // would burn cycles for no gain.
+  const accountId = state.blob.accountId;
+  if (!accountId && state.config.requiredIdentityClaims?.includes("accountId")) {
     logger.warn("oauth model provider: accountId missing in stored creds", {
-      credentialId,
-      providerId: config.providerId,
-      hookReturnedClaims: claims !== null,
+      credentialId: state.credentialId,
+      providerId: state.config.providerId,
     });
   }
-  return undefined;
-}
-
-function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
-  const accountId = resolveAccountIdViaHook(
-    state.config,
-    state.blob.accessToken,
-    state.blob.accountId,
-    state.credentialId,
-  );
   return {
     accessToken: state.blob.accessToken,
     expiresAt: state.blob.expiresAt,
@@ -389,12 +363,18 @@ async function doRefresh(
   // one (Anthropic does, OpenAI rotates them too, but be defensive).
   const parsed = parseTokenResponse(data, undefined, state.blob.refreshToken);
 
-  const accountId = resolveAccountIdViaHook(
-    state.config,
-    parsed.accessToken,
-    state.blob.accountId,
-    credentialId,
-  );
+  // Re-extract identity from the freshly-issued access token. Providers
+  // that re-issue a token on every refresh make the wire token the source
+  // of truth; fall back to the previously-stored value otherwise.
+  const claims = state.config.hooks?.extractTokenIdentity?.(parsed.accessToken) ?? null;
+  const accountId = claims?.accountId ?? state.blob.accountId;
+  if (!accountId && state.config.requiredIdentityClaims?.includes("accountId")) {
+    logger.warn("oauth model provider: accountId missing after refresh", {
+      credentialId,
+      providerId: state.config.providerId,
+      hookReturnedClaims: claims !== null,
+    });
+  }
   const expiresAtMs = parsed.expiresAt ? new Date(parsed.expiresAt).getTime() : null;
   await updateOAuthCredentialTokens(state.orgId, credentialId, {
     accessToken: parsed.accessToken,
