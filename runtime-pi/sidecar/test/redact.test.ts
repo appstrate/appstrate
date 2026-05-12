@@ -1,69 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { redactSecrets, filterSensitiveHeaders } from "../redact.ts";
-
-describe("redactSecrets", () => {
-  it("redacts a JWT triple-segment token", () => {
-    const jwt =
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
-    const out = redactSecrets(`token=${jwt} trailing`);
-    expect(out).toBe("token=***JWT-REDACTED*** trailing");
-    expect(out).not.toContain("eyJ");
-  });
-
-  it("redacts a Bearer header value", () => {
-    const out = redactSecrets("Authorization: Bearer abc123XYZ-_.~+/==");
-    expect(out).toBe("Authorization: Bearer ***REDACTED***");
-    expect(out).not.toContain("abc123");
-  });
-
-  it("redacts an Anthropic sk-ant- key", () => {
-    const out = redactSecrets("key=sk-ant-api03-abcdef123456 next");
-    expect(out).toBe("key=sk-ant-***REDACTED*** next");
-    expect(out).not.toContain("api03");
-  });
-
-  it("redacts a generic sk- key with ≥20 body chars", () => {
-    const out = redactSecrets("OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234");
-    expect(out).toBe("OPENAI_API_KEY=sk-***REDACTED***");
-  });
-
-  it("preserves short sk- placeholders (sk-placeholder, sk-test)", () => {
-    expect(redactSecrets("config=sk-placeholder")).toBe("config=sk-placeholder");
-    expect(redactSecrets("debug sk-test value")).toBe("debug sk-test value");
-    expect(redactSecrets("sk-foo")).toBe("sk-foo");
-  });
-
-  it("preserves a JWT placeholder shape (header.payload.placeholder)", () => {
-    // The literal docs/example shape `header.payload.placeholder` has no
-    // `eyJ` prefix on the first two segments, so it must NOT match the
-    // JWT regex — leave it intact for operator readability.
-    const placeholder = "header.payload.placeholder";
-    expect(redactSecrets(`token=${placeholder}`)).toBe(`token=${placeholder}`);
-  });
-
-  it("preserves text that matches no secret shape", () => {
-    const text = "request_id=req_abc 429 Too Many Requests retry-after=3 model=gpt-4o";
-    expect(redactSecrets(text)).toBe(text);
-  });
-
-  it("returns empty string unchanged", () => {
-    expect(redactSecrets("")).toBe("");
-  });
-
-  it("redacts multiple shapes in the same string", () => {
-    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
-    const input = `bearer Bearer abcdefghijk and jwt ${jwt} and key sk-ant-secret-token-here`;
-    const out = redactSecrets(input);
-    expect(out).toContain("Bearer ***REDACTED***");
-    expect(out).toContain("***JWT-REDACTED***");
-    expect(out).toContain("sk-ant-***REDACTED***");
-    expect(out).not.toContain("eyJ");
-    expect(out).not.toContain("abcdefghijk");
-    expect(out).not.toContain("secret-token");
-  });
-});
+import { filterSensitiveHeaders } from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {

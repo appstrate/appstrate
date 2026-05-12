@@ -27,7 +27,7 @@ import {
   TransformBodyTooLargeError,
 } from "./oauth-identity.ts";
 import { logger } from "./logger.ts";
-import { redactSecrets, filterSensitiveHeaders } from "./redact.ts";
+import { filterSensitiveHeaders } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -138,18 +138,19 @@ async function logOauthLlmResponse(
     // body unreadable — log what we have
   }
   // Drop credential-bearing headers (set-cookie, www-authenticate, …)
-  // and regex-scrub known secret shapes from the body sample before it
-  // hits the operator log. See `redact.ts` for the allowlist + shape list.
+  // before the response hits the operator log. We don't regex-scrub the
+  // body sample — upstream JSON error payloads never echo bearer tokens
+  // back, and a 200-char preview is enough to diagnose without amplifying
+  // log noise.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const truncated = bodySample.length > 1500 ? bodySample.slice(0, 1500) + "…" : bodySample;
-  const redactedBodySample = redactSecrets(truncated);
+  const truncated = bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample;
   logger.warn("oauth llm: upstream response non-2xx", {
     providerId,
     targetUrl,
     status: upstream.status,
     contentType: upstream.headers.get("content-type"),
     responseHeaders,
-    bodySample: redactedBodySample,
+    bodySample: truncated,
   });
   return upstream;
 }

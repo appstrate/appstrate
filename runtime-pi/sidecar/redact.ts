@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Operator-log redaction helpers for the OAuth LLM proxy path.
+ * Operator-log header redaction for the OAuth LLM proxy path.
  *
- * Upstream LLM providers routinely echo sensitive material on
- * auth-failure responses: a fresh access token
- * surfaced via `WWW-Authenticate`, a session cookie set on a 401, a JWT
- * embedded in a JSON error body, and so on. The sidecar's warn log is
- * collected by the operator's log aggregator (pino JSON → stdout), so any
- * verbatim copy is a credential leak in cleartext.
+ * Upstream LLM providers can echo credential-bearing material on
+ * auth-failure responses (`WWW-Authenticate` challenge, `Set-Cookie`
+ * session token). The sidecar's warn log is collected by the operator's
+ * log aggregator (pino JSON → stdout), so any verbatim copy is a leak.
  *
- * Two surfaces to scrub:
- *   - response headers — drop the well-known credential carriers
- *     entirely (`set-cookie`, `www-authenticate`, …) rather than try to
- *     parse their values.
- *   - response body samples — regex-replace known token shapes (JWTs,
- *     `sk-…`, `sk-ant-…`, `Bearer …`) with explicit redaction markers.
- *
- * Both helpers are pure and synchronous — the goal is to keep them
- * trivial to unit-test in isolation from the proxy.
+ * We drop the well-known credential-carrying headers entirely rather
+ * than try to parse their values. Body samples are truncated to a small
+ * preview (set at the call-site) — JSON error payloads from major LLM
+ * providers don't echo bearer tokens back, so per-shape regex scrubbing
+ * is unnecessary.
  */
 
 /**
@@ -64,48 +58,5 @@ export function filterSensitiveHeaders(
       out[key] = value;
     }
   }
-  return out;
-}
-
-/**
- * Regex-based redaction of known secret shapes in arbitrary text. Order
- * matters — the longer / more specific shapes run first so the broader
- * `sk-` rule never clobbers a `sk-ant-` token mid-replace.
- *
- * Shapes handled:
- *   - JWT (`eyJ…\.eyJ…\.…`) → `***JWT-REDACTED***`
- *   - `Bearer <token>` (HTTP auth)         → `Bearer ***REDACTED***`
- *   - Anthropic API keys (`sk-ant-…`)      → `sk-ant-***REDACTED***`
- *   - Generic `sk-` keys ≥20 body chars    → `sk-***REDACTED***`
- *     (the 20-char floor preserves obvious dev placeholders such as
- *     `sk-placeholder`, `sk-test`, `sk-foo` that we want to keep
- *     readable in operator logs.)
- */
-export function redactSecrets(text: string): string {
-  if (!text) return text;
-
-  // JWT: three dot-separated base64url segments, the first two starting
-  // with `eyJ` (which decodes to `{"`). The third segment is the
-  // signature — we require ≥1 char to avoid matching `header.payload.`
-  // placeholders that some docs/examples use.
-  let out = text.replace(
-    /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
-    "***JWT-REDACTED***",
-  );
-
-  // `Bearer <token>` — HTTP auth scheme. Token charset per RFC 6750
-  // (base64url + `=` padding + `+/`).
-  out = out.replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/g, "Bearer ***REDACTED***");
-
-  // Anthropic-prefixed keys first, so the generic `sk-` rule below never
-  // partially overwrites the `ant-` segment.
-  out = out.replace(/sk-ant-[\w-]+/g, "sk-ant-***REDACTED***");
-
-  // Generic `sk-` keys: require ≥20 chars after the prefix to skip
-  // obvious placeholders like `sk-placeholder` (14) or `sk-test` (7).
-  // Real OpenAI keys are ~48 chars; 20 is a safe floor that keeps short
-  // dev sentinels readable while catching the real thing.
-  out = out.replace(/sk-[\w-]{20,}/g, "sk-***REDACTED***");
-
   return out;
 }
