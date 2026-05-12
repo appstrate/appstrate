@@ -9,7 +9,7 @@
  * one adapter per endpoint and hands it to the shared core.
  */
 
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 
 /** Principal that minted the proxy call — mirrors credential-proxy. */
 export type LlmProxyPrincipal =

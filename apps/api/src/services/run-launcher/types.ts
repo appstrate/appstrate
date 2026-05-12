@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { modelCostSchema, tokenUsageSchema } from "@appstrate/shared-types";
-import type { ModelCost, TokenUsage } from "@appstrate/shared-types";
+import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
 
-export type { ModelCost, ToolMeta, TokenUsage, ResolvedModel };
+export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
 
 export interface UploadedFile {

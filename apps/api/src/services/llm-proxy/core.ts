@@ -30,7 +30,7 @@ import type {
   UpstreamUsage,
 } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;

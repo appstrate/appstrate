@@ -27,7 +27,8 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
-import { type OpenRouterModel, type ModelCost } from "../hooks/use-models";
+import { type OpenRouterModel } from "../hooks/use-models";
+import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {

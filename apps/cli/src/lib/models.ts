@@ -10,7 +10,7 @@
  * the real upstream credentials.
  */
 
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 import { apiList } from "./api.ts";
 
 export interface ModelPreset {

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { modelCostSchema } from "@appstrate/shared-types";
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 
 // --- Types ---
 

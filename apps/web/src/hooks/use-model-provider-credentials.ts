@@ -3,7 +3,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { ModelCost, ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 
 export function useModelProviderCredentials() {
   const orgId = useCurrentOrgId();
