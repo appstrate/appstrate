@@ -186,6 +186,62 @@ export const modelsPaths = {
       },
     },
   },
+  "/api/models/seed": {
+    post: {
+      operationId: "seedModels",
+      tags: ["Models"],
+      summary: "Bulk-seed models from the registry for a credential",
+      description:
+        "Atomically seed multiple `org_models` rows from the registry entry pinned by the credential's `providerId`. Idempotent — returns `created: 0` when the org already has any model bound to this credential.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["credentialId", "modelIds"],
+              properties: {
+                credentialId: { type: "string", minLength: 1 },
+                modelIds: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 50,
+                  items: { type: "string", minLength: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Models seeded",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["created", "ids", "promotedDefault"],
+                properties: {
+                  created: { type: "integer", minimum: 0 },
+                  ids: { type: "array", items: { type: "string" } },
+                  promotedDefault: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/models/openrouter": {
     get: {
       operationId: "searchOpenRouterModels",

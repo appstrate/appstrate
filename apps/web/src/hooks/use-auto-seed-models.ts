@@ -3,26 +3,33 @@
 /**
  * Onboarding-only helper that seeds `org_models` rows right after a fresh
  * OAuth pairing succeeds. Wired into the onboarding quick-connect cards —
- * NOT into the generic `OAuthModelProviderDialog` flow, because users
- * launching OAuth from the model picker explicitly want a single model.
+ * NOT into the generic credential form modal flow, because users launching
+ * OAuth from the model picker explicitly want a single model.
  *
- * Policy:
- *   1. If the org already has ANY model for this `providerId`, do nothing —
- *      respect manual configuration (e.g. user disconnected + reconnected).
- *   2. Seed every model marked `recommended: true` in the registry. If no
- *      model carries that flag, fall back to seeding the whole list.
- *   3. If the org has no default model, the first seeded row becomes default.
+ * Delegates to the platform's `POST /api/models/seed` endpoint, which:
+ *   1. Skips entirely if any model already binds to this credential.
+ *   2. Seeds every recommended model from the registry (falls back to the
+ *      full model list when no model carries `recommended: true`).
+ *   3. Promotes the first inserted row to default if the org has none.
+ *
+ * One round-trip, atomic — the previous N-POST-per-model dance was
+ * superseded by phase 1.3 of the optimization plan.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { api } from "../api";
 import { useProvidersRegistry, type ProviderRegistryEntry } from "./use-model-provider-credentials";
-import type { OrgModelInfo } from "@appstrate/shared-types";
 
 interface SeedResult {
-  /** Number of models created. Zero when the org already had models for this provider. */
+  /** Number of models created. Zero when the org already had models for this credential. */
   created: number;
   /** Whether one of the freshly-created rows was promoted to default. */
+  promotedDefault: boolean;
+}
+
+interface SeedResponse {
+  created: number;
+  ids: string[];
   promotedDefault: boolean;
 }
 
@@ -35,62 +42,24 @@ export function useAutoSeedRecommendedModels() {
     const entry = registry?.find((p) => p.providerId === providerId);
     if (!entry) return { created: 0, promotedDefault: false };
 
-    // Refetch the current model list — onboarding has live SSE state, so a
-    // stale React Query cache could mislead the dedup check.
-    const models = await apiList<OrgModelInfo>("/models");
-    const hasExistingForProvider = models.some((m) => m.credentialId === credentialId);
-    if (hasExistingForProvider) {
-      return { created: 0, promotedDefault: false };
-    }
-
     const recommended = entry.models.filter((m) => m.recommended);
     const toSeed = recommended.length > 0 ? recommended : entry.models;
     if (toSeed.length === 0) return { created: 0, promotedDefault: false };
 
-    const orgHasDefault = models.some((m) => m.isDefault);
-
-    let created = 0;
-    let promotedDefault = false;
-    let firstCreatedId: string | null = null;
-
-    for (const m of toSeed) {
-      try {
-        const res = await api<{ id: string }>("/models", {
-          method: "POST",
-          body: JSON.stringify({
-            label: m.id,
-            apiShape: entry.apiShape,
-            baseUrl: entry.defaultBaseUrl,
-            modelId: m.id,
-            credentialId,
-            contextWindow: m.contextWindow,
-            maxTokens: m.maxTokens ?? undefined,
-            input: m.capabilities.filter((c) => c === "text" || c === "image"),
-            reasoning: m.capabilities.includes("reasoning"),
-          }),
-        });
-        created++;
-        if (!firstCreatedId) firstCreatedId = res.id;
-      } catch {
-        // Seed is best-effort — a duplicate-label or transient failure on one
-        // model shouldn't abort the rest. The user can always fix it manually.
-      }
+    try {
+      const res = await api<SeedResponse>("/models/seed", {
+        method: "POST",
+        body: JSON.stringify({
+          credentialId,
+          modelIds: toSeed.map((m) => m.id),
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ["models"] });
+      return { created: res.created, promotedDefault: res.promotedDefault };
+    } catch {
+      // Seed is best-effort — onboarding can still continue if seeding fails.
+      return { created: 0, promotedDefault: false };
     }
-
-    if (!orgHasDefault && firstCreatedId) {
-      try {
-        await api("/models/default", {
-          method: "PUT",
-          body: JSON.stringify({ modelId: firstCreatedId }),
-        });
-        promotedDefault = true;
-      } catch {
-        // Non-fatal — the user can set a default manually.
-      }
-    }
-
-    qc.invalidateQueries({ queryKey: ["models"] });
-    return { created, promotedDefault };
   };
 
   return { seed, registryReady: !registryQuery.isLoading && !!registryQuery.data };

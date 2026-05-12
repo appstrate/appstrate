@@ -187,6 +187,94 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
 }
 
+/**
+ * Atomically seed multiple models from the registry for a single OAuth-connected
+ * credential. Called by the onboarding quick-connect flow right after a
+ * pairing succeeds — replaces N client-side POST /models calls.
+ *
+ * Skips entirely if the org already has any model bound to the credential
+ * (idempotent for re-connect flows). Promotes the first newly-created row to
+ * default when the org has no default yet.
+ *
+ * Each entry in `models` is taken verbatim — the caller (typically the registry
+ * for that provider) is responsible for matching modelId to its
+ * apiShape/baseUrl/capabilities. We do NOT re-resolve via the registry here so
+ * the service stays pure DB.
+ */
+export interface SeedModelEntry {
+  modelId: string;
+  label: string;
+  apiShape: string;
+  baseUrl: string;
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+}
+
+export interface SeedModelsResult {
+  created: number;
+  ids: string[];
+  promotedDefault: boolean;
+}
+
+export async function seedOrgModelsForCredential(
+  orgId: string,
+  userId: string,
+  credentialId: string,
+  entries: SeedModelEntry[],
+): Promise<SeedModelsResult> {
+  if (entries.length === 0) return { created: 0, ids: [], promotedDefault: false };
+
+  return db.transaction(async (tx) => {
+    // Dedup: skip if any model already references this credential.
+    const existingForCred = await tx
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.credentialId, credentialId)] }))
+      .limit(1);
+    if (existingForCred.length > 0) {
+      return { created: 0, ids: [], promotedDefault: false };
+    }
+
+    const orgHasDefault = await tx
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.isDefault, true)] }))
+      .limit(1);
+    const needsDefault = orgHasDefault.length === 0;
+
+    const inserted = await tx
+      .insert(orgModels)
+      .values(
+        entries.map((entry, idx) => ({
+          orgId,
+          label: entry.label,
+          apiShape: entry.apiShape,
+          baseUrl: entry.baseUrl,
+          modelId: entry.modelId,
+          credentialId,
+          input: entry.input ?? null,
+          contextWindow: entry.contextWindow ?? null,
+          maxTokens: entry.maxTokens ?? null,
+          reasoning: entry.reasoning ?? null,
+          cost: null,
+          // First inserted row becomes default when the org had none.
+          isDefault: needsDefault && idx === 0,
+          source: "custom",
+          createdBy: userId,
+        })),
+      )
+      .returning({ id: orgModels.id });
+
+    return {
+      created: inserted.length,
+      ids: inserted.map((r) => r.id),
+      promotedDefault: needsDefault && inserted.length > 0,
+    };
+  });
+}
+
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
   // Reset all defaults for this org
   await db

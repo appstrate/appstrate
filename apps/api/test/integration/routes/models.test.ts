@@ -5,6 +5,11 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import { db } from "@appstrate/db/client";
+import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
+import { eq, and } from "drizzle-orm";
+import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
 
@@ -226,6 +231,138 @@ describe("Models API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
+    });
+  });
+
+  describe("POST /api/models/seed", () => {
+    /**
+     * Inserts an OAuth credential bound to the synthetic `test-oauth`
+     * provider. The seed endpoint only accepts credentials whose providerId
+     * matches a registered entry; the api-key-only `seedOrgModelProviderKey`
+     * helper wouldn't suffice because its provider has no registered
+     * `models[]` list.
+     */
+    async function seedTestOAuthCredential(): Promise<string> {
+      const [row] = await db
+        .insert(modelProviderCredentials)
+        .values({
+          orgId: ctx.orgId,
+          label: "Test OAuth",
+          providerId: TEST_OAUTH_PROVIDER_ID,
+          credentialsEncrypted: encryptCredentials({
+            kind: "oauth",
+            accessToken: "test-access",
+            refreshToken: "test-refresh",
+            expiresAt: null,
+            needsReconnection: false,
+          }),
+          createdBy: ctx.user.id,
+        })
+        .returning();
+      return row!.id;
+    }
+
+    it("seeds models atomically and promotes the first as default", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        created: number;
+        ids: string[];
+        promotedDefault: boolean;
+      };
+      expect(body.created).toBe(1);
+      expect(body.ids).toHaveLength(1);
+      expect(body.promotedDefault).toBe(true);
+
+      const inserted = await db
+        .select()
+        .from(orgModels)
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.credentialId, credentialId)));
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0]!.modelId).toBe("test-model");
+      expect(inserted[0]!.isDefault).toBe(true);
+    });
+
+    it("is idempotent — returns created=0 when models already exist for the credential", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const first = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+      expect(first.status).toBe(201);
+
+      const second = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+      expect(second.status).toBe(201);
+      const body = (await second.json()) as { created: number; promotedDefault: boolean };
+      expect(body.created).toBe(0);
+      expect(body.promotedDefault).toBe(false);
+    });
+
+    it("rejects unknown modelIds with 400", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["does-not-exist"] }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when the credential does not exist", async () => {
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          credentialId: "00000000-0000-0000-0000-000000000000",
+          modelIds: ["test-model"],
+        }),
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("does NOT promote default when the org already has one", async () => {
+      const existingKey = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: existingKey.id,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+        modelId: "gpt-4o",
+        label: "Existing default",
+        isDefault: true,
+      });
+
+      const credentialId = await seedTestOAuthCredential();
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { created: number; promotedDefault: boolean };
+      expect(body.created).toBe(1);
+      expect(body.promotedDefault).toBe(false);
     });
   });
 });

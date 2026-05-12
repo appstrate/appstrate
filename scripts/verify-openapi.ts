@@ -176,6 +176,7 @@ const expectedEndpoints = [
   "PUT /api/models/default",
   "GET /api/models/openrouter",
   "POST /api/models/test",
+  "POST /api/models/seed",
   "PUT /api/models/{id}",
   "DELETE /api/models/{id}",
   "POST /api/models/{id}/test",

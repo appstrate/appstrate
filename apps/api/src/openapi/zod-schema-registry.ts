@@ -20,6 +20,7 @@ import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts
 // --- Model schemas (routes/models.ts) ---
 import {
   createModelSchema,
+  seedModelsSchema,
   updateModelSchema,
   setDefaultSchema as modelsSetDefaultSchema,
   testInlineSchema as modelsTestInlineSchema,
@@ -170,6 +171,12 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/models/test",
     jsonSchema: toJsonSchema(modelsTestInlineSchema),
     description: "Test model config inline",
+  },
+  {
+    method: "POST",
+    path: "/api/models/seed",
+    jsonSchema: toJsonSchema(seedModelsSchema),
+    description: "Bulk-seed models from registry",
   },
 
   // ─── API Keys ───────────────────────────────────────────────────────────
