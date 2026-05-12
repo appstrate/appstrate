@@ -25,10 +25,20 @@ beforeAll(() => {
   registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
 });
 
-const CORE_PROVIDER_IDS = ["openai", "anthropic", "openai-compatible"] as const;
+const CORE_PROVIDER_IDS = [
+  "anthropic",
+  "cerebras",
+  "google-ai",
+  "groq",
+  "mistral",
+  "openai",
+  "openai-compatible",
+  "openrouter",
+  "xai",
+] as const;
 
 describe("runtime registry composition", () => {
-  it("exposes the three canonical core-providers (all module-contributed)", () => {
+  it("exposes every canonical core-provider (all module-contributed)", () => {
     const ids = listModelProviders()
       .map((p) => p.providerId)
       .sort();
@@ -46,7 +56,7 @@ describe("runtime registry composition", () => {
       expect(cfg.displayName.length).toBeGreaterThan(0);
       expect(cfg.iconUrl.length).toBeGreaterThan(0);
       expect(cfg.apiShape).toMatch(
-        /^(anthropic-messages|openai-chat|openai-responses|openai-codex-responses)$/,
+        /^(anthropic-messages|openai-chat|openai-completions|openai-responses|openai-codex-responses|mistral-conversations|google-generative-ai|google-vertex|azure-openai-responses|bedrock-converse-stream)$/,
       );
       expect(cfg.defaultBaseUrl.length).toBeGreaterThan(0);
       expect(typeof cfg.baseUrlOverridable).toBe("boolean");

@@ -4,12 +4,22 @@ import { describe, it, expect } from "bun:test";
 import coreProvidersModule from "../../index.ts";
 
 describe("core-providers module", () => {
-  it("declares the three canonical API-key providers", () => {
+  it("declares the canonical API-key provider catalog", () => {
     const ids = coreProvidersModule
       .modelProviders?.()
       .map((p) => p.providerId)
       .sort();
-    expect(ids).toEqual(["anthropic", "openai", "openai-compatible"]);
+    expect(ids).toEqual([
+      "anthropic",
+      "cerebras",
+      "google-ai",
+      "groq",
+      "mistral",
+      "openai",
+      "openai-compatible",
+      "openrouter",
+      "xai",
+    ]);
   });
 
   it("every contributed provider is api_key and has no oauth block", () => {
@@ -26,13 +36,19 @@ describe("core-providers module", () => {
     expect(overridable).toEqual(["openai-compatible"]);
   });
 
-  it("matches the apiShape of the legacy in-code seed", () => {
+  it("pins each provider to its canonical apiShape", () => {
     const byId = new Map(
       (coreProvidersModule.modelProviders?.() ?? []).map((p) => [p.providerId, p]),
     );
-    expect(byId.get("openai")?.apiShape).toBe("openai-chat");
+    expect(byId.get("openai")?.apiShape).toBe("openai-responses");
     expect(byId.get("anthropic")?.apiShape).toBe("anthropic-messages");
     expect(byId.get("openai-compatible")?.apiShape).toBe("openai-chat");
+    expect(byId.get("mistral")?.apiShape).toBe("mistral-conversations");
+    expect(byId.get("google-ai")?.apiShape).toBe("google-generative-ai");
+    expect(byId.get("groq")?.apiShape).toBe("openai-completions");
+    expect(byId.get("cerebras")?.apiShape).toBe("openai-completions");
+    expect(byId.get("xai")?.apiShape).toBe("openai-completions");
+    expect(byId.get("openrouter")?.apiShape).toBe("openai-completions");
   });
 
   it("init is a no-op (declarative contribution)", async () => {
