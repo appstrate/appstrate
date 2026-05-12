@@ -447,7 +447,7 @@ export function getModuleOidcScopes(): string[] {
  * resolves credentials by id.
  *
  * OSS invariant: returns `[]` when no module contributes (e.g. cloud SaaS
- * with `MODULES=oidc,webhooks` and neither `core-providers` nor `codex`).
+ * with `MODULES=oidc,webhooks` and no provider-contributing module loaded).
  */
 export function getModuleModelProviders(): readonly ModelProviderDefinition[] {
   const collected: ModelProviderDefinition[] = [];

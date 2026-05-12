@@ -47,6 +47,7 @@
         "@appstrate/db": "workspace:*",
         "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
+        "@appstrate/module-codex": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "@better-auth/oauth-provider": "^1.6.9",
@@ -300,6 +301,13 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
     },
+    "packages/module-codex": {
+      "name": "@appstrate/module-codex",
+      "version": "0.0.0",
+      "dependencies": {
+        "@appstrate/core": "workspace:*",
+      },
+    },
     "packages/runner-pi": {
       "name": "@appstrate/runner-pi",
       "version": "0.0.0",
@@ -418,6 +426,8 @@
     "@appstrate/env": ["@appstrate/env@workspace:packages/env"],
 
     "@appstrate/mcp-transport": ["@appstrate/mcp-transport@workspace:packages/mcp-transport"],
+
+    "@appstrate/module-codex": ["@appstrate/module-codex@workspace:packages/module-codex"],
 
     "@appstrate/runner-pi": ["@appstrate/runner-pi@workspace:packages/runner-pi"],
 

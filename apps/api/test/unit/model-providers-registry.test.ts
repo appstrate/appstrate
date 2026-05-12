@@ -86,7 +86,7 @@ describe("model-providers runtime registry", () => {
 
     it("returns true for oauth2 providers", () => {
       registerModelProvider(
-        fakeDef("codex", {
+        fakeDef("oauth-test", {
           authMode: "oauth2",
           oauth: {
             clientId: "x",
@@ -98,7 +98,7 @@ describe("model-providers runtime registry", () => {
           },
         }),
       );
-      expect(isOAuthModelProvider("codex")).toBe(true);
+      expect(isOAuthModelProvider("oauth-test")).toBe(true);
     });
   });
 
@@ -115,7 +115,7 @@ describe("model-providers runtime registry", () => {
     it("preserves the hooks reference on the stored definition", () => {
       const extractTokenIdentity = (t: string) => ({ accountId: t.slice(0, 4) });
       registerModelProvider(
-        fakeDef("codex", {
+        fakeDef("oauth-test", {
           authMode: "oauth2",
           oauth: {
             clientId: "x",
@@ -128,7 +128,7 @@ describe("model-providers runtime registry", () => {
           hooks: { extractTokenIdentity },
         }),
       );
-      const def = getModelProvider("codex");
+      const def = getModelProvider("oauth-test");
       expect(def?.hooks?.extractTokenIdentity).toBe(extractTokenIdentity);
     });
   });

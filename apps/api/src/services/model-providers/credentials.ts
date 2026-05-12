@@ -69,7 +69,7 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * descriptors. OAuth + DB rows always carry one.
  */
 export interface DecryptedModelProviderCredentials {
-  /** Canonical registry id ("anthropic", "codex", …). Absent for env-driven system keys. */
+  /** Canonical registry id ("anthropic", "openai", …). Absent for env-driven system keys. */
   providerId?: string;
   apiShape: ModelApiShape;
   baseUrl: string;

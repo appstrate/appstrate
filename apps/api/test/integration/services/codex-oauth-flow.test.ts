@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Codex module — integration coverage for OAuth flow behaviors that depend
- * on this module's `extractTokenIdentity` hook and `requiredIdentityClaims`
- * declaration. Generic flow coverage (unknown providerId, empty label,
- * api-key rejection, refresh, soft-disable, etc.) lives in the core suite
- * under `apps/api/test/integration/` and is exercised against the synthetic
- * `test-oauth` provider — that suite must not depend on this module being
- * loaded.
+ * Cross-cutting integration coverage for OAuth flow behaviors that depend
+ * on the `@appstrate/module-codex` workspace package's `extractTokenIdentity`
+ * hook and `requiredIdentityClaims` declaration. The test runs because the
+ * root test preload (`test/setup/preload.ts`) auto-discovers
+ * `packages/module-codex/` and registers it before this file loads — so
+ * removing the module from the repo makes this file fail to find the
+ * provider in the registry and the codex assertions go away with it.
+ *
+ * Generic flow coverage (unknown providerId, empty label, api-key
+ * rejection, refresh, soft-disable, etc.) lives next to this file and is
+ * exercised against the synthetic `test-oauth` provider — that suite must
+ * not depend on this module being loaded.
  *
  * What this file owns:
  *   - JWT decoding round-trip (CLI sends raw access token → platform
@@ -22,17 +27,17 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
-import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
+import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { decryptCredentials } from "@appstrate/connect";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { importOAuthModelProviderConnection } from "../../../../../services/model-providers/oauth-flow.ts";
+import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
 import {
   loadInferenceCredentials,
   listOrgModelProviderCredentials,
   type OAuthBlob,
-} from "../../../../../services/model-providers/credentials.ts";
-import { ApiError } from "../../../../../lib/errors.ts";
+} from "../../../src/services/model-providers/credentials.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 
 const CODEX = "codex";
 

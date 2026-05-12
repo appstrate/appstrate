@@ -61,11 +61,11 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Canonical providerId (e.g. "codex") — used for logging only. The sidecar never branches on this value. */
+  /** Canonical providerId — used for logging only. The sidecar never branches on this value. */
   providerId: string;
-  /** Path rewrite applied to every outbound URL (e.g. Codex `/v1/responses` → `/codex/responses`). */
+  /** Path rewrite applied to every outbound URL (e.g. `/v1/responses` → `/codex/responses` for chatgpt-account-mode Codex). */
   rewriteUrlPath?: { from: string; to: string };
-  /** Force `stream: true` in JSON request bodies (Codex ChatGPT-account mode). */
+  /** Force `stream: true` in JSON request bodies (required by some chat-account OAuth flows). */
   forceStream?: boolean;
   /** Force `store: false` in JSON request bodies (Codex ChatGPT-account mode). */
   forceStore?: boolean;

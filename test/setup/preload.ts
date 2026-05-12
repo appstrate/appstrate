@@ -6,14 +6,18 @@
  * 3. Runs Drizzle migrations against the test database (core + all modules)
  * 4. Registers module-owned tables for truncation
  *
- * Module discovery: each built-in module under apps/api/src/modules/<name>/ contributes:
- *   - index.ts — default-exports an AppstrateModule (used by getTestApp)
+ * Module discovery — two roots:
+ *   - apps/api/src/modules/<name>/ (built-in modules, entry: index.ts)
+ *   - packages/module-<name>/ (workspace-package modules, entry: src/index.ts)
+ *
+ * Each module directory contributes:
+ *   - the entry file — default-exports an AppstrateModule (used by getTestApp)
  *   - drizzle/migrations/NNNN_name.sql — applied in file-name order (alphabetical)
  *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
  *
- * Both are optional. Running core tests alone still picks up installed modules
- * because anything under the modules directory is part of the repo — there is
- * no "module disabled" state in tests, unlike production (MODULES env var).
+ * All three are optional. Running core tests alone still picks up installed
+ * modules because anything in either root is part of the repo — there is no
+ * "module disabled" state in tests, unlike production (MODULES env var).
  */
 import { resolve, join } from "path";
 import { readdirSync, existsSync, statSync } from "fs";
@@ -166,18 +170,47 @@ if (result.exitCode !== 0) {
 }
 
 // ─── Module migrations + truncation registration ────────────
-// Auto-discover every built-in module under apps/api/src/modules/*/ and
-// wire up its test infrastructure. We do this from the root preload (not
-// per-module) so that `bun test` from any directory sees a consistent state.
+// Auto-discover every module in the repo and wire up its test infrastructure.
+// We do this from the root preload (not per-module) so that `bun test` from
+// any directory sees a consistent state.
+//
+// Two layouts are recognised:
+//   - apps/api/src/modules/<name>/index.ts (built-in modules)
+//   - packages/module-<name>/src/index.ts (workspace-package modules)
+// Both share the same `drizzle/migrations/` and `test/tables.ts` conventions
+// (relative to the module's root directory).
 
-const modulesRoot = resolve(import.meta.dir, "../../apps/api/src/modules");
-const moduleDirs = existsSync(modulesRoot)
-  ? readdirSync(modulesRoot)
-      .map((name) => join(modulesRoot, name))
-      .filter((path) => statSync(path).isDirectory())
-  : [];
+interface DiscoveredModule {
+  /** Module root directory. */
+  dir: string;
+  /** Absolute path to the module's entry file. */
+  entry: string;
+}
 
-for (const moduleDir of moduleDirs) {
+function discoverModules(
+  root: string,
+  entryRel: string,
+  dirPredicate: (name: string) => boolean = () => true,
+): DiscoveredModule[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root)
+    .filter(dirPredicate)
+    .map((name) => ({ dir: join(root, name), entry: join(root, name, entryRel) }))
+    .filter(({ dir, entry }) => statSync(dir).isDirectory() && existsSync(entry));
+}
+
+const builtinModulesRoot = resolve(import.meta.dir, "../../apps/api/src/modules");
+const workspaceModulesRoot = resolve(import.meta.dir, "../../packages");
+const moduleEntries: DiscoveredModule[] = [
+  // Built-in modules — `apps/api/src/modules/<name>/index.ts`.
+  ...discoverModules(builtinModulesRoot, "index.ts"),
+  // Workspace-package modules — `packages/module-<name>/src/index.ts`.
+  // The `module-` prefix is the convention that distinguishes module
+  // workspace packages from regular library packages (core, db, ui, …).
+  ...discoverModules(workspaceModulesRoot, "src/index.ts", (n) => n.startsWith("module-")),
+];
+
+for (const { dir: moduleDir } of moduleEntries) {
   const migrationsDir = join(moduleDir, "drizzle", "migrations");
   if (!existsSync(migrationsDir)) continue;
   const sqlFiles = readdirSync(migrationsDir)
@@ -199,15 +232,12 @@ const { registerTestModule } = await import("../../apps/api/test/helpers/test-mo
 // (via `getModuleContributions()`), so tests and prod cannot drift.
 const importedModules: AppstrateModule[] = [];
 
-for (const moduleDir of moduleDirs) {
+for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
   // Register the module itself so getTestApp() can mount its router
-  const indexFile = join(moduleDir, "index.ts");
-  if (existsSync(indexFile)) {
-    const imported: { default?: AppstrateModule } = await import(indexFile);
-    if (imported.default) {
-      registerTestModule(imported.default);
-      importedModules.push(imported.default);
-    }
+  const imported: { default?: AppstrateModule } = await import(indexFile);
+  if (imported.default) {
+    registerTestModule(imported.default);
+    importedModules.push(imported.default);
   }
 
   // Register its tables for per-test truncation

@@ -166,7 +166,7 @@ Provider hooks (`ModelProviderHooks`):
 
 Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
 
-Reference modules: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed) and `codex` (OAuth, all four hooks implemented, `requiredIdentityClaims: ["accountId"]`). External operator-installed providers extend the catalog the same way.
+Reference modules: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed) and the workspace package `@appstrate/module-codex` under `packages/module-codex/` (OAuth, all four hooks implemented, `requiredIdentityClaims: ["accountId"]`). External operator-installed providers extend the catalog the same way.
 
 ## Hooks and events
 

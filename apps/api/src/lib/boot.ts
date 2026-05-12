@@ -90,9 +90,10 @@ export async function boot(): Promise<void> {
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
   // Aggregate model provider contributions from every loaded module into
-  // the runtime registry. The four canonical OSS built-ins (openai,
-  // anthropic, openai-compatible, codex) all ship as modules
-  // (`core-providers`, `codex`) — there is no in-code seed.
+  // the runtime registry. The three core API-key providers (openai,
+  // anthropic, openai-compatible) ship as the `core-providers` module;
+  // OAuth-flavoured providers ship as opt-in workspace modules
+  // (`@appstrate/module-*`). There is no in-code seed.
   registerModelProviders(getModuleModelProviders());
 
   // Initialize Better Auth AFTER modules have registered their plugin +

@@ -1,0 +1,19 @@
+{
+  "name": "@appstrate/module-codex",
+  "version": "0.0.0",
+  "description": "Appstrate module — OAuth model provider for ChatGPT Plus / Pro / Business via Codex. Opt-in: append `@appstrate/module-codex` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@appstrate/core": "workspace:*"
+  }
+}

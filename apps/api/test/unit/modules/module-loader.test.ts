@@ -879,10 +879,10 @@ describe("module-loader", () => {
       const a = mockModule("a", {
         modelProviders: () => [fakeProvider("openai"), fakeProvider("anthropic")],
       });
-      const b = mockModule("b", { modelProviders: () => [fakeProvider("codex")] });
+      const b = mockModule("b", { modelProviders: () => [fakeProvider("extra-oauth")] });
       await loadModulesFromInstances([a, b], mockCtx());
       const ids = getModuleModelProviders().map((p) => p.providerId);
-      expect(ids).toEqual(["openai", "anthropic", "codex"]);
+      expect(ids).toEqual(["openai", "anthropic", "extra-oauth"]);
     });
 
     it("throws when two modules contribute the same providerId", async () => {
@@ -897,7 +897,7 @@ describe("module-loader", () => {
       const a = mockModule("a", {
         modelProviders: () => [
           {
-            ...fakeProvider("codex"),
+            ...fakeProvider("extra-oauth"),
             authMode: "oauth2",
             oauth: {
               clientId: "x",

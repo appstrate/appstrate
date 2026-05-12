@@ -22,6 +22,7 @@
     "@appstrate/db": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
+    "@appstrate/module-codex": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
     "@better-auth/oauth-provider": "^1.6.9",

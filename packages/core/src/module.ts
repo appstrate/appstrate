@@ -358,9 +358,9 @@ export interface AppstrateModule {
    * @example
    * ```ts
    * modelProviders: () => [{
-   *   providerId: "codex",
-   *   displayName: "Codex (ChatGPT)",
-   *   apiShape: "openai-codex-responses",
+   *   providerId: "my-oauth-provider",
+   *   displayName: "My OAuth Provider",
+   *   apiShape: "openai-chat",
    *   authMode: "oauth2",
    *   oauth: { clientId: "...", ... },
    *   models: [...],

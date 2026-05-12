@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import codexModule from "../../index.ts";
+import codexModule from "../../src/index.ts";
 import type { InferenceProbeBuildError, InferenceProbeRequest } from "@appstrate/core/module";
 
 const codex = codexModule.modelProviders?.()[0];

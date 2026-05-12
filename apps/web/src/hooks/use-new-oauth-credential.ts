@@ -15,7 +15,7 @@ import { useModelProviderCredentials } from "./use-model-provider-credentials";
  *   // before opening the OAuth dialog
  *   captureBeforeConnect();
  *   // in dialog.onConnected
- *   const newId = await findAfterConnect("codex");
+ *   const newId = await findAfterConnect(providerId);
  */
 export function useNewOAuthCredential() {
   const credentialsQuery = useModelProviderCredentials();

@@ -2,9 +2,12 @@
 
 /**
  * Cross-module composition contract for the runtime model-provider
- * registry. The four canonical OSS providers — openai, anthropic,
- * openai-compatible, codex — are all contributed by modules and
- * aggregated into the runtime registry at boot.
+ * registry. The three canonical core-providers — openai, anthropic,
+ * openai-compatible — are contributed by the `core-providers` module and
+ * aggregated into the runtime registry at boot. OAuth-flavoured providers
+ * (workspace modules under `packages/module-*`) contribute their own
+ * definitions on top via the same path; their identity / wire-shape
+ * specifics are covered in each module's own unit suite.
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
@@ -16,22 +19,20 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
-import codexModule from "../../../src/modules/codex/index.ts";
 
 beforeAll(() => {
   resetModelProviders();
   registerModelProviders(coreProvidersModule.modelProviders?.() ?? []);
-  registerModelProviders(codexModule.modelProviders?.() ?? []);
 });
 
-const CANONICAL_IDS = ["openai", "anthropic", "openai-compatible", "codex"] as const;
+const CORE_PROVIDER_IDS = ["openai", "anthropic", "openai-compatible"] as const;
 
 describe("runtime registry composition", () => {
-  it("exposes the four canonical OSS providers (all module-contributed)", () => {
+  it("exposes the three canonical core-providers (all module-contributed)", () => {
     const ids = listModelProviders()
       .map((p) => p.providerId)
       .sort();
-    expect(ids).toEqual([...CANONICAL_IDS].sort());
+    expect(ids).toEqual([...CORE_PROVIDER_IDS].sort());
   });
 
   it("each entry's providerId matches its key in the runtime registry", () => {
@@ -53,19 +54,10 @@ describe("runtime registry composition", () => {
     }
   });
 
-  it("oauth field is present iff authMode === 'oauth2'", () => {
+  it("core-providers contribute api-key-only definitions (no OAuth)", () => {
     for (const cfg of listModelProviders()) {
-      if (cfg.authMode === "oauth2") {
-        expect(cfg.oauth).toBeDefined();
-        expect(cfg.oauth!.clientId.length).toBeGreaterThan(0);
-        expect(cfg.oauth!.scopes.length).toBeGreaterThan(0);
-        expect(cfg.oauth!.pkce).toBe("S256");
-        expect(cfg.oauth!.authorizationUrl).toMatch(/^https:\/\//);
-        expect(cfg.oauth!.tokenUrl).toMatch(/^https:\/\//);
-        expect(cfg.oauth!.refreshUrl).toMatch(/^https:\/\//);
-      } else {
-        expect(cfg.oauth).toBeUndefined();
-      }
+      expect(cfg.authMode).toBe("api_key");
+      expect(cfg.oauth).toBeUndefined();
     }
   });
 
@@ -85,8 +77,8 @@ describe("runtime registry composition", () => {
 });
 
 describe("getModelProviderConfig()", () => {
-  it("returns the config for every canonical id", () => {
-    for (const id of CANONICAL_IDS) {
+  it("returns the config for every canonical core-provider id", () => {
+    for (const id of CORE_PROVIDER_IDS) {
       expect(getModelProviderConfig(id)?.providerId).toBe(id);
     }
   });
@@ -98,14 +90,13 @@ describe("getModelProviderConfig()", () => {
 });
 
 describe("isOAuthModelProvider()", () => {
-  it("accepts the canonical OAuth id (codex — the only OSS OAuth provider)", () => {
-    expect(isOAuthModelProvider("codex")).toBe(true);
-  });
-
-  it("rejects api-key providers and anything unknown", () => {
+  it("rejects core-provider api-key ids", () => {
     expect(isOAuthModelProvider("openai")).toBe(false);
     expect(isOAuthModelProvider("anthropic")).toBe(false);
     expect(isOAuthModelProvider("openai-compatible")).toBe(false);
+  });
+
+  it("rejects anything unknown", () => {
     expect(isOAuthModelProvider("@appstrate/provider-gmail")).toBe(false);
     expect(isOAuthModelProvider("@unknown/x")).toBe(false);
     expect(isOAuthModelProvider("")).toBe(false);

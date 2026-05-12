@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import codexModule from "../../index.ts";
+import codexModule from "../../src/index.ts";
 
 describe("codex module", () => {
   it("declares exactly the codex provider", () => {

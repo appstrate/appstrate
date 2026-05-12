@@ -60,7 +60,8 @@ import { getModule, emitEvent } from "./module-loader.ts";
  * openai-compatible) as an explicit, disablable module so cloud SaaS
  * deployments that BYO their own provider catalog can opt out cleanly.
  *
- * OAuth-backed providers (codex, ...) live in their own modules and are
+ * OAuth-backed providers live in their own opt-in modules (workspace
+ * packages under `packages/module-*` or external npm specifiers) and are
  * NOT in the default — operators add them explicitly after reviewing the
  * provider's ToS posture.
  *

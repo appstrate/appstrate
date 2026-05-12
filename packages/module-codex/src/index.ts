@@ -9,7 +9,7 @@
  * consumer Terms of Use lack an explicit Anthropic-style ban on
  * third-party OAuth tools, but the client_id allowlist + reverse-
  * engineered wire format are policy-fragile). Operators opt in
- * deliberately by appending `codex` to MODULES.
+ * deliberately by appending `@appstrate/module-codex` to MODULES.
  *
  * Provider-specific behaviors live on the definition's `hooks` field:
  *   - `extractTokenIdentity` decodes the RS256 access JWT to surface

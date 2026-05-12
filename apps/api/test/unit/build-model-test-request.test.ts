@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildModelTestRequest, testModelConfig } from "../../src/services/org-models.ts";
+import { buildModelTestRequest } from "../../src/services/org-models.ts";
 
 describe("buildModelTestRequest", () => {
   it("anthropic-messages: appends /v1/models, x-api-key for sk-ant- keys", () => {
@@ -139,21 +139,8 @@ describe("buildModelTestRequest", () => {
   });
 });
 
-describe("testModelConfig", () => {
-  // The Codex branch issues a real single-token inference probe and
-  // needs an outbound fetch — covered in the integration test suite
-  // where we can intercept the upstream call. This unit suite only
-  // covers the static request shape via buildModelTestRequest above.
-  it("codex without accountId: rejects with AUTH_FAILED before any fetch", async () => {
-    const result = await testModelConfig({
-      apiShape: "openai-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
-      modelId: "gpt-5.4-mini",
-      apiKey: "not-a-jwt",
-      providerId: "codex",
-      // intentionally no accountId — simulates a malformed token
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("AUTH_FAILED");
-  });
-});
+// Provider-specific `buildInferenceProbe` hook behavior (e.g. fail-fast on
+// missing identity claims) is covered in each module's own unit suite —
+// see `packages/module-codex/test/unit/build-inference-probe-request.test.ts`
+// for the canonical example. This file owns only the request-shape branches
+// of `buildModelTestRequest` above.

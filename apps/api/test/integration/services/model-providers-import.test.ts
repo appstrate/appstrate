@@ -3,11 +3,11 @@
 /**
  * `importOAuthModelProviderConnection` — service-level coverage of the
  * platform's generic OAuth import flow. Provider-specific behavior
- * (claim extraction, requiredIdentityClaims gate) is covered by each
- * module's own test suite — e.g. `apps/api/src/modules/codex/test/
- * integration/services/codex-oauth-flow.test.ts`. This file uses the
- * synthetic `test-oauth` provider so removing or swapping a module never
- * breaks core flow coverage.
+ * (claim extraction, requiredIdentityClaims gate) is covered next to
+ * this file in dedicated module-suffixed flow tests (e.g.
+ * `codex-oauth-flow.test.ts`). This file uses the synthetic `test-oauth`
+ * provider so removing or swapping a module never breaks core flow
+ * coverage.
  *
  * The CLI does the loopback OAuth dance on the user's machine (since the
  * public CLI client_ids only allowlist `localhost:PORT/...` redirect_uris)

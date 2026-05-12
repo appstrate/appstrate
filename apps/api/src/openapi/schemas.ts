@@ -828,7 +828,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential (e.g. `codex`). Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
       },
       oauthEmail: { type: ["string", "null"] },
       oauthExpiresAt: { type: ["string", "null"], format: "date-time" },

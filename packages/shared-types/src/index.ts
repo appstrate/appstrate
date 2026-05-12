@@ -517,9 +517,9 @@ export interface ModelProviderCredentialInfo {
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";
-  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection (e.g. `codex`). */
+  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection. */
   providerId?: string | null;
-  /** Surface email of the OAuth account (Codex JWT claim). UI shows it as transparency hint. */
+  /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauthEmail?: string | null;
   /** OAuth token expiry, ISO-8601. `null` when expiry is unknown. */
   oauthExpiresAt?: string | null;

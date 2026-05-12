@@ -10,9 +10,10 @@
  * module is enabled by default in `.env.example` (`MODULES=oidc,webhooks,
  * core-providers,...`).
  *
- * OAuth-flavoured providers (codex, codex-fork-X, ...) live in their own
- * modules so operators can disable them granularly — see
- * `apps/api/src/modules/codex/` for the canonical example.
+ * OAuth-flavoured providers live in their own opt-in workspace modules
+ * under `packages/module-*` (e.g. `@appstrate/module-codex`) so operators
+ * can disable them granularly. Removing one from `MODULES` leaves no
+ * provider id in the registry, no UI surface, no traffic.
  */
 
 import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
