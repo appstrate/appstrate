@@ -12,7 +12,7 @@ import {
   useProvidersRegistry,
   deduplicateLabel,
 } from "./use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -184,14 +184,8 @@ export function useModelFormHandler(opts: {
 
   const onSubmit = (data: ModelFormData) => {
     const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
-      const provider = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl);
-      const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
-      const matched = registry?.find(
-        (p) =>
-          p.authMode === "api_key" &&
-          p.apiShape === data.apiShape &&
-          p.defaultBaseUrl.replace(/\/+$/, "") === data.baseUrl.replace(/\/+$/, ""),
-      );
+      const matched = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl, registry ?? []);
+      const label = deduplicateLabel(matched?.displayName ?? "Custom", providerKeys ?? []);
       const providerId = matched?.providerId ?? "openai-compatible";
       const baseUrlOverride = matched ? null : data.baseUrl;
       createPk.mutate(

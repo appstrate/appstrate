@@ -48,8 +48,14 @@ export const modelProviderCredentialsPaths = {
                           enum: [
                             "anthropic-messages",
                             "openai-chat",
+                            "openai-completions",
                             "openai-responses",
                             "openai-codex-responses",
+                            "mistral-conversations",
+                            "google-generative-ai",
+                            "google-vertex",
+                            "azure-openai-responses",
+                            "bedrock-converse-stream",
                           ],
                         },
                         defaultBaseUrl: { type: "string" },
@@ -62,9 +68,25 @@ export const modelProviderCredentialsPaths = {
                             required: ["id", "contextWindow", "capabilities", "recommended"],
                             properties: {
                               id: { type: "string" },
+                              label: {
+                                type: ["string", "null"],
+                                description:
+                                  "Human-readable label for picker UIs; falls back to `id` when null.",
+                              },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
+                              cost: {
+                                type: ["object", "null"],
+                                description:
+                                  "Per-1M-token cost (USD). Null when the provider doesn't publish pricing.",
+                                properties: {
+                                  input: { type: "number" },
+                                  output: { type: "number" },
+                                  cacheRead: { type: "number" },
+                                  cacheWrite: { type: "number" },
+                                },
+                              },
                               recommended: {
                                 type: "boolean",
                                 description:

@@ -532,6 +532,8 @@ export interface ModelProviderModelCost {
 export interface ModelProviderModelEntry {
   /** Canonical model identifier accepted by the provider's API. */
   id: string;
+  /** Human-readable label for picker UIs. Falls back to `id` when absent. */
+  label?: string;
   /** Maximum input context window in tokens. */
   contextWindow: number;
   /** Maximum response tokens (provider-defined ceiling). */

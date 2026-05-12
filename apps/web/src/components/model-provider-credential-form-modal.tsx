@@ -4,12 +4,12 @@
  * Unified credential modal — single entry point for both API-key and
  * OAuth model provider connections.
  *
- * The provider picker merges PROVIDER_PRESETS (api-key, hardcoded) and
- * OAuth providers contributed by modules via `useProvidersRegistry()`.
- * Selecting an OAuth provider swaps the body to the pairing-token UI
- * (`<OAuthPairingBody>`); api-key providers keep the form. Modules can
- * be added/removed via the `MODULES` env var with zero UI churn — their
- * OAuth tiles appear/disappear automatically.
+ * The provider picker is fully sourced from `useProvidersRegistry()` —
+ * api-key and OAuth providers alike. Selecting an OAuth provider swaps
+ * the body to the pairing-token UI (`<OAuthPairingBody>`); api-key
+ * providers keep the form. Modules can be added/removed via the
+ * `MODULES` env var with zero client churn — their entries appear or
+ * disappear in the picker automatically.
  *
  * Edit mode is API-key-only — OAuth rows are immutable (label included)
  * and use the dedicated "reconnect" affordance, which re-enters the
@@ -41,10 +41,10 @@ import {
 import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
-  PROVIDER_PRESETS,
   PI_ADAPTER_TYPES,
   findProviderByApiShapeAndBaseUrl,
-} from "@/lib/model-presets";
+  getProviderById,
+} from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 
@@ -72,37 +72,38 @@ interface ProviderKeyFormFields {
   apiKey: string;
 }
 
-function detectProviderFromKey(key: ModelProviderCredentialInfo | null): string {
+function detectProviderFromKey(
+  key: ModelProviderCredentialInfo | null,
+  registry: readonly ProviderRegistryEntry[],
+): string {
   if (!key) return "";
-  const match = findProviderByApiShapeAndBaseUrl(key.apiShape, key.baseUrl);
-  return match ? match.id : CUSTOM_ID;
+  const match = findProviderByApiShapeAndBaseUrl(key.apiShape, key.baseUrl, registry);
+  return match ? match.providerId : CUSTOM_ID;
 }
 
 /**
- * Unified pick-list option model. Sourced from PROVIDER_PRESETS
- * (api-key presets) + the dynamic OAuth registry. The renderer just
- * needs an id, label, and (for dispatch) an authMode.
+ * Unified pick-list option model. Built entirely from the registry —
+ * api-key entries surface as plain `providerId` options, OAuth entries
+ * are prefixed `oauth:` to keep the dispatch unambiguous. Openrouter
+ * stays out of the credential picker (managed via the model form's
+ * dedicated combobox).
  */
 interface PickerOption {
   id: string;
   label: string;
   authMode: "api_key" | "oauth2";
-  providerId?: string;
+  providerId: string;
 }
 
-function buildOptions(oauthEntries: readonly ProviderRegistryEntry[]): PickerOption[] {
-  const apiKeyOptions = PROVIDER_PRESETS.filter((p) => p.id !== "openrouter").map((p) => ({
-    id: p.id,
-    label: p.label,
-    authMode: "api_key" as const,
-  }));
-  const oauthOptions = oauthEntries.map((p) => ({
-    id: `oauth:${p.providerId}`,
-    label: p.displayName,
-    authMode: "oauth2" as const,
-    providerId: p.providerId,
-  }));
-  return [...apiKeyOptions, ...oauthOptions];
+function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
+  return registry
+    .filter((p) => p.providerId !== "openrouter" && p.providerId !== "openai-compatible")
+    .map((p) => ({
+      id: p.authMode === "oauth2" ? `oauth:${p.providerId}` : p.providerId,
+      label: p.displayName,
+      authMode: p.authMode,
+      providerId: p.providerId,
+    }));
 }
 
 function ProviderKeyFormBody({
@@ -120,12 +121,12 @@ function ProviderKeyFormBody({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
-  const oauthRegistry = (registryQuery.data ?? []).filter((p) => p.authMode === "oauth2");
-  const options = buildOptions(oauthRegistry);
+  const registry = registryQuery.data ?? [];
+  const options = buildOptions(registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
-    return detectProviderFromKey(providerKey);
+    return detectProviderFromKey(providerKey, registry);
   });
 
   const isEditing = !!providerKey;
@@ -192,11 +193,11 @@ function ProviderKeyFormBody({
     }
     const option = options.find((o) => o.id === id);
     if (!option || option.authMode === "oauth2") return;
-    const provider = PROVIDER_PRESETS.find((p) => p.id === id);
+    const provider = getProviderById(option.providerId, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
-      setValue("baseUrl", provider.baseUrl);
-      if (!label.trim()) setValue("label", provider.label);
+      setValue("baseUrl", provider.defaultBaseUrl);
+      if (!label.trim()) setValue("label", provider.displayName);
     }
   };
 
@@ -403,7 +404,7 @@ function ProviderKeyFormBody({
 
 function renderOptions(options: PickerOption[], t: (key: string) => string): React.ReactNode {
   return options.map((opt) => {
-    const Icon = opt.authMode === "api_key" ? PROVIDER_ICONS[opt.id] : undefined;
+    const Icon = PROVIDER_ICONS[opt.providerId];
     return (
       <SelectItem key={opt.id} value={opt.id}>
         <span className="flex items-center gap-2">

@@ -39,15 +39,26 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 export type ModelApiShape =
   | "anthropic-messages"
   | "openai-chat"
+  | "openai-completions"
   | "openai-responses"
-  | "openai-codex-responses";
+  | "openai-codex-responses"
+  | "mistral-conversations"
+  | "google-generative-ai"
+  | "google-vertex"
+  | "azure-openai-responses"
+  | "bedrock-converse-stream";
 
 /**
- * Subset of {@link ModelApiShape} reachable via the OAuth path. `openai-chat`
- * is intentionally excluded — chat-completions is an API-key-only surface
- * (BYO OpenAI key, openai-compatible endpoints), never authenticated via OAuth.
+ * Subset of {@link ModelApiShape} reachable via the OAuth path. The
+ * `openai-chat`/`openai-completions` and direct-API shapes
+ * (`mistral-conversations`, `google-*`, `azure-*`, `bedrock-*`) are
+ * API-key-only surfaces — they never authenticate via OAuth and the
+ * platform's OAuth resolver should never see them.
  */
-export type OauthModelApiShape = Exclude<ModelApiShape, "openai-chat">;
+export type OauthModelApiShape =
+  | "anthropic-messages"
+  | "openai-responses"
+  | "openai-codex-responses";
 
 export interface LlmProxyApiKeyConfig {
   authMode: "api_key";

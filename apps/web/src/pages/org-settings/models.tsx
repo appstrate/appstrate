@@ -30,7 +30,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { ModelProviderKeyFormModal } from "../../components/model-provider-credential-form-modal";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
-import { findProviderByApiShapeAndBaseUrl } from "../../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
@@ -131,6 +131,7 @@ function ModelsList({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -145,8 +146,12 @@ function ModelsList({
         <div className="flex flex-col gap-3">
           {models.map((m) => {
             const isBuiltIn = m.source === "built-in";
-            const provider = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            const provider = findProviderByApiShapeAndBaseUrl(
+              m.apiShape,
+              m.baseUrl,
+              registry ?? [],
+            );
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
             return (
               <div key={m.id} className="border-border bg-card rounded-lg border p-5">
                 <div className="mb-3 flex items-center gap-3">
@@ -243,6 +248,7 @@ function ProviderKeysSection({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -259,8 +265,12 @@ function ProviderKeysSection({
       {providerKeys && providerKeys.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
           {providerKeys.map((pk) => {
-            const provider = findProviderByApiShapeAndBaseUrl(pk.apiShape, pk.baseUrl);
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            const provider = findProviderByApiShapeAndBaseUrl(
+              pk.apiShape,
+              pk.baseUrl,
+              registry ?? [],
+            );
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
             const isOauth = pk.authMode === "oauth2";
             return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">

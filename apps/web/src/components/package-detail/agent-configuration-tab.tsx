@@ -15,7 +15,8 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { uploadClient } from "../../api";
 import { PROVIDER_ICONS } from "../icons";
-import { findProviderByApiShapeAndBaseUrl } from "@/lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helpers";
+import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { useAppProfiles, useSetAgentAppProfile } from "../../hooks/use-connection-profiles";
@@ -75,6 +76,7 @@ function ModelSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
+  const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
   if (!orgModels || orgModels.length === 0) return null;
 
@@ -99,8 +101,8 @@ function ModelSection({ packageId }: { packageId: string }) {
               : t("models.agent.inheritNoDefault", { ns: "settings" })}
           </SelectItem>
           {orgModels.map((m) => {
-            const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
-            const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
+            const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
+            const MIcon = mp ? PROVIDER_ICONS[mp.providerId] : undefined;
             return (
               <SelectItem key={m.id} value={m.id}>
                 <span className="inline-flex items-center gap-1.5">

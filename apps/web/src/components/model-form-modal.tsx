@@ -39,38 +39,11 @@ import { OAuthModelProviderDialog } from "./oauth-model-provider-dialog";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
-  PROVIDER_PRESETS,
   PI_ADAPTER_TYPES,
-  findPresetMatch,
+  findRegistryModel,
   getProviderById,
   findProviderByApiShapeAndBaseUrl,
-  type ProviderPreset,
-} from "@/lib/model-presets";
-
-/**
- * Adapt the API's `/registry` entries into the modal's `ProviderPreset`
- * shape so OAuth-subscription providers participate in the picker
- * without being statically duplicated in `model-presets.ts`.
- */
-function registryToPresets(entries: ProviderRegistryEntry[] | undefined): ProviderPreset[] {
-  if (!entries) return [];
-  return entries.map((p) => ({
-    id: p.providerId,
-    label: p.displayName,
-    apiShape: p.apiShape,
-    baseUrl: p.defaultBaseUrl,
-    models: p.models.map((m) => ({
-      modelId: m.id,
-      label: m.id,
-      input: [...m.capabilities].filter(
-        (c): c is "text" | "image" => c === "text" || c === "image",
-      ),
-      contextWindow: m.contextWindow,
-      maxTokens: m.maxTokens ?? 0,
-      reasoning: m.capabilities.includes("reasoning"),
-    })),
-  }));
-}
+} from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 
 export interface ModelFormData {
@@ -111,34 +84,26 @@ interface ModelFormFields {
 
 function detectProvider(
   model: OrgModelInfo | null,
-  extraProviders: readonly ProviderPreset[] = [],
+  registry: readonly ProviderRegistryEntry[],
 ): string {
   if (!model) return "";
-  const match = findPresetMatch(model.apiShape, model.modelId, extraProviders);
-  if (match) return match.provider.id;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(
-    model.apiShape,
-    model.baseUrl,
-    extraProviders,
-  );
-  if (byApiAndUrl) return byApiAndUrl.id;
+  const match = findRegistryModel(model.apiShape, model.modelId, registry);
+  if (match) return match.provider.providerId;
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
+  if (byApiAndUrl) return byApiAndUrl.providerId;
   return CUSTOM_ID;
 }
 
 function detectModel(
   model: OrgModelInfo | null,
-  extraProviders: readonly ProviderPreset[] = [],
+  registry: readonly ProviderRegistryEntry[],
 ): string {
   if (!model) return "";
-  const match = findPresetMatch(model.apiShape, model.modelId, extraProviders);
-  if (match) return match.model.modelId;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(
-    model.apiShape,
-    model.baseUrl,
-    extraProviders,
-  );
+  const match = findRegistryModel(model.apiShape, model.modelId, registry);
+  if (match) return match.model.id;
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
   if (byApiAndUrl) {
-    // Providers with no static presets (e.g. OpenRouter) use dynamic model IDs
+    // Providers with no curated catalog (e.g. OpenRouter) use dynamic model IDs
     if (byApiAndUrl.models.length === 0) return model.modelId;
     return CUSTOM_ID;
   }
@@ -262,28 +227,23 @@ function ModelFormBody({
   const { t } = useTranslation(["settings", "common"]);
 
   const registryQuery = useProvidersRegistry();
-  const registryPresets = useMemo(
-    () => registryToPresets(registryQuery.data),
-    [registryQuery.data],
-  );
-  // Picker dropdown — static presets first, then registry-only OAuth providers.
-  const pickerPresets = useMemo(
-    () => [
-      ...PROVIDER_PRESETS,
-      ...registryPresets.filter((rp) => !PROVIDER_PRESETS.some((p) => p.id === rp.id)),
-    ],
-    [registryPresets],
+  const registry = useMemo(() => registryQuery.data ?? [], [registryQuery.data]);
+  // openai-compatible is the operator escape hatch (free-form baseUrl, no
+  // catalog) and surfaces as the "Custom" option instead of a picker entry.
+  // OpenRouter has no curated catalog — its row stays so users can pick it
+  // and search models via the dedicated combobox.
+  const pickerEntries = useMemo(
+    () => registry.filter((p) => p.providerId !== "openai-compatible"),
+    [registry],
   );
 
   // User-driven provider/model overrides — `null` means "follow auto-detect".
-  // Detection runs through `registryPresets` so OAuth-backed models resolve
-  // correctly once the registry hook resolves.
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [cost, setCost] = useState<ModelCost | null>(null);
 
-  const providerId = providerOverride ?? detectProvider(model, registryPresets);
-  const selectedModelId = modelOverride ?? detectModel(model, registryPresets);
+  const providerId = providerOverride ?? detectProvider(model, registry);
+  const selectedModelId = modelOverride ?? detectModel(model, registry);
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);
 
@@ -333,8 +293,8 @@ function ModelFormBody({
   //   - "oauth2"  → no inline apiKey, must select an existing connection or
   //                 launch the OAuth dialog to create one.
   //   - "api_key" → inline apiKey input OR pick an existing matching credential.
-  // The registry is the source of truth — OAuth providers only exist
-  // there; static `PROVIDER_PRESETS` entries are all api_key.
+  // The registry is the single source of truth — adding a provider on the
+  // server flows through here without any client edits.
   const registryEntry = useMemo(
     () => registryQuery.data?.find((p) => p.providerId === providerId),
     [registryQuery.data, providerId],
@@ -392,9 +352,7 @@ function ModelFormBody({
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
 
-  const selectedProvider = isCustomProvider
-    ? undefined
-    : getProviderById(providerId, registryPresets);
+  const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId, registry);
 
   const resetModelFields = () => {
     setValue("label", "");
@@ -417,10 +375,10 @@ function ModelFormBody({
       setValue("baseUrl", "");
     } else {
       setSelectedModelId("");
-      const provider = getProviderById(id, registryPresets);
+      const provider = getProviderById(id, registry);
       if (provider) {
         setValue("apiShape", provider.apiShape);
-        setValue("baseUrl", provider.baseUrl);
+        setValue("baseUrl", provider.defaultBaseUrl);
       }
     }
     resetModelFields();
@@ -436,17 +394,27 @@ function ModelFormBody({
       return;
     }
 
-    const preset = selectedProvider?.models.find((m) => m.modelId === id);
+    const preset = selectedProvider?.models.find((m) => m.id === id);
     if (!preset) return;
 
-    setValue("label", preset.label);
-    setValue("modelId", preset.modelId);
-    setValue("inputText", preset.input.includes("text"));
-    setValue("inputImage", preset.input.includes("image"));
+    const caps = preset.capabilities;
+    setValue("label", preset.label ?? preset.id);
+    setValue("modelId", preset.id);
+    setValue("inputText", caps.includes("text"));
+    setValue("inputImage", caps.includes("image"));
     setValue("contextWindow", preset.contextWindow.toString());
-    setValue("maxTokens", preset.maxTokens.toString());
-    setValue("reasoning", preset.reasoning);
-    setCost(preset.cost ?? null);
+    setValue("maxTokens", (preset.maxTokens ?? 0).toString());
+    setValue("reasoning", caps.includes("reasoning"));
+    setCost(
+      preset.cost
+        ? {
+            input: preset.cost.input,
+            output: preset.cost.output,
+            cacheRead: preset.cost.cacheRead ?? 0,
+            cacheWrite: preset.cost.cacheWrite ?? 0,
+          }
+        : null,
+    );
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -517,13 +485,13 @@ function ModelFormBody({
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {pickerPresets.map((p) => {
-                const Icon = PROVIDER_ICONS[p.id];
+              {pickerEntries.map((p) => {
+                const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
                 return (
-                  <SelectItem key={p.id} value={p.id}>
+                  <SelectItem key={p.providerId} value={p.providerId}>
                     <span className="flex items-center gap-2">
                       {Icon && <Icon className="size-4" />}
-                      {p.label}
+                      {p.displayName}
                     </span>
                   </SelectItem>
                 );
@@ -534,7 +502,7 @@ function ModelFormBody({
         </div>
 
         {/* Model select (only for known providers, except OpenRouter) */}
-        {selectedProvider && !isOpenRouter && (
+        {selectedProvider && !isOpenRouter && selectedProvider.models.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
             <Select value={selectedModelId} onValueChange={handleModelChange}>
@@ -543,8 +511,8 @@ function ModelFormBody({
               </SelectTrigger>
               <SelectContent>
                 {selectedProvider.models.map((m) => (
-                  <SelectItem key={m.modelId} value={m.modelId}>
-                    {m.label}
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label ?? m.id}
                   </SelectItem>
                 ))}
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>

@@ -94,9 +94,11 @@ export function createModelProviderCredentialsRouter() {
       authMode: p.authMode,
       models: p.models.map((m) => ({
         id: m.id,
+        label: m.label ?? null,
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens ?? null,
         capabilities: m.capabilities,
+        cost: m.cost ?? null,
         recommended: m.recommended ?? false,
       })),
     }));

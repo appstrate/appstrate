@@ -15,26 +15,22 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "../../components/icons";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-credentials";
 
 /**
- * Resolve a model's provider icon. The static `model-presets.ts` catalog
- * covers most api-key providers (anthropic, openai, mistral, …) but not
- * the registry-only OAuth ones. We try the static catalog first, then
- * fall back to the runtime registry's `iconUrl` hint.
+ * Resolve a model's provider icon entirely from the runtime registry —
+ * both the providerId lookup and the `iconUrl` hint live there. The
+ * `iconUrl` fallback path matters for providers whose `providerId` isn't
+ * a key in PROVIDER_ICONS but whose `iconUrl` is (e.g. the codex OAuth
+ * module ships `iconUrl: "openai"`).
  */
 function resolveProviderIcon(model: OrgModelInfo, registry: ProviderRegistryEntry[] | undefined) {
-  const staticMatch = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl);
-  if (staticMatch) return PROVIDER_ICONS[staticMatch.id];
-  const norm = (s: string) => s.replace(/\/+$/, "");
-  const registryMatch = registry?.find(
-    (p) => p.apiShape === model.apiShape && norm(p.defaultBaseUrl) === norm(model.baseUrl),
-  );
-  if (registryMatch?.iconUrl) return PROVIDER_ICONS[registryMatch.iconUrl];
-  return undefined;
+  const match = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry ?? []);
+  if (!match) return undefined;
+  return PROVIDER_ICONS[match.providerId] ?? PROVIDER_ICONS[match.iconUrl ?? ""];
 }
 
 export function OnboardingModelStep() {

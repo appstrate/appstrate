@@ -17,7 +17,8 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 import { usePackageVersions } from "../hooks/use-packages";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/model-presets";
+import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 
 const INHERIT = "__inherit__";
@@ -74,6 +75,7 @@ export function RunOverridesPanel({
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
   const { data: orgProxies } = useProxies();
+  const { data: registry } = useProvidersRegistry();
   const { data: versions } = usePackageVersions("agent", packageId);
   const labels = useSchemaFormLabels();
 
@@ -161,8 +163,8 @@ export function RunOverridesPanel({
                   : t("run.overrides.modelInherit", { ns: "agents" })}
               </SelectItem>
               {orgModels.map((m) => {
-                const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl);
-                const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
+                const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
+                const MIcon = mp ? PROVIDER_ICONS[mp.providerId] : undefined;
                 return (
                   <SelectItem key={m.id} value={m.id}>
                     <span className="inline-flex items-center gap-1.5">
