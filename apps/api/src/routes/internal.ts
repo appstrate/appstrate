@@ -76,6 +76,7 @@ async function verifyRunToken(c: Context): Promise<{
     connectionProfileId: string | null;
     providerProfileIds: Record<string, string> | null;
     modelCredentialId: string | null;
+    runOrigin: "platform" | "remote";
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -105,6 +106,7 @@ async function verifyRunToken(c: Context): Promise<{
       connectionProfileId: runs.connectionProfileId,
       providerProfileIds: runs.providerProfileIds,
       modelCredentialId: runs.modelCredentialId,
+      runOrigin: runs.runOrigin,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -131,6 +133,7 @@ async function verifyRunToken(c: Context): Promise<{
       connectionProfileId: run.connectionProfileId,
       providerProfileIds: run.providerProfileIds ?? null,
       modelCredentialId: run.modelCredentialId ?? null,
+      runOrigin: run.runOrigin,
     },
   };
 }
@@ -426,10 +429,19 @@ export function createInternalRouter() {
   // SPEC §5.2). Auth is the same Bearer run-token mechanism as the rest
   // of /internal/* — `assertOAuthModelCredential` additionally verifies
   // the requested credentialId resolves to a `model_provider_credentials`
-  // row owned by the run's org.
+  // row owned by the run's org AND is pinned to this run.
+  //
+  // Remote-origin runs execute on the customer's host with their own
+  // model provider (e.g. local Claude Code subscription) — they have no
+  // platform sidecar to consume these tokens, and `model_credential_id`
+  // is always NULL for that origin. Rejecting them up-front prevents a
+  // leaked remote run-token from being used to enumerate the org's
+  // OAuth credentials (the per-run pin check is bypassed when the
+  // pin is NULL).
 
   router.get("/oauth-token/:credentialId", async (c) => {
     const { run } = await verifyRunToken(c);
+    assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
@@ -437,12 +449,27 @@ export function createInternalRouter() {
 
   router.post("/oauth-token/:credentialId/refresh", async (c) => {
     const { run } = await verifyRunToken(c);
+    assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
   });
 
   return router;
+}
+
+/**
+ * Reject `/internal/oauth-token` traffic from remote-origin runs. They
+ * execute on the customer's host with their own model provider and never
+ * legitimately need a platform-stored OAuth token. The per-run pin
+ * (`runs.model_credential_id`) is intentionally NULL for that origin,
+ * which would otherwise let the run-token bearer enumerate every OAuth
+ * credential in the org via `/internal/oauth-token/:credentialId`.
+ */
+function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void {
+  if (runOrigin !== "platform") {
+    throw forbidden("OAuth model provider tokens are not available for remote runs");
+  }
 }
 
 /**
@@ -456,10 +483,10 @@ export function createInternalRouter() {
  *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
  *   3. UUID well-formedness: malformed path params surface as 404 not 500.
  *
- *
- * `pinnedCredentialId === null` is allowed (legacy pre-binding rows, plus
- * future schedule/inline run paths that may resolve the model lazily) — the
- * org-membership check is the only safety net in that case.
+ * `pinnedCredentialId === null` is only reachable from platform-origin
+ * runs that resolved to an API-key model (no OAuth credential to bind
+ * against). Remote-origin runs (where the pin is structurally absent)
+ * are rejected upstream by `assertPlatformOriginOAuthAccess`.
  */
 async function assertOAuthModelCredential(
   credentialId: string,

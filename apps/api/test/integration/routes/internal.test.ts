@@ -938,5 +938,46 @@ describe("Internal API", () => {
       // throws notFound because the provider isn't OAuth-enabled.
       expect(res.status).toBe(404);
     });
+
+    // Remote-origin runs execute on the customer's host and never need
+    // platform-stored OAuth tokens. The per-run pin is structurally NULL
+    // for that origin, so we reject access at the route boundary to prevent
+    // a leaked remote run-token from enumerating the org's OAuth credentials.
+    it("returns 403 when the run is remote-origin (even for a same-org credential)", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+      const remote = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+      });
+      const remoteToken = signRunToken(remote.id);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${remoteToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 on POST /refresh when the run is remote-origin", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+      const remote = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+      });
+      const remoteToken = signRunToken(remote.id);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${remoteToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
   });
 });
