@@ -324,14 +324,7 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    const responseHeaders: Record<string, string> = {};
-    const ct = upstream.headers.get("content-type");
-    if (ct) responseHeaders["Content-Type"] = ct;
-
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    return passUpstream(upstream);
   });
 
   async function handleOauthLlmRequest(
