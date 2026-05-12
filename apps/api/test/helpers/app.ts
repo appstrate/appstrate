@@ -37,6 +37,7 @@ import {
 } from "../../src/services/model-providers/registry.ts";
 import {
   registerTestOAuthProvider,
+  registerTestOAuthHooksProvider,
   _resetTestOAuthProviderRegistration,
 } from "./test-oauth-provider.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
@@ -118,6 +119,7 @@ initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults wh
 resetModelProviders();
 _resetTestOAuthProviderRegistration();
 registerTestOAuthProvider();
+registerTestOAuthHooksProvider();
 {
   const moduleContributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
