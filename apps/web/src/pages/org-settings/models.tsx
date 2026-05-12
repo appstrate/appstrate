@@ -3,17 +3,11 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, ChevronDown, KeyRound } from "lucide-react";
+import { BrainCircuit, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useModels,
@@ -34,7 +28,6 @@ import {
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { ModelProviderKeyFormModal } from "../../components/model-provider-credential-form-modal";
-import { OAuthModelProviderDialog } from "../../components/oauth-model-provider-dialog";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/model-presets";
@@ -250,39 +243,18 @@ function ProviderKeysSection({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
-  // Surface only OAuth providers the platform actually loaded — the
-  // contract is module-driven (modules inject providers, not the other
-  // way around). Removing a module from `MODULES` hides its entry from
-  // this dropdown with zero UI footprint.
-  const registryQuery = useProvidersRegistry();
-  const oauthProviders = registryQuery.data?.filter((p) => p.authMode === "oauth2") ?? [];
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const addMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button>
-          {t("providerKeys.add")} <ChevronDown className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onCreate}>
-          <KeyRound className="size-4" /> {t("providerKeys.add")}
-        </DropdownMenuItem>
-        {oauthProviders.map((p) => (
-          <DropdownMenuItem key={p.providerId} onSelect={() => onConnectOAuth(p.providerId)}>
-            {t("providerKeys.oauth.connect", { provider: p.displayName })}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+  // Single entry point — the unified modal handles both API-key and OAuth
+  // flows. Removing a module from `MODULES` hides its OAuth tile from the
+  // in-modal provider picker with zero UI footprint here.
+  const addButton = <Button onClick={onCreate}>{t("providerKeys.add")}</Button>;
 
   return (
     <div className="mb-8">
-      <div className="mb-4 flex items-center justify-end gap-2">{addMenu}</div>
+      <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
 
       {providerKeys && providerKeys.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
@@ -386,7 +358,7 @@ function ProviderKeysSection({
           icon={KeyRound}
           compact
         >
-          {addMenu}
+          {addButton}
         </EmptyState>
       )}
     </div>
@@ -416,6 +388,9 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
+  // Preselect an OAuth provider when opening the unified modal — used by
+  // the "reconnect" affordance on stale OAuth rows and any direct deep-link.
+  const [connectingOauthProviderId, setConnectingOauthProviderId] = useState<string | null>(null);
   const {
     data: providerKeys,
     isLoading: pkLoading,
@@ -425,8 +400,6 @@ export function OrgSettingsModelsPage() {
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
   const registryQuery = useProvidersRegistry();
-
-  const [oauthDialogProviderId, setOauthDialogProviderId] = useState<string | null>(null);
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
@@ -465,10 +438,12 @@ export function OrgSettingsModelsPage() {
           error={pkError}
           onCreate={() => {
             setEditPk(null);
+            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onEdit={(pk) => {
             setEditPk(pk);
+            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
@@ -477,15 +452,11 @@ export function OrgSettingsModelsPage() {
           onRename={(pk, newLabel) => {
             updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
           }}
-          onConnectOAuth={(providerId) => setOauthDialogProviderId(providerId)}
-        />
-      )}
-
-      {oauthDialogProviderId && (
-        <OAuthModelProviderDialog
-          open
-          providerId={oauthDialogProviderId}
-          onClose={() => setOauthDialogProviderId(null)}
+          onConnectOAuth={(providerId) => {
+            setEditPk(null);
+            setConnectingOauthProviderId(providerId);
+            setPkModalOpen(true);
+          }}
         />
       )}
 
@@ -499,8 +470,12 @@ export function OrgSettingsModelsPage() {
 
       <ModelProviderKeyFormModal
         open={pkModalOpen}
-        onClose={() => setPkModalOpen(false)}
+        onClose={() => {
+          setPkModalOpen(false);
+          setConnectingOauthProviderId(null);
+        }}
         providerKey={editPk}
+        initialOauthProviderId={connectingOauthProviderId}
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {

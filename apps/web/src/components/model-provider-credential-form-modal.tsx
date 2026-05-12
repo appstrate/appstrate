@@ -1,5 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Unified credential modal — single entry point for both API-key and
+ * OAuth model provider connections.
+ *
+ * The provider picker merges PROVIDER_PRESETS (api-key, hardcoded) and
+ * OAuth providers contributed by modules via `useProvidersRegistry()`.
+ * Selecting an OAuth provider swaps the body to the pairing-token UI
+ * (`<OAuthPairingBody>`); api-key providers keep the form. Modules can
+ * be added/removed via the `MODULES` env var with zero UI churn — their
+ * OAuth tiles appear/disappear automatically.
+ *
+ * Edit mode is API-key-only — OAuth rows are immutable (label included)
+ * and use the dedicated "reconnect" affordance, which re-enters the
+ * modal with the same provider preselected to re-pair.
+ */
+
 import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
@@ -17,7 +33,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useTestModelProviderCredentialInline } from "../hooks/use-model-provider-credentials";
+import {
+  useProvidersRegistry,
+  useTestModelProviderCredentialInline,
+  type ProviderRegistryEntry,
+} from "../hooks/use-model-provider-credentials";
 import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -26,8 +46,9 @@ import {
   findProviderByApiShapeAndBaseUrl,
 } from "@/lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
+import { OAuthPairingBody } from "./oauth-pairing-body";
 
-interface ProviderKeyFormData {
+export interface ProviderKeyFormData {
   label: string;
   apiShape: string;
   baseUrl: string;
@@ -38,6 +59,8 @@ interface ProviderKeyFormModalProps {
   open: boolean;
   onClose: () => void;
   providerKey: ModelProviderCredentialInfo | null;
+  /** Preselect an OAuth provider — used by the "reconnect" affordance on stale rows. */
+  initialOauthProviderId?: string | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
 }
@@ -55,22 +78,60 @@ function detectProviderFromKey(key: ModelProviderCredentialInfo | null): string 
   return match ? match.id : CUSTOM_ID;
 }
 
+/**
+ * Unified pick-list option model. Sourced from PROVIDER_PRESETS
+ * (api-key presets) + the dynamic OAuth registry. The renderer just
+ * needs an id, label, and (for dispatch) an authMode.
+ */
+interface PickerOption {
+  id: string;
+  label: string;
+  authMode: "api_key" | "oauth2";
+  providerId?: string;
+}
+
+function buildOptions(oauthEntries: readonly ProviderRegistryEntry[]): PickerOption[] {
+  const apiKeyOptions = PROVIDER_PRESETS.filter((p) => p.id !== "openrouter").map((p) => ({
+    id: p.id,
+    label: p.label,
+    authMode: "api_key" as const,
+  }));
+  const oauthOptions = oauthEntries.map((p) => ({
+    id: `oauth:${p.providerId}`,
+    label: p.displayName,
+    authMode: "oauth2" as const,
+    providerId: p.providerId,
+  }));
+  return [...apiKeyOptions, ...oauthOptions];
+}
+
 function ProviderKeyFormBody({
   providerKey,
+  initialOauthProviderId,
   isPending,
   onSubmit,
   onClose,
 }: {
   providerKey: ModelProviderCredentialInfo | null;
+  initialOauthProviderId: string | null;
   isPending: boolean;
   onSubmit: (data: ProviderKeyFormData) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const [providerId, setProviderId] = useState(() => detectProviderFromKey(providerKey));
+  const registryQuery = useProvidersRegistry();
+  const oauthRegistry = (registryQuery.data ?? []).filter((p) => p.authMode === "oauth2");
+  const options = buildOptions(oauthRegistry);
+
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
+    return detectProviderFromKey(providerKey);
+  });
 
   const isEditing = !!providerKey;
-  const isCustom = providerId === CUSTOM_ID;
+  const selectedOption = options.find((o) => o.id === selectedId);
+  const isOAuthSelected = selectedOption?.authMode === "oauth2";
+  const isCustom = selectedId === CUSTOM_ID;
 
   const {
     register,
@@ -121,19 +182,21 @@ function ProviderKeyFormBody({
   };
 
   const handleProviderChange = (id: string) => {
-    setProviderId(id);
+    setSelectedId(id);
     clearErrors();
     if (id === CUSTOM_ID) {
       setValue("apiShape", "");
       setValue("baseUrl", "");
       setValue("label", "");
-    } else {
-      const provider = PROVIDER_PRESETS.find((p) => p.id === id);
-      if (provider) {
-        setValue("apiShape", provider.apiShape);
-        setValue("baseUrl", provider.baseUrl);
-        if (!label.trim()) setValue("label", provider.label);
-      }
+      return;
+    }
+    const option = options.find((o) => o.id === id);
+    if (!option || option.authMode === "oauth2") return;
+    const provider = PROVIDER_PRESETS.find((p) => p.id === id);
+    if (provider) {
+      setValue("apiShape", provider.apiShape);
+      setValue("baseUrl", provider.baseUrl);
+      if (!label.trim()) setValue("label", provider.label);
     }
   };
 
@@ -147,6 +210,42 @@ function ProviderKeyFormBody({
   });
 
   const title = providerKey ? t("providerKeys.form.editTitle") : t("providerKeys.form.title");
+
+  // OAuth-selected: the pairing body owns submission (helper POSTs creds
+  // back). Hide the form-side Test/Save buttons; only Close stays.
+  if (isOAuthSelected && selectedOption?.providerId) {
+    return (
+      <Modal
+        open
+        onClose={onClose}
+        title={title}
+        actions={
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t("providerKeys.oauth.close")}
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          {!isEditing && (
+            <div className="space-y-2">
+              <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
+              <Select value={selectedId} onValueChange={handleProviderChange}>
+                <SelectTrigger id="pk-provider">
+                  <SelectValue placeholder={t("models.form.providerPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>{renderOptions(options, t)}</SelectContent>
+              </Select>
+            </div>
+          )}
+          <OAuthPairingBody
+            key={selectedOption.providerId}
+            providerId={selectedOption.providerId}
+            onConnected={() => onClose()}
+          />
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -182,31 +281,19 @@ function ProviderKeyFormBody({
       }
     >
       <form id="pk-form" onSubmit={onFormSubmit} className="space-y-4">
-        {/* Provider select */}
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
-          <Select value={providerId} onValueChange={handleProviderChange} disabled={isEditing}>
+          <Select value={selectedId} onValueChange={handleProviderChange} disabled={isEditing}>
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {PROVIDER_PRESETS.filter((p) => p.id !== "openrouter").map((p) => {
-                const Icon = PROVIDER_ICONS[p.id];
-                return (
-                  <SelectItem key={p.id} value={p.id}>
-                    <span className="flex items-center gap-2">
-                      {Icon && <Icon className="size-4" />}
-                      {p.label}
-                    </span>
-                  </SelectItem>
-                );
-              })}
+              {renderOptions(options, t)}
               <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {/* Label */}
         <div className="space-y-2">
           <Label htmlFor="pk-label">{t("providerKeys.form.label")}</Label>
           <Input
@@ -224,7 +311,6 @@ function ProviderKeyFormBody({
           )}
         </div>
 
-        {/* Custom provider fields */}
         {isCustom && (
           <>
             <div className="space-y-2">
@@ -284,8 +370,7 @@ function ProviderKeyFormBody({
           </>
         )}
 
-        {/* API Key */}
-        {!!providerId && (
+        {!!selectedId && (
           <div className="space-y-2">
             <Label htmlFor="pk-apiKey">{t("providerKeys.form.apiKey")}</Label>
             <Input
@@ -316,19 +401,42 @@ function ProviderKeyFormBody({
   );
 }
 
+function renderOptions(options: PickerOption[], t: (key: string) => string): React.ReactNode {
+  return options.map((opt) => {
+    const Icon = opt.authMode === "api_key" ? PROVIDER_ICONS[opt.id] : undefined;
+    return (
+      <SelectItem key={opt.id} value={opt.id}>
+        <span className="flex items-center gap-2">
+          {Icon && <Icon className="size-4" />}
+          {opt.label}
+          {opt.authMode === "oauth2" && (
+            <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
+              {t("providerKeys.oauth.badgeOauth")}
+            </span>
+          )}
+        </span>
+      </SelectItem>
+    );
+  });
+}
+
 export function ModelProviderKeyFormModal({
   open,
   onClose,
   providerKey,
+  initialOauthProviderId = null,
   isPending,
   onSubmit,
 }: ProviderKeyFormModalProps) {
   if (!open) return null;
-  const key = providerKey?.id ?? "__create__";
+  // Re-mount on every (re)open so internal state (selected provider,
+  // form values, pairing token if any) resets cleanly.
+  const key = providerKey?.id ?? `__create__:${initialOauthProviderId ?? ""}`;
   return (
     <ProviderKeyFormBody
       key={key}
       providerKey={providerKey}
+      initialOauthProviderId={initialOauthProviderId}
       isPending={isPending}
       onSubmit={onSubmit}
       onClose={onClose}
