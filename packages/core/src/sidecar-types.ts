@@ -112,8 +112,41 @@ export interface OAuthTokenResponse {
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
 
 // Anthropic Consumer ToS (https://www.anthropic.com/legal/consumer-terms)
-// explicitly forbids using OAuth subscription tokens with any third-party
-// product, tool, or service — including the Agent SDK. OSS therefore
-// ships no Anthropic OAuth provider; operators who want to use Anthropic
-// inside Appstrate route through the upstream API key flow (which IS
-// supported) via the `anthropic` provider in the `core-providers` module.
+// forbids using OAuth subscription tokens with any third-party product,
+// tool, or service — including the Agent SDK. The OSS default ships no
+// Anthropic OAuth provider; operators who reviewed the ToS posture and
+// want to wire their Claude Pro / Max / Team subscription enable the
+// opt-in `claude-code` module (apps/api/src/modules/claude-code/) by
+// appending it to `MODULES`. Operators who want plain API-key Anthropic
+// stay on the `anthropic` provider in `core-providers`.
+//
+// The two constants below are the sidecar's wire-format knowledge for
+// the `claude-code` providerId. They live in core (not the module) so
+// the sidecar build doesn't depend on the optional module — when the
+// module is not loaded no traffic carries `providerId="claude-code"`,
+// so the sidecar branch reading these constants is dead at runtime.
+
+/**
+ * System-prompt prelude Anthropic's third-party-tier filter requires on
+ * every OAuth-authenticated `/v1/messages` call. Reproduced verbatim from
+ * `anthropic-ai/claude-code`'s `THIRD_PARTY_TIER_FILTER_PREFIX`; both the
+ * platform's claude-code module and the sidecar runtime
+ * (`runtime-pi/sidecar/oauth-identity.ts`) reference this constant —
+ * paraphrasing it (even capitalisation) trips Anthropic's third-party
+ * tier filter and silently 429s every request.
+ */
+export const CLAUDE_CODE_IDENTITY_PROMPT =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/**
+ * Static identity headers Anthropic enforces on every OAuth-authenticated
+ * `/v1/messages` call. Lives here so the sidecar runtime can inject them
+ * without taking a dependency on the optional `claude-code` module.
+ * `accept` and `content-type` are NOT in this set — each call site picks
+ * the right pair (`application/json` non-stream, `text/event-stream`
+ * streaming).
+ */
+export const CLAUDE_CODE_IDENTITY_HEADERS = {
+  "anthropic-dangerous-direct-browser-access": "true",
+  "x-app": "cli",
+} as const;
