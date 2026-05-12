@@ -42,7 +42,6 @@
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/connect": "workspace:*",
-        "@appstrate/connect-helper": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@appstrate/emails": "workspace:*",
@@ -101,21 +100,6 @@
         "@appstrate/shared-types": "workspace:*",
         "@types/bun": "latest",
         "@types/write-file-atomic": "^4.0.3",
-      },
-    },
-    "apps/connect-helper": {
-      "name": "@appstrate/connect-helper",
-      "version": "0.1.0",
-      "bin": {
-        "appstrate-connect": "./dist/cli.js",
-      },
-      "dependencies": {
-        "@appstrate/core": "^2.19.0",
-        "@mariozechner/pi-ai": "^0.70.6",
-        "open": "^11.0.0",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
       },
     },
     "apps/web": {
@@ -413,8 +397,6 @@
     "@appstrate/api": ["@appstrate/api@workspace:apps/api"],
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
-
-    "@appstrate/connect-helper": ["@appstrate/connect-helper@workspace:apps/connect-helper"],
 
     "@appstrate/core": ["@appstrate/core@workspace:packages/core"],
 

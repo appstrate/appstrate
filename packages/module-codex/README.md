@@ -25,6 +25,12 @@ The platform resolves it via dynamic import — workspace resolution finds it lo
 
 No DB tables, no routes, no workers — the unified `model_provider_credentials` table in core holds the OAuth blob.
 
+## Client-side helper
+
+The OAuth dance must run on the user's machine — OpenAI's authorize endpoint only allowlists loopback redirect URIs. Appstrate ships [`@appstrate/connect-helper`](https://www.npmjs.com/package/@appstrate/connect-helper) for this purpose; the dashboard mints a pairing token and surfaces `npx @appstrate/connect-helper@latest <token>`. The helper binds `127.0.0.1:1455`, completes the PKCE flow, and POSTs the resulting credentials back to the platform.
+
+The helper's source lives in a separate private repo (`appstrate/connect-helper`) — the published npm package is public so `npx` works without auth. No setup is required from the operator beyond enabling this module on the platform side.
+
 ## Authoring follow-on OAuth providers
 
-This module is the canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"`, provide `hooks` if the access token needs to be decoded for an identity claim, and pin any wire-format quirks in `oauthWireFormat`.
+This module is the canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"`, provide `hooks` if the access token needs to be decoded for an identity claim, and pin any wire-format quirks in `oauthWireFormat`. The client-side helper (`@appstrate/connect-helper`) registers each provider by canonical `providerId` in its own `PROVIDERS` table — extending it requires a coordinated bump.
