@@ -31,13 +31,12 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
   createOAuthCredential,
   type OAuthBlob,
-} from "../../../src/services/model-provider-credentials.ts";
+} from "../../../src/services/model-providers/credentials.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
-} from "../../../src/services/oauth-model-providers/token-resolver.ts";
+} from "../../../src/services/model-providers/token-resolver.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 // ─── globalThis.fetch swap ───────────────────────────────────
 
@@ -58,7 +57,7 @@ afterAll(() => restoreFetch());
 async function seedOAuthCredential(opts: {
   orgId: string;
   userId: string;
-  providerId: "codex" | "claude-code";
+  providerId: "test-oauth";
   accessToken?: string;
   refreshToken?: string;
   expiresAtMs?: number | null;
@@ -72,7 +71,6 @@ async function seedOAuthCredential(opts: {
     accessToken: opts.accessToken ?? "stale-access",
     refreshToken: opts.refreshToken ?? "stale-refresh",
     expiresAt: opts.expiresAtMs === undefined ? null : opts.expiresAtMs,
-    scopesGranted: ["user:inference"],
   });
   if (opts.needsReconnection || opts.refreshToken === "") {
     // Force-rewrite the blob to mirror the requested edge-case shape (the
@@ -130,7 +128,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "stale",
         refreshToken: "rt-revoked",
         expiresAtMs: Date.now() - 10_000,
@@ -162,7 +160,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "stale",
         refreshToken: "rt-1",
         needsReconnection: true,
@@ -189,7 +187,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "only-access-token",
         refreshToken: "",
       });
@@ -218,7 +216,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "old-access",
         refreshToken: "old-refresh",
         expiresAtMs: Date.now() - 10_000,
@@ -253,7 +251,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "old-access",
         refreshToken: "kept-refresh",
         expiresAtMs: Date.now() - 1_000,
@@ -282,7 +280,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "stale",
         refreshToken: "rt",
         expiresAtMs: Date.now() - 1_000,
@@ -310,7 +308,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "cached-access",
         refreshToken: "rt",
         expiresAtMs: Date.now() + 60 * 60 * 1000,
@@ -324,7 +322,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       const result = await resolveOAuthTokenForSidecar(id);
       expect(result.accessToken).toBe("cached-access");
-      expect(result.providerId).toBe("claude-code");
+      expect(result.providerId).toBe("test-oauth");
       expect(fetchCalled).toBe(false);
     });
 
@@ -332,7 +330,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "near-expiry",
         refreshToken: "rt",
         expiresAtMs: Date.now() + 60 * 1000,
@@ -359,7 +357,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
-        providerId: "claude-code",
+        providerId: "test-oauth",
         accessToken: "stale",
         refreshToken: "rt",
         needsReconnection: true,
@@ -391,47 +389,6 @@ describe("OAuth model providers — token-resolver hardening", () => {
       }
       expect(caught).toBeInstanceOf(ApiError);
       expect((caught as ApiError).status).toBe(404);
-    });
-
-    /**
-     * MODEL_PROVIDERS_DISABLED is a SOFT disable — admins block new credentials,
-     * but existing rows keep resolving. The hot path uses `getModelProviderConfig`
-     * (unfiltered), not `listEnabledModelProviders`, on purpose. This test
-     * guards against a future regression where someone wires the filter in
-     * here and silently kills every active credential.
-     */
-    it("keeps resolving for credentials whose providerId is currently disabled", async () => {
-      const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
-      try {
-        const id = await seedOAuthCredential({
-          orgId,
-          userId,
-          providerId: "claude-code",
-          accessToken: "still-good",
-          refreshToken: "rt",
-          expiresAtMs: Date.now() + 60 * 60 * 1000,
-        });
-
-        // Admin disables the provider AFTER the credential was created.
-        process.env.MODEL_PROVIDERS_DISABLED = "claude-code";
-        resetEnvCache();
-
-        let fetchCalled = false;
-        mockFetch(async () => {
-          fetchCalled = true;
-          return new Response("{}", { status: 200 });
-        });
-
-        const result = await resolveOAuthTokenForSidecar(id);
-        expect(result.accessToken).toBe("still-good");
-        expect(result.providerId).toBe("claude-code");
-        // Cached + far from expiry → no provider call.
-        expect(fetchCalled).toBe(false);
-      } finally {
-        if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
-        else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
-        resetEnvCache();
-      }
     });
   });
 });

@@ -8,8 +8,7 @@
  * tenants. This is a security invariant — adjust with care.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -28,7 +27,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -48,7 +47,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(401);
   });
@@ -70,27 +69,6 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     });
     expect(res.status).toBe(400);
   });
-
-  describe("MODEL_PROVIDERS_DISABLED gate", () => {
-    const SNAPSHOT = process.env.MODEL_PROVIDERS_DISABLED;
-
-    afterEach(() => {
-      if (SNAPSHOT === undefined) delete process.env.MODEL_PROVIDERS_DISABLED;
-      else process.env.MODEL_PROVIDERS_DISABLED = SNAPSHOT;
-      resetEnvCache();
-    });
-
-    it("returns 403 when the providerId is soft-disabled", async () => {
-      process.env.MODEL_PROVIDERS_DISABLED = "codex,claude-code";
-      resetEnvCache();
-      const res = await app.request("/api/model-providers-oauth/pairing", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ providerId: "codex" }),
-      });
-      expect(res.status).toBe(403);
-    });
-  });
 });
 
 describe("GET /api/model-providers-oauth/pairing/:id", () => {
@@ -105,7 +83,7 @@ describe("GET /api/model-providers-oauth/pairing/:id", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string };
@@ -152,7 +130,7 @@ describe("DELETE /api/model-providers-oauth/pairing/:id", () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ providerId: "codex" }),
+      body: JSON.stringify({ providerId: "test-oauth" }),
     });
     const body = (await res.json()) as { id: string };
     return body.id;

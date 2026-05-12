@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `importOAuthModelProviderConnection` — service-level coverage.
+ * `importOAuthModelProviderConnection` — service-level coverage of the
+ * platform's generic OAuth import flow. Provider-specific behavior
+ * (claim extraction, requiredIdentityClaims gate) is covered by each
+ * module's own test suite — e.g. `apps/api/src/modules/codex/test/
+ * integration/services/codex-oauth-flow.test.ts`. This file uses the
+ * synthetic `test-oauth` provider so removing or swapping a module never
+ * breaks core flow coverage.
  *
  * The CLI does the loopback OAuth dance on the user's machine (since the
  * public CLI client_ids only allowlist `localhost:PORT/...` redirect_uris)
@@ -15,14 +21,12 @@
  * `userProviderConnections` + `applicationProviderCredentials`.
  *
  * Edge cases under test:
- *   - Happy path Codex: persists row + decoded chatgpt_account_id.
- *   - Happy path Claude: passes `subscriptionType` + `email` through verbatim.
- *   - Codex JWT defensive decoding extracts `chatgpt_account_id` server-side
- *     even when the request body did not provide it.
+ *   - Happy path: persists row with provided access/refresh tokens.
  *   - Unknown providerId → 404 (`notFound`).
- *   - Empty label → 400 (`invalidRequest`).
+ *   - Api-key provider rejected (only OAuth providers route here).
+ *   - Empty label → 400.
  *   - Missing accessToken/refreshToken → 400.
- *   - Re-import creates a fresh row (the new model does not de-dupe).
+ *   - Re-import creates a fresh row (no upsert).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -31,37 +35,10 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { decryptCredentials } from "@appstrate/connect";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { importOAuthModelProviderConnection } from "../../../src/services/oauth-model-providers/oauth-flow.ts";
-import { type OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
+import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
+import { type OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
-
-const CODEX = "codex";
-const CLAUDE = "claude-code";
-
-/**
- * Build a synthetic Codex-shaped JWT (RS256 alg header but unsigned — the
- * platform reads the payload defensively, never verifies the signature, so
- * "x" as fake signature suffices).
- */
-function makeFakeCodexJwt(payload: {
-  chatgpt_account_id?: string;
-  email?: string;
-  [k: string]: unknown;
-}): string {
-  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
-  const claims = {
-    iss: "https://auth.openai.com",
-    aud: "codex-cli",
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    "https://api.openai.com/auth": payload.chatgpt_account_id
-      ? { chatgpt_account_id: payload.chatgpt_account_id }
-      : {},
-    ...(payload.email ? { email: payload.email } : {}),
-  };
-  const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
-  return `${header}.${body}.x`;
-}
+import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 describe("importOAuthModelProviderConnection", () => {
   let userId: string;
@@ -75,69 +52,35 @@ describe("importOAuthModelProviderConnection", () => {
     orgId = org.id;
   });
 
-  it("happy path Codex: persists row + decodes account_id from JWT", async () => {
-    const accessJwt = makeFakeCodexJwt({
-      chatgpt_account_id: "acc-123",
-      email: "user@example.com",
-    });
-
+  it("happy path: persists row with token blob", async () => {
     const result = await importOAuthModelProviderConnection({
       orgId,
       userId,
-      providerId: CODEX,
-      label: "ChatGPT Pro",
-      accessToken: accessJwt,
-      refreshToken: "rt-codex",
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Test OAuth",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
       expiresAt: Date.now() + 3600 * 1000,
+      email: "user@example.com",
     });
 
-    expect(result.providerId).toBe(CODEX);
+    expect(result.providerId).toBe(TEST_OAUTH_PROVIDER_ID);
     expect(result.credentialId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.email).toBe("user@example.com");
     expect(result.availableModelIds.length).toBeGreaterThan(0);
 
     const [row] = await db
       .select()
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, result.credentialId));
-    expect(row?.providerId).toBe("codex");
-    expect(row?.label).toBe("ChatGPT Pro");
+    expect(row?.providerId).toBe(TEST_OAUTH_PROVIDER_ID);
+    expect(row?.label).toBe("Test OAuth");
 
     const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
     expect(blob.kind).toBe("oauth");
-    expect(blob.accessToken).toBe(accessJwt);
-    expect(blob.refreshToken).toBe("rt-codex");
-    expect(blob.accountId).toBe("acc-123");
+    expect(blob.accessToken).toBe("access-1");
+    expect(blob.refreshToken).toBe("refresh-1");
     expect(blob.email).toBe("user@example.com");
     expect(blob.needsReconnection).toBe(false);
-  });
-
-  it("happy path Claude: passes subscriptionType + email through verbatim", async () => {
-    const result = await importOAuthModelProviderConnection({
-      orgId,
-      userId,
-      providerId: CLAUDE,
-      label: "Claude Max",
-      accessToken: "sk-ant-oat01-fake",
-      refreshToken: "sk-ant-ort01-fake",
-      expiresAt: Date.now() + 3600 * 1000,
-      subscriptionType: "max",
-      email: "user@anthropic-test.com",
-    });
-
-    expect(result.providerId).toBe(CLAUDE);
-    expect(result.subscriptionType).toBe("max");
-    expect(result.email).toBe("user@anthropic-test.com");
-
-    const [row] = await db
-      .select()
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, result.credentialId));
-    expect(row?.providerId).toBe("claude-code");
-    const blob = decryptCredentials<OAuthBlob>(row!.credentialsEncrypted);
-    expect(blob.subscriptionType).toBe("max");
-    expect(blob.email).toBe("user@anthropic-test.com");
-    expect(blob.accountId).toBeUndefined();
   });
 
   it("unknown providerId → notFound (404)", async () => {
@@ -171,10 +114,10 @@ describe("importOAuthModelProviderConnection", () => {
       importOAuthModelProviderConnection({
         orgId,
         userId,
-        providerId: CODEX,
+        providerId: TEST_OAUTH_PROVIDER_ID,
         label: "   ",
-        accessToken: makeFakeCodexJwt({ chatgpt_account_id: "x" }),
-        refreshToken: "rt",
+        accessToken: "a",
+        refreshToken: "r",
       }),
     ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
   });
@@ -184,24 +127,9 @@ describe("importOAuthModelProviderConnection", () => {
       importOAuthModelProviderConnection({
         orgId,
         userId,
-        providerId: CODEX,
+        providerId: TEST_OAUTH_PROVIDER_ID,
         label: "x",
         accessToken: "",
-        refreshToken: "rt",
-      }),
-    ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
-  });
-
-  it("Codex import without recoverable accountId → invalidRequest (400)", async () => {
-    // JWT without the chatgpt_account_id claim, and no body-level accountId.
-    const noAccountJwt = makeFakeCodexJwt({ email: "x@example.com" });
-    await expect(
-      importOAuthModelProviderConnection({
-        orgId,
-        userId,
-        providerId: CODEX,
-        label: "ChatGPT",
-        accessToken: noAccountJwt,
         refreshToken: "rt",
       }),
     ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
@@ -211,8 +139,8 @@ describe("importOAuthModelProviderConnection", () => {
     const first = await importOAuthModelProviderConnection({
       orgId,
       userId,
-      providerId: CLAUDE,
-      label: "Claude v1",
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Test v1",
       accessToken: "access-v1",
       refreshToken: "refresh-v1",
       expiresAt: Date.now() + 3600 * 1000,
@@ -221,8 +149,8 @@ describe("importOAuthModelProviderConnection", () => {
     const second = await importOAuthModelProviderConnection({
       orgId,
       userId,
-      providerId: CLAUDE,
-      label: "Claude v2",
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Test v2",
       accessToken: "access-v2",
       refreshToken: "refresh-v2",
       expiresAt: Date.now() + 7200 * 1000,

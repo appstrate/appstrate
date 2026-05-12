@@ -135,7 +135,7 @@ export const orgProxies = pgTable(
  * table was dropped. `provider_id` is a free-text registry key (e.g. "codex",
  * "openai") — NOT a FK to `packages.id`. Inference wire format and default
  * base URL are read from the platform registry
- * (`apps/api/src/services/oauth-model-providers/registry.ts`) keyed by
+ * (`apps/api/src/services/model-providers/registry.ts`) keyed by
  * `provider_id`. `base_url_override` is honored only for providers whose
  * registry entry has `baseUrlOverridable: true` (e.g. "openai-compatible").
  *
@@ -227,7 +227,7 @@ export const modelProviderPairings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** Provider id (e.g. `codex`, `claude-code`) from the OAuth model provider registry. */
+    /** Provider id (e.g. `codex`) from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */

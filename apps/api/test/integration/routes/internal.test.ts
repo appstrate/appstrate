@@ -15,7 +15,7 @@ import {
 } from "../../helpers/seed.ts";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
-import type { OAuthBlob } from "../../../src/services/model-provider-credentials.ts";
+import type { OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
 import { userProviderConnections } from "@appstrate/db/schema";
@@ -868,7 +868,6 @@ describe("Internal API", () => {
         accessToken: "test-access-token",
         refreshToken: "test-refresh-token",
         expiresAt: Date.now() + 3600_000,
-        scopesGranted: ["user:inference"],
         needsReconnection: false,
       };
       const [row] = await db
@@ -876,7 +875,7 @@ describe("Internal API", () => {
         .values({
           orgId,
           label: "Test OAuth Credential",
-          providerId: "claude-code",
+          providerId: "test-oauth",
           credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
           createdBy: null,
         })
@@ -922,7 +921,7 @@ describe("Internal API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { accessToken: string; providerId: string };
       expect(body.accessToken).toBe("test-access-token");
-      expect(body.providerId).toBe("claude-code");
+      expect(body.providerId).toBe("test-oauth");
     });
 
     it("rejects api_key credentials (only OAuth rows are valid here)", async () => {

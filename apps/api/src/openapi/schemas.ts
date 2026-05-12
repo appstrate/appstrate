@@ -828,16 +828,11 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential (e.g. `codex`, `claude-code`). Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential (e.g. `codex`). Set when `authMode === 'oauth2'`.",
       },
       oauthEmail: { type: ["string", "null"] },
       oauthExpiresAt: { type: ["string", "null"], format: "date-time" },
       needsReconnection: { type: "boolean" },
-      providerDisabled: {
-        type: "boolean",
-        description:
-          "True when the credential's `providerId` is listed in `MODEL_PROVIDERS_DISABLED`. Existing rows keep working (token resolver, refresh worker, llm-proxy stay unfiltered); the UI hides the Reconnect affordance and shows a 'Disabled by admin' badge.",
-      },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -879,7 +874,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: ["oauth", "api-key", null],
         description:
-          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
+          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
       },
       cost: {
         type: ["object", "null"],
@@ -934,7 +929,8 @@ export const schemas = {
       forceStore: { type: "boolean" },
       accountId: {
         type: "string",
-        description: "Codex only — used as `chatgpt-account-id` header.",
+        description:
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by `providerId`) decides which routing header to echo it as.",
       },
       providerId: { type: "string" },
     },

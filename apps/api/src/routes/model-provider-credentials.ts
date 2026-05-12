@@ -14,19 +14,14 @@ import {
   loadInferenceCredentials,
   resolveProviderIdFromApiKeyForm,
   updateModelProviderCredential,
-} from "../services/model-provider-credentials.ts";
-import {
-  getModelProviderConfig,
-  isModelProviderEnabled,
-  listEnabledModelProviders,
-} from "../services/oauth-model-providers/registry.ts";
+} from "../services/model-providers/credentials.ts";
+import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
   conflict,
-  forbidden,
   invalidRequest,
   notFound,
   internalError,
@@ -87,7 +82,7 @@ export function createModelProviderCredentialsRouter() {
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
-    const data = listEnabledModelProviders().map((p) => ({
+    const data = listModelProviders().map((p) => ({
       providerId: p.providerId,
       displayName: p.displayName,
       iconUrl: p.iconUrl,
@@ -102,6 +97,7 @@ export function createModelProviderCredentialsRouter() {
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens ?? null,
         capabilities: m.capabilities,
+        recommended: m.recommended ?? false,
       })),
     }));
     return c.json(listResponse(data));
@@ -125,9 +121,6 @@ export function createModelProviderCredentialsRouter() {
     // resolve it to the canonical `providerId` (with `baseUrlOverride` for
     // any unrecognized combo) before persisting.
     const { providerId, baseUrlOverride } = resolveProviderIdFromApiKeyForm(apiShape, baseUrl);
-    if (!isModelProviderEnabled(providerId)) {
-      throw forbidden(`Provider ${providerId} is disabled by platform admin`);
-    }
     try {
       const id = await createApiKeyCredential({
         orgId,
@@ -204,7 +197,7 @@ export function createModelProviderCredentialsRouter() {
         // the registry's first model (sized for a low-cost probe regardless).
         let modelId = "_test";
         if (creds.providerId) {
-          const cfg = getModelProviderConfig(creds.providerId);
+          const cfg = getModelProvider(creds.providerId);
           if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
         }
         const result = await testModelConfig({ ...creds, modelId });

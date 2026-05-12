@@ -20,14 +20,15 @@
  * Filter strategy: `expires_at` is denormalized onto its own indexed
  * column (mirrored from `blob.expiresAt` by `createOAuthCredential` /
  * `updateOAuthCredentialTokens`). The scan filters at the SQL level
- * (`provider_id IN <oauth ids> AND (expires_at IS NULL OR expires_at <
- * now + lead)`) and only decrypts the qualifying subset. The
- * `IS NULL` branch handles rows that pre-date the column — they self-cure
- * on the first refresh. A LIMIT bounds memory use on large installations;
- * if the query is saturated, the next sweep picks up the remainder.
+ * (`provider_id IN <oauth ids> AND expires_at < now + lead`) and only
+ * decrypts the qualifying subset. Rows with no upstream-provided expiry
+ * land with `expires_at = NULL` and stay out of the scan — the sidecar's
+ * reactive 401-retry path covers them. A LIMIT bounds memory use on
+ * large installations; if the query is saturated, the next sweep picks
+ * up the remainder.
  */
 
-import { inArray, and, or, isNull, lte, sql } from "drizzle-orm";
+import { inArray, and, lte, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
@@ -36,7 +37,7 @@ import { logger } from "../../lib/logger.ts";
 import { ApiError } from "../../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listModelProviders } from "./registry.ts";
-import { type OAuthBlob } from "../model-provider-credentials.ts";
+import { type OAuthBlob } from "./credentials.ts";
 import { forceRefreshOAuthModelProviderToken } from "./token-resolver.ts";
 import { cleanupExpiredPairings } from "./pairings.ts";
 
@@ -62,8 +63,7 @@ const REFRESH_LEAD_HOURS = 24;
 /**
  * Hard cap on rows scanned per sweep. Bounds memory use on installations
  * with millions of OAuth credentials; remaining rows are picked up on the
- * next scheduled sweep (or the row's own `expires_at` becomes the SQL
- * filter once it gets backfilled).
+ * next scheduled sweep.
  */
 const SCAN_BATCH_LIMIT = 500;
 
@@ -103,24 +103,17 @@ export async function scanAndEnqueueRefreshes(): Promise<{
   scanned: number;
   enqueued: number;
 }> {
-  // Unfiltered: existing credentials for disabled providers must keep working.
-  // The refresh worker rotates tokens for any OAuth credential still on the
-  // shelf — even ones whose provider is currently in `MODEL_PROVIDERS_DISABLED`
-  // — so an admin temporarily disabling a provider doesn't silently expire
-  // user tokens.
   const oauthProviderIds = listModelProviders()
     .filter((p) => p.authMode === "oauth2")
     .map((p) => p.providerId);
   if (oauthProviderIds.length === 0) return { scanned: 0, enqueued: 0 };
 
   const cutoffDate = new Date(Date.now() + REFRESH_LEAD_HOURS * 60 * 60 * 1000);
-  const cutoffMs = cutoffDate.getTime();
 
-  // SQL-level filter: `expires_at IS NULL` covers rows that pre-date the
-  // denormalized column (they decrypt once, then `updateOAuthCredentialTokens`
-  // populates `expires_at` and they fall out of this branch). The
-  // `expires_at <= cutoff` branch is the steady-state hot path and rides
-  // on `idx_model_provider_credentials_expires_at_oauth`.
+  // SQL-level filter on the denormalized `expires_at` column — rides
+  // `idx_model_provider_credentials_expires_at_oauth`. Rows with a NULL
+  // expiry (upstream surfaced no `expires_in`) are intentionally excluded:
+  // the reactive 401-retry path covers them.
   const candidates = await db
     .select({
       id: modelProviderCredentials.id,
@@ -131,13 +124,10 @@ export async function scanAndEnqueueRefreshes(): Promise<{
     .where(
       and(
         inArray(modelProviderCredentials.providerId, oauthProviderIds),
-        or(
-          isNull(modelProviderCredentials.expiresAt),
-          lte(modelProviderCredentials.expiresAt, cutoffDate),
-        ),
+        lte(modelProviderCredentials.expiresAt, cutoffDate),
       ),
     )
-    .orderBy(sql`${modelProviderCredentials.expiresAt} ASC NULLS FIRST`)
+    .orderBy(asc(modelProviderCredentials.expiresAt))
     .limit(SCAN_BATCH_LIMIT);
 
   if (candidates.length === 0) return { scanned: 0, enqueued: 0 };
@@ -157,8 +147,6 @@ export async function scanAndEnqueueRefreshes(): Promise<{
       continue;
     }
     if (blob.needsReconnection) continue;
-    if (blob.expiresAt === null) continue;
-    if (blob.expiresAt > cutoffMs) continue;
     dueRows.push({ id: row.id, providerId: row.providerId });
   }
 

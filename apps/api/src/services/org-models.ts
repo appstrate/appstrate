@@ -7,29 +7,27 @@ import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-re
 import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import {
-  CLAUDE_CODE_CLI_VERSION,
-  CLAUDE_CODE_IDENTITY_HEADERS,
-  CLAUDE_CODE_IDENTITY_PROMPT,
-  CLAUDE_CODE_OAUTH_IDENTITY_BETAS,
-} from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials } from "./model-provider-credentials.ts";
+import { loadInferenceCredentials } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
+import { getModelProvider } from "./model-providers/registry.ts";
+import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- List (system + DB) ---
 
 /**
- * Anthropic gates `sk-ant-oat-*` tokens to Claude-Code identity at the
- * body level (system prompt + tool-name renaming) — pi-ai injects that
- * locally only when its prefix-based detection fires (see
+ * Anthropic gates `sk-ant-oat-*` tokens to a specific identity shape at
+ * the body level (system prompt + tool-name renaming) — pi-ai injects
+ * that locally only when its prefix-based detection fires (see
  * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
  * the LLM proxy path the upstream key never leaves the platform, so we
  * surface its kind to the CLI; the CLI then mirrors the prefix in the
  * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
- * protocols and for Anthropic models whose creds are unavailable.
+ * protocols and for Anthropic models whose creds are unavailable. OSS
+ * ships no Anthropic OAuth provider; this stays as a contribution point
+ * for external operator-installed modules.
  */
 function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
   if (apiShape !== "anthropic-messages") return null;
@@ -209,7 +207,15 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-interface ResolvedModel {
+/**
+ * Canonical resolved-model shape — produced by {@link resolveModel} /
+ * {@link loadModel}, consumed by the env-builder (which strips the
+ * display-only fields into the `LlmConfig` slot of `AppstrateRunPlan`).
+ * `accountId` is set for OAuth credentials whose provider hook surfaced
+ * an identity claim; the env-builder doesn't propagate it (the sidecar
+ * re-reads it from the credential row on each request).
+ */
+export interface ResolvedModel {
   apiShape: string;
   baseUrl: string;
   modelId: string;
@@ -224,7 +230,11 @@ interface ResolvedModel {
   isSystemModel: boolean;
   /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
   providerId?: string;
-  /** Codex only: required as `chatgpt-account-id` header on inference probes/runs. */
+  /**
+   * Abstract account/tenant identifier surfaced by the credential's
+   * `extractTokenIdentity` hook — passed to the provider's
+   * `buildInferenceProbe` hook so it can be echoed as a routing header.
+   */
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
   credentialId?: string;
@@ -383,21 +393,12 @@ export function buildModelTestRequest(config: {
   const headers: Record<string, string> = {};
   let url: string;
 
-  // OAuth-backed Anthropic flows (sk-ant-oat API tokens or Claude Code OAuth
-  // access tokens) probe `/v1/models` with the OAuth headers; the provider id
-  // is the canonical signal — sk-ant-oat prefix is the legacy fallback.
-  const isAnthropicOAuth =
-    config.providerId === "claude-code" || config.apiKey.startsWith("sk-ant-oat");
-
   switch (config.apiShape) {
     case "anthropic-messages":
+      // API-key only — OAuth subscription tokens (`sk-ant-oat-*`) are
+      // not used by any provider Appstrate ships out of the box.
       url = `${base}/v1/models`;
-      if (isAnthropicOAuth) {
-        headers["Authorization"] = `Bearer ${config.apiKey}`;
-        headers["anthropic-beta"] = "oauth-2025-04-20";
-      } else {
-        headers["x-api-key"] = config.apiKey;
-      }
+      headers["x-api-key"] = config.apiKey;
       headers["anthropic-version"] = "2023-06-01";
       break;
     case "mistral-conversations":
@@ -445,17 +446,23 @@ export async function testModelConfig(config: {
     };
   }
 
-  // OAuth-backed providers don't expose a `/models` discovery endpoint
-  // compatible with the Bearer token (Codex has no /models at all on
-  // chatgpt.com/backend-api; Claude Code's /v1/models would 200 even when
-  // /v1/messages is blocked by the third-party OAuth ban). Issue a real
-  // single-token inference probe so the test reflects whether the key can
-  // actually serve traffic.
-  if (config.providerId === "codex") {
-    return testCodexInference(config);
-  }
-  if (config.providerId === "claude-code") {
-    return testClaudeCodeInference(config);
+  // Provider-agnostic inference-probe override — modules whose backend
+  // doesn't accept the generic `/models` discovery probe (e.g. Codex's
+  // chatgpt.com backend has no `/models` endpoint) implement
+  // `buildInferenceProbe` to provide the real wire format. The platform
+  // sends whatever the module builds without inspecting the contents.
+  const provider = config.providerId ? getModelProvider(config.providerId) : null;
+  const probe = provider?.hooks?.buildInferenceProbe?.({
+    baseUrl: config.baseUrl,
+    modelId: config.modelId,
+    apiKey: config.apiKey,
+    accountId: config.accountId,
+  });
+  if (probe) {
+    if ("error" in probe) {
+      return { ok: false, latency: 0, error: probe.error, message: probe.message };
+    }
+    return runInferenceProbe(probe);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -497,77 +504,15 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
 const PROBE_TIMEOUT_MS = 15_000;
 
 /**
- * Inference probe request shape — `fetch()` arguments factored out as a
- * pure function so the headers + body can be unit-tested without standing
- * up an HTTP listener. `testCodexInference` / `testClaudeCodeInference`
- * are the only callers.
- */
-export interface InferenceProbeRequest {
-  url: string;
-  method: "POST";
-  headers: Record<string, string>;
-  body: string;
-}
-
-/**
- * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-
- * responses provider exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/openai-codex-responses.js). The wire format is the regression-
- * prone part — Codex rejects requests that drop any of the headers below
- * (`chatgpt-account-id`, `originator`, `OpenAI-Beta`).
- */
-export function buildCodexInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/codex/responses`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "chatgpt-account-id": config.accountId,
-      originator: "pi",
-      "OpenAI-Beta": "responses=experimental",
-      accept: "text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      store: false,
-      stream: true,
-      instructions: "ping",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "ping" }] }],
-      include: [],
-    }),
-  };
-}
-
-/**
- * Codex (ChatGPT subscription) inference probe — single-token request to
- * `${baseUrl}/codex/responses` with the SSE shape pi-ai uses in production
- * (cf. node_modules/@mariozechner/pi-ai/dist/providers/openai-codex-responses.js).
+ * Send a module-supplied {@link InferenceProbeRequest} and map the response
+ * to a {@link TestResult}. The platform is provider-agnostic here — the
+ * module's `buildInferenceProbe` hook owns the wire format; this helper
+ * only knows how to send it and classify the outcome.
  *
- * On 200 the connection works end-to-end (oauth + chatgpt backend +
- * subscription + model availability). The streaming body is canceled
- * immediately — we only care about the response status.
+ * Streaming bodies are aborted immediately — we only care about the
+ * response status.
  */
-async function testCodexInference(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  accountId?: string;
-}): Promise<TestResult> {
-  if (!config.accountId) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "AUTH_FAILED",
-      message: "Missing chatgpt-account-id (token may not be a valid Codex JWT)",
-    };
-  }
-  const req = buildCodexInferenceRequest({ ...config, accountId: config.accountId });
+async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult> {
   const start = performance.now();
   try {
     const res = await fetch(req.url, {
@@ -577,7 +522,6 @@ async function testCodexInference(config: {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const latency = Math.round(performance.now() - start);
-    // We only need the response status — abort the stream we've started.
     void res.body?.cancel().catch(() => {});
     if (res.ok) return { ok: true, latency };
     if (res.status === 401 || res.status === 403) {
@@ -585,136 +529,21 @@ async function testCodexInference(config: {
         ok: false,
         latency,
         error: "AUTH_FAILED",
-        message: "ChatGPT subscription rejected the token (auth failed or subscription inactive)",
+        message: "Provider rejected the token (auth failed or subscription inactive)",
       };
     }
     return {
       ok: false,
       latency,
       error: "PROVIDER_ERROR",
-      message: `Codex backend returned ${res.status}`,
+      message: `Provider returned ${res.status}`,
     };
   } catch (err) {
     return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
   }
 }
 
-/**
- * Claude Code (Anthropic subscription) inference probe — single-token
- * `/v1/messages` call mirroring pi-ai's "stealth mode" exactly: Anthropic
- * 429s/403s requests that don't impersonate the official Claude Code CLI
- * (third-party enforcement since 2026-01-09). The required signals are:
- *
- *   - `anthropic-beta: claude-code-20250219,oauth-2025-04-20`
- *   - `user-agent: claude-cli/<version>`
- *   - `x-app: cli`
- *   - `anthropic-dangerous-direct-browser-access: true`
- *   - First system message: "You are Claude Code, Anthropic's official CLI for Claude."
- *
- * cf. node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js (search
- * for `claudeCodeVersion`). The constants are defined in `@appstrate/core/
- * sidecar-types` so the sidecar runtime and the platform probe reference
- * the same source of truth.
- */
-
-/**
- * Build the Claude Code inference probe request. Mirrors pi-ai's
- * "stealth mode" exactly (cf. node_modules/@mariozechner/pi-ai/dist/
- * providers/anthropic.js — search for `claudeCodeVersion`). All five
- * signals below are load-bearing — drop any one and Anthropic 429s
- * the request as third-party tier abuse.
- */
-export function buildClaudeCodeInferenceRequest(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): InferenceProbeRequest {
-  return {
-    url: `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "anthropic-beta": CLAUDE_CODE_OAUTH_IDENTITY_BETAS.join(","),
-      "anthropic-version": "2023-06-01",
-      "user-agent": `claude-cli/${CLAUDE_CODE_CLI_VERSION}`,
-      ...CLAUDE_CODE_IDENTITY_HEADERS,
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.modelId,
-      max_tokens: 1,
-      system: [{ type: "text", text: CLAUDE_CODE_IDENTITY_PROMPT }],
-      messages: [{ role: "user", content: "ping" }],
-    }),
-  };
-}
-
-async function testClaudeCodeInference(config: {
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-}): Promise<TestResult> {
-  const req = buildClaudeCodeInferenceRequest(config);
-  const start = performance.now();
-  try {
-    const res = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const latency = Math.round(performance.now() - start);
-    if (res.ok) {
-      void res.body?.cancel().catch(() => {});
-      return { ok: true, latency };
-    }
-    // Read the error body up to 1 KB to catch the third-party enforcement signal.
-    const text = await res
-      .text()
-      .then((t) => t.slice(0, 1024))
-      .catch(() => "");
-    if (
-      (res.status === 403 || res.status === 429) &&
-      /third.?party|claude code|oauth.{0,40}(not allowed|not permitted|disabled)/i.test(text)
-    ) {
-      return {
-        ok: false,
-        latency,
-        error: "OAUTH_TIER_BLOCKED",
-        message:
-          "Anthropic blocks third-party use of Claude Code OAuth tokens (in effect since 2026-01-09). Use a paid API plan instead.",
-      };
-    }
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Anthropic rejected the token (auth failed or subscription inactive)",
-      };
-    }
-    if (res.status === 429) {
-      // Anthropic's per-IP / per-account rate limit on Claude Code OAuth is
-      // aggressive (kicks in after a handful of probes from the same IP).
-      // Surface a Retry-After hint when the upstream provides one.
-      const retryAfter = res.headers.get("retry-after");
-      return {
-        ok: false,
-        latency,
-        error: "RATE_LIMITED",
-        message: retryAfter
-          ? `Anthropic rate limit hit — retry in ${retryAfter}s`
-          : "Anthropic rate limit hit on the OAuth tier — try again in a minute",
-      };
-    }
-    return {
-      ok: false,
-      latency,
-      error: "PROVIDER_ERROR",
-      message: `Anthropic returned ${res.status}`,
-    };
-  } catch (err) {
-    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
-  }
-}
+// OSS supports only the API-key flow for Anthropic, via the `anthropic`
+// provider in the `core-providers` module. Anthropic Consumer ToS forbids
+// using OAuth subscription tokens in any third-party product, so OSS
+// ships no Anthropic OAuth provider.

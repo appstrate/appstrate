@@ -31,6 +31,14 @@ import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
+import {
+  registerModelProviders,
+  resetModelProviders,
+} from "../../src/services/model-providers/registry.ts";
+import {
+  registerTestOAuthProvider,
+  _resetTestOAuthProviderRegistration,
+} from "./test-oauth-provider.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
@@ -92,6 +100,30 @@ initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in 
 initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
+// Seed the runtime model-provider registry. Tests bypass boot.ts so the
+// usual aggregation (module contributions) has to happen here.
+//
+// Reset upfront because the preload may have already populated the
+// registry for other test files in the same process — we want a fresh
+// seed every time the app helper is loaded so test order doesn't matter.
+//
+// Two layers, in this order:
+//   1. Synthetic `test-oauth` provider — core integration tests for the
+//      OAuth flow (pairing, import, refresh, token resolver) seed against
+//      THIS provider, not any module's. The zero-footprint invariant
+//      requires that removing a module never breaks core tests.
+//   2. Every discovered module's `modelProviders()` contribution —
+//      modules can layer their own definitions on top. Module-specific
+//      integration tests live in `<module>/test/integration/`.
+resetModelProviders();
+_resetTestOAuthProviderRegistration();
+registerTestOAuthProvider();
+{
+  const moduleContributions = getDiscoveredModules()
+    .map((m) => m.modelProviders?.() ?? [])
+    .flat();
+  registerModelProviders(moduleContributions);
+}
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**

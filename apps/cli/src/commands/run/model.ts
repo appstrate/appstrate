@@ -167,10 +167,11 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // `apps/api/src/services/llm-proxy/anthropic.ts:HEADERS_TO_FORWARD`.
   //
   // OAuth-keyed Anthropic presets need an extra trick: the upstream
-  // (`sk-ant-oat-*`) is gated to Claude-Code identity at the BODY level
-  // — system prompt + tool-name renaming — which pi-ai injects locally
-  // only when its `apiKey.includes("sk-ant-oat")` detection fires. So we
-  // mirror the prefix in the placeholder. pi-ai then takes its OAuth
+  // (`sk-ant-oat-*`) is gated at the BODY level to a specific identity
+  // shape — system prompt + tool-name renaming — which pi-ai injects
+  // locally only when its `apiKey.includes("sk-ant-oat")` detection
+  // fires. So we mirror the prefix in the placeholder. pi-ai then takes
+  // its OAuth
   // path: it tries to set `Authorization: Bearer <oauth-placeholder>` AND
   // reshapes the body. The Anthropic SDK's `defaultHeaders` (= our
   // `model.headers`) is applied AFTER the auth header in `buildHeaders`

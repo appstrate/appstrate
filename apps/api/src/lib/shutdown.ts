@@ -12,7 +12,7 @@ import {
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
-import { shutdownOAuthModelRefreshWorker } from "../services/oauth-model-providers/refresh-worker.ts";
+import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";

@@ -56,8 +56,8 @@ describe("model_provider_credentials table schema", () => {
       .insert(modelProviderCredentials)
       .values({
         orgId: ctx.orgId,
-        label: "Codex personal",
-        providerId: "codex",
+        label: "Test OAuth personal",
+        providerId: "test-oauth",
         credentialsEncrypted: "v1:k1:another-opaque-blob",
         createdBy: ctx.user.id,
       })
@@ -67,7 +67,7 @@ describe("model_provider_credentials table schema", () => {
       .select()
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, inserted!.id));
-    expect(row!.providerId).toBe("codex");
+    expect(row!.providerId).toBe("test-oauth");
     expect(row!.baseUrlOverride).toBeNull();
   });
 

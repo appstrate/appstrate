@@ -77,7 +77,7 @@ export function toSlug(value: string, maxLen?: number): string {
  * Format: `{namespace_snake}__{tool_snake}` \u2014 two snake_case tokens
  * joined by a double underscore. Hard length ceiling 56 chars leaves
  * headroom under the 64-char OpenAI/Anthropic limit for downstream
- * host re-prefixing (e.g. Claude Code adds its own
+ * host re-prefixing (e.g. some CLI hosts add their own
  * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
  *
  * Bifurcated predicates (npm pattern):

@@ -268,9 +268,6 @@ function ProviderKeysSection({
         <DropdownMenuItem onSelect={() => onConnectOAuth("codex")}>
           {t("providerKeys.oauth.connectCodex")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onConnectOAuth("claude-code")}>
-          {t("providerKeys.oauth.connectClaude")}
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -303,15 +300,6 @@ function ProviderKeysSection({
                     {pk.needsReconnection && (
                       <Badge variant="destructive" className="text-[0.65rem]">
                         {t("providerKeys.oauth.needsReconnection")}
-                      </Badge>
-                    )}
-                    {pk.providerDisabled && (
-                      <Badge
-                        variant="secondary"
-                        className="text-[0.65rem]"
-                        title={t("providerKeys.disabledTooltip")}
-                      >
-                        {t("providerKeys.disabledBadge")}
                       </Badge>
                     )}
                   </div>
@@ -361,7 +349,7 @@ function ProviderKeysSection({
                   )}
                   {isOauth && (
                     <>
-                      {pk.needsReconnection && pk.providerId && !pk.providerDisabled && (
+                      {pk.needsReconnection && pk.providerId && (
                         <Button
                           variant="outline"
                           size="sm"

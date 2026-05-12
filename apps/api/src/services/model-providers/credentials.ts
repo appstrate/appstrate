@@ -22,16 +22,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
-import { mergeSystemAndDb, scopedWhere } from "../lib/db-helpers.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
-import {
-  getModelProviderConfig,
-  isModelProviderEnabled,
-  listModelProviders,
-} from "./oauth-model-providers/registry.ts";
+import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
+import { getModelProvider, listModelProviders } from "./registry.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import { getSystemModelProviderKeys } from "./model-registry.ts";
-import { logger } from "../lib/logger.ts";
+import { getSystemModelProviderKeys } from "../model-registry.ts";
+import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
@@ -47,39 +43,18 @@ export interface OAuthBlob {
   refreshToken: string;
   /** Epoch milliseconds. `null` when the upstream did not return an expiry. */
   expiresAt: number | null;
-  scopesGranted: string[];
   needsReconnection: boolean;
-  /** Codex only — `chatgpt-account-id` header value. */
+  /**
+   * Abstract account/tenant identifier — populated by the provider's
+   * `extractTokenIdentity` hook (e.g. Codex maps `chatgpt_account_id`
+   * here). Echoed by the sidecar as a routing header at request time.
+   */
   accountId?: string;
-  /** Subscription tier from the OAuth response (Claude). */
-  subscriptionType?: string;
   /** Account email — surfaced in the UI; never used in the inference path. */
   email?: string;
 }
 
 export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
-
-// ─── Internal DB-row shape (never carries plaintext) ───────────────────────
-// Distinct from the public `ModelProviderCredentialInfo` (shared-types) which
-// also represents env-driven system keys via `source: "built-in"`.
-
-interface ModelProviderCredentialRow {
-  id: string;
-  orgId: string;
-  label: string;
-  providerId: string;
-  /** Effective base URL after applying the override, if any. */
-  baseUrl: string;
-  /** "api_key" | "oauth2" — derived from the registry, not stored on the row. */
-  authMode: "api_key" | "oauth2";
-  /** OAuth-only: filled when the row's blob is `kind: "oauth"`. */
-  oauthEmail?: string | null;
-  needsReconnection?: boolean;
-  oauthExpiresAt?: string | null;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
@@ -87,7 +62,7 @@ interface ModelProviderCredentialRow {
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
  * (the only public read path). Carries the registry overlay (apiShape,
  * baseUrl, rewriteUrlPath, forceStream/Store) inline so downstream consumers
- * (pi.ts, llm-proxy) don't have to re-look-up `getModelProviderConfig`.
+ * (pi.ts, llm-proxy) don't have to re-look-up `getModelProvider`.
  *
  * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
  * entries have no registry providerId — they are flat wire-format
@@ -114,7 +89,7 @@ export interface DecryptedModelProviderCredentials {
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
 function effectiveBaseUrl(providerId: string, override: string | null): string | null {
-  const cfg = getModelProviderConfig(providerId);
+  const cfg = getModelProvider(providerId);
   if (!cfg) return null;
   if (override && cfg.baseUrlOverridable) return override;
   return cfg.defaultBaseUrl;
@@ -126,39 +101,6 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
   } catch {
     return null;
   }
-}
-
-// ─── List (org-scoped) ─────────────────────────────────────────────────────
-
-export async function listModelProviderCredentialRows(
-  orgId: string,
-): Promise<ModelProviderCredentialRow[]> {
-  const rows = await db
-    .select()
-    .from(modelProviderCredentials)
-    .where(scopedWhere(modelProviderCredentials, { orgId }));
-
-  return rows.map((r): ModelProviderCredentialRow => {
-    const cfg = getModelProviderConfig(r.providerId);
-    const baseUrl = effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "";
-    const blob = decryptBlob(r.credentialsEncrypted);
-    const isOauth = blob?.kind === "oauth";
-    return {
-      id: r.id,
-      orgId: r.orgId,
-      label: r.label,
-      providerId: r.providerId,
-      baseUrl,
-      authMode: cfg?.authMode ?? "api_key",
-      oauthEmail: isOauth ? (blob.email ?? null) : undefined,
-      needsReconnection: isOauth ? blob.needsReconnection : undefined,
-      oauthExpiresAt:
-        isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
-      createdBy: r.createdBy,
-      createdAt: toISORequired(r.createdAt),
-      updatedAt: toISORequired(r.updatedAt),
-    };
-  });
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
@@ -173,7 +115,7 @@ export interface CreateApiKeyCredentialInput {
 }
 
 export async function createApiKeyCredential(input: CreateApiKeyCredentialInput): Promise<string> {
-  const cfg = getModelProviderConfig(input.providerId);
+  const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
   }
@@ -208,14 +150,12 @@ export interface CreateOAuthCredentialInput {
   refreshToken: string;
   /** Epoch ms. */
   expiresAt: number | null;
-  scopesGranted: string[];
   accountId?: string;
-  subscriptionType?: string;
   email?: string;
 }
 
 export async function createOAuthCredential(input: CreateOAuthCredentialInput): Promise<string> {
-  const cfg = getModelProviderConfig(input.providerId);
+  const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
   }
@@ -229,10 +169,8 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     accessToken: input.accessToken,
     refreshToken: input.refreshToken,
     expiresAt: input.expiresAt,
-    scopesGranted: input.scopesGranted,
     needsReconnection: false,
     ...(input.accountId ? { accountId: input.accountId } : {}),
-    ...(input.subscriptionType ? { subscriptionType: input.subscriptionType } : {}),
     ...(input.email ? { email: input.email } : {}),
   };
   const [row] = await db
@@ -312,8 +250,7 @@ export async function updateModelProviderCredential(
 /**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
- * upstream didn't return (e.g. `email`, `subscriptionType`, `accountId` when
- * not rotated).
+ * upstream didn't return (e.g. `email`, `accountId` when not rotated).
  */
 export interface UpdateOAuthCredentialTokensInput {
   accessToken: string;
@@ -433,7 +370,7 @@ async function loadDbCredential(
     .limit(1);
   if (!row) return null;
 
-  const cfg = getModelProviderConfig(row.providerId);
+  const cfg = getModelProvider(row.providerId);
   if (!cfg) {
     logger.warn("model-provider-credentials: unknown providerId in DB row", {
       credentialId: id,
@@ -485,11 +422,6 @@ export function resolveProviderIdFromApiKeyForm(
   baseUrl: string,
 ): { providerId: string; baseUrlOverride: string | null } {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
-  // Unfiltered: existing credentials for disabled providers must keep working.
-  // The POST route enforces `isModelProviderEnabled` BEFORE calling this
-  // helper, so disabled providers never reach create. Resolution itself stays
-  // total over the registry so update/delete paths on existing rows keep
-  // matching their canonical providerId.
   for (const cfg of listModelProviders()) {
     if (cfg.authMode !== "api_key") continue;
     if (cfg.providerId === "openai-compatible") continue; // explicit fallback below
@@ -516,7 +448,10 @@ export async function listOrgModelProviderCredentials(
 ): Promise<ModelProviderCredentialInfo[]> {
   const system = getSystemModelProviderKeys();
   const now = toISORequired(new Date());
-  const rows = await listModelProviderCredentialRows(orgId);
+  const rows = await db
+    .select()
+    .from(modelProviderCredentials)
+    .where(scopedWhere(modelProviderCredentials, { orgId }));
 
   return mergeSystemAndDb({
     system,
@@ -532,23 +467,25 @@ export async function listOrgModelProviderCredentials(
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (row): ModelProviderCredentialInfo => {
-      const cfg = getModelProviderConfig(row.providerId);
+    mapRow: (r): ModelProviderCredentialInfo => {
+      const cfg = getModelProvider(r.providerId);
+      const blob = decryptBlob(r.credentialsEncrypted);
+      const isOauth = blob?.kind === "oauth";
       return {
-        id: row.id,
-        label: row.label,
+        id: r.id,
+        label: r.label,
         apiShape: cfg?.apiShape ?? "openai-chat",
-        baseUrl: row.baseUrl,
+        baseUrl: effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "",
         source: "custom",
-        authMode: row.authMode,
-        providerId: row.providerId,
-        oauthEmail: row.oauthEmail ?? null,
-        oauthExpiresAt: row.oauthExpiresAt ?? null,
-        needsReconnection: row.needsReconnection ?? false,
-        providerDisabled: !isModelProviderEnabled(row.providerId),
-        createdBy: row.createdBy,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
+        authMode: cfg?.authMode ?? "api_key",
+        providerId: r.providerId,
+        oauthEmail: isOauth ? (blob.email ?? null) : null,
+        oauthExpiresAt:
+          isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
+        needsReconnection: isOauth ? !!blob.needsReconnection : false,
+        createdBy: r.createdBy,
+        createdAt: toISORequired(r.createdAt),
+        updatedAt: toISORequired(r.updatedAt),
       };
     },
   });
@@ -563,7 +500,7 @@ export async function listOrgModelProviderCredentials(
  *
  * The returned shape carries the registry overlay (rewriteUrlPath,
  * forceStream/Store) inline so downstream consumers (pi.ts, llm-proxy)
- * don't have to re-look-up `getModelProviderConfig(providerId)`.
+ * don't have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the
  * OAuth credential is dead and the caller must treat it as missing.

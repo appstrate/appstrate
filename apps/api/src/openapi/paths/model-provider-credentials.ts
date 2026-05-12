@@ -7,7 +7,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List the in-code model provider registry",
       description:
-        "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, Claude Code, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
+        "Returns the catalog of LLM providers Appstrate knows how to talk to (Codex, OpenAI, Anthropic, OpenAI-compatible). The UI uses this to render the provider picker without hard-coding the catalog client-side.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -59,12 +59,17 @@ export const modelProviderCredentialsPaths = {
                           type: "array",
                           items: {
                             type: "object",
-                            required: ["id", "contextWindow", "capabilities"],
+                            required: ["id", "contextWindow", "capabilities", "recommended"],
                             properties: {
                               id: { type: "string" },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
+                              recommended: {
+                                type: "boolean",
+                                description:
+                                  "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all.",
+                              },
                             },
                           },
                         },
@@ -88,7 +93,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List organization model provider credentials",
       description:
-        "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, Claude Code, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "Returns all LLM model provider credentials (Anthropic, OpenAI, Codex, etc.) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -192,8 +197,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": {
-          description:
-            "Forbidden — caller lacks `model-provider-credentials:write`, OR the resolved `providerId` is listed in `MODEL_PROVIDERS_DISABLED`.",
+          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

@@ -18,7 +18,7 @@ import {
   consumePairing,
   createPairing,
   getPairing,
-} from "../../../src/services/oauth-model-providers/pairings.ts";
+} from "../../../src/services/model-providers/pairings.ts";
 import { hashPairingSecret } from "@appstrate/connect-helper/pairing-token";
 import { modelProviderPairings } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -49,7 +49,7 @@ describe("createPairing", () => {
     const result = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "codex",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
@@ -68,7 +68,7 @@ describe("createPairing", () => {
     expect(row!.tokenHash).toBe(expectedHash);
     // Plaintext token MUST NOT appear in the row — only its hash.
     expect(row!.tokenHash).not.toContain(result.token);
-    expect(row!.providerId).toBe("codex");
+    expect(row!.providerId).toBe("test-oauth");
     expect(row!.consumedAt).toBeNull();
   });
 });
@@ -80,7 +80,7 @@ describe("consumePairing", () => {
     fix = await setup();
   });
 
-  async function mint(ttlSeconds = 300, providerId = "codex"): Promise<string> {
+  async function mint(ttlSeconds = 300, providerId = "test-oauth"): Promise<string> {
     const { token } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
@@ -94,7 +94,7 @@ describe("consumePairing", () => {
   it("happy path — flips consumed_at and returns the row", async () => {
     const token = await mint();
     const consumed = await consumePairing(token, "127.0.0.1");
-    expect(consumed.providerId).toBe("codex");
+    expect(consumed.providerId).toBe("test-oauth");
     expect(consumed.orgId).toBe(fix.org.id);
     expect(consumed.consumedAt).toBeInstanceOf(Date);
   });
@@ -150,7 +150,7 @@ describe("getPairing", () => {
     const { id } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "codex",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
@@ -163,7 +163,7 @@ describe("getPairing", () => {
     const { id } = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "codex",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
@@ -185,7 +185,7 @@ describe("cleanupExpiredPairings", () => {
     const fresh = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "codex",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
@@ -193,7 +193,7 @@ describe("cleanupExpiredPairings", () => {
     const recent = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "claude-code",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: -60, // expired 60s ago
     });
@@ -201,7 +201,7 @@ describe("cleanupExpiredPairings", () => {
     const old = await createPairing({
       userId: fix.userId,
       orgId: fix.org.id,
-      providerId: "codex",
+      providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });

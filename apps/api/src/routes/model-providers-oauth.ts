@@ -5,20 +5,16 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { importOAuthModelProviderConnection } from "../services/oauth-model-providers/oauth-flow.ts";
-import {
-  isModelProviderEnabled,
-  isOAuthModelProvider,
-} from "../services/oauth-model-providers/registry.ts";
+import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
+import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import {
   cancelPairing,
   consumePairing,
   createPairing,
   getPairing,
-} from "../services/oauth-model-providers/pairings.ts";
-import { forbidden, invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
+} from "../services/model-providers/pairings.ts";
+import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 
@@ -47,20 +43,22 @@ const importBody = z.object({
   refreshToken: z.string().min(1, "refreshToken is required"),
   /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
   expiresAt: z.number().int().positive().optional().nullable(),
-  /** Claude-only: subscription tier from the token response body. */
-  subscriptionType: z.string().max(40).optional(),
-  /** Account email; Codex re-derives from JWT, Claude relies on this. */
+  /**
+   * Account email associated with the credential. Either forwarded by
+   * the CLI from the OAuth response body, or re-derived server-side by
+   * the provider's `extractTokenIdentity` hook.
+   */
   email: z.email().max(320).optional(),
   /**
-   * Codex only — pi-ai surfaces the `chatgpt_account_id` claim as a
-   * top-level `accountId` field after a successful login. We accept it
-   * here so we can persist the canonical value rather than re-deriving
-   * it from the JWT (which risks a base64url decode mismatch). Constrained
-   * to a strict UUID — Codex's `chatgpt_account_id` is canonically a UUID,
-   * so anything else is a malformed payload and rejecting it early keeps
-   * downstream header injection (`chatgpt-account-id`) honest.
+   * Abstract account/tenant identifier — the well-known `accountId`
+   * slot from {@link ModelProviderIdentity}. When the CLI surfaces it
+   * from the OAuth response body we trust the body-level value (it's
+   * cheaper than re-decoding the token); otherwise the provider's
+   * `extractTokenIdentity` hook fills it in server-side. Constrained
+   * to a reasonable length — provider-specific format validation
+   * (e.g. "must be a UUID") belongs in the module's hook.
    */
-  accountId: z.uuid().optional(),
+  accountId: z.string().min(1).max(120).optional(),
 });
 
 export function createModelProvidersOAuthRouter() {
@@ -104,9 +102,6 @@ export function createModelProvidersOAuthRouter() {
         "providerId",
       );
     }
-    if (!isModelProviderEnabled(input.providerId)) {
-      throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
-    }
 
     const result = await importOAuthModelProviderConnection({
       orgId: consumed.orgId,
@@ -116,7 +111,6 @@ export function createModelProvidersOAuthRouter() {
       accessToken: input.accessToken,
       refreshToken: input.refreshToken,
       expiresAt: input.expiresAt ?? null,
-      subscriptionType: input.subscriptionType,
       email: input.email,
       accountId: input.accountId,
     });
@@ -172,7 +166,6 @@ export function createModelProvidersOAuthRouter() {
   // GETs only ever return status, never the token itself.
   router.post(
     "/pairing",
-    requireAppContext(),
     requirePermission("model-provider-credentials", "write"),
     rateLimit(10),
     async (c) => {
@@ -180,12 +173,6 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const body = await c.req.json().catch(() => ({}));
       const input = parseBody(createPairingBody, body);
-
-      // Same soft-disable gate as /import — disabled providers cannot have
-      // new pairings minted, but existing credentials keep working.
-      if (!isModelProviderEnabled(input.providerId)) {
-        throw forbidden(`Provider ${input.providerId} is disabled by platform admin`);
-      }
 
       const platformUrl = getEnv().APP_URL;
       const { id, token, expiresAt } = await createPairing({
@@ -225,31 +212,26 @@ export function createModelProvidersOAuthRouter() {
   //
   // Wrong-org reads return 404 (not 403) — we never confirm or deny
   // existence of a pairing belonging to a different tenant.
-  router.get(
-    "/pairing/:id",
-    requireAppContext(),
-    requirePermission("model-provider-credentials", "read"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
+  router.get("/pairing/:id", requirePermission("model-provider-credentials", "read"), async (c) => {
+    const orgId = c.get("orgId");
+    const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-      const row = await getPairing(id, orgId);
-      if (!row) throw notFound("Pairing not found");
+    const row = await getPairing(id, orgId);
+    if (!row) throw notFound("Pairing not found");
 
-      const now = Date.now();
-      let status: "pending" | "consumed" | "expired";
-      if (row.consumedAt) status = "consumed";
-      else if (row.expiresAt.getTime() <= now) status = "expired";
-      else status = "pending";
+    const now = Date.now();
+    let status: "pending" | "consumed" | "expired";
+    if (row.consumedAt) status = "consumed";
+    else if (row.expiresAt.getTime() <= now) status = "expired";
+    else status = "pending";
 
-      return c.json({
-        id: row.id,
-        status,
-        consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
-        expiresAt: row.expiresAt.toISOString(),
-      });
-    },
-  );
+    return c.json({
+      id: row.id,
+      status,
+      consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
+      expiresAt: row.expiresAt.toISOString(),
+    });
+  });
 
   // DELETE /api/model-providers-oauth/pairing/:id
   // Cancel a pending pairing. Idempotent — returns 204 even when the row
@@ -257,7 +239,6 @@ export function createModelProvidersOAuthRouter() {
   // wrong-org case is silent for the same reason GET returns 404.
   router.delete(
     "/pairing/:id",
-    requireAppContext(),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
       const orgId = c.get("orgId");

@@ -301,10 +301,10 @@ export const PI_ADAPTER_TYPES = [
 /**
  * Helpers accept an optional `extraProviders` list — used by callers that
  * have already fetched the server's `MODEL_PROVIDERS` registry via
- * `useProvidersRegistry()` and want OAuth-subscription providers (Codex,
- * Claude Code) included in the lookup. The static list above intentionally
- * omits them — the OAuth catalog is authoritatively defined in
- * `apps/api/src/services/oauth-model-providers/registry.ts`.
+ * `useProvidersRegistry()` and want OAuth-subscription providers (Codex)
+ * included in the lookup. The static list above intentionally omits them
+ * — the OAuth catalog is authoritatively defined by the modules
+ * contributing OAuth model providers (see `apps/api/src/modules/codex`).
  */
 export function findPresetMatch(
   apiShape: string,

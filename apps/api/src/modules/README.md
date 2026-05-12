@@ -153,6 +153,21 @@ Core routes use `requirePermission` (apps/api-internal, union-typed against core
 
 Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
 
+## Model providers
+
+Modules contribute model providers (the LLM backends Appstrate knows how to authenticate against and talk to) via `modelProviders()` on the `AppstrateModule` contract. Each `ModelProviderDefinition` carries its wire format (`apiShape`, `defaultBaseUrl`, `forceStream`/`forceStore`), auth mode (`api_key` or `oauth2` + `oauth` config), model catalog, and an optional `hooks` block. The platform aggregates every loaded module's contributions into a runtime registry (`apps/api/src/services/model-providers/registry.ts`) and resolves by `providerId` — it never reaches into a module's internals.
+
+Provider hooks (`ModelProviderHooks`):
+
+- **`beforeLlmProxyRequest(ctx) → patch`** — runs at every LLM call, returns extra headers / URL rewrites to merge into the outbound request. Use it to inject provider-specific routing headers.
+- **`extractTokenIdentity(accessToken) → ModelProviderIdentity | null`** — runs once at credential import + after every refresh. Maps the provider's claim vocabulary (e.g. a JWT payload) into the platform's well-known abstract slots: `{ accountId?, email? }`. The platform persists the result and never re-decodes.
+- **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value the agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder. The real upstream credential never leaves the platform/sidecar boundary.
+- **`buildInferenceProbe(ctx) → InferenceProbeRequest | InferenceProbeBuildError | null`** — builds the connection-test probe (used by `POST /api/model-provider-credentials/:id/test`). Return a probe request when the generic `GET ${baseUrl}/models` discovery probe doesn't work, a structured error to fail fast (e.g. missing required identity slot), or `null` to fall back to discovery.
+
+Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
+
+Reference modules: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed) and `codex` (OAuth, all four hooks implemented, `requiredIdentityClaims: ["accountId"]`). External operator-installed providers extend the catalog the same way.
+
 ## Hooks and events
 
 - **Hooks** (`callHook`, first-match-wins): `beforeRun`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeRun` gates a run, `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.

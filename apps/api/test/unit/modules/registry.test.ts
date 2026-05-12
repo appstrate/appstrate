@@ -16,7 +16,7 @@ describe("getModuleRegistry", () => {
 
   it("returns built-in OSS modules when MODULES is unset", () => {
     delete process.env.MODULES;
-    expect(getModuleRegistry()).toEqual(["oidc", "webhooks"]);
+    expect(getModuleRegistry()).toEqual(["oidc", "webhooks", "core-providers"]);
   });
 
   it("returns empty array when MODULES is empty string", () => {

@@ -19,7 +19,7 @@ describe("pairing token codec", () => {
 
   it("strips trailing slashes from platformUrl on encode", () => {
     const token = encodePairingToken(
-      { platformUrl: "https://example.com///", providerId: "claude-code" },
+      { platformUrl: "https://example.com///", providerId: "codex" },
       VALID_SECRET,
     );
     expect(decodePairingToken(token).platformUrl).toBe("https://example.com");
@@ -118,7 +118,7 @@ describe("hashPairingSecret", () => {
       VALID_SECRET,
     );
     const t2 = encodePairingToken(
-      { platformUrl: "https://other.example.com", providerId: "claude-code" },
+      { platformUrl: "https://other.example.com", providerId: "codex" },
       VALID_SECRET,
     );
     expect(await hashPairingSecret(t1)).toBe(await hashPairingSecret(t2));
