@@ -35,7 +35,7 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { OAuthModelProviderDialog } from "./oauth-model-provider-dialog";
+import { OAuthPairingBody } from "./oauth-pairing-body";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
@@ -720,12 +720,24 @@ function ModelFormBody({
         )}
 
         {oauthDialogOpen && (
-          <OAuthModelProviderDialog
+          <Modal
             open
-            providerId={providerId}
             onClose={() => setOauthDialogOpen(false)}
-            onConnected={handleOauthConnected}
-          />
+            title={t("providerKeys.oauth.cliStageTitle")}
+            actions={
+              <Button variant="ghost" onClick={() => setOauthDialogOpen(false)}>
+                {t("providerKeys.oauth.close")}
+              </Button>
+            }
+          >
+            <OAuthPairingBody
+              providerId={providerId}
+              onConnected={(newId) => {
+                handleOauthConnected(newId);
+                setOauthDialogOpen(false);
+              }}
+            />
+          </Modal>
         )}
 
         {/* Custom fields — visible for custom provider or custom model */}

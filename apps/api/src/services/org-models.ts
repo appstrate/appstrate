@@ -297,11 +297,11 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 /**
  * Canonical resolved-model shape — produced by {@link resolveModel} /
- * {@link loadModel}, consumed by the env-builder (which strips the
- * display-only fields into the `LlmConfig` slot of `AppstrateRunPlan`).
- * `accountId` is set for OAuth credentials whose provider hook surfaced
- * an identity claim; the env-builder doesn't propagate it (the sidecar
- * re-reads it from the credential row on each request).
+ * {@link loadModel}, consumed by the env-builder. Passed through to the
+ * run executor verbatim as `AppstrateRunPlan.llmConfig`; the executor
+ * only reads inference fields. `accountId` is set for OAuth credentials
+ * whose provider hook surfaced an identity claim — the sidecar re-reads
+ * it from the credential row on each request, so the executor ignores it.
  */
 export interface ResolvedModel {
   apiShape: string;

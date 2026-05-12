@@ -11,9 +11,9 @@
  * card here. Hiding a card means removing its module from `MODULES` —
  * core has no per-providerId allowlist.
  *
- * The seeding behavior is intentionally bound to this caller — the generic
- * `OAuthModelProviderDialog` stays neutral so OAuth connections triggered
- * from `ModelFormModal` (where the user explicitly picks one model) do not
+ * The seeding behavior is intentionally bound to this caller — the shared
+ * `OAuthPairingBody` stays neutral so OAuth connections triggered from
+ * `ModelFormModal` (where the user explicitly picks one model) do not
  * accidentally create extra rows.
  */
 
@@ -22,8 +22,10 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { OAuthModelProviderDialog } from "./oauth-model-provider-dialog";
+import { OAuthPairingBody } from "./oauth-pairing-body";
 import { PROVIDER_ICONS } from "./icons";
 import {
   useModelProviderCredentials,
@@ -120,14 +122,24 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
       </button>
 
       {dialogOpen && (
-        <OAuthModelProviderDialog
+        <Modal
           open
-          providerId={entry.providerId}
           onClose={() => setDialogOpen(false)}
-          onConnected={(newId) => {
-            void handleConnected(newId);
-          }}
-        />
+          title={t("providerKeys.oauth.cliStageTitle")}
+          actions={
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+              {t("providerKeys.oauth.close")}
+            </Button>
+          }
+        >
+          <OAuthPairingBody
+            providerId={entry.providerId}
+            onConnected={(newId) => {
+              setDialogOpen(false);
+              void handleConnected(newId);
+            }}
+          />
+        </Modal>
       )}
     </>
   );

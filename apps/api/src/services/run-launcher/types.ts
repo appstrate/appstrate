@@ -7,7 +7,7 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
 
-export type { ModelCost, ToolMeta, TokenUsage };
+export type { ModelCost, ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
 
 export interface UploadedFile {
@@ -38,14 +38,6 @@ export interface ProviderSummary extends PlatformPromptProvider {
 }
 
 /**
- * Inference-only projection of {@link ResolvedModel} — drops display
- * fields (`label`, `isSystemModel`) the env-builder consumes separately
- * via the run record, and `accountId` which the sidecar re-reads from
- * the credential row on each request.
- */
-export type LlmConfig = Omit<ResolvedModel, "label" | "isSystemModel" | "accountId">;
-
-/**
  * Platform-specific run configuration — everything that does NOT fit in the
  * AFPS {@link ExecutionContext} (auth material, infrastructure wiring,
  * container inputs). Passed alongside the AFPS context to the Pi container
@@ -66,7 +58,13 @@ export interface AppstrateRunPlan {
   outputSchema?: JSONSchemaObject;
 
   // --- LLM ---
-  llmConfig: LlmConfig;
+  /**
+   * Resolved model + credential. `label`/`isSystemModel` are consumed by
+   * the caller for the run record; `accountId` is re-read by the sidecar
+   * from the credential row on each request. Both are passed through here
+   * verbatim — the executor only reads the inference fields.
+   */
+  llmConfig: ResolvedModel;
 
   // --- Platform wiring ---
   /** Callback URL + signed token for the agent container. Optional — runners that don't expose a callback API may omit it. */

@@ -159,6 +159,8 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
       baseUrl: "https://api.anthropic.com",
       modelId: "test-model",
       apiKey: "sk-test",
+      label: "Test Model",
+      isSystemModel: false,
     },
     ...overrides,
   };

@@ -137,15 +137,6 @@ export async function buildRunContext(params: {
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
-  // The inference-only projection — `label`/`isSystemModel` are consumed
-  // above (run record), `accountId` is re-read by the sidecar at request
-  // time. Anything else flows through verbatim.
-  const {
-    label: _label,
-    isSystemModel: _isSystemModel,
-    accountId: _accountId,
-    ...llmConfig
-  } = modelResult;
 
   // Step 3: resolve version label + dirty flag
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
@@ -197,7 +188,7 @@ export async function buildRunContext(params: {
     bundle,
     rawPrompt: agent.prompt,
     outputSchema: extractManifestSchemas(agent.manifest).output,
-    llmConfig,
+    llmConfig: modelResult,
     runApi: { url: runApiUrl, token: signRunToken(runId) },
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,

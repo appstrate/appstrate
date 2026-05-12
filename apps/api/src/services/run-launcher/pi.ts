@@ -112,8 +112,7 @@ export async function runPlatformContainer(
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
-      // config boundary — no need to ferry it through DecryptedModelProviderCredentials
-      // → ResolvedModel → LlmConfig. The provider definition is the source of truth.
+      // config boundary — the provider definition is the source of truth.
       const providerCfg = getModelProvider(llmConfig.providerId!);
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
