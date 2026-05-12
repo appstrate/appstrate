@@ -193,7 +193,12 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     baseUrl,
     reasoning: preset.reasoning ?? false,
     input: (preset.input ?? ["text"]) as ("text" | "image")[],
-    cost: preset.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    cost: {
+      input: preset.cost?.input ?? 0,
+      output: preset.cost?.output ?? 0,
+      cacheRead: preset.cost?.cacheRead ?? 0,
+      cacheWrite: preset.cost?.cacheWrite ?? 0,
+    },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
     headers,
