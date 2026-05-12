@@ -260,9 +260,10 @@ const envSchema = z
       .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
     // Modules (comma-separated specifiers).
-    // Default loads built-in OSS modules (oidc, webhooks, core-providers).
-    // Append external specifiers (npm package names) to extend.
-    MODULES: z.string().default("oidc,webhooks,core-providers"),
+    // Default loads the built-in OSS modules plus @appstrate/module-codex
+    // (ChatGPT/Codex OAuth). Remove module-codex to drop that provider
+    // surface. Append further external specifiers to extend.
+    MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),
