@@ -41,12 +41,18 @@ export interface DecodedPairingToken extends PairingTokenHeader {
   raw: string;
 }
 
+function stripTrailing(input: string, char: string): string {
+  let end = input.length;
+  while (end > 0 && input[end - 1] === char) end--;
+  return input.slice(0, end);
+}
+
 function base64UrlEncode(input: string): string {
-  return Buffer.from(input, "utf-8")
+  const b64 = Buffer.from(input, "utf-8")
     .toString("base64")
     .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+    .replace(/\//g, "_");
+  return stripTrailing(b64, "=");
 }
 
 function base64UrlDecode(input: string): string {
@@ -85,7 +91,7 @@ export function encodePairingToken(header: PairingTokenHeader, secret: string): 
     throw new Error("Invalid secret (must be ≥32 url-safe chars)");
   }
   const headerJson = JSON.stringify({
-    u: header.platformUrl.replace(/\/+$/, ""),
+    u: stripTrailing(header.platformUrl, "/"),
     p: header.providerId,
     v: HEADER_VERSION,
   });
@@ -165,9 +171,6 @@ export async function hashPairingSecret(token: string): Promise<string> {
   if (dot <= 0) throw new Error("Invalid pairing token: malformed");
   const secret = stripped.slice(dot + 1);
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return Buffer.from(buf)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const b64 = Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+  return stripTrailing(b64, "=");
 }
