@@ -25,7 +25,7 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider, listModelProviders } from "./registry.ts";
-import type { ModelApiShape, OAuthWireFormat } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -60,9 +60,11 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
 /**
  * Single decrypted credential shape exposed by `loadInferenceCredentials`
- * (the only public read path). Carries the registry overlay (apiShape,
- * baseUrl, wireFormat) inline so downstream consumers (pi.ts, llm-proxy)
- * don't have to re-look-up `getModelProvider`.
+ * (the only public read path). Carries the registry-derived `apiShape` and
+ * `baseUrl` inline so downstream consumers don't have to re-look-up
+ * `getModelProvider`. The declarative `oauthWireFormat` quirks are NOT
+ * ferried here — consumers (pi.ts) read them straight from the registry
+ * by `providerId` at the sidecar-config boundary.
  *
  * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
  * entries have no registry providerId — they are flat wire-format
@@ -77,8 +79,6 @@ export interface DecryptedModelProviderCredentials {
   apiKey: string;
   /** OAuth only — abstract account/tenant identifier (echoed by the sidecar as `wireFormat.accountIdHeader`). */
   accountId?: string;
-  /** OAuth only — declarative wire-format quirks from the provider definition (identity headers, body coercions, URL rewrites, adaptive retries). */
-  wireFormat?: OAuthWireFormat;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
   /** OAuth only — epoch ms. Refresh worker uses this to schedule renewals. */
@@ -398,7 +398,6 @@ async function loadDbCredential(
     ...common,
     apiKey: blob.accessToken,
     accountId: blob.accountId,
-    ...(cfg.oauthWireFormat ? { wireFormat: cfg.oauthWireFormat } : {}),
     needsReconnection: blob.needsReconnection,
     expiresAt: blob.expiresAt,
   };

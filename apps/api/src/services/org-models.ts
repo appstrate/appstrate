@@ -7,7 +7,6 @@ import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-re
 import type { ModelCost } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import type { OAuthWireFormat } from "@appstrate/core/sidecar-types";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -239,8 +238,6 @@ export interface ResolvedModel {
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
   credentialId?: string;
-  /** OAuth registry overlay — declarative wire-format quirks (identity headers, body coercions, URL rewrites, adaptive retries) forwarded to the sidecar. */
-  wireFormat?: OAuthWireFormat;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -304,7 +301,6 @@ export async function resolveModel(
         providerId: creds.providerId,
         accountId: creds.accountId,
         credentialId: dbDefault.credentialId,
-        wireFormat: creds.wireFormat,
       };
     }
   }
@@ -368,7 +364,6 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     providerId: creds.providerId,
     accountId: creds.accountId,
     credentialId: row.credentialId,
-    wireFormat: creds.wireFormat,
   };
 }
 
