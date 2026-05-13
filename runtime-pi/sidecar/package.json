@@ -10,6 +10,6 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "hono": "^4.12.15"
+    "hono": "^4.12.18"
   }
 }
