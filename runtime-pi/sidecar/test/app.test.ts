@@ -13,9 +13,10 @@
  * retry) live in `credential-proxy.test.ts`.
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
+import { logger } from "../logger.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -456,5 +457,105 @@ describe("ALL /llm/* — streaming", () => {
     const text = await res.text();
     expect(text).toContain('data: {"type":"content"}');
     expect(text).toContain("data: [DONE]");
+  });
+});
+
+// --- ALL /llm/* — telemetry ---
+//
+// `passUpstream` in app.ts wraps every successful LLM stream with a
+// `ReadableStream` that emits one structured `llm.stream.observed` log
+// on close. This is the long-term telemetry handle used to detect the
+// next class of Bun.serve idleTimeout-style stream-cancellation bugs
+// (see issue #426). Regressing the contract — silencing the log,
+// dropping fields, or mis-naming `ttfbMs` — would make the next
+// incident much harder to diagnose, so the emission shape is pinned
+// here rather than left as an implicit side effect.
+
+describe("ALL /llm/* — telemetry", () => {
+  it("emits llm.stream.observed with TTFB, idle gap, and byte counters", async () => {
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const chunks = ["chunk-1-", "chunk-2-end"];
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+          controller.close();
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+      deps.config.llm = LLM_CONFIG;
+      const app = createApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+      // Drain the stream so `pull` runs to completion and the
+      // observation closes — without this `llm.stream.observed` is
+      // never emitted because the consumer never pulls.
+      await res.text();
+
+      const observed = infoSpy.mock.calls.find(([msg]) => msg === "llm.stream.observed");
+      expect(observed).toBeDefined();
+      const payload = observed?.[1] as Record<string, unknown> | undefined;
+      expect(payload).toMatchObject({
+        status: 200,
+        authMode: "api_key",
+        bytes: chunks.reduce((n, c) => n + new TextEncoder().encode(c).byteLength, 0),
+        chunks: 2,
+      });
+      // `ttfbMs` is set on the first chunk (time-to-first-byte, not
+      // time-to-last-byte — the original draft of #426 mis-named this).
+      expect(typeof payload?.ttfbMs).toBe("number");
+      expect(payload?.ttfbMs).toBeGreaterThanOrEqual(0);
+      // `maxIdleMs` is always present even if 0 (chunks back-to-back).
+      expect(typeof payload?.maxIdleMs).toBe("number");
+      expect(payload?.maxIdleMs).toBeGreaterThanOrEqual(0);
+      // `totalMs` is monotonically >= ttfbMs.
+      expect(payload?.totalMs).toBeGreaterThanOrEqual(payload?.ttfbMs as number);
+      expect(payload?.targetUrl).toBe("https://api.anthropic.com/v1/messages");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("emits llm.stream.cancelled when the consumer aborts mid-stream", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // Upstream that never closes — forces the consumer-side cancel
+      // path to fire (the failure mode that was burning the run
+      // timeout before #426).
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("first-chunk"));
+          // Intentionally never close.
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+      deps.config.llm = LLM_CONFIG;
+      const app = createApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+      const reader = res.body!.getReader();
+      await reader.read(); // pull the first chunk
+      await reader.cancel("test-abort");
+
+      const cancelled = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.cancelled");
+      expect(cancelled).toBeDefined();
+      const payload = cancelled?.[1] as Record<string, unknown> | undefined;
+      expect(payload).toMatchObject({ status: 200, authMode: "api_key" });
+      expect(String(payload?.reason)).toContain("test-abort");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

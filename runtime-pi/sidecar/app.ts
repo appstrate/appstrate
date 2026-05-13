@@ -136,6 +136,7 @@ function passUpstream(upstream: Response, observe?: LlmStreamObservation): Respo
 
   const reader = upstream.body.getReader();
   const start = Date.now();
+  let firstByteAt: number | null = null;
   let lastByteAt = start;
   let maxIdleMs = 0;
   let totalBytes = 0;
@@ -145,12 +146,20 @@ function passUpstream(upstream: Response, observe?: LlmStreamObservation): Respo
     ...observe,
     status: upstream.status,
     totalMs: Date.now() - start,
-    ttfbMs: chunks > 0 ? lastByteAt - start : null,
+    ttfbMs: firstByteAt === null ? null : firstByteAt - start,
     maxIdleMs,
     bytes: totalBytes,
     chunks,
   });
 
+  // `pull`-based: `reader.read()` is only invoked when the downstream
+  // consumer (pi-ai) pulls a chunk. `maxIdleMs` therefore reflects the
+  // time between consumer pulls — exactly what Bun.serve's idle watchdog
+  // measures, and the reason a `>10 s` upstream pause was killing the
+  // connection before #426. A separate eager reader would isolate raw
+  // upstream byte timing, but we intentionally match what the serve
+  // layer sees so the metric stays comparable to the idle-timeout
+  // threshold.
   const observed = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -163,6 +172,7 @@ function passUpstream(upstream: Response, observe?: LlmStreamObservation): Respo
           controller.close();
           return;
         }
+        if (firstByteAt === null) firstByteAt = now;
         lastByteAt = now;
         totalBytes += value.byteLength;
         chunks += 1;
