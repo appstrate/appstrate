@@ -306,13 +306,21 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // HMAC signature at the route layer — not via JWT / API key / cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
-  // OAuth model-provider import is bearer-only: `Authorization: Bearer appp_…`
+  // OAuth model-provider pair-redeem is bearer-only: `Authorization: Bearer appp_…`
   // is the ONLY accepted auth shape. The route handler atomically consumes
   // the matching `model_provider_pairings` row; the row's userId/orgId/
   // providerId become the request context, replacing the cookie/API-key
   // chain entirely. Requests without the bearer reach the route handler
   // and 401 there.
-  if (path === "/api/model-providers-oauth/import" && headers) {
+  //
+  // The canonical path is `/pair/redeem`; `/import` is a deprecation alias
+  // kept indefinitely for `@appstrate/connect-helper` versions already in
+  // the wild via `npx`. Both share the same auth-bypass rule.
+  if (
+    (path === "/api/model-providers-oauth/pair/redeem" ||
+      path === "/api/model-providers-oauth/import") &&
+    headers
+  ) {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (auth?.startsWith("Bearer appp_")) return true;
   }
