@@ -126,7 +126,7 @@ function passUpstream(upstream: Response): Response {
  * normal traffic shouldn't pollute the log. Returns the original response.
  */
 async function logOauthLlmResponse(
-  providerId: string,
+  credentialId: string,
   targetUrl: string,
   upstream: Response,
 ): Promise<Response> {
@@ -145,7 +145,7 @@ async function logOauthLlmResponse(
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
   const truncated = bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample;
   logger.warn("oauth llm: upstream response non-2xx", {
-    providerId,
+    credentialId,
     targetUrl,
     status: upstream.status,
     contentType: upstream.headers.get("content-type"),
@@ -244,12 +244,7 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    const body = await c.req.json<{
-      runToken?: string;
-      platformApiUrl?: string;
-      proxyUrl?: string;
-      llm?: LlmProxyConfig;
-    }>();
+    const body = await c.req.json<Partial<SidecarConfig>>();
     if (body.runToken) config.runToken = body.runToken;
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
@@ -426,14 +421,14 @@ export function createApp(deps: AppDeps): Hono {
       upstream = await doFetch(forwardedHeaders, bodyText);
     } catch (err) {
       logger.error("oauth llm: upstream fetch threw", {
-        providerId: llmConfig.providerId,
+        credentialId: llmConfig.credentialId,
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    upstream = await logOauthLlmResponse(llmConfig.providerId, targetUrl, upstream);
+    upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
 
     // 401 retry: invalidate cache, force-refresh token, replay once.
     if (upstream.status === 401) {
@@ -461,7 +456,7 @@ export function createApp(deps: AppDeps): Hono {
       } catch (err) {
         return llmFetchErrorResponse(c, targetUrl, err);
       }
-      upstream = await logOauthLlmResponse(llmConfig.providerId, targetUrl, upstream);
+      upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
       // No second-level retry on the retry — propagate whatever we got.
     }
 

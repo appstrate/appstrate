@@ -79,3 +79,23 @@ export function findRegistryModel(
   }
   return null;
 }
+
+/**
+ * Resolve the `providerId` that owns a `(apiShape, baseUrl, modelId?)` row.
+ * Tries the curated model catalog first when a `modelId` is supplied
+ * (`org_models` rows), then falls back to the base-URL match
+ * (`model_provider_credentials` rows have no `modelId`). Returns
+ * {@link CUSTOM_ID} when no registry entry claims the row — what the form
+ * modals surface as the "Custom" picker entry.
+ */
+export function resolveProviderId(
+  spec: { apiShape: string; baseUrl: string | undefined; modelId?: string | undefined },
+  registry: readonly ProviderRegistryEntry[],
+): string {
+  if (spec.modelId) {
+    const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
+    if (match) return match.provider.providerId;
+  }
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
+  return byApiAndUrl ? byApiAndUrl.providerId : CUSTOM_ID;
+}

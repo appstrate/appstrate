@@ -26,6 +26,7 @@ import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
+import type { ModelProviderIdentity } from "@appstrate/core/module";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -85,6 +86,37 @@ export interface DecryptedModelProviderCredentials {
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
+
+/**
+ * Project an OAuth credential source into the wire shape consumed by the
+ * sidecar. The conditional `accountId` spread is the actual contract — when
+ * the provider didn't surface one, the field is omitted entirely (rather
+ * than serialized as `null`).
+ */
+export function pickOAuthTokenResponse(source: {
+  accessToken: string;
+  expiresAt: number | null;
+  accountId?: string;
+}): OAuthTokenResponse {
+  const { accessToken, expiresAt, accountId } = source;
+  return accountId !== undefined
+    ? { accessToken, expiresAt, accountId }
+    : { accessToken, expiresAt };
+}
+
+/**
+ * Return the subset of provider-declared required identity claims that
+ * aren't populated. Used both by the import gate (throws when non-empty)
+ * and by the runtime warn paths (logs when non-empty). Centralizing this
+ * means adding a new claim (e.g. `email`) to a provider's required list
+ * picks up at every site automatically.
+ */
+export function findMissingIdentityClaims(
+  required: readonly (keyof ModelProviderIdentity)[] | undefined,
+  identity: ModelProviderIdentity,
+): (keyof ModelProviderIdentity)[] {
+  return (required ?? []).filter((k) => !identity[k]);
+}
 
 function effectiveBaseUrl(providerId: string, override: string | null): string | null {
   const cfg = getModelProvider(providerId);
@@ -488,8 +520,6 @@ export async function listOrgModelProviderCredentials(
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
         oauthEmail: isOauth ? (blob.email ?? null) : null,
-        oauthExpiresAt:
-          isOauth && blob.expiresAt !== null ? new Date(blob.expiresAt).toISOString() : null,
         needsReconnection: isOauth ? !!blob.needsReconnection : false,
         createdBy: r.createdBy,
         createdAt: toISORequired(r.createdAt),

@@ -3,8 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
-import type { ModelCost } from "@appstrate/core/module";
+import type {
+  ModelProviderCredentialInfo,
+  ProviderRegistryEntry,
+  TestResult,
+} from "@appstrate/shared-types";
+
+export type { ProviderRegistryEntry } from "@appstrate/shared-types";
 
 export function useModelProviderCredentials() {
   const orgId = useCurrentOrgId();
@@ -13,40 +18,6 @@ export function useModelProviderCredentials() {
     queryFn: () => apiList<ModelProviderCredentialInfo>("/model-provider-credentials"),
     enabled: !!orgId,
   });
-}
-
-/**
- * Catalog entry surfaced by `GET /api/model-provider-credentials/registry` —
- * the in-code `MODEL_PROVIDERS` registry on the API side. Used by the model
- * picker so OAuth providers and any future entries don't need to be
- * re-declared client-side.
- */
-export interface ProviderRegistryEntry {
-  providerId: string;
-  displayName: string;
-  iconUrl: string | null;
-  description: string | null;
-  docsUrl: string | null;
-  apiShape: string;
-  defaultBaseUrl: string;
-  baseUrlOverridable: boolean;
-  authMode: "api_key" | "oauth2";
-  models: {
-    id: string;
-    /** Human-readable label; falls back to `id` when null. */
-    label: string | null;
-    contextWindow: number;
-    maxTokens: number | null;
-    capabilities: readonly string[];
-    /** Per-1M-token pricing; null when the provider doesn't publish it. */
-    cost: ModelCost | null;
-    /**
-     * Curated default for first-connection auto-seed (onboarding
-     * quick-connect). When at least one model carries the flag, the seeder
-     * inserts only those; otherwise it seeds every entry.
-     */
-    recommended: boolean;
-  }[];
 }
 
 export function useProvidersRegistry() {

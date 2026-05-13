@@ -16,6 +16,7 @@ import {
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ProviderRegistryEntry } from "@appstrate/shared-types";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -82,7 +83,7 @@ export function createModelProviderCredentialsRouter() {
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
   router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
-    const data = listModelProviders().map((p) => ({
+    const data: ProviderRegistryEntry[] = listModelProviders().map((p) => ({
       providerId: p.providerId,
       displayName: p.displayName,
       iconUrl: p.iconUrl,

@@ -42,8 +42,8 @@ import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-
 import {
   CUSTOM_ID,
   PI_ADAPTER_TYPES,
-  findProviderByApiShapeAndBaseUrl,
   getProviderById,
+  resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 import { OAuthPairingBody } from "./oauth-pairing-body";
@@ -77,8 +77,7 @@ function detectProviderFromKey(
   registry: readonly ProviderRegistryEntry[],
 ): string {
   if (!key) return "";
-  const match = findProviderByApiShapeAndBaseUrl(key.apiShape, key.baseUrl, registry);
-  return match ? match.providerId : CUSTOM_ID;
+  return resolveProviderId(key, registry);
 }
 
 /**

@@ -23,8 +23,10 @@ import {
 } from "@appstrate/connect";
 import type { ModelProviderDefinition as ModelProviderConfig } from "@appstrate/core/module";
 import {
+  findMissingIdentityClaims,
   loadCredentialRow,
   markCredentialNeedsReconnection,
+  pickOAuthTokenResponse,
   updateOAuthCredentialTokens,
   type OAuthBlob,
 } from "./credentials.ts";
@@ -101,20 +103,22 @@ async function loadCredentialState(
 }
 
 function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
-  // Trust the stored `accountId` — it was populated by
+  // Trust the stored identity claims — they were populated by
   // `extractTokenIdentity` at import time and re-populated on every
   // refresh in `doRefresh`. Re-decoding the JWT on every sidecar poll
   // would burn cycles for no gain.
-  const { accessToken, expiresAt, accountId } = state.blob;
-  if (!accountId && state.config.requiredIdentityClaims?.includes("accountId")) {
-    logger.warn("oauth model provider: accountId missing in stored creds", {
+  const missing = findMissingIdentityClaims(state.config.requiredIdentityClaims, {
+    accountId: state.blob.accountId,
+    email: state.blob.email,
+  });
+  if (missing.length > 0) {
+    logger.warn("oauth model provider: required identity claim(s) missing in stored creds", {
       credentialId: state.credentialId,
       providerId: state.config.providerId,
+      missing,
     });
   }
-  return accountId !== undefined
-    ? { accessToken, expiresAt, accountId }
-    : { accessToken, expiresAt };
+  return pickOAuthTokenResponse(state.blob);
 }
 
 /**
@@ -336,11 +340,17 @@ async function doRefresh(
   // of truth; fall back to the previously-stored value otherwise.
   const claims = state.config.hooks?.extractTokenIdentity?.(parsed.accessToken) ?? null;
   const accountId = claims?.accountId ?? state.blob.accountId;
-  if (!accountId && state.config.requiredIdentityClaims?.includes("accountId")) {
-    logger.warn("oauth model provider: accountId missing after refresh", {
+  const email = claims?.email ?? state.blob.email;
+  const missing = findMissingIdentityClaims(state.config.requiredIdentityClaims, {
+    accountId,
+    email,
+  });
+  if (missing.length > 0) {
+    logger.warn("oauth model provider: required identity claim(s) missing after refresh", {
       credentialId,
       providerId: state.config.providerId,
       hookReturnedClaims: claims !== null,
+      missing,
     });
   }
   const expiresAtMs = parsed.expiresAt ? new Date(parsed.expiresAt).getTime() : null;
@@ -351,9 +361,9 @@ async function doRefresh(
     ...(accountId ? { accountId } : {}),
   });
 
-  return {
+  return pickOAuthTokenResponse({
     accessToken: parsed.accessToken,
     expiresAt: expiresAtMs,
-    ...(accountId ? { accountId } : {}),
-  };
+    accountId,
+  });
 }

@@ -30,6 +30,7 @@ import type {
   ModelProviderHooks,
   ModelProviderIdentity,
 } from "@appstrate/core/module";
+import { base64UrlEncode, decodeJwtPayload } from "@appstrate/core/jwt";
 
 // ---------------------------------------------------------------------------
 // Codex JWT decoder
@@ -55,39 +56,20 @@ function decodeCodexJwtPayload(accessToken: string): {
   chatgpt_account_id?: string;
   email?: string;
 } | null {
-  const parts = accessToken.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payload = parts[1]!;
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-    const json = Buffer.from(padded, "base64").toString("utf-8");
-    const claims = JSON.parse(json) as Record<string, unknown>;
-
-    const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
-    const accountId =
-      auth && typeof auth["chatgpt_account_id"] === "string"
-        ? (auth["chatgpt_account_id"] as string)
-        : undefined;
-    const email = typeof claims["email"] === "string" ? (claims["email"] as string) : undefined;
-
-    return { chatgpt_account_id: accountId, email };
-  } catch {
-    return null;
-  }
+  const claims = decodeJwtPayload(accessToken);
+  if (!claims) return null;
+  const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+  const accountId =
+    auth && typeof auth["chatgpt_account_id"] === "string"
+      ? (auth["chatgpt_account_id"] as string)
+      : undefined;
+  const email = typeof claims["email"] === "string" ? (claims["email"] as string) : undefined;
+  return { chatgpt_account_id: accountId, email };
 }
 
 // ---------------------------------------------------------------------------
 // Provider hooks
 // ---------------------------------------------------------------------------
-
-function base64UrlEncode(input: string): string {
-  return Buffer.from(input, "utf-8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
 
 /**
  * Build the Codex inference probe request. Mirrors pi-ai's openai-codex-

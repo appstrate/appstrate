@@ -48,18 +48,6 @@ export type ModelApiShape =
   | "azure-openai-responses"
   | "bedrock-converse-stream";
 
-/**
- * Subset of {@link ModelApiShape} reachable via the OAuth path. The
- * `openai-chat`/`openai-completions` and direct-API shapes
- * (`mistral-conversations`, `google-*`, `azure-*`, `bedrock-*`) are
- * API-key-only surfaces — they never authenticate via OAuth and the
- * platform's OAuth resolver should never see them.
- */
-export type OauthModelApiShape =
-  | "anthropic-messages"
-  | "openai-responses"
-  | "openai-codex-responses";
-
 export interface LlmProxyApiKeyConfig {
   authMode: "api_key";
   baseUrl: string;
@@ -73,8 +61,6 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Canonical providerId — used for logging only. The sidecar never branches on this value. */
-  providerId: string;
   /**
    * Declarative wire-format contract contributed by the provider module
    * (`ModelProviderDefinition.oauthWireFormat`). Drives identity-header

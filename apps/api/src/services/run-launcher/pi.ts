@@ -39,7 +39,11 @@ import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
-import type { LlmProxyConfig, LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
+import type {
+  LlmProxyConfig,
+  LlmProxyOauthConfig,
+  SidecarConfig,
+} from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -118,7 +122,6 @@ export async function runPlatformContainer(
         authMode: "oauth",
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        providerId: llmConfig.providerId!,
         ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
       };
       sidecarLlm = oauthCfg;
@@ -131,7 +134,7 @@ export async function runPlatformContainer(
       };
     }
 
-    const sidecarConfig = {
+    const sidecarConfig: SidecarConfig = {
       runToken: plan.runApi?.token ?? "",
       platformApiUrl: plan.runApi?.url ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,

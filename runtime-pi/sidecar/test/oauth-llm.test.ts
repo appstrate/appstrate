@@ -106,7 +106,6 @@ const PREPEND_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://provider-a.example.com",
   credentialId: "conn-prepend",
-  providerId: "synthetic-prepend",
   wireFormat: {
     identityHeaders: {
       accept: "application/json",
@@ -140,7 +139,6 @@ const ACCOUNT_ID_OAUTH: LlmProxyOauthConfig = {
   authMode: "oauth",
   baseUrl: "https://provider-b.example.com/backend-api",
   credentialId: "conn-acct",
-  providerId: "synthetic-account-id",
   wireFormat: {
     identityHeaders: {
       "x-originator": "pi",

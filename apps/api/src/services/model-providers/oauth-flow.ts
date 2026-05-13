@@ -23,7 +23,11 @@
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
-import { createOAuthCredential, type CreateOAuthCredentialInput } from "./credentials.ts";
+import {
+  createOAuthCredential,
+  findMissingIdentityClaims,
+  type CreateOAuthCredentialInput,
+} from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -75,16 +79,12 @@ export async function importOAuthModelProviderConnection(
   // platform refuses to persist a credential that downstream calls can't
   // actually use (e.g. when an `accountId` is mandatory for the upstream
   // backend's routing header).
-  const required = config.requiredIdentityClaims ?? [];
-  if (required.length > 0) {
-    const identity = { accountId, email };
-    const missing = required.filter((k) => !identity[k]);
-    if (missing.length > 0) {
-      throw invalidRequest(
-        `Could not resolve required identity slot(s) for ${config.providerId}: ${missing.join(", ")}. ` +
-          `Re-run the OAuth flow or check the CLI version.`,
-      );
-    }
+  const missing = findMissingIdentityClaims(config.requiredIdentityClaims, { accountId, email });
+  if (missing.length > 0) {
+    throw invalidRequest(
+      `Could not resolve required identity slot(s) for ${config.providerId}: ${missing.join(", ")}. ` +
+        `Re-run the OAuth flow or check the CLI version.`,
+    );
   }
   logger.info("oauth model provider connection import", {
     providerId: config.providerId,

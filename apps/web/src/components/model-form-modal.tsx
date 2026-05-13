@@ -44,6 +44,7 @@ import {
   findRegistryModel,
   getProviderById,
   findProviderByApiShapeAndBaseUrl,
+  resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 
@@ -88,11 +89,7 @@ function detectProvider(
   registry: readonly ProviderRegistryEntry[],
 ): string {
   if (!model) return "";
-  const match = findRegistryModel(model.apiShape, model.modelId, registry);
-  if (match) return match.provider.providerId;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
-  if (byApiAndUrl) return byApiAndUrl.providerId;
-  return CUSTOM_ID;
+  return resolveProviderId(model, registry);
 }
 
 function detectModel(

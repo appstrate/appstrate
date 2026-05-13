@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import type { ModelCost } from "@appstrate/core/module";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 
@@ -341,8 +342,6 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
  * `@appstrate/core/module`). `cacheRead` / `cacheWrite` are optional —
  * providers without prompt caching simply omit them.
  */
-import type { ModelCost } from "@appstrate/core/module";
-
 export const modelCostSchema = z.object({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
@@ -526,13 +525,49 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauthEmail?: string | null;
-  /** OAuth token expiry, ISO-8601. `null` when expiry is unknown. */
-  oauthExpiresAt?: string | null;
   /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
   needsReconnection?: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Wire shape of `GET /api/model-provider-credentials/registry` — surfaces the
+ * runtime `MODEL_PROVIDERS` registry to the UI so the model picker stays
+ * data-driven (no hardcoded provider list client-side). Mirrors
+ * {@link import("@appstrate/core/module").ModelProviderDefinition} with the
+ * optional-fields normalised to nullable for wire clarity (and stripped of
+ * the platform-internal `hooks` / `oauthWireFormat` blocks).
+ */
+export interface ProviderRegistryEntry {
+  providerId: string;
+  displayName: string;
+  iconUrl: string;
+  description: string | null;
+  docsUrl: string | null;
+  apiShape: string;
+  defaultBaseUrl: string;
+  baseUrlOverridable: boolean;
+  authMode: "api_key" | "oauth2";
+  models: ProviderRegistryModelEntry[];
+}
+
+export interface ProviderRegistryModelEntry {
+  id: string;
+  /** Human-readable label; falls back to `id` when null. */
+  label: string | null;
+  contextWindow: number;
+  maxTokens: number | null;
+  capabilities: readonly string[];
+  /** Per-1M-token pricing; null when the provider doesn't publish it. */
+  cost: ModelCost | null;
+  /**
+   * Curated default for first-connection auto-seed (onboarding
+   * quick-connect). When at least one model carries the flag, the seeder
+   * inserts only those; otherwise it seeds every entry.
+   */
+  recommended: boolean;
 }
 
 // --- Connection Test Types ---
