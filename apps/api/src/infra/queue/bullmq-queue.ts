@@ -39,6 +39,11 @@ export class BullMQQueue<T> implements JobQueue<T> {
           }
         : {}),
     });
+    // QueueBase routes `connection.on("error")` to `queue.emit("error", ...)`
+    // (queue-base.js:40). Without a listener, Node EventEmitter rethrows.
+    this.queue.on("error", (err) => {
+      logger.error(`${this.name} queue error`, { error: err.message });
+    });
   }
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
@@ -109,9 +114,29 @@ export class BullMQQueue<T> implements JobQueue<T> {
         error: err.message,
       });
     });
+
+    // BullMQ Worker re-emits underlying connection errors as "error" events.
+    // Same rationale as the Queue handler above.
+    this.worker.on("error", (err) => {
+      logger.error(`${this.name} worker error`, { error: err.message });
+    });
   }
 
   async shutdown(): Promise<void> {
+    // Wait for the blocking client's init sequence (CLIENT SETNAME, INFO, …)
+    // to complete BEFORE close. BullMQ's `RedisConnection.close()` calls
+    // `disconnect()` when status is "initializing" (redis-connection.js:222),
+    // which rejects every in-flight init command with "Connection is closed.".
+    // Those rejections are fire-and-forget inside BullMQ, so they surface as
+    // unhandled rejections that fail bun:test files with a full init→close
+    // lifecycle (model-providers-pairing-cleanup-worker.test.ts).
+    if (this.worker) {
+      try {
+        await this.worker.waitUntilReady();
+      } catch {
+        // Already disconnected — nothing to wait for.
+      }
+    }
     await this.worker?.close();
     await this.queue.close();
     this.worker = null;
