@@ -433,43 +433,6 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
   );
 }
 
-// ─── Load (decrypt + apply registry overlay) ───────────────────────────────
-
-/**
- * Internal: decrypt + overlay the registry config for one DB row. Public
- * callers MUST use {@link loadInferenceCredentials} so the env-system-key
- * fallback and `needsReconnection` gate are honored — those two callers
- * differ only by what they wrap around this single read path.
- */
-async function loadDbCredential(
-  orgId: string,
-  id: string,
-): Promise<DecryptedModelProviderCredentials | null> {
-  const loaded = await loadCredentialRow(id, orgId);
-  if (!loaded || !loaded.config) return null;
-
-  const baseUrl = effectiveBaseUrl(loaded.providerId, loaded.baseUrlOverride);
-  if (!baseUrl) return null;
-
-  const common = {
-    providerId: loaded.providerId,
-    apiShape: loaded.config.apiShape,
-    baseUrl,
-  };
-
-  if (loaded.blob.kind === "api_key") {
-    return { ...common, apiKey: loaded.blob.apiKey };
-  }
-
-  return {
-    ...common,
-    apiKey: loaded.blob.accessToken,
-    accountId: loaded.blob.accountId,
-    needsReconnection: loaded.blob.needsReconnection,
-    expiresAt: loaded.blob.expiresAt,
-  };
-}
-
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
 
 /**
@@ -557,9 +520,28 @@ export async function loadInferenceCredentials(
     };
   }
 
-  // 2) Unified credentials table (api-key + OAuth).
-  const creds = await loadDbCredential(orgId, id);
-  if (!creds) return null;
-  if (creds.needsReconnection) return null;
-  return creds;
+  // 2) Unified credentials table (api-key + OAuth). Inlined — the previous
+  // `loadDbCredential` helper had only this one caller and added no
+  // value beyond the registry-overlay projection.
+  const loaded = await loadCredentialRow(id, orgId);
+  if (!loaded || !loaded.config) return null;
+  const baseUrl = effectiveBaseUrl(loaded.providerId, loaded.baseUrlOverride);
+  if (!baseUrl) return null;
+  if (loaded.blob.kind === "oauth" && loaded.blob.needsReconnection) return null;
+
+  const common = {
+    providerId: loaded.providerId,
+    apiShape: loaded.config.apiShape,
+    baseUrl,
+  };
+  if (loaded.blob.kind === "api_key") {
+    return { ...common, apiKey: loaded.blob.apiKey };
+  }
+  return {
+    ...common,
+    apiKey: loaded.blob.accessToken,
+    accountId: loaded.blob.accountId,
+    needsReconnection: loaded.blob.needsReconnection,
+    expiresAt: loaded.blob.expiresAt,
+  };
 }
