@@ -22,6 +22,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
 COPY packages/mcp-transport/package.json packages/mcp-transport/
+COPY packages/module-codex/package.json packages/module-codex/
 COPY packages/runner-pi/package.json packages/runner-pi/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/ui/package.json packages/ui/
@@ -112,6 +113,13 @@ COPY --from=build /app/packages/emails/package.json ./packages/emails/
 # Env package (Zod-validated env vars — used by API, DB, connect at runtime)
 COPY --from=build /app/packages/env/src ./packages/env/src
 COPY --from=build /app/packages/env/package.json ./packages/env/
+
+# Module: Codex OAuth model provider — opt-in via MODULES env
+# (default `oidc,webhooks,core-providers,@appstrate/module-codex`).
+# Module-loader dynamic-imports it at boot; src + package.json must
+# both be present so the workspace symlink in node_modules resolves.
+COPY --from=build /app/packages/module-codex/src ./packages/module-codex/src
+COPY --from=build /app/packages/module-codex/package.json ./packages/module-codex/
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
