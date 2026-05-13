@@ -175,23 +175,23 @@ export function useModelFormHandler(opts: {
 }) {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
-  const createPk = useCreateModelProviderCredential();
-  const { data: providerKeys } = useModelProviderCredentials();
+  const createCredential = useCreateModelProviderCredential();
+  const { data: credentials } = useModelProviderCredentials();
   const { data: registry } = useProvidersRegistry();
 
-  const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
+  const isPending = createModel.isPending || updateModel.isPending || createCredential.isPending;
 
   const onSubmit = (data: ModelFormData) => {
-    const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
+    const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
       const matched = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl, registry ?? []);
-      const label = deduplicateLabel(matched?.displayName ?? "Custom", providerKeys ?? []);
+      const label = deduplicateLabel(matched?.displayName ?? "Custom", credentials ?? []);
       const providerId = matched?.providerId ?? "openai-compatible";
       const baseUrlOverride = matched ? null : data.baseUrl;
-      createPk.mutate(
+      createCredential.mutate(
         {
           label,
           providerId,
-          apiKey: data.newProviderKey!.apiKey,
+          apiKey: data.newCredential!.apiKey,
           ...(baseUrlOverride ? { baseUrlOverride } : {}),
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
@@ -199,9 +199,9 @@ export function useModelFormHandler(opts: {
     };
 
     if (opts.editModel) {
-      if (data.newProviderKey) {
-        createProviderKeyAndThen((keyId) => {
-          const { newProviderKey: _, ...modelData } = data;
+      if (data.newCredential) {
+        createCredentialAndThen((keyId) => {
+          const { newCredential: _, ...modelData } = data;
           updateModel.mutate(
             { id: opts.editModel!.id, data: { ...modelData, credentialId: keyId } },
             { onSuccess: opts.onSuccess },
@@ -210,9 +210,9 @@ export function useModelFormHandler(opts: {
       } else {
         updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
       }
-    } else if (data.newProviderKey) {
-      createProviderKeyAndThen((keyId) => {
-        const { newProviderKey: _, ...modelData } = data;
+    } else if (data.newCredential) {
+      createCredentialAndThen((keyId) => {
+        const { newCredential: _, ...modelData } = data;
         createModel.mutate({ ...modelData, credentialId: keyId }, { onSuccess: opts.onSuccess });
       });
     } else {

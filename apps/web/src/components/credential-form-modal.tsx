@@ -48,36 +48,36 @@ import {
 import { PROVIDER_ICONS } from "./icons";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 
-export interface ProviderKeyFormData {
+export interface CredentialFormData {
   label: string;
   apiShape: string;
   baseUrl: string;
   apiKey?: string;
 }
 
-interface ProviderKeyFormModalProps {
+interface CredentialFormModalProps {
   open: boolean;
   onClose: () => void;
-  providerKey: ModelProviderCredentialInfo | null;
+  credential: ModelProviderCredentialInfo | null;
   /** Preselect an OAuth provider — used by the "reconnect" affordance on stale rows. */
   initialOauthProviderId?: string | null;
   isPending: boolean;
-  onSubmit: (data: ProviderKeyFormData) => void;
+  onSubmit: (data: CredentialFormData) => void;
 }
 
-interface ProviderKeyFormFields {
+interface CredentialFormFields {
   label: string;
   apiShape: string;
   baseUrl: string;
   apiKey: string;
 }
 
-function detectProviderFromKey(
-  key: ModelProviderCredentialInfo | null,
+function detectProviderFromCredential(
+  credential: ModelProviderCredentialInfo | null,
   registry: readonly ProviderRegistryEntry[],
 ): string {
-  if (!key) return "";
-  return resolveProviderId(key, registry);
+  if (!credential) return "";
+  return resolveProviderId(credential, registry);
 }
 
 /**
@@ -105,17 +105,17 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
     }));
 }
 
-function ProviderKeyFormBody({
-  providerKey,
+function CredentialFormBody({
+  credential,
   initialOauthProviderId,
   isPending,
   onSubmit,
   onClose,
 }: {
-  providerKey: ModelProviderCredentialInfo | null;
+  credential: ModelProviderCredentialInfo | null;
   initialOauthProviderId: string | null;
   isPending: boolean;
-  onSubmit: (data: ProviderKeyFormData) => void;
+  onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -125,10 +125,10 @@ function ProviderKeyFormBody({
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
-    return detectProviderFromKey(providerKey, registry);
+    return detectProviderFromCredential(credential, registry);
   });
 
-  const isEditing = !!providerKey;
+  const isEditing = !!credential;
   const selectedOption = options.find((o) => o.id === selectedId);
   const isOAuthSelected = selectedOption?.authMode === "oauth2";
   const isCustom = selectedId === CUSTOM_ID;
@@ -141,11 +141,11 @@ function ProviderKeyFormBody({
     clearErrors,
     showError,
     formState: { errors },
-  } = useAppForm<ProviderKeyFormFields>({
+  } = useAppForm<CredentialFormFields>({
     defaultValues: {
-      label: providerKey?.label ?? "",
-      apiShape: providerKey?.apiShape ?? "",
-      baseUrl: providerKey?.baseUrl ?? "",
+      label: credential?.label ?? "",
+      apiShape: credential?.apiShape ?? "",
+      baseUrl: credential?.baseUrl ?? "",
       apiKey: "",
     },
   });
@@ -157,7 +157,7 @@ function ProviderKeyFormBody({
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const canTest = !!apiShape.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!providerKey);
+  const canTest = !!apiShape.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!credential);
 
   const handleTest = () => {
     setTestResult(null);
@@ -166,7 +166,7 @@ function ProviderKeyFormBody({
         apiShape: apiShape.trim(),
         baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...(providerKey ? { existingKeyId: providerKey.id } : {}),
+        ...(credential ? { existingKeyId: credential.id } : {}),
       },
       {
         onSuccess: (result) => setTestResult(result),
@@ -209,7 +209,7 @@ function ProviderKeyFormBody({
     });
   });
 
-  const title = providerKey ? t("providerKeys.form.editTitle") : t("providerKeys.form.title");
+  const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
 
   // OAuth-selected: the pairing body owns submission (helper POSTs creds
   // back). Hide the form-side Test/Save buttons; only Close stays.
@@ -221,14 +221,14 @@ function ProviderKeyFormBody({
         title={title}
         actions={
           <Button type="button" variant="outline" onClick={onClose}>
-            {t("providerKeys.oauth.close")}
+            {t("credentials.oauth.close")}
           </Button>
         }
       >
         <div className="space-y-4">
           {!isEditing && (
             <div className="space-y-2">
-              <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
+              <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
               <Select value={selectedId} onValueChange={handleProviderChange}>
                 <SelectTrigger id="pk-provider">
                   <SelectValue placeholder={t("models.form.providerPlaceholder")} />
@@ -261,13 +261,13 @@ function ProviderKeyFormBody({
               onClick={handleTest}
               disabled={!canTest || testMutation.isPending}
             >
-              {testMutation.isPending ? <Spinner /> : t("providerKeys.test")}
+              {testMutation.isPending ? <Spinner /> : t("credentials.test")}
             </Button>
             {testResult && (
               <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
                 {testResult.ok
-                  ? t("providerKeys.testSuccess", { latency: testResult.latency })
-                  : t("providerKeys.testFailed", { message: testResult.message })}
+                  ? t("credentials.testSuccess", { latency: testResult.latency })
+                  : t("credentials.testFailed", { message: testResult.message })}
               </span>
             )}
           </div>
@@ -282,7 +282,7 @@ function ProviderKeyFormBody({
     >
       <form id="pk-form" onSubmit={onFormSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
+          <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
           <Select value={selectedId} onValueChange={handleProviderChange} disabled={isEditing}>
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
@@ -295,7 +295,7 @@ function ProviderKeyFormBody({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="pk-label">{t("providerKeys.form.label")}</Label>
+          <Label htmlFor="pk-label">{t("credentials.form.label")}</Label>
           <Input
             id="pk-label"
             type="text"
@@ -342,7 +342,7 @@ function ProviderKeyFormBody({
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pk-baseUrl">{t("providerKeys.form.baseUrl")}</Label>
+              <Label htmlFor="pk-baseUrl">{t("credentials.form.baseUrl")}</Label>
               <Input
                 id="pk-baseUrl"
                 type="url"
@@ -372,23 +372,21 @@ function ProviderKeyFormBody({
 
         {!!selectedId && (
           <div className="space-y-2">
-            <Label htmlFor="pk-apiKey">{t("providerKeys.form.apiKey")}</Label>
+            <Label htmlFor="pk-apiKey">{t("credentials.form.apiKey")}</Label>
             <Input
               id="pk-apiKey"
               type="password"
               {...register("apiKey", {
                 validate: (v) =>
-                  !providerKey && !v.trim()
-                    ? t("validation.required", { ns: "common" })
-                    : undefined,
+                  !credential && !v.trim() ? t("validation.required", { ns: "common" }) : undefined,
               })}
               placeholder="sk-..."
               aria-invalid={showError("apiKey") ? true : undefined}
               className={cn(showError("apiKey") && "border-destructive")}
             />
-            {providerKey && (
+            {credential && (
               <div className="text-muted-foreground text-sm">
-                {t("providerKeys.form.apiKeyHint")}
+                {t("credentials.form.apiKeyHint")}
               </div>
             )}
             {showError("apiKey") && errors.apiKey?.message && (
@@ -411,7 +409,7 @@ function renderOptions(options: PickerOption[], t: (key: string) => string): Rea
           {opt.label}
           {opt.authMode === "oauth2" && (
             <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
-              {t("providerKeys.oauth.badgeOauth")}
+              {t("credentials.oauth.badgeOauth")}
             </span>
           )}
         </span>
@@ -420,22 +418,22 @@ function renderOptions(options: PickerOption[], t: (key: string) => string): Rea
   });
 }
 
-export function ModelProviderKeyFormModal({
+export function CredentialFormModal({
   open,
   onClose,
-  providerKey,
+  credential,
   initialOauthProviderId = null,
   isPending,
   onSubmit,
-}: ProviderKeyFormModalProps) {
+}: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
   // form values, pairing token if any) resets cleanly.
-  const key = providerKey?.id ?? `__create__:${initialOauthProviderId ?? ""}`;
+  const key = credential?.id ?? `__create__:${initialOauthProviderId ?? ""}`;
   return (
-    <ProviderKeyFormBody
+    <CredentialFormBody
       key={key}
-      providerKey={providerKey}
+      credential={credential}
       initialOauthProviderId={initialOauthProviderId}
       isPending={isPending}
       onSubmit={onSubmit}

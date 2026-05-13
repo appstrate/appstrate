@@ -54,7 +54,7 @@ export interface ModelFormData {
   baseUrl: string;
   modelId: string;
   credentialId: string;
-  newProviderKey?: { apiKey: string };
+  newCredential?: { apiKey: string };
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -285,7 +285,7 @@ function ModelFormBody({
       ],
     });
 
-  const providerKeysQuery = useModelProviderCredentials();
+  const credentialsQuery = useModelProviderCredentials();
 
   // `authMode` for the picked provider drives the credential UX:
   //   - "oauth2"  → no inline apiKey, must select an existing connection or
@@ -305,24 +305,24 @@ function ModelFormBody({
   //   - OAuth: pin to the canonical `providerId` (DB column) — apiShape +
   //            baseUrl would collide with api-key Anthropic credentials.
   //   - api-key: match on apiShape + baseUrl as before.
-  const availableProviderKeys = useMemo(() => {
-    if (!providerKeysQuery.data) return [];
+  const availableCredentials = useMemo(() => {
+    if (!credentialsQuery.data) return [];
     if (isOauthProvider) {
-      return providerKeysQuery.data.filter(
+      return credentialsQuery.data.filter(
         (k) => k.authMode === "oauth2" && k.providerId === providerId,
       );
     }
     if (!apiShape || !baseUrl) return [];
     const normalizedBase = baseUrl.replace(/\/+$/, "");
-    return providerKeysQuery.data.filter(
+    return credentialsQuery.data.filter(
       (k) =>
         k.authMode === "api_key" &&
         k.apiShape === apiShape &&
         k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
-  }, [providerKeysQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
+  }, [credentialsQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
 
-  const selectedKey = availableProviderKeys.find((k) => k.id === credentialId);
+  const selectedKey = availableCredentials.find((k) => k.id === credentialId);
   // For api-key providers, the third state is "no selection + about to type
   // a new key inline". For OAuth providers there's no inline path — the
   // user must either pick or click "Connect".
@@ -447,7 +447,7 @@ function ModelFormBody({
       baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
       credentialId: willCreateNewKey ? "" : data.credentialId,
-      ...(willCreateNewKey ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } } : {}),
+      ...(willCreateNewKey ? { newCredential: { apiKey: data.inlineApiKey.trim() } } : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
@@ -580,7 +580,7 @@ function ModelFormBody({
         {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
             <Label>
-              {isOauthProvider ? t("models.form.connectionLabel") : t("providerKeys.form.apiKey")}
+              {isOauthProvider ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
             </Label>
 
             {selectedKey ? (
@@ -617,7 +617,7 @@ function ModelFormBody({
               // button when there's at least one match — single column avoids
               // the side-by-side overflow when the provider name is long.
               <div className="flex flex-col gap-2">
-                {availableProviderKeys.length > 0 && (
+                {availableCredentials.length > 0 && (
                   <Select
                     value=""
                     onValueChange={(id) => {
@@ -630,7 +630,7 @@ function ModelFormBody({
                       <SelectValue placeholder={t("models.form.useExistingConnection")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableProviderKeys.map((k) => (
+                      {availableCredentials.map((k) => (
                         <SelectItem key={k.id} value={k.id}>
                           <span className="flex items-center gap-2">
                             <span className="truncate">{k.label}</span>
@@ -656,7 +656,7 @@ function ModelFormBody({
                 >
                   <Plug className="mr-2 size-4 shrink-0" />
                   <span className="truncate">
-                    {availableProviderKeys.length > 0
+                    {availableCredentials.length > 0
                       ? t("models.form.connectAnother", {
                           provider: registryEntry?.displayName ?? providerId,
                         })
@@ -678,7 +678,7 @@ function ModelFormBody({
                   )}
                   aria-invalid={showError("credentialId") ? true : undefined}
                 />
-                {availableProviderKeys.length > 0 && (
+                {availableCredentials.length > 0 && (
                   <Select
                     value=""
                     onValueChange={(id) => {
@@ -690,7 +690,7 @@ function ModelFormBody({
                       <SelectValue placeholder={t("models.form.useExistingKey")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableProviderKeys.map((k) => (
+                      {availableCredentials.map((k) => (
                         <SelectItem key={k.id} value={k.id}>
                           {k.label}
                         </SelectItem>
@@ -703,7 +703,7 @@ function ModelFormBody({
 
             {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
               <div className="text-muted-foreground text-sm">
-                {t("models.form.createProviderKeyHint")}
+                {t("models.form.createCredentialHint")}
               </div>
             )}
             {!selectedKey && isOauthProvider && (
@@ -721,10 +721,10 @@ function ModelFormBody({
           <Modal
             open
             onClose={() => setOauthDialogOpen(false)}
-            title={t("providerKeys.oauth.cliStageTitle")}
+            title={t("credentials.oauth.cliStageTitle")}
             actions={
               <Button variant="ghost" onClick={() => setOauthDialogOpen(false)}>
-                {t("providerKeys.oauth.close")}
+                {t("credentials.oauth.close")}
               </Button>
             }
           >

@@ -82,7 +82,7 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
   // setState-on-close doesn't tear into this effect.
   useEffect(() => {
     if (pairingStatus.data?.status !== "consumed") return;
-    toast.success(t("providerKeys.oauth.callbackSuccess"));
+    toast.success(t("credentials.oauth.callbackSuccess"));
     qc.invalidateQueries({ queryKey: ["model-provider-credentials"] });
     const credentialId = pairingStatus.data.credentialId;
     if (credentialId && onConnected) queueMicrotask(() => onConnected(credentialId));
@@ -97,7 +97,7 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
       const res = await createPairing.mutateAsync({ providerId });
       setPairing({ id: res.id, command: res.command });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("providerKeys.oauth.pairingCreateFailed"));
+      toast.error(err instanceof Error ? err.message : t("credentials.oauth.pairingCreateFailed"));
     }
   }
 
@@ -112,25 +112,25 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error(t("providerKeys.oauth.copyFailed"));
+      toast.error(t("credentials.oauth.copyFailed"));
     }
   }
 
   return (
     <div className="flex flex-col gap-4 text-sm">
-      <p>{t("providerKeys.oauth.cliInstructions")}</p>
+      <p>{t("credentials.oauth.cliInstructions")}</p>
 
       {createPairing.isPending || (!pairing && !isExpired) ? (
         <div className="bg-muted text-muted-foreground flex items-center gap-2 rounded-md p-3 text-xs">
           <Spinner />
-          <span>{t("providerKeys.oauth.generatingCommand")}</span>
+          <span>{t("credentials.oauth.generatingCommand")}</span>
         </div>
       ) : isExpired ? (
         <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          <p>{t("providerKeys.oauth.pairingExpired")}</p>
+          <p>{t("credentials.oauth.pairingExpired")}</p>
           <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            {t("providerKeys.oauth.regenerateCommand")}
+            {t("credentials.oauth.regenerateCommand")}
           </Button>
         </div>
       ) : (
@@ -142,19 +142,19 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
               variant="outline"
               size="sm"
               onClick={handleCopy}
-              aria-label={t("providerKeys.oauth.copyCommand")}
+              aria-label={t("credentials.oauth.copyCommand")}
               className="shrink-0"
             >
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               <span className="ml-1.5">
-                {copied ? t("providerKeys.oauth.copied") : t("providerKeys.oauth.copy")}
+                {copied ? t("credentials.oauth.copied") : t("credentials.oauth.copy")}
               </span>
             </Button>
           </div>
-          <p className="text-muted-foreground text-xs">{t("providerKeys.oauth.cliHint")}</p>
+          <p className="text-muted-foreground text-xs">{t("credentials.oauth.cliHint")}</p>
           <div className="text-muted-foreground flex items-center gap-2 text-xs">
             <Spinner />
-            <span>{t("providerKeys.oauth.cliWaiting")}</span>
+            <span>{t("credentials.oauth.cliWaiting")}</span>
           </div>
         </>
       )}
