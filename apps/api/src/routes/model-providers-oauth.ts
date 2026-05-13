@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
@@ -18,6 +18,7 @@ import {
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
+import { logger } from "../lib/logger.ts";
 
 /**
  * Body shape posted by `npx @appstrate/connect-helper <token>` after it
@@ -62,72 +63,103 @@ const importBody = z.object({
   accountId: z.string().min(1).max(120).optional(),
 });
 
+/**
+ * Pair-redeem handler — shared between the canonical
+ * `POST /api/model-providers-oauth/pair/redeem` route and the legacy
+ * `POST /api/model-providers-oauth/import` alias kept for back-compat with
+ * the `@appstrate/connect-helper` versions already in the wild via `npx`.
+ *
+ * Auth is exclusively `Authorization: Bearer appp_<token>`. The platform
+ * minted the token via POST /pairing (session-auth + RBAC); the helper
+ * POSTs the credentials back here with it as Bearer credentials. We
+ * `consumePairing()` atomically (single-use) — the resulting row's
+ * userId / orgId / providerId override anything the body claims, so a
+ * tampered helper cannot redirect the redeem to a different org or
+ * provider than the user authorized in the dashboard.
+ *
+ * No cookie / API-key path: the dashboard never POSTs to this route,
+ * it only mints pairings + polls their status. `auth-pipeline.ts` lets
+ * requests with `Bearer appp_` skip the cookie/API-key chain; any other
+ * shape lands here and we 401.
+ */
+async function handlePairRedeem(c: Context<AppEnv>) {
+  const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
+  if (!authHeader?.startsWith("Bearer appp_")) {
+    throw unauthorized(
+      "POST /api/model-providers-oauth/pair/redeem requires a pairing-token bearer (Authorization: Bearer appp_…)",
+    );
+  }
+
+  const token = authHeader.slice(7);
+  const fromIp = getClientIp(c);
+  const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
+
+  const body = await c.req.json();
+  const input = parseBody(importBody, body);
+
+  // Body's providerId MUST match what the pairing was minted for —
+  // otherwise the helper could divert the redeem to a different
+  // provider than the user authorized in the dashboard.
+  if (input.providerId !== consumed.providerId) {
+    throw invalidRequest(
+      `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
+      "providerId",
+    );
+  }
+
+  const result = await importOAuthModelProviderConnection({
+    ...input,
+    orgId: consumed.orgId,
+    userId: consumed.userId,
+  });
+
+  // Link the new credential back to the pairing row so the dashboard's
+  // GET /pairing/:id poll surfaces it without a separate list call.
+  await linkPairingCredential(consumed.id, result.credentialId);
+
+  await recordAuditFromContext(c, {
+    action: "oauth_model_provider.imported",
+    resourceType: "oauth_model_provider",
+    resourceId: result.credentialId,
+    after: {
+      providerId: result.providerId,
+      credentialId: result.credentialId,
+      availableModelIds: result.availableModelIds,
+      pairingId: consumed.id,
+      // No raw token / email — audit log MUST NOT carry secrets
+    },
+  });
+
+  return c.json(result);
+}
+
 export function createModelProvidersOAuthRouter() {
   const router = new Hono<AppEnv>();
 
-  // POST /api/model-providers-oauth/import
-  //
-  // Auth is exclusively `Authorization: Bearer appp_<token>`. The platform
-  // minted the token via POST /pairing (session-auth + RBAC); the helper
-  // POSTs the credentials back here with it as Bearer credentials. We
-  // `consumePairing()` atomically (single-use) — the resulting row's
-  // userId / orgId / providerId override anything the body claims, so a
-  // tampered helper cannot redirect the import to a different org or
-  // provider than the user authorized in the dashboard.
-  //
-  // No cookie / API-key path: the dashboard never POSTs to this route,
-  // it only mints pairings + polls their status. `auth-pipeline.ts` lets
-  // requests with `Bearer appp_` skip the cookie/API-key chain; any other
-  // shape lands here and we 401.
+  // POST /api/model-providers-oauth/pair/redeem — canonical pairing-redeem
+  // route. `pair` is the canonical noun (mirrors the `model_provider_pairings`
+  // table and the `/pairing` lifecycle endpoints); `redeem` is the verb the
+  // helper performs (consume the one-shot bearer + post credentials back).
+  router.post("/pair/redeem", handlePairRedeem);
+
+  // POST /api/model-providers-oauth/import — legacy alias kept indefinitely
+  // for backward compatibility with `@appstrate/connect-helper` versions
+  // already in the wild via `npx @appstrate/connect-helper@latest <token>`.
+  // Behaviour is identical to the canonical path; the only difference is a
+  // `Deprecation: true` response header + a `logger.warn` so operators can
+  // track adoption of the new path before retiring the alias.
   router.post("/import", async (c) => {
-    const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
-    if (!authHeader?.startsWith("Bearer appp_")) {
-      throw unauthorized(
-        "POST /api/model-providers-oauth/import requires a pairing-token bearer (Authorization: Bearer appp_…)",
-      );
-    }
-
-    const token = authHeader.slice(7);
-    const fromIp = getClientIp(c);
-    const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
-
-    const body = await c.req.json();
-    const input = parseBody(importBody, body);
-
-    // Body's providerId MUST match what the pairing was minted for —
-    // otherwise the helper could divert the import to a different
-    // provider than the user authorized in the dashboard.
-    if (input.providerId !== consumed.providerId) {
-      throw invalidRequest(
-        `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
-        "providerId",
-      );
-    }
-
-    const result = await importOAuthModelProviderConnection({
-      ...input,
-      orgId: consumed.orgId,
-      userId: consumed.userId,
-    });
-
-    // Link the new credential back to the pairing row so the dashboard's
-    // GET /pairing/:id poll surfaces it without a separate list call.
-    await linkPairingCredential(consumed.id, result.credentialId);
-
-    await recordAuditFromContext(c, {
-      action: "oauth_model_provider.imported",
-      resourceType: "oauth_model_provider",
-      resourceId: result.credentialId,
-      after: {
-        providerId: result.providerId,
-        credentialId: result.credentialId,
-        availableModelIds: result.availableModelIds,
-        pairingId: consumed.id,
-        // No raw token / email — audit log MUST NOT carry secrets
+    logger.warn(
+      "Deprecated route hit: POST /api/model-providers-oauth/import — clients should migrate to POST /api/model-providers-oauth/pair/redeem",
+      {
+        requestId: c.get("requestId"),
+        path: "/api/model-providers-oauth/import",
+        successor: "/api/model-providers-oauth/pair/redeem",
       },
-    });
-
-    return c.json(result);
+    );
+    c.header("Deprecation", "true");
+    c.header("Link", '</api/model-providers-oauth/pair/redeem>; rel="successor-version"');
+    return handlePairRedeem(c);
   });
 
   // ────────────────────────────────────────────────────────────────────────
