@@ -33,4 +33,4 @@ The helper's source lives in a separate private repo (`appstrate/connect-helper`
 
 ## Authoring follow-on OAuth providers
 
-This module is the canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"`, provide `hooks` if the access token needs to be decoded for an identity claim, and pin any wire-format quirks in `oauthWireFormat`. The client-side helper (`@appstrate/connect-helper`) registers each provider by canonical `providerId` in its own `PROVIDERS` table — extending it requires a coordinated bump.
+This module is the canonical example. Copy the shape: declare a `ModelProviderDefinition` with `authMode: "oauth2"`, provide `hooks` if the access token needs to be decoded for an identity claim, and pin any wire-format quirks in `oauthWireFormat`. The client-side helper (`@appstrate/connect-helper`) registers each provider by canonical `providerId` in its own `MODEL_PROVIDERS` table — extending it requires a coordinated bump.
