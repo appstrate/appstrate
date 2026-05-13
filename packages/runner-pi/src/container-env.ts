@@ -50,6 +50,14 @@ export interface RuntimePiEnvOptions {
   outputSchema?: unknown;
   /** Forward-proxy URL reachable from the agent container. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
+  /**
+   * Disable Pi SDK's internal retry loop. Set by the platform when the
+   * Portkey module is wired — Portkey handles `Retry-After` + backoff
+   * upstream, so stacking the SDK's own retry on top causes
+   * retry-amplification on 429. Defaults to undefined (SDK retry stays
+   * on), preserving legacy behavior.
+   */
+  disableModelRetry?: boolean;
   /** Hosts excluded from the forward proxy. Defaults to `sidecar,localhost,127.0.0.1`. */
   noProxy?: string;
   /**
@@ -135,6 +143,10 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.https_proxy = opts.forwardProxyUrl;
     env.NO_PROXY = noProxy;
     env.no_proxy = noProxy;
+  }
+
+  if (opts.disableModelRetry) {
+    env.MODEL_RETRY_ENABLED = "false";
   }
 
   if (opts.sink) {

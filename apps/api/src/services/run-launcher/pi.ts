@@ -39,6 +39,7 @@ import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
+import { getPortkeyRouter } from "../portkey-router.ts";
 import type {
   LlmProxyConfig,
   LlmProxyOauthConfig,
@@ -114,9 +115,14 @@ export async function runPlatformContainer(
       : deriveKeyPlaceholder(llmApiKey);
 
     let sidecarLlm: LlmProxyConfig | undefined;
+    let portkeyActive = false;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
       // config boundary — the provider definition is the source of truth.
+      // Subscription-OAuth providers (Codex, Claude Pro) bypass Portkey
+      // — they use personal OAuth tokens with provider-mandated identity
+      // headers Portkey doesn't model. See the epic's "Subscription OAuth
+      // providers — explicit non-scope" section.
       const providerCfg = getModelProvider(llmConfig.providerId!);
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
@@ -126,12 +132,24 @@ export async function runPlatformContainer(
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
-      sidecarLlm = {
-        authMode: "api_key",
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-        placeholder: llmPlaceholder,
-      };
+      const portkey = getPortkeyRouter()?.(llmConfig) ?? null;
+      portkeyActive = portkey !== null;
+      sidecarLlm = portkey
+        ? {
+            authMode: "api_key",
+            // Re-point the sidecar at the local Portkey gateway. Portkey
+            // routes to the real upstream using the inline config.
+            baseUrl: portkey.baseUrl,
+            apiKey: llmApiKey,
+            placeholder: llmPlaceholder,
+            portkeyConfig: portkey.portkeyConfig,
+          }
+        : {
+            authMode: "api_key",
+            baseUrl: llmConfig.baseUrl,
+            apiKey: llmApiKey,
+            placeholder: llmPlaceholder,
+          };
     }
 
     const sidecarConfig: SidecarConfig = {
@@ -166,6 +184,7 @@ export async function runPlatformContainer(
       connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: "http://sidecar:8081",
+      disableModelRetry: portkeyActive,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalizeUrl,

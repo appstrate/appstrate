@@ -245,7 +245,15 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: { enabled: false },
-        retry: { enabled: true, maxRetries: 2 },
+        // When MODEL_RETRY_ENABLED=false (set by the platform when the
+        // Portkey module is wired), disable Pi SDK's internal retry to
+        // avoid retry-amplification — Portkey already retries upstream
+        // with Retry-After honoring + jitter. Default ON preserves the
+        // legacy direct-upstream path's behavior.
+        retry:
+          process.env.MODEL_RETRY_ENABLED === "false"
+            ? { enabled: false }
+            : { enabled: true, maxRetries: 2 },
       }),
     });
 

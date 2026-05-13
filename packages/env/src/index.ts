@@ -277,6 +277,13 @@ const envSchema = z
           .filter(Boolean),
       ),
     PORT: z.coerce.number().int().positive().default(3000),
+    /**
+     * Local port the Portkey gateway sub-process binds to when the
+     * `portkey` module is loaded. Reachable from the sidecar via
+     * `http://host.docker.internal:<PORTKEY_PORT>` on a Docker bridge,
+     * or via the platform-container hostname on a Compose network.
+     */
+    PORTKEY_PORT: z.coerce.number().int().positive().default(8787),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce
