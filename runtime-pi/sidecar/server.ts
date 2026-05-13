@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createApp } from "./app.ts";
+import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
@@ -86,11 +86,8 @@ const app = createApp({
 
 logger.info("Sidecar proxy listening", { port });
 
-// `idleTimeout: 255` mirrors `apps/api/src/index.ts` — Bun.serve's default
-// of 10 s otherwise kills any LLM stream that goes quiet (reasoning phase,
-// parallel tool-call generation, slow upstream networks) longer than that,
-// surfacing as `terminated` / `connection lost` to the agent which then
-// retries the same turn until the run timeout fires. 255 s is the maximum
-// allowed by Bun and sits comfortably under the 300 s run-tracker ceiling.
+// `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
+// in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
+// without booting this entry point (which has port-binding side effects).
 // See issue #426.
-export default { port, fetch: app.fetch, idleTimeout: 255 };
+export default { port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };

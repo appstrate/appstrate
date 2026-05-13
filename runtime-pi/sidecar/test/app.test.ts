@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, mock, spyOn } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
 import { logger } from "../logger.ts";
 
@@ -43,6 +43,30 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
     ...overrides,
   };
 }
+
+// --- SIDECAR_IDLE_TIMEOUT_SECONDS ---
+//
+// The actual `idleTimeout` value embedded in `server.ts`'s Bun.serve
+// export. Pinned here (rather than in a `server.ts` import test) because
+// `server.ts` has port-binding side effects at import time — bringing it
+// into the test process would bind a real port. The constant lives in
+// `app.ts` precisely so the bound can be asserted without that boot.
+// See issue #426.
+
+describe("SIDECAR_IDLE_TIMEOUT_SECONDS", () => {
+  it("is set, sane, and under the run-tracker ceiling", () => {
+    // Value must be > the previous (broken) 10 s Bun.serve default by a
+    // wide margin. 60 s is the lowest credible LLM-stream pause we'd
+    // tolerate (reasoning + parallel tool-call generation routinely
+    // spans 15-45 s).
+    expect(SIDECAR_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(60);
+    // Must stay strictly under the run-tracker's 300 s timeout so
+    // genuinely dead connections get reclaimed before the run is
+    // forcibly killed. Bun also caps `idleTimeout` at 255 s.
+    expect(SIDECAR_IDLE_TIMEOUT_SECONDS).toBeLessThan(300);
+    expect(SIDECAR_IDLE_TIMEOUT_SECONDS).toBeLessThanOrEqual(255);
+  });
+});
 
 // --- GET /health ---
 

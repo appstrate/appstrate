@@ -31,6 +31,17 @@ import { filterSensitiveHeaders } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
+/**
+ * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP
+ * surface. Bun's default of 10 s otherwise kills any LLM stream that
+ * goes quiet longer than that (reasoning, parallel tool-call generation,
+ * slow upstream) — see issue #426. 255 s is Bun's maximum allowed value
+ * and sits under the 300 s run-tracker ceiling, so genuinely dead
+ * connections still get reclaimed before the run is forcibly killed.
+ * Imported by `server.ts` for the Bun.serve config.
+ */
+export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
+
 export interface AppDeps {
   config: SidecarConfig;
   fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
