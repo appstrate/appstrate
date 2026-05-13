@@ -32,6 +32,7 @@ COPY packages/db/package.json            packages/db/
 COPY packages/emails/package.json        packages/emails/
 COPY packages/env/package.json           packages/env/
 COPY packages/mcp-transport/package.json packages/mcp-transport/
+COPY packages/module-codex/package.json  packages/module-codex/
 COPY packages/runner-pi/package.json     packages/runner-pi/
 COPY packages/shared-types/package.json  packages/shared-types/
 COPY packages/ui/package.json            packages/ui/
