@@ -36,39 +36,40 @@ import { test, expect } from "../../fixtures/api.fixture.ts";
 const SYNTHETIC_UNKNOWN_PROVIDER = "@example/not-a-real-provider";
 
 test.describe("OAuth Model Providers — API smoke", () => {
-  test("import rejects cookie-auth requests (bearer-only) — providerId variant @smoke", async ({
+  // The import route is bearer-pairing-only — cookie auth 401s at the
+  // route's first check before body validation ever runs. Probing the
+  // gate with several body shapes (well-formed, empty label, missing
+  // accessToken) proves the gate ignores the body entirely, which is
+  // what makes the bearer-only contract load-bearing: a tampered body
+  // cannot route around the auth check by triggering a different code
+  // path. Body-shape validation under the bearer-authenticated path is
+  // pinned by `model-providers-oauth-import-pairing-bearer.test.ts`.
+  test("import 401s on cookie-auth regardless of body shape (bearer-only gate) @smoke", async ({
     apiClient,
   }) => {
-    const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
-      label: "Should fail",
-      accessToken: "fake-access",
-      refreshToken: "fake-refresh",
-    });
-    expect(res.status()).toBe(401);
-  });
-
-  test("import rejects cookie-auth requests (bearer-only) — empty label variant @smoke", async ({
-    apiClient,
-  }) => {
-    const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
-      label: "",
-      accessToken: "fake-access",
-      refreshToken: "fake-refresh",
-    });
-    expect(res.status()).toBe(401);
-  });
-
-  test("import rejects cookie-auth requests (bearer-only) — missing accessToken variant @smoke", async ({
-    apiClient,
-  }) => {
-    const res = await apiClient.post("/model-providers-oauth/import", {
-      providerId: SYNTHETIC_UNKNOWN_PROVIDER,
-      label: "Pro",
-      refreshToken: "fake-refresh",
-    });
-    expect(res.status()).toBe(401);
+    const bodies = [
+      {
+        providerId: SYNTHETIC_UNKNOWN_PROVIDER,
+        label: "Should fail",
+        accessToken: "fake-access",
+        refreshToken: "fake-refresh",
+      },
+      {
+        providerId: SYNTHETIC_UNKNOWN_PROVIDER,
+        label: "",
+        accessToken: "fake-access",
+        refreshToken: "fake-refresh",
+      },
+      {
+        providerId: SYNTHETIC_UNKNOWN_PROVIDER,
+        label: "Pro",
+        refreshToken: "fake-refresh",
+      },
+    ];
+    for (const body of bodies) {
+      const res = await apiClient.post("/model-providers-oauth/import", body);
+      expect(res.status()).toBe(401);
+    }
   });
 
   test("internal OAuth token endpoint requires a run token (no anonymous read) @smoke", async ({
