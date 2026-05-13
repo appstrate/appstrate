@@ -125,10 +125,10 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
         <Modal
           open
           onClose={() => setDialogOpen(false)}
-          title={t("providerKeys.oauth.cliStageTitle")}
+          title={t("credentials.oauth.cliStageTitle")}
           actions={
             <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-              {t("providerKeys.oauth.close")}
+              {t("credentials.oauth.close")}
             </Button>
           }
         >

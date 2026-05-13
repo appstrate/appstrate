@@ -27,7 +27,7 @@ import {
 } from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { ModelProviderKeyFormModal } from "../../components/model-provider-credential-form-modal";
+import { CredentialFormModal } from "../../components/credential-form-modal";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
@@ -226,8 +226,8 @@ function ModelsList({
   );
 }
 
-function ProviderKeysSection({
-  providerKeys,
+function CredentialsSection({
+  credentials,
   isLoading,
   error,
   onCreate,
@@ -236,7 +236,7 @@ function ProviderKeysSection({
   onRename,
   onConnectOAuth,
 }: {
-  providerKeys: ModelProviderCredentialInfo[] | undefined;
+  credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
   error: Error | null;
   onCreate: () => void;
@@ -256,15 +256,15 @@ function ProviderKeysSection({
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
   // in-modal provider picker with zero UI footprint here.
-  const addButton = <Button onClick={onCreate}>{t("providerKeys.add")}</Button>;
+  const addButton = <Button onClick={onCreate}>{t("credentials.add")}</Button>;
 
   return (
     <div className="mb-8">
       <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
 
-      {providerKeys && providerKeys.length > 0 ? (
+      {credentials && credentials.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
-          {providerKeys.map((pk) => {
+          {credentials.map((pk) => {
             const provider = findProviderByApiShapeAndBaseUrl(
               pk.apiShape,
               pk.baseUrl,
@@ -284,12 +284,12 @@ function ProviderKeysSection({
                     />
                     {isOauth && (
                       <Badge variant="secondary" className="text-[0.65rem]">
-                        {t("providerKeys.oauth.badgeOauth")}
+                        {t("credentials.oauth.badgeOauth")}
                       </Badge>
                     )}
                     {pk.needsReconnection && (
                       <Badge variant="destructive" className="text-[0.65rem]">
-                        {t("providerKeys.oauth.needsReconnection")}
+                        {t("credentials.oauth.needsReconnection")}
                       </Badge>
                     )}
                   </div>
@@ -304,7 +304,7 @@ function ProviderKeysSection({
                     {isOauth && pk.oauthEmail && (
                       <>
                         <span>&middot;</span>
-                        <span>{t("providerKeys.oauth.connectedAs", { email: pk.oauthEmail })}</span>
+                        <span>{t("credentials.oauth.connectedAs", { email: pk.oauthEmail })}</span>
                       </>
                     )}
                   </div>
@@ -317,23 +317,23 @@ function ProviderKeysSection({
                       onClick={() => handleTest(pk.id)}
                       disabled={testingId === pk.id}
                     >
-                      {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
+                      {testingId === pk.id ? <Spinner /> : t("credentials.test")}
                     </Button>
                   )}
                   {testResults[pk.id] && (
                     <TestResultSpan
                       result={testResults[pk.id]!}
-                      successKey="providerKeys.testSuccess"
-                      failedKey="providerKeys.testFailed"
+                      successKey="credentials.testSuccess"
+                      failedKey="credentials.testFailed"
                     />
                   )}
                   {pk.source === "custom" && !isOauth && (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => onEdit(pk)}>
-                        {t("providerKeys.edit")}
+                        {t("credentials.edit")}
                       </Button>
                       <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
-                        {t("providerKeys.delete")}
+                        {t("credentials.delete")}
                       </Button>
                     </>
                   )}
@@ -345,11 +345,11 @@ function ProviderKeysSection({
                           size="sm"
                           onClick={() => onConnectOAuth(pk.providerId!)}
                         >
-                          {t("providerKeys.oauth.reconnect")}
+                          {t("credentials.oauth.reconnect")}
                         </Button>
                       )}
                       <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
-                        {t("providerKeys.oauth.disconnect")}
+                        {t("credentials.oauth.disconnect")}
                       </Button>
                     </>
                   )}
@@ -363,8 +363,8 @@ function ProviderKeysSection({
         </div>
       ) : (
         <EmptyState
-          message={t("providerKeys.empty")}
-          hint={t("providerKeys.emptyHint")}
+          message={t("credentials.empty")}
+          hint={t("credentials.emptyHint")}
           icon={KeyRound}
           compact
         >
@@ -379,9 +379,9 @@ export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
 
-  const [subTab, setSubTab] = useState<"models-list" | "provider-keys">("models-list");
+  const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
-    type: "deleteModel" | "deleteProviderKey";
+    type: "deleteModel" | "deleteCredential";
     label: string;
     id: string;
   } | null>(null);
@@ -401,11 +401,7 @@ export function OrgSettingsModelsPage() {
   // Preselect an OAuth provider when opening the unified modal — used by
   // the "reconnect" affordance on stale OAuth rows and any direct deep-link.
   const [connectingOauthProviderId, setConnectingOauthProviderId] = useState<string | null>(null);
-  const {
-    data: providerKeys,
-    isLoading: pkLoading,
-    error: pkError,
-  } = useModelProviderCredentials();
+  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
@@ -415,10 +411,10 @@ export function OrgSettingsModelsPage() {
 
   return (
     <>
-      <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "provider-keys")}>
+      <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
         <TabsList className="mb-4">
           <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-          <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
+          <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -441,9 +437,9 @@ export function OrgSettingsModelsPage() {
         />
       )}
 
-      {subTab === "provider-keys" && (
-        <ProviderKeysSection
-          providerKeys={providerKeys}
+      {subTab === "credentials" && (
+        <CredentialsSection
+          credentials={credentials}
           isLoading={pkLoading}
           error={pkError}
           onCreate={() => {
@@ -457,7 +453,7 @@ export function OrgSettingsModelsPage() {
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
-            setConfirmState({ type: "deleteProviderKey", label: pk.label, id: pk.id })
+            setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
           onRename={(pk, newLabel) => {
             updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
@@ -478,13 +474,13 @@ export function OrgSettingsModelsPage() {
         onSubmit={modelForm.onSubmit}
       />
 
-      <ModelProviderKeyFormModal
+      <CredentialFormModal
         open={pkModalOpen}
         onClose={() => {
           setPkModalOpen(false);
           setConnectingOauthProviderId(null);
         }}
-        providerKey={editPk}
+        credential={editPk}
         initialOauthProviderId={connectingOauthProviderId}
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
@@ -499,7 +495,7 @@ export function OrgSettingsModelsPage() {
               { onSuccess: () => setPkModalOpen(false) },
             );
           } else {
-            const uniqueLabel = deduplicateLabel(data.label, providerKeys ?? []);
+            const uniqueLabel = deduplicateLabel(data.label, credentials ?? []);
             // Form still emits (apiShape, baseUrl) for UX presets; map to the
             // canonical (providerId, baseUrlOverride) the API expects. The
             // registry exposes the same matching server-side; any future
@@ -532,8 +528,8 @@ export function OrgSettingsModelsPage() {
         description={
           confirmState?.type === "deleteModel"
             ? t("models.deleteConfirm", { label: confirmState.label })
-            : confirmState?.type === "deleteProviderKey"
-              ? t("providerKeys.deleteConfirm", { label: confirmState.label })
+            : confirmState?.type === "deleteCredential"
+              ? t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
