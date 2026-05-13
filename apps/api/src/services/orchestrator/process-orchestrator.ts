@@ -200,9 +200,16 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     };
     if (config.proxyUrl) env.PROXY_URL = config.proxyUrl;
     if (config.llm) {
-      env.PI_BASE_URL = config.llm.baseUrl;
-      env.PI_API_KEY = config.llm.apiKey;
-      env.PI_PLACEHOLDER = config.llm.placeholder;
+      if (config.llm.authMode === "oauth") {
+        // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
+        // parses it into config.llm so handleOauthLlmRequest can run from
+        // boot (no /configure round-trip needed in process mode).
+        env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(config.llm);
+      } else {
+        env.PI_BASE_URL = config.llm.baseUrl;
+        env.PI_API_KEY = config.llm.apiKey;
+        env.PI_PLACEHOLDER = config.llm.placeholder;
+      }
     }
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {

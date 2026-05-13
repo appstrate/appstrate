@@ -155,10 +155,12 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
     providers: [],
     llmModel: "test-model",
     llmConfig: {
-      api: "anthropic",
+      apiShape: "anthropic",
       baseUrl: "https://api.anthropic.com",
       modelId: "test-model",
       apiKey: "sk-test",
+      label: "Test Model",
+      isSystemModel: false,
     },
     ...overrides,
   };

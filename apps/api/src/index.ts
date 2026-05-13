@@ -22,7 +22,8 @@ import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
-import { createModelProviderKeysRouter } from "./routes/model-provider-keys.ts";
+import { createModelProviderCredentialsRouter } from "./routes/model-provider-credentials.ts";
+import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createApplicationsRouter } from "./routes/applications.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
@@ -198,7 +199,7 @@ function getAppScopedPrefixes(): string[] {
 
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
   if (!getAppScopedPrefixes().some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);
@@ -210,7 +211,7 @@ const apiVersionMiddleware = apiVersion(async (orgId) => {
   return settings.apiVersion ?? null;
 });
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
   return apiVersionMiddleware(c, next);
 });
@@ -280,7 +281,8 @@ app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
-app.route("/api/model-provider-keys", createModelProviderKeysRouter());
+app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
+app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/applications", createApplicationsRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());

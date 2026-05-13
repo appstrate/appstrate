@@ -38,6 +38,12 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
+import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
+import type {
+  LlmProxyConfig,
+  LlmProxyOauthConfig,
+  SidecarConfig,
+} from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -90,22 +96,60 @@ export async function runPlatformContainer(
     boundary = await orch.createIsolationBoundary(runId);
 
     const llmApiKey = llmConfig.apiKey;
-    const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
 
-    const sidecarConfig = {
+    // OAuth credentials must take the sidecar's OAuth branch — the API-key
+    // path can't refresh tokens or inject the provider's identity routing
+    // headers at request time.
+    const isOauthCredential =
+      !!llmConfig.providerId &&
+      !!llmConfig.credentialId &&
+      isOAuthModelProvider(llmConfig.providerId);
+
+    // The placeholder is what actually lands in MODEL_API_KEY inside the
+    // agent container. Provider-specific shape (e.g. a structured JWT) is
+    // built by the module's `buildApiKeyPlaceholder` hook — see
+    // `deriveOauthPlaceholder` below.
+    const llmPlaceholder = isOauthCredential
+      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId!)
+      : deriveKeyPlaceholder(llmApiKey);
+
+    let sidecarLlm: LlmProxyConfig | undefined;
+    if (isOauthCredential) {
+      // Read `oauthWireFormat` straight from the registry at the sidecar-
+      // config boundary — the provider definition is the source of truth.
+      const providerCfg = getModelProvider(llmConfig.providerId!);
+      const oauthCfg: LlmProxyOauthConfig = {
+        authMode: "oauth",
+        baseUrl: llmConfig.baseUrl,
+        credentialId: llmConfig.credentialId!,
+        ...(providerCfg?.oauthWireFormat ? { wireFormat: providerCfg.oauthWireFormat } : {}),
+      };
+      sidecarLlm = oauthCfg;
+    } else if (llmApiKey) {
+      sidecarLlm = {
+        authMode: "api_key",
+        baseUrl: llmConfig.baseUrl,
+        apiKey: llmApiKey,
+        placeholder: llmPlaceholder,
+      };
+    }
+
+    const sidecarConfig: SidecarConfig = {
       runToken: plan.runApi?.token ?? "",
       platformApiUrl: plan.runApi?.url ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,
-      llm: llmApiKey
-        ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
-        : undefined,
+      llm: sidecarLlm,
     };
 
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
+    // The agent container only ever receives the placeholder
+    // (apiKeyPlaceholder); the real access token never leaves the
+    // platform/sidecar boundary. The sidecar overwrites Authorization with
+    // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({
       model: {
-        api: llmConfig.api,
+        api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
@@ -289,5 +333,25 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
+/**
+ * Build the `MODEL_API_KEY` placeholder the agent container sees, without
+ * leaking the real upstream credential.
+ *
+ * Provider-specific: the module owns the placeholder shape via its
+ * `buildApiKeyPlaceholder` hook (e.g. a synthetic JWT carrying only the
+ * routing claim pi-ai's in-container LLM client will read). When the hook
+ * is absent or returns null, the platform falls back to the generic
+ * dash-stripping strategy — safe for opaque bearer tokens.
+ */
+function deriveOauthPlaceholder(key: string | undefined, providerId: string): string {
+  if (!key) return deriveKeyPlaceholder(key);
+  const config = getModelProvider(providerId);
+  const fromHook = config?.hooks?.buildApiKeyPlaceholder?.(key);
+  return fromHook ?? deriveKeyPlaceholder(key);
+}
+
 /** @internal Exported for testing */
-export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
+export {
+  deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting,
+  deriveOauthPlaceholder as _deriveOauthPlaceholderForTesting,
+};

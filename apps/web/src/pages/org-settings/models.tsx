@@ -17,24 +17,29 @@ import {
   useModelFormHandler,
 } from "../../hooks/use-models";
 import {
-  useModelProviderKeys,
-  useCreateModelProviderKey,
-  useUpdateModelProviderKey,
-  useDeleteModelProviderKey,
-  useTestModelProviderKey,
+  useModelProviderCredentials,
+  useCreateModelProviderCredential,
+  useUpdateModelProviderCredential,
+  useDeleteModelProviderCredential,
+  useTestModelProviderCredential,
+  useProvidersRegistry,
   deduplicateLabel,
-} from "../../hooks/use-model-provider-keys";
+} from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { ModelProviderKeyFormModal } from "../../components/model-provider-key-form-modal";
+import { ModelProviderKeyFormModal } from "../../components/model-provider-credential-form-modal";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../../components/icons";
-import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
+import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import type { OrgModelInfo, OrgModelProviderKeyInfo, TestResult } from "@appstrate/shared-types";
+import type {
+  OrgModelInfo,
+  ModelProviderCredentialInfo,
+  TestResult,
+} from "@appstrate/shared-types";
 
 function TestResultSpan({
   result,
@@ -126,6 +131,7 @@ function ModelsList({
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -140,8 +146,12 @@ function ModelsList({
         <div className="flex flex-col gap-3">
           {models.map((m) => {
             const isBuiltIn = m.source === "built-in";
-            const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            const provider = findProviderByApiShapeAndBaseUrl(
+              m.apiShape,
+              m.baseUrl,
+              registry ?? [],
+            );
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
             return (
               <div key={m.id} className="border-border bg-card rounded-lg border p-5">
                 <div className="mb-3 flex items-center gap-3">
@@ -149,7 +159,7 @@ function ModelsList({
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
                     <span className="text-muted-foreground text-sm">
-                      {m.api} / {m.modelId}
+                      {m.apiShape} / {m.modelId}
                     </span>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
@@ -224,61 +234,92 @@ function ProviderKeysSection({
   onEdit,
   onDelete,
   onRename,
+  onConnectOAuth,
 }: {
-  providerKeys: OrgModelProviderKeyInfo[] | undefined;
+  providerKeys: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
   error: Error | null;
   onCreate: () => void;
-  onEdit: (pk: OrgModelProviderKeyInfo) => void;
-  onDelete: (pk: OrgModelProviderKeyInfo) => void;
-  onRename: (pk: OrgModelProviderKeyInfo, newLabel: string) => void;
+  onEdit: (pk: ModelProviderCredentialInfo) => void;
+  onDelete: (pk: ModelProviderCredentialInfo) => void;
+  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
+  onConnectOAuth: (providerId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModelProviderKey();
+  const testMutation = useTestModelProviderCredential();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
+  // Single entry point — the unified modal handles both API-key and OAuth
+  // flows. Removing a module from `MODULES` hides its OAuth tile from the
+  // in-modal provider picker with zero UI footprint here.
+  const addButton = <Button onClick={onCreate}>{t("providerKeys.add")}</Button>;
+
   return (
     <div className="mb-8">
-      <div className="mb-4 flex items-center justify-end gap-2">
-        <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
-      </div>
+      <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
 
       {providerKeys && providerKeys.length > 0 ? (
         <div className="border-border divide-border divide-y rounded-lg border">
           {providerKeys.map((pk) => {
-            const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            const provider = findProviderByApiShapeAndBaseUrl(
+              pk.apiShape,
+              pk.baseUrl,
+              registry ?? [],
+            );
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
+            const isOauth = pk.authMode === "oauth2";
             return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
                 {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
                 <div className="min-w-0 flex-1">
-                  <InlineEditableLabel
-                    value={pk.label}
-                    editable={pk.source === "custom"}
-                    onSave={(newLabel) => onRename(pk, newLabel)}
-                  />
-                  <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                    <span>{pk.api}</span>
+                  <div className="flex items-center gap-2">
+                    <InlineEditableLabel
+                      value={pk.label}
+                      editable={pk.source === "custom" && !isOauth}
+                      onSave={(newLabel) => onRename(pk, newLabel)}
+                    />
+                    {isOauth && (
+                      <Badge variant="secondary" className="text-[0.65rem]">
+                        {t("providerKeys.oauth.badgeOauth")}
+                      </Badge>
+                    )}
+                    {pk.needsReconnection && (
+                      <Badge variant="destructive" className="text-[0.65rem]">
+                        {t("providerKeys.oauth.needsReconnection")}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
+                    <span>{pk.apiShape}</span>
                     {pk.createdAt && (
                       <>
                         <span>&middot;</span>
                         <span>{formatDateField(pk.createdAt)}</span>
                       </>
                     )}
+                    {isOauth && pk.oauthEmail && (
+                      <>
+                        <span>&middot;</span>
+                        <span>{t("providerKeys.oauth.connectedAs", { email: pk.oauthEmail })}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleTest(pk.id)}
-                    disabled={testingId === pk.id}
-                  >
-                    {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
-                  </Button>
+                  {!isOauth && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleTest(pk.id)}
+                      disabled={testingId === pk.id}
+                    >
+                      {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
+                    </Button>
+                  )}
                   {testResults[pk.id] && (
                     <TestResultSpan
                       result={testResults[pk.id]!}
@@ -286,13 +327,29 @@ function ProviderKeysSection({
                       failedKey="providerKeys.testFailed"
                     />
                   )}
-                  {pk.source === "custom" && (
+                  {pk.source === "custom" && !isOauth && (
                     <>
                       <Button variant="ghost" size="sm" onClick={() => onEdit(pk)}>
                         {t("providerKeys.edit")}
                       </Button>
                       <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
                         {t("providerKeys.delete")}
+                      </Button>
+                    </>
+                  )}
+                  {isOauth && (
+                    <>
+                      {pk.needsReconnection && pk.providerId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onConnectOAuth(pk.providerId!)}
+                        >
+                          {t("providerKeys.oauth.reconnect")}
+                        </Button>
+                      )}
+                      <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
+                        {t("providerKeys.oauth.disconnect")}
                       </Button>
                     </>
                   )}
@@ -311,7 +368,7 @@ function ProviderKeysSection({
           icon={KeyRound}
           compact
         >
-          <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
+          {addButton}
         </EmptyState>
       )}
     </div>
@@ -340,11 +397,19 @@ export function OrgSettingsModelsPage() {
   });
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
-  const [editPk, setEditPk] = useState<OrgModelProviderKeyInfo | null>(null);
-  const { data: providerKeys, isLoading: pkLoading, error: pkError } = useModelProviderKeys();
-  const createPkMutation = useCreateModelProviderKey();
-  const updatePkMutation = useUpdateModelProviderKey();
-  const deletePkMutation = useDeleteModelProviderKey();
+  const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
+  // Preselect an OAuth provider when opening the unified modal — used by
+  // the "reconnect" affordance on stale OAuth rows and any direct deep-link.
+  const [connectingOauthProviderId, setConnectingOauthProviderId] = useState<string | null>(null);
+  const {
+    data: providerKeys,
+    isLoading: pkLoading,
+    error: pkError,
+  } = useModelProviderCredentials();
+  const createPkMutation = useCreateModelProviderCredential();
+  const updatePkMutation = useUpdateModelProviderCredential();
+  const deletePkMutation = useDeleteModelProviderCredential();
+  const registryQuery = useProvidersRegistry();
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
@@ -383,10 +448,12 @@ export function OrgSettingsModelsPage() {
           error={pkError}
           onCreate={() => {
             setEditPk(null);
+            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onEdit={(pk) => {
             setEditPk(pk);
+            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
@@ -394,6 +461,11 @@ export function OrgSettingsModelsPage() {
           }
           onRename={(pk, newLabel) => {
             updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
+          }}
+          onConnectOAuth={(providerId) => {
+            setEditPk(null);
+            setConnectingOauthProviderId(providerId);
+            setPkModalOpen(true);
           }}
         />
       )}
@@ -408,23 +480,44 @@ export function OrgSettingsModelsPage() {
 
       <ModelProviderKeyFormModal
         open={pkModalOpen}
-        onClose={() => setPkModalOpen(false)}
+        onClose={() => {
+          setPkModalOpen(false);
+          setConnectingOauthProviderId(null);
+        }}
         providerKey={editPk}
+        initialOauthProviderId={connectingOauthProviderId}
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {
+            // The PUT body only accepts mutable fields — `api`/`baseUrl` are
+            // pinned by `providerId` at create time. Strip them here even
+            // though the form disables those inputs on edit.
+            const patch: { label?: string; apiKey?: string } = { label: data.label };
+            if (data.apiKey) patch.apiKey = data.apiKey;
             updatePkMutation.mutate(
-              { id: editPk.id, data },
+              { id: editPk.id, data: patch },
               { onSuccess: () => setPkModalOpen(false) },
             );
           } else {
             const uniqueLabel = deduplicateLabel(data.label, providerKeys ?? []);
+            // Form still emits (apiShape, baseUrl) for UX presets; map to the
+            // canonical (providerId, baseUrlOverride) the API expects. The
+            // registry exposes the same matching server-side; any future
+            // registry-aware form can drop this translation.
+            const matchedProvider = registryQuery.data?.find(
+              (p) =>
+                p.authMode === "api_key" &&
+                p.apiShape === data.apiShape &&
+                p.defaultBaseUrl.replace(/\/+$/, "") === data.baseUrl.replace(/\/+$/, ""),
+            );
+            const providerId = matchedProvider?.providerId ?? "openai-compatible";
+            const baseUrlOverride = matchedProvider ? null : data.baseUrl;
             createPkMutation.mutate(
-              { ...data, label: uniqueLabel } as {
-                label: string;
-                api: string;
-                baseUrl: string;
-                apiKey: string;
+              {
+                label: uniqueLabel,
+                providerId,
+                apiKey: data.apiKey ?? "",
+                ...(baseUrlOverride ? { baseUrlOverride } : {}),
               },
               { onSuccess: () => setPkModalOpen(false) },
             );

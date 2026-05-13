@@ -806,15 +806,32 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgModelProviderKey: {
+  ModelProviderCredential: {
     type: "object",
-    required: ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "label",
+      "apiShape",
+      "baseUrl",
+      "source",
+      "authMode",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      api: { type: "string" },
+      apiShape: { type: "string" },
       baseUrl: { type: "string" },
       source: { type: "string", enum: ["built-in", "custom"] },
+      authMode: { type: "string", enum: ["api_key", "oauth2"] },
+      providerId: {
+        type: ["string", "null"],
+        description:
+          "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
+      },
+      oauthEmail: { type: ["string", "null"] },
+      needsReconnection: { type: "boolean" },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -825,20 +842,20 @@ export const schemas = {
     required: [
       "id",
       "label",
-      "api",
+      "apiShape",
       "baseUrl",
       "modelId",
       "enabled",
       "isDefault",
       "source",
-      "providerKeyId",
+      "credentialId",
       "createdAt",
       "updatedAt",
     ],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      api: { type: "string" },
+      apiShape: { type: "string" },
       baseUrl: { type: "string" },
       modelId: { type: "string" },
       input: { type: ["array", "null"], items: { type: "string" } },
@@ -848,16 +865,15 @@ export const schemas = {
       enabled: { type: "boolean" },
       isDefault: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },
-      providerKeyId: {
+      credentialId: {
         type: "string",
-        description: "Provider key ID for API key credentials",
+        description: "ID of the backing `model_provider_credentials` row.",
       },
-      providerKeyLabel: { type: ["string", "null"], description: "Provider key label for display" },
       keyKind: {
         type: ["string", "null"],
         enum: ["oauth", "api-key", null],
         description:
-          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
+          "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping happens locally before the proxy ever sees the request. null for non-Anthropic protocols.",
       },
       cost: {
         type: ["object", "null"],
@@ -882,6 +898,24 @@ export const schemas = {
       latency: { type: "number", description: "Response time in milliseconds" },
       error: { type: "string", description: "Error code if test failed" },
       message: { type: "string", description: "Human-readable error message" },
+    },
+  },
+  OAuthTokenResponse: {
+    type: "object",
+    description:
+      "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, wireFormat, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+    required: ["accessToken", "expiresAt"],
+    properties: {
+      accessToken: { type: "string" },
+      expiresAt: {
+        type: ["integer", "null"],
+        description: "Epoch milliseconds. null when expiry is unknown.",
+      },
+      accountId: {
+        type: "string",
+        description:
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
+      },
     },
   },
   OrgProxy: {

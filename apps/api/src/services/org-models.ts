@@ -4,29 +4,33 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadModelProviderKeyCredentials } from "./org-model-provider-keys.ts";
+import { loadInferenceCredentials } from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
+import { getModelProvider } from "./model-providers/registry.ts";
+import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- List (system + DB) ---
 
 /**
- * Anthropic gates `sk-ant-oat-*` tokens to Claude-Code identity at the
- * body level (system prompt + tool-name renaming) — pi-ai injects that
- * locally only when its prefix-based detection fires (see
+ * Anthropic gates `sk-ant-oat-*` tokens to a specific identity shape at
+ * the body level (system prompt + tool-name renaming) — pi-ai injects
+ * that locally only when its prefix-based detection fires (see
  * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
  * the LLM proxy path the upstream key never leaves the platform, so we
  * surface its kind to the CLI; the CLI then mirrors the prefix in the
  * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
- * protocols and for Anthropic models whose creds are unavailable.
+ * protocols and for Anthropic models whose creds are unavailable. OSS
+ * ships no Anthropic OAuth provider; this stays as a contribution point
+ * for external operator-installed modules.
  */
-function detectKeyKind(api: string, apiKey: string): "oauth" | "api-key" | null {
-  if (api !== "anthropic-messages") return null;
+function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
+  if (apiShape !== "anthropic-messages") return null;
   return apiKey.includes("sk-ant-oat") ? "oauth" : "api-key";
 }
 
@@ -37,15 +41,15 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const now = toISORequired(new Date());
 
   // Resolve keyKind for Anthropic DB models — needs a credentials lookup
-  // per distinct providerKeyId. System models carry `apiKey` inline, so
+  // per distinct credentialId. System models carry `apiKey` inline, so
   // detection there is free. Other protocols don't expose keyKind at all.
   const anthropicProviderKeyIds = new Set(
-    rows.filter((r) => r.api === "anthropic-messages").map((r) => r.providerKeyId),
+    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.credentialId),
   );
   const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
   await Promise.all(
     Array.from(anthropicProviderKeyIds).map(async (id) => {
-      const creds = await loadModelProviderKeyCredentials(orgId, id);
+      const creds = await loadInferenceCredentials(orgId, id);
       dbKeyKinds.set(id, creds ? detectKeyKind("anthropic-messages", creds.apiKey) : null);
     }),
   );
@@ -56,7 +60,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
     mapSystem: (id, def) => ({
       id,
       label: def.label,
-      api: def.api,
+      apiShape: def.apiShape,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
       input: def.input ?? null,
@@ -67,9 +71,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in" as const,
-      providerKeyId: def.providerKeyId,
-      providerKeyLabel: null,
-      keyKind: detectKeyKind(def.api, def.apiKey),
+      credentialId: def.credentialId,
+      keyKind: detectKeyKind(def.apiShape, def.apiKey),
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -77,7 +80,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
     mapRow: (row) => ({
       id: row.id,
       label: row.label,
-      api: row.api,
+      apiShape: row.apiShape,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
       input: row.input as string[] | null,
@@ -88,10 +91,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: row.enabled,
       isDefault: row.isDefault,
       source: row.source as "custom" | "built-in",
-      providerKeyId: row.providerKeyId,
-      providerKeyLabel: null,
+      credentialId: row.credentialId,
       keyKind:
-        row.api === "anthropic-messages" ? (dbKeyKinds.get(row.providerKeyId) ?? null) : null,
+        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.credentialId) ?? null) : null,
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
@@ -104,11 +106,11 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
 export async function createOrgModel(
   orgId: string,
   label: string,
-  api: string,
+  apiShape: string,
   baseUrl: string,
   modelId: string,
   userId: string,
-  providerKeyId: string,
+  credentialId: string,
   capabilities?: {
     input?: string[];
     contextWindow?: number;
@@ -130,10 +132,10 @@ export async function createOrgModel(
     .values({
       orgId,
       label,
-      api,
+      apiShape,
       baseUrl,
       modelId,
-      providerKeyId,
+      credentialId,
       input: capabilities?.input ?? null,
       contextWindow: capabilities?.contextWindow ?? null,
       maxTokens: capabilities?.maxTokens ?? null,
@@ -152,7 +154,7 @@ export async function updateOrgModel(
   modelDbId: string,
   data: {
     label?: string;
-    api?: string;
+    apiShape?: string;
     baseUrl?: string;
     modelId?: string;
     enabled?: boolean;
@@ -161,7 +163,7 @@ export async function updateOrgModel(
     maxTokens?: number | null;
     reasoning?: boolean | null;
     cost?: ModelCost | null;
-    providerKeyId?: string;
+    credentialId?: string;
   },
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
@@ -185,6 +187,94 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
 }
 
+/**
+ * Atomically seed multiple models from the registry for a single OAuth-connected
+ * credential. Called by the onboarding quick-connect flow right after a
+ * pairing succeeds — replaces N client-side POST /models calls.
+ *
+ * Skips entirely if the org already has any model bound to the credential
+ * (idempotent for re-connect flows). Promotes the first newly-created row to
+ * default when the org has no default yet.
+ *
+ * Each entry in `models` is taken verbatim — the caller (typically the registry
+ * for that provider) is responsible for matching modelId to its
+ * apiShape/baseUrl/capabilities. We do NOT re-resolve via the registry here so
+ * the service stays pure DB.
+ */
+export interface SeedModelEntry {
+  modelId: string;
+  label: string;
+  apiShape: string;
+  baseUrl: string;
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+}
+
+export interface SeedModelsResult {
+  created: number;
+  ids: string[];
+  promotedDefault: boolean;
+}
+
+export async function seedOrgModelsForCredential(
+  orgId: string,
+  userId: string,
+  credentialId: string,
+  entries: SeedModelEntry[],
+): Promise<SeedModelsResult> {
+  if (entries.length === 0) return { created: 0, ids: [], promotedDefault: false };
+
+  return db.transaction(async (tx) => {
+    // Dedup: skip if any model already references this credential.
+    const existingForCred = await tx
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.credentialId, credentialId)] }))
+      .limit(1);
+    if (existingForCred.length > 0) {
+      return { created: 0, ids: [], promotedDefault: false };
+    }
+
+    const orgHasDefault = await tx
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.isDefault, true)] }))
+      .limit(1);
+    const needsDefault = orgHasDefault.length === 0;
+
+    const inserted = await tx
+      .insert(orgModels)
+      .values(
+        entries.map((entry, idx) => ({
+          orgId,
+          label: entry.label,
+          apiShape: entry.apiShape,
+          baseUrl: entry.baseUrl,
+          modelId: entry.modelId,
+          credentialId,
+          input: entry.input ?? null,
+          contextWindow: entry.contextWindow ?? null,
+          maxTokens: entry.maxTokens ?? null,
+          reasoning: entry.reasoning ?? null,
+          cost: null,
+          // First inserted row becomes default when the org had none.
+          isDefault: needsDefault && idx === 0,
+          source: "custom",
+          createdBy: userId,
+        })),
+      )
+      .returning({ id: orgModels.id });
+
+    return {
+      created: inserted.length,
+      ids: inserted.map((r) => r.id),
+      promotedDefault: needsDefault && inserted.length > 0,
+    };
+  });
+}
+
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
   // Reset all defaults for this org
   await db
@@ -205,8 +295,16 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-interface ResolvedModel {
-  api: string;
+/**
+ * Canonical resolved-model shape — produced by {@link resolveModel} /
+ * {@link loadModel}, consumed by the env-builder. Passed through to the
+ * run executor verbatim as `AppstrateRunPlan.llmConfig`; the executor
+ * only reads inference fields. `accountId` is set for OAuth credentials
+ * whose provider hook surfaced an identity claim — the sidecar re-reads
+ * it from the credential row on each request, so the executor ignores it.
+ */
+export interface ResolvedModel {
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;
@@ -218,11 +316,21 @@ interface ResolvedModel {
   cost?: ModelCost | null;
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
+  /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
+  providerId?: string;
+  /**
+   * Abstract account/tenant identifier surfaced by the credential's
+   * `extractTokenIdentity` hook — passed to the provider's
+   * `buildInferenceProbe` hook so it can be echoed as a routing header.
+   */
+  accountId?: string;
+  /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */
+  credentialId?: string;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   return {
-    api: def.api,
+    apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
@@ -233,6 +341,41 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     reasoning: def.reasoning ?? null,
     cost: def.cost ?? null,
     isSystemModel: true,
+  };
+}
+
+interface OrgModelRow {
+  apiShape: string;
+  baseUrl: string;
+  modelId: string;
+  credentialId: string;
+  label: string;
+  input: unknown;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  reasoning: boolean | null;
+  cost: unknown;
+}
+
+function dbRowToResolved(
+  row: OrgModelRow,
+  creds: { apiKey: string; providerId?: string; accountId?: string },
+): ResolvedModel {
+  return {
+    apiShape: row.apiShape,
+    baseUrl: row.baseUrl,
+    modelId: row.modelId,
+    apiKey: creds.apiKey,
+    label: row.label,
+    input: row.input as string[] | null,
+    contextWindow: row.contextWindow,
+    maxTokens: row.maxTokens,
+    reasoning: row.reasoning,
+    cost: row.cost as ModelCost | null,
+    isSystemModel: false,
+    providerId: creds.providerId,
+    accountId: creds.accountId,
+    credentialId: row.credentialId,
   };
 }
 
@@ -264,22 +407,8 @@ export async function resolveModel(
     .limit(1);
 
   if (dbDefault) {
-    const creds = await loadModelProviderKeyCredentials(orgId, dbDefault.providerKeyId);
-    if (creds) {
-      return {
-        api: dbDefault.api,
-        baseUrl: dbDefault.baseUrl,
-        modelId: dbDefault.modelId,
-        apiKey: creds.apiKey,
-        label: dbDefault.label,
-        input: dbDefault.input as string[] | null,
-        contextWindow: dbDefault.contextWindow,
-        maxTokens: dbDefault.maxTokens,
-        reasoning: dbDefault.reasoning,
-        cost: dbDefault.cost as ModelCost | null,
-        isSystemModel: false,
-      };
-    }
+    const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
+    if (creds) return dbRowToResolved(dbDefault, creds);
   }
 
   // 3. System default
@@ -305,10 +434,10 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   // Check DB
   const [row] = await db
     .select({
-      api: orgModels.api,
+      apiShape: orgModels.apiShape,
       baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
-      providerKeyId: orgModels.providerKeyId,
+      credentialId: orgModels.credentialId,
       enabled: orgModels.enabled,
       label: orgModels.label,
       input: orgModels.input,
@@ -323,28 +452,21 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   if (!row || !row.enabled) return null;
 
-  const creds = await loadModelProviderKeyCredentials(orgId, row.providerKeyId);
+  const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return {
-    api: row.api,
-    baseUrl: row.baseUrl,
-    modelId: row.modelId,
-    apiKey: creds.apiKey,
-    label: row.label,
-    input: row.input as string[] | null,
-    contextWindow: row.contextWindow,
-    maxTokens: row.maxTokens,
-    reasoning: row.reasoning,
-    cost: row.cost as ModelCost | null,
-    isSystemModel: false,
-  };
+  return dbRowToResolved(row, creds);
 }
 
 // --- Connection test ---
 
 /** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
-export function buildModelTestRequest(config: { api: string; baseUrl: string; apiKey: string }): {
+export function buildModelTestRequest(config: {
+  apiShape: string;
+  baseUrl: string;
+  apiKey: string;
+  providerId?: string;
+}): {
   url: string;
   headers: Record<string, string>;
 } {
@@ -352,15 +474,12 @@ export function buildModelTestRequest(config: { api: string; baseUrl: string; ap
   const headers: Record<string, string> = {};
   let url: string;
 
-  switch (config.api) {
+  switch (config.apiShape) {
     case "anthropic-messages":
+      // API-key only — OAuth subscription tokens (`sk-ant-oat-*`) are
+      // not used by any provider Appstrate ships out of the box.
       url = `${base}/v1/models`;
-      if (config.apiKey.startsWith("sk-ant-oat")) {
-        headers["Authorization"] = `Bearer ${config.apiKey}`;
-        headers["anthropic-beta"] = "oauth-2025-04-20";
-      } else {
-        headers["x-api-key"] = config.apiKey;
-      }
+      headers["x-api-key"] = config.apiKey;
       headers["anthropic-version"] = "2023-06-01";
       break;
     case "mistral-conversations":
@@ -392,10 +511,12 @@ export function buildModelTestRequest(config: { api: string; baseUrl: string; ap
 
 /** Test a model config directly (no DB lookup). */
 export async function testModelConfig(config: {
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;
+  providerId?: string;
+  accountId?: string;
 }): Promise<TestResult> {
   if (isBlockedUrl(config.baseUrl)) {
     return {
@@ -404,6 +525,24 @@ export async function testModelConfig(config: {
       error: "BLOCKED_URL",
       message: "URL targets a blocked network",
     };
+  }
+
+  // Provider-agnostic inference-probe override — modules whose backend
+  // doesn't accept the generic `/models` discovery probe implement
+  // `buildInferenceProbe` to provide the real wire format. The platform
+  // sends whatever the module builds without inspecting the contents.
+  const provider = config.providerId ? getModelProvider(config.providerId) : null;
+  const probe = provider?.hooks?.buildInferenceProbe?.({
+    baseUrl: config.baseUrl,
+    modelId: config.modelId,
+    apiKey: config.apiKey,
+    accountId: config.accountId,
+  });
+  if (probe) {
+    if ("error" in probe) {
+      return { ok: false, latency: 0, error: probe.error, message: probe.message };
+    }
+    return runInferenceProbe(probe);
   }
 
   const { url, headers } = buildModelTestRequest(config);
@@ -439,3 +578,52 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
 
   return testModelConfig(model);
 }
+
+// --- OAuth inference probes ---
+
+const PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * Send a module-supplied {@link InferenceProbeRequest} and map the response
+ * to a {@link TestResult}. The platform is provider-agnostic here — the
+ * module's `buildInferenceProbe` hook owns the wire format; this helper
+ * only knows how to send it and classify the outcome.
+ *
+ * Streaming bodies are aborted immediately — we only care about the
+ * response status.
+ */
+async function runInferenceProbe(req: InferenceProbeRequest): Promise<TestResult> {
+  const start = performance.now();
+  try {
+    const res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const latency = Math.round(performance.now() - start);
+    void res.body?.cancel().catch(() => {});
+    if (res.ok) return { ok: true, latency };
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        latency,
+        error: "AUTH_FAILED",
+        message: "Provider rejected the token (auth failed or subscription inactive)",
+      };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "PROVIDER_ERROR",
+      message: `Provider returned ${res.status}`,
+    };
+  } catch (err) {
+    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
+  }
+}
+
+// OSS supports only the API-key flow for Anthropic, via the `anthropic`
+// provider in the `core-providers` module. Anthropic Consumer ToS forbids
+// using OAuth subscription tokens in any third-party product, so OSS
+// ships no Anthropic OAuth provider.

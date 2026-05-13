@@ -124,7 +124,7 @@ export interface RunLog {
  * subtyping keeps both call sites assignable to the same DTO.
  */
 export interface PlatformModel {
-  readonly api: string;
+  readonly apiShape: string;
   readonly modelId: string;
   readonly baseUrl: string;
   /** Decrypted provider key — populated by `models.load()`, omitted by `listForOrg()`. */

@@ -148,15 +148,15 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   const loader = inputs.presetsLoader ?? listModelPresets;
   const presets = await loader(inputs.profileName);
   const preset = pickPreset(presets, inputs.modelId);
-  if (!PROXY_SUPPORTED_APIS.has(preset.api)) {
+  if (!PROXY_SUPPORTED_APIS.has(preset.apiShape)) {
     throw new ModelResolutionError(
-      `Preset "${preset.id}" uses protocol "${preset.api}", which /api/llm-proxy/* does not route yet.`,
+      `Preset "${preset.id}" uses protocol "${preset.apiShape}", which /api/llm-proxy/* does not route yet.`,
       `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. ` +
         `Pick another preset or run with --model-source env.`,
     );
   }
 
-  const baseUrl = buildProxyBaseUrl(inputs.instance, preset.api);
+  const baseUrl = buildProxyBaseUrl(inputs.instance, preset.apiShape);
   // pi-ai's Anthropic SDK path sends auth as `x-api-key`, but the
   // platform's auth pipeline reads `Authorization: Bearer`. We inject
   // the bearer via model.headers and pass a placeholder `apiKey` to
@@ -167,10 +167,11 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // `apps/api/src/services/llm-proxy/anthropic.ts:HEADERS_TO_FORWARD`.
   //
   // OAuth-keyed Anthropic presets need an extra trick: the upstream
-  // (`sk-ant-oat-*`) is gated to Claude-Code identity at the BODY level
-  // — system prompt + tool-name renaming — which pi-ai injects locally
-  // only when its `apiKey.includes("sk-ant-oat")` detection fires. So we
-  // mirror the prefix in the placeholder. pi-ai then takes its OAuth
+  // (`sk-ant-oat-*`) is gated at the BODY level to a specific identity
+  // shape — system prompt + tool-name renaming — which pi-ai injects
+  // locally only when its `apiKey.includes("sk-ant-oat")` detection
+  // fires. So we mirror the prefix in the placeholder. pi-ai then takes
+  // its OAuth
   // path: it tries to set `Authorization: Bearer <oauth-placeholder>` AND
   // reshapes the body. The Anthropic SDK's `defaultHeaders` (= our
   // `model.headers`) is applied AFTER the auth header in `buildHeaders`
@@ -178,7 +179,7 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // overrides pi-ai's OAuth bearer before the request leaves the
   // process — the proxy still authenticates with the Appstrate token,
   // and the reshaped body flows through to the real OAuth upstream.
-  const isAnthropic = preset.api === "anthropic-messages";
+  const isAnthropic = preset.apiShape === "anthropic-messages";
   const isAnthropicOAuth = isAnthropic && preset.keyKind === "oauth";
   const headers: Record<string, string> = { "X-Org-Id": inputs.orgId };
   if (isAnthropic) {
@@ -187,12 +188,17 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   const model: Model<Api> = {
     id: preset.id,
     name: preset.label,
-    api: preset.api as Api,
-    provider: deriveProvider(preset.api),
+    api: preset.apiShape as Api,
+    provider: deriveProvider(preset.apiShape),
     baseUrl,
     reasoning: preset.reasoning ?? false,
     input: (preset.input ?? ["text"]) as ("text" | "image")[],
-    cost: preset.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    cost: {
+      input: preset.cost?.input ?? 0,
+      output: preset.cost?.output ?? 0,
+      cacheRead: preset.cost?.cacheRead ?? 0,
+      cacheWrite: preset.cost?.cacheWrite ?? 0,
+    },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
     headers,
@@ -223,7 +229,7 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
   if (requestedId) {
     const match = presets.find((p) => p.id === requestedId);
     if (!match) {
-      const available = presets.map((p) => `  - ${p.id} (${p.api})`).join("\n");
+      const available = presets.map((p) => `  - ${p.id} (${p.apiShape})`).join("\n");
       throw new ModelResolutionError(
         `No preset matches "${requestedId}"`,
         `Available presets:\n${available}\nRun \`appstrate models list\` to discover them.`,

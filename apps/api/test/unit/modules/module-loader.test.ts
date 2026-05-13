@@ -16,8 +16,14 @@ import {
   resetModules,
   getModuleAuthStrategies,
   getModuleContributions,
+  getModuleModelProviders,
 } from "../../../src/lib/modules/module-loader.ts";
-import type { AppstrateModule, ModuleInitContext, AuthStrategy } from "@appstrate/core/module";
+import type {
+  AppstrateModule,
+  ModelProviderDefinition,
+  ModuleInitContext,
+  AuthStrategy,
+} from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
 
 function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): AppstrateModule {
@@ -332,6 +338,7 @@ describe("module-loader", () => {
 
       expect(getModules().size).toBe(0);
       expect(getModulePublicPaths()).toEqual(new Set());
+      expect(getModuleModelProviders()).toEqual([]);
 
       // registerModuleRoutes is a no-op — it only mounts module-provided
       // routers. Core routers are wired separately in apps/api/src/index.ts
@@ -846,6 +853,78 @@ describe("module-loader", () => {
         betterAuthPlugins: [],
         drizzleSchemas: {},
       });
+    });
+  });
+
+  describe("getModuleModelProviders", () => {
+    function fakeProvider(id: string): ModelProviderDefinition {
+      return {
+        providerId: id,
+        displayName: id,
+        iconUrl: "openai",
+        apiShape: "openai-chat",
+        defaultBaseUrl: "https://api.example.com",
+        baseUrlOverridable: false,
+        authMode: "api_key",
+        models: [],
+      };
+    }
+
+    it("returns [] when no module contributes (OSS zero-footprint invariant)", async () => {
+      await loadModulesFromInstances([mockModule("alpha"), mockModule("beta")], mockCtx());
+      expect(getModuleModelProviders()).toEqual([]);
+    });
+
+    it("aggregates providers from every module in module load order", async () => {
+      const a = mockModule("a", {
+        modelProviders: () => [fakeProvider("openai"), fakeProvider("anthropic")],
+      });
+      const b = mockModule("b", { modelProviders: () => [fakeProvider("extra-oauth")] });
+      await loadModulesFromInstances([a, b], mockCtx());
+      const ids = getModuleModelProviders().map((p) => p.providerId);
+      expect(ids).toEqual(["openai", "anthropic", "extra-oauth"]);
+    });
+
+    it("throws when two modules contribute the same providerId", async () => {
+      const a = mockModule("a", { modelProviders: () => [fakeProvider("openai")] });
+      const b = mockModule("b", { modelProviders: () => [fakeProvider("openai")] });
+      await expect(loadModulesFromInstances([a, b], mockCtx())).resolves.toBeUndefined();
+      expect(() => getModuleModelProviders()).toThrow(/both declared model provider "openai"/);
+    });
+
+    it("preserves provider hooks intact on the returned definitions", async () => {
+      const extractTokenIdentity = (token: string) => ({ accountId: token.slice(0, 4) });
+      const a = mockModule("a", {
+        modelProviders: () => [
+          {
+            ...fakeProvider("extra-oauth"),
+            authMode: "oauth2",
+            oauth: {
+              clientId: "x",
+              authorizationUrl: "https://example.com/authorize",
+              tokenUrl: "https://example.com/token",
+              refreshUrl: "https://example.com/token",
+              scopes: ["openid"],
+              pkce: "S256",
+            },
+            hooks: { extractTokenIdentity },
+          },
+        ],
+      });
+      await loadModulesFromInstances([a], mockCtx());
+      const providers = getModuleModelProviders();
+      expect(providers).toHaveLength(1);
+      expect(providers[0]?.hooks?.extractTokenIdentity).toBe(extractTokenIdentity);
+    });
+
+    it("returns [] after resetModules()", async () => {
+      await loadModulesFromInstances(
+        [mockModule("a", { modelProviders: () => [fakeProvider("openai")] })],
+        mockCtx(),
+      );
+      expect(getModuleModelProviders()).toHaveLength(1);
+      resetModules();
+      expect(getModuleModelProviders()).toEqual([]);
     });
   });
 });

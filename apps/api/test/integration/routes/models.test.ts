@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { encrypt } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import {
+  seedOrgModelProviderKey,
+  seedOrgModel,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
+import { db } from "@appstrate/db/client";
+import { orgModels } from "@appstrate/db/schema";
+import { eq, and } from "drizzle-orm";
+import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
 
@@ -19,13 +26,12 @@ describe("Models API", () => {
 
   /** Helper: create a model provider key and return its ID (required for model creation). */
   async function createProviderKey(): Promise<string> {
-    const res = await app.request("/api/model-provider-keys", {
+    const res = await app.request("/api/model-provider-credentials", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         label: "Test Model Provider Key",
-        api: "openai",
-        baseUrl: "https://api.openai.com",
+        providerId: "openai",
         apiKey: "sk-test-key-123",
       }),
     });
@@ -59,14 +65,14 @@ describe("Models API", () => {
       // opaque 429 from Anthropic.
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
-        apiKeyEncrypted: encrypt("sk-ant-oat-real-token-xyz"),
+        apiKey: "sk-ant-oat-real-token-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
-        api: "anthropic-messages",
+        credentialId: providerKey.id,
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
         label: "Sonnet OAuth",
@@ -85,14 +91,14 @@ describe("Models API", () => {
     it("flags Anthropic API-key credentials with keyKind='api-key'", async () => {
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "anthropic-messages",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
-        apiKeyEncrypted: encrypt("sk-ant-api03-real-key-xyz"),
+        apiKey: "sk-ant-api03-real-key-xyz",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
-        api: "anthropic-messages",
+        credentialId: providerKey.id,
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         modelId: "claude-sonnet-4-6",
         label: "Sonnet API Key",
@@ -109,14 +115,14 @@ describe("Models API", () => {
     it("returns keyKind=null for non-Anthropic protocols", async () => {
       const providerKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        api: "openai-completions",
+        apiShape: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
-        apiKeyEncrypted: encrypt("sk-openai-anything"),
+        apiKey: "sk-openai-anything",
       });
       await seedOrgModel({
         orgId: ctx.orgId,
-        providerKeyId: providerKey.id,
-        api: "openai-completions",
+        credentialId: providerKey.id,
+        apiShape: "openai-completions",
         baseUrl: "https://api.openai.com/v1",
         modelId: "gpt-4o",
         label: "OpenAI Preset",
@@ -136,17 +142,17 @@ describe("Models API", () => {
 
   describe("POST /api/models", () => {
     it("creates a model with a valid provider key", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "GPT-4o",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
-          providerKeyId,
+          credentialId,
         }),
       });
 
@@ -159,7 +165,7 @@ describe("Models API", () => {
 
   describe("DELETE /api/models/:id", () => {
     it("deletes a model and returns 204", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       // Create a model
       const createRes = await app.request("/api/models", {
@@ -167,10 +173,10 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "To Delete",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o-mini",
-          providerKeyId,
+          credentialId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -188,7 +194,7 @@ describe("Models API", () => {
 
   describe("PUT /api/models/default", () => {
     it("sets the default model", async () => {
-      const providerKeyId = await createProviderKey();
+      const credentialId = await createProviderKey();
 
       // Create a model first
       const createRes = await app.request("/api/models", {
@@ -196,10 +202,10 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Default Model",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
-          providerKeyId,
+          credentialId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -227,6 +233,131 @@ describe("Models API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
+    });
+  });
+
+  describe("POST /api/models/seed", () => {
+    /**
+     * Inserts an OAuth credential bound to the synthetic `test-oauth`
+     * provider. The seed endpoint only accepts credentials whose providerId
+     * matches a registered entry; the api-key-only `seedOrgModelProviderKey`
+     * helper wouldn't suffice because its provider has no registered
+     * `models[]` list.
+     */
+    async function seedTestOAuthCredential(): Promise<string> {
+      const row = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      return row.id;
+    }
+
+    it("seeds models atomically and promotes the first as default", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        created: number;
+        ids: string[];
+        promotedDefault: boolean;
+      };
+      expect(body.created).toBe(1);
+      expect(body.ids).toHaveLength(1);
+      expect(body.promotedDefault).toBe(true);
+
+      const inserted = await db
+        .select()
+        .from(orgModels)
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.credentialId, credentialId)));
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0]!.modelId).toBe("test-model");
+      expect(inserted[0]!.isDefault).toBe(true);
+    });
+
+    it("is idempotent — returns created=0 when models already exist for the credential", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const first = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+      expect(first.status).toBe(201);
+
+      const second = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+      expect(second.status).toBe(201);
+      const body = (await second.json()) as { created: number; promotedDefault: boolean };
+      expect(body.created).toBe(0);
+      expect(body.promotedDefault).toBe(false);
+    });
+
+    it("rejects unknown modelIds with 400", async () => {
+      const credentialId = await seedTestOAuthCredential();
+
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["does-not-exist"] }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when the credential does not exist", async () => {
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          credentialId: "00000000-0000-0000-0000-000000000000",
+          modelIds: ["test-model"],
+        }),
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("does NOT promote default when the org already has one", async () => {
+      const existingKey = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: existingKey.id,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+        modelId: "gpt-4o",
+        label: "Existing default",
+        isDefault: true,
+      });
+
+      const credentialId = await seedTestOAuthCredential();
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { created: number; promotedDefault: boolean };
+      expect(body.created).toBe(1);
+      expect(body.promotedDefault).toBe(false);
     });
   });
 });

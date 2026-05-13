@@ -31,6 +31,7 @@ import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
+import { seedTestModelProviders } from "./model-providers.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
@@ -49,7 +50,8 @@ import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
-import { createModelProviderKeysRouter } from "../../src/routes/model-provider-keys.ts";
+import { createModelProvidersOAuthRouter } from "../../src/routes/model-providers-oauth.ts";
+import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
@@ -91,6 +93,12 @@ initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in 
 initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
+// Seed the runtime model-provider registry to the canonical test
+// baseline. Tests bypass boot.ts so the usual module-contribution
+// aggregation has to happen here. The helper lives in
+// `./model-providers.ts` so unit tests that only need the reseed don't
+// have to import the full Hono app builder.
+seedTestModelProviders();
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**
@@ -233,7 +241,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
-  app.route("/api/model-provider-keys", createModelProviderKeysRouter());
+  app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
+  app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api/app-profiles", createAppProfilesRouter());

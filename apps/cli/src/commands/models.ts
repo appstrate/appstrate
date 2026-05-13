@@ -28,7 +28,7 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<void> 
   try {
     let models = await listModelPresets(profileName);
     if (opts.proxyOnly) {
-      models = models.filter((m) => PROXY_SUPPORTED_APIS.has(m.api));
+      models = models.filter((m) => PROXY_SUPPORTED_APIS.has(m.apiShape));
     }
 
     if (opts.json) {
@@ -45,9 +45,9 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<void> 
       const suffixes: string[] = [];
       if (m.isDefault) suffixes.push("default");
       if (!m.enabled) suffixes.push("disabled");
-      if (!PROXY_SUPPORTED_APIS.has(m.api)) suffixes.push("proxy-unsupported");
+      if (!PROXY_SUPPORTED_APIS.has(m.apiShape)) suffixes.push("proxy-unsupported");
       const suffix = suffixes.length > 0 ? ` [${suffixes.join(", ")}]` : "";
-      process.stdout.write(`  ${m.id.padEnd(36)}  ${m.api.padEnd(24)}  ${m.label}${suffix}\n`);
+      process.stdout.write(`  ${m.id.padEnd(36)}  ${m.apiShape.padEnd(24)}  ${m.label}${suffix}\n`);
     }
   } catch (err) {
     exitWithError(err);

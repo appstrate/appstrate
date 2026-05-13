@@ -249,4 +249,84 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/oauth-token/{credentialId}": {
+    get: {
+      operationId: "getOAuthModelProviderToken",
+      tags: ["Internal"],
+      summary: "Fetch a fresh access token for an OAuth model provider connection",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "credentialId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "model_provider_credentials.id of the OAuth-backed credential.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Resolved token and runtime config.",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OAuthTokenResponse" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description:
+            "Connection needs reconnection (refresh token revoked or missing). Sidecar should propagate as 401 to the agent.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/internal/oauth-token/{credentialId}/refresh": {
+    post: {
+      operationId: "refreshOAuthModelProviderToken",
+      tags: ["Internal"],
+      summary: "Force a refresh of the access token for an OAuth model provider connection",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on revoked refresh tokens, flips needsReconnection=true on the connection and returns 410.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "credentialId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Refreshed token and runtime config (same shape as GET).",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OAuthTokenResponse" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description: "Refresh token revoked — connection flagged needsReconnection.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
 } as const;

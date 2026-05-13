@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import type { ModelCost } from "@appstrate/core/module";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 
@@ -336,14 +337,17 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
 
 // --- Model Cost Types ---
 
-/** Per-model pricing in $/M tokens (margin included). */
+/**
+ * Zod validator for {@link ModelCost} (the type itself lives in
+ * `@appstrate/core/module`). `cacheRead` / `cacheWrite` are optional —
+ * providers without prompt caching simply omit them.
+ */
 export const modelCostSchema = z.object({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative(),
-  cacheWrite: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheWrite: z.number().nonnegative().optional(),
 });
-export type ModelCost = z.infer<typeof modelCostSchema>;
 
 /**
  * Token usage as reported by an LLM provider for a single completion call.
@@ -470,7 +474,7 @@ export interface OrgProxyInfo {
 export interface OrgModelInfo {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
   input?: string[] | null;
@@ -481,19 +485,20 @@ export interface OrgModelInfo {
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
-  providerKeyId: string;
-  providerKeyLabel: string | null;
+  credentialId: string;
   /**
    * Anthropic-only: shape of the upstream credential, exposed so the CLI
    * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`
-   * tokens (Anthropic gates these to Claude-Code identity at the body
-   * level — system prompt + tool-name renaming — which pi-ai injects
-   * locally only when its prefix-based detection fires); `api-key` for
-   * regular `sk-ant-…` keys; null for non-Anthropic protocols and for
-   * Anthropic models whose credentials cannot be loaded (treat as
-   * api-key). The CLI mirrors the kind by passing `sk-ant-oat-placeholder`
-   * as the `apiKey` to pi-ai when `keyKind === "oauth"`, so pi-ai
-   * reshapes the body before the proxy ever sees it.
+   * tokens (Anthropic gates these at the body level — system prompt +
+   * tool-name renaming — which pi-ai injects locally only when its
+   * prefix-based detection fires); `api-key` for regular `sk-ant-…` keys;
+   * null for non-Anthropic protocols and for Anthropic models whose
+   * credentials cannot be loaded (treat as api-key). The CLI mirrors
+   * the kind by passing `sk-ant-oat-placeholder` as the `apiKey` to pi-ai
+   * when `keyKind === "oauth"`, so pi-ai reshapes the body before the
+   * proxy ever sees it. OSS ships no Anthropic OAuth provider — this
+   * field stays as a contribution point for external operator-installed
+   * modules.
    */
   keyKind?: "oauth" | "api-key" | null;
   createdBy: string | null;
@@ -501,15 +506,68 @@ export interface OrgModelInfo {
   updatedAt: string;
 }
 
-export interface OrgModelProviderKeyInfo {
+/**
+ * Aggregated UI view of a model provider credential — combines env-driven
+ * `SYSTEM_PROVIDER_KEYS` (source: "built-in") with the unified
+ * `model_provider_credentials` table (source: "custom"). Never carries
+ * plaintext. The shape is produced by `listOrgModelProviderCredentials()` —
+ * keep it in lock-step with the service.
+ */
+export interface ModelProviderCredentialInfo {
   id: string;
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   source: "built-in" | "custom";
+  /** Auth mode of the underlying credential (matches the registry vocabulary). */
+  authMode: "api_key" | "oauth2";
+  /** Set when `authMode === "oauth2"`. Canonical providerId backing the connection. */
+  providerId?: string | null;
+  /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
+  oauthEmail?: string | null;
+  /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
+  needsReconnection?: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Wire shape of `GET /api/model-provider-credentials/registry` — surfaces the
+ * runtime `MODEL_PROVIDERS` registry to the UI so the model picker stays
+ * data-driven (no hardcoded provider list client-side). Mirrors
+ * {@link import("@appstrate/core/module").ModelProviderDefinition} with the
+ * optional-fields normalised to nullable for wire clarity (and stripped of
+ * the platform-internal `hooks` / `oauthWireFormat` blocks).
+ */
+export interface ProviderRegistryEntry {
+  providerId: string;
+  displayName: string;
+  iconUrl: string;
+  description: string | null;
+  docsUrl: string | null;
+  apiShape: string;
+  defaultBaseUrl: string;
+  baseUrlOverridable: boolean;
+  authMode: "api_key" | "oauth2";
+  models: ProviderRegistryModelEntry[];
+}
+
+export interface ProviderRegistryModelEntry {
+  id: string;
+  /** Human-readable label; falls back to `id` when null. */
+  label: string | null;
+  contextWindow: number;
+  maxTokens: number | null;
+  capabilities: readonly string[];
+  /** Per-1M-token pricing; null when the provider doesn't publish it. */
+  cost: ModelCost | null;
+  /**
+   * Curated default for first-connection auto-seed (onboarding
+   * quick-connect). When at least one model carries the flag, the seeder
+   * inserts only those; otherwise it seeds every entry.
+   */
+  recommended: boolean;
 }
 
 // --- Connection Test Types ---

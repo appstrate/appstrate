@@ -302,6 +302,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
+      modelCredentialId: plan.llmConfig.credentialId ?? null,
     },
   );
 

@@ -77,6 +77,7 @@ const KNOWN_MODEL_APIS = new Set([
   "anthropic-messages",
   "openai-completions",
   "openai-responses",
+  "openai-codex-responses",
   "mistral-conversations",
   "google-generative-ai",
   "google-vertex",

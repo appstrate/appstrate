@@ -54,13 +54,13 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(owner, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
-      // May fail due to FK constraint on providerKeyId, but should NOT be 403
+      // May fail due to FK constraint on credentialId, but should NOT be 403
       expect(res.status).not.toBe(403);
     });
 
@@ -70,10 +70,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).not.toBe(403);
@@ -85,10 +85,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);
@@ -100,10 +100,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(viewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);
@@ -137,16 +137,16 @@ describe("RBAC — Permission enforcement", () => {
 
   // ─── Model provider keys (admin-only read) ─────────────────
 
-  describe("model-provider-keys:read (admin-only)", () => {
+  describe("model-provider-credentials:read (admin-only)", () => {
     it("admin can list model provider keys", async () => {
-      const res = await app.request("/api/model-provider-keys", {
+      const res = await app.request("/api/model-provider-credentials", {
         headers: authHeaders(admin),
       });
       expect(res.status).toBe(200);
     });
 
     it("member gets 403 on list model provider keys", async () => {
-      const res = await app.request("/api/model-provider-keys", {
+      const res = await app.request("/api/model-provider-credentials", {
         headers: authHeaders(member),
       });
       expect(res.status).toBe(403);
@@ -238,10 +238,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Test",
-          api: "openai",
+          apiShape: "openai",
           baseUrl: "https://api.example.com",
           modelId: "gpt-4",
-          providerKeyId: "pk_test",
+          credentialId: "pk_test",
         }),
       });
       expect(res.status).toBe(403);

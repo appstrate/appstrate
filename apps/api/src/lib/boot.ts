@@ -8,7 +8,12 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
+import {
+  loadModules,
+  getModules,
+  getModuleContributions,
+  getModuleModelProviders,
+} from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
@@ -24,6 +29,7 @@ import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
+import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
@@ -39,6 +45,8 @@ import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
+import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
+import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -81,6 +89,13 @@ export async function boot(): Promise<void> {
   // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
+
+  // Aggregate model provider contributions from every loaded module into
+  // the runtime registry. The three core API-key providers (openai,
+  // anthropic, openai-compatible) ship as the `core-providers` module;
+  // OAuth-flavoured providers ship as opt-in workspace modules
+  // (`@appstrate/module-*`). There is no in-code seed.
+  registerModelProviders(getModuleModelProviders());
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. `createAuth()` narrows the `unknown[]` from the
@@ -249,6 +264,26 @@ export async function boot(): Promise<void> {
     }),
     initInlineCompactionWorker().catch((err) => {
       logger.warn("Could not initialize inline compaction worker", {
+        error: getErrorMessage(err),
+      });
+    }),
+    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
+    // sidecar's reactive 401-retry path and the on-demand token resolver
+    // cover correctness without it; the worker only matters for credentials
+    // that go dormant long enough that their refresh_token would expire
+    // upstream.
+    (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
+      (err) => {
+        logger.warn("Could not initialize OAuth model refresh worker", {
+          error: getErrorMessage(err),
+        });
+      },
+    ),
+    // Pairing-table cleanup runs unconditionally — pure table-bloat
+    // janitor for `model_provider_pairings`, unrelated to the refresh
+    // hot path.
+    initPairingCleanupWorker().catch((err) => {
+      logger.warn("Could not initialize OAuth model pairing cleanup worker", {
         error: getErrorMessage(err),
       });
     }),

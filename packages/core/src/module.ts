@@ -13,6 +13,7 @@
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
+import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
 import type {
   Actor,
   ContainerOrchestrator,
@@ -335,6 +336,40 @@ export interface AppstrateModule {
    */
   permissionsContribution?(): ModulePermissionContribution[];
 
+  /**
+   * Model providers contributed by this module.
+   *
+   * Each `ModelProviderDefinition` pins identity, wire format, auth metadata,
+   * and selectable models for one LLM provider (OAuth-subscription or API-key).
+   * The platform's runtime registry aggregates contributions from every loaded
+   * module — disabling a module removes its providers without any other
+   * code change.
+   *
+   * Provider-specific behaviors (header injection, token-derived identity,
+   * post-refresh enrichment) belong on the definition's `hooks` field
+   * rather than the global `ModuleHooks` map: the platform dispatches by
+   * `providerId`, not by hook name, so a module's hook only runs for its
+   * own providers.
+   *
+   * Called once at boot, immediately after `init(ctx)`. Adding a provider
+   * later (e.g. on credential creation) is not supported — providers are
+   * declarative.
+   *
+   * @example
+   * ```ts
+   * modelProviders: () => [{
+   *   providerId: "my-oauth-provider",
+   *   displayName: "My OAuth Provider",
+   *   apiShape: "openai-chat",
+   *   authMode: "oauth2",
+   *   oauth: { clientId: "...", ... },
+   *   models: [...],
+   *   hooks: { extractTokenIdentity: (jwt) => ({ accountId: "...", email: "..." }) },
+   * }]
+   * ```
+   */
+  modelProviders?(): readonly ModelProviderDefinition[];
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
 }
@@ -459,6 +494,284 @@ export interface ModuleEvents {
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => void | Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Model provider contribution types
+//
+// A `ModelProviderDefinition` describes a single LLM provider Appstrate
+// knows how to talk to. Modules contribute providers via
+// `AppstrateModule.modelProviders()`; the platform aggregates them into a
+// runtime registry consulted by the LLM proxy, OAuth flow, token resolver,
+// and refresh worker.
+//
+// Behavior that varies per provider but stays declarative (apiShape,
+// forceStream, base URL, OAuth endpoints, model catalog, sidecar wire-
+// format quirks) lives in the definition itself. Behavior that requires
+// arbitrary code (JWT decoding, post-refresh enrichment, inference
+// probe construction) lives in `hooks`, which the platform dispatches
+// per provider definition rather than by hook name.
+// ---------------------------------------------------------------------------
+
+/** Capabilities surfaced for model selection UIs. */
+export type ModelProviderCapability = "text" | "image" | "reasoning" | "long-context-1m";
+
+/** Per-1M-token cost (USD). All cache fields optional — providers may omit pricing. */
+export interface ModelCost {
+  /** USD per 1M input tokens. */
+  input: number;
+  /** USD per 1M output tokens. */
+  output: number;
+  /** USD per 1M cache-read tokens (Anthropic-style prompt caching). */
+  cacheRead?: number;
+  /** USD per 1M cache-write tokens (Anthropic-style prompt caching). */
+  cacheWrite?: number;
+}
+
+/** A single selectable model exposed by a provider. */
+export interface ModelProviderModelEntry {
+  /** Canonical model identifier accepted by the provider's API. */
+  id: string;
+  /** Human-readable label for picker UIs. Falls back to `id` when absent. */
+  label?: string;
+  /** Maximum input context window in tokens. */
+  contextWindow: number;
+  /** Maximum response tokens (provider-defined ceiling). */
+  maxTokens?: number;
+  /** Surfaced capabilities for selection UIs. */
+  capabilities: readonly ModelProviderCapability[];
+  /** Default per-token cost. Self-hosters can override via env. */
+  cost?: ModelCost;
+  /**
+   * Curated default for first-connection auto-seed flows. When `true`, the
+   * model is created in `org_models` automatically right after a fresh
+   * pairing succeeds. If no model in a provider's list carries this flag,
+   * callers fall back to seeding every entry.
+   */
+  recommended?: true;
+}
+
+/** OAuth2 endpoints + client config for OAuth-authenticated providers. */
+export interface ModelProviderOAuthConfig {
+  /** Public OAuth client_id — typically shared with the provider's official CLI. */
+  clientId: string;
+  /** /authorize endpoint. */
+  authorizationUrl: string;
+  /** Token exchange endpoint. */
+  tokenUrl: string;
+  /** Token refresh endpoint (often equal to tokenUrl). */
+  refreshUrl: string;
+  /** Scopes requested at /authorize. */
+  scopes: readonly string[];
+  /** PKCE code challenge method. All current providers require S256. */
+  pkce: "S256";
+}
+
+/**
+ * Context passed to provider-specific proxy hooks. The provider's
+ * `beforeLlmProxyRequest` decides which headers to add/override on the
+ * outbound LLM call (e.g. an account-routing header).
+ */
+export interface ModelProviderProxyContext {
+  providerId: string;
+  /** Credential kind backing this call — providers can choose to skip hooks for API-key flows. */
+  credentialKind: "api_key" | "oauth";
+  /** The access token (OAuth) or API key (api_key) the platform will forward upstream. */
+  upstreamApiKey: string;
+  /** The incoming request headers from the agent — read-only. */
+  incomingHeaders: Headers;
+}
+
+/** Patch returned by `beforeLlmProxyRequest`. Empty object = no changes. */
+export interface ModelProviderProxyPatch {
+  /** Headers to merge into the outbound request. Later wins over earlier. */
+  headers?: Record<string, string>;
+}
+
+/**
+ * Well-known identity slots a provider may surface from an OAuth access
+ * token. Modules map their provider-specific claim names into these
+ * abstract slots, so the platform never needs to know any provider's
+ * internal claim vocabulary.
+ *
+ * `accountId` is the stable account/tenant identifier the provider uses
+ * for routing (echoed back to the upstream via the configured
+ * `accountIdHeader`). `email` is the user identity associated with the
+ * credential.
+ */
+export interface ModelProviderIdentity {
+  accountId?: string;
+  email?: string;
+}
+
+/**
+ * Pure-data inference probe request — used by the platform's connection
+ * test to verify that a stored credential can actually serve traffic
+ * against the provider's backend. Factored out so the wire format can be
+ * unit-tested without standing up an HTTP listener.
+ */
+export interface InferenceProbeRequest {
+  url: string;
+  method: "POST";
+  headers: Record<string, string>;
+  body: string;
+}
+
+/**
+ * Input passed to {@link ModelProviderHooks.buildInferenceProbe}. The
+ * platform supplies the resolved model + credential material; the module
+ * builds the wire-shape its backend will actually accept.
+ */
+export interface InferenceProbeContext {
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  /** Populated from the credential row's identity slots when present. */
+  accountId?: string;
+}
+
+/**
+ * Pure-data error result a module may return from
+ * {@link ModelProviderHooks.buildInferenceProbe} when it knows the probe
+ * cannot succeed (e.g. a required identity slot is missing). The platform
+ * surfaces it as a `TestResult` without ever sending the request.
+ */
+export interface InferenceProbeBuildError {
+  error: string;
+  message: string;
+}
+
+/**
+ * Provider-scoped hooks. All hooks are optional. The platform dispatches
+ * each by `providerId` — a module's hook only runs for providers it
+ * declared, never globally.
+ */
+export interface ModelProviderHooks {
+  /**
+   * Called by the LLM proxy and the in-container sidecar before forwarding
+   * a request upstream. Returns a patch (typically extra headers) merged
+   * into the outbound request. MUST be fast and side-effect-free — invoked
+   * on every LLM call.
+   */
+  beforeLlmProxyRequest?: (
+    ctx: ModelProviderProxyContext,
+  ) => Promise<ModelProviderProxyPatch> | ModelProviderProxyPatch;
+
+  /**
+   * Decode an OAuth access token into the well-known
+   * {@link ModelProviderIdentity} slots. Called once at credential creation
+   * and after every refresh; the result is persisted on the credential row
+   * so the proxy doesn't re-decode on every request.
+   *
+   * Returns the populated subset of identity slots, or `null` if the token
+   * carries no decodable identity. The platform uses
+   * `requiredIdentityClaims` (on the provider definition) to enforce that
+   * mandatory slots are populated after extraction.
+   *
+   * The module is responsible for translating its provider-specific claim
+   * vocabulary into these abstract slots — the platform never sees the
+   * raw claim names.
+   */
+  extractTokenIdentity?: (accessToken: string) => ModelProviderIdentity | null;
+
+  /**
+   * Build the `apiKey` placeholder that lands in the agent container's
+   * `MODEL_API_KEY` env var, when the in-container LLM client expects a
+   * structurally meaningful value (e.g. a JWT it will decode to read a
+   * routing claim). Returns `null` to fall back to the platform's generic
+   * placeholder.
+   *
+   * The real upstream credential never leaves the platform/sidecar
+   * boundary — the placeholder is what the agent container sees. Modules
+   * whose in-container shape only needs an opaque token should not
+   * implement this hook.
+   */
+  buildApiKeyPlaceholder?: (accessToken: string) => string | null;
+
+  /**
+   * Build the inference probe the platform sends to verify the credential
+   * can serve traffic. Modules whose backend doesn't accept the generic
+   * `GET ${baseUrl}/models` discovery probe implement this hook to
+   * provide the real wire format.
+   *
+   * Returns:
+   *  - {@link InferenceProbeRequest} → the platform sends it and reports
+   *    the result.
+   *  - {@link InferenceProbeBuildError} → the platform surfaces it as a
+   *    failed `TestResult` without ever sending the request (e.g. when a
+   *    required identity slot is missing).
+   *  - `null` → fall back to the platform's generic `/models` discovery
+   *    probe.
+   */
+  buildInferenceProbe?: (
+    ctx: InferenceProbeContext,
+  ) => InferenceProbeRequest | InferenceProbeBuildError | null;
+}
+
+/**
+ * A model provider Appstrate knows how to talk to.
+ *
+ * Aggregated by the platform from every loaded module's
+ * `modelProviders()` contribution. The runtime registry resolves by
+ * `providerId`; the platform never reaches into a module's internal state.
+ *
+ * Two `authMode` flavours:
+ *  - `"api_key"` — user provides a bearer token; no OAuth config required
+ *  - `"oauth2"` — OAuth2/PKCE flow, `oauth` block required
+ */
+export interface ModelProviderDefinition {
+  /** Stable id used as `provider_id` in DB rows and as registry lookup key. */
+  providerId: string;
+  /** Human-readable name for picker UIs. */
+  displayName: string;
+  /** Icon hint consumed by the UI (matches the existing AFPS provider iconUrl format). */
+  iconUrl: string;
+  /** Short marketing description for picker cards. */
+  description?: string;
+  /** Provider-side documentation URL surfaced as a "learn more" link. */
+  docsUrl?: string;
+
+  // — Inference wire format —
+  /** Shape the runtime serializes against. */
+  apiShape: ModelApiShape;
+  /** Default base URL the sidecar forwards LLM traffic to. */
+  defaultBaseUrl: string;
+  /** Whether the user can override `defaultBaseUrl` per credential row. */
+  baseUrlOverridable: boolean;
+
+  // — Auth —
+  authMode: "api_key" | "oauth2";
+  /** Required iff `authMode === "oauth2"`. */
+  oauth?: ModelProviderOAuthConfig;
+  /**
+   * Declarative wire-format quirks the sidecar must apply on this
+   * provider's behalf — static identity headers, accountId routing
+   * header, system-prompt prepend, body coercions (`forceStream`/
+   * `forceStore`), URL path rewriting, adaptive header retries.
+   *
+   * Only meaningful for OAuth providers. The platform forwards this
+   * struct verbatim into the sidecar's `LlmProxyOauthConfig.wireFormat`
+   * at boot, so the sidecar runtime never branches on `providerId` —
+   * adding a new OAuth provider is a pure declarative change.
+   */
+  oauthWireFormat?: OAuthWireFormat;
+
+  // — Catalog —
+  /** Selectable models. May be empty for providers whose model list is user-supplied. */
+  models: readonly ModelProviderModelEntry[];
+
+  // — Behavior —
+  /** Provider-scoped hooks (header injection, identity extraction). */
+  hooks?: ModelProviderHooks;
+  /**
+   * Well-known {@link ModelProviderIdentity} slots the platform MUST refuse
+   * to import without. Lets a provider declare that, for example, an
+   * `accountId` is mandatory (because its backend uses it as a routing
+   * header) — without hardcoding provider ids or claim names in the core
+   * import flow. When omitted, the import succeeds with whatever the hook
+   * returned (or nothing if the hook is absent).
+   */
+  requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
 }
 
 // ---------------------------------------------------------------------------

@@ -5113,13 +5113,13 @@
                     {
                       "id": "gpt-4o",
                       "label": "GPT-4o",
-                      "api": "openai-responses",
+                      "apiShape": "openai-responses",
                       "baseUrl": "https://api.openai.com/v1",
                       "modelId": "gpt-4o",
                       "source": "built-in",
                       "enabled": true,
                       "isDefault": false,
-                      "providerKeyId": "pk_abc123",
+                      "credentialId": "pk_abc123",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
                       "reasoning": false,
@@ -5155,17 +5155,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label", "api", "baseUrl", "modelId", "providerKeyId"],
+                "required": ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
                 "properties": {
                   "label": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Display name for the model"
                   },
-                  "api": {
+                  "apiShape": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)"
+                    "description": "Wire format / API shape (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)"
                   },
                   "baseUrl": {
                     "type": "string",
@@ -5178,7 +5178,7 @@
                     "minLength": 1,
                     "description": "Model identifier (e.g. gpt-4o)"
                   },
-                  "providerKeyId": {
+                  "credentialId": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Provider key ID for API key credentials"
@@ -5321,6 +5321,93 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/models/seed": {
+      "post": {
+        "operationId": "seedModels",
+        "tags": ["Models"],
+        "summary": "Bulk-seed models from the registry for a credential",
+        "description": "Atomically seed multiple `org_models` rows from the registry entry pinned by the credential's `providerId`. Idempotent — returns `created: 0` when the org already has any model bound to this credential.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["credentialId", "modelIds"],
+                "properties": {
+                  "credentialId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Models seeded",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["created", "ids", "promotedDefault"],
+                  "properties": {
+                    "created": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "promotedDefault": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -5488,12 +5575,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["api", "baseUrl", "modelId"],
+                "required": ["apiShape", "baseUrl", "modelId"],
                 "properties": {
-                  "api": {
+                  "apiShape": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "API type"
+                    "description": "Wire format / API shape"
                   },
                   "baseUrl": {
                     "type": "string",
@@ -5582,7 +5669,7 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "api": {
+                  "apiShape": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -5594,7 +5681,7 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "providerKeyId": {
+                  "credentialId": {
                     "type": "string",
                     "description": "Provider key ID to change which key is used"
                   },
@@ -5767,12 +5854,12 @@
         }
       }
     },
-    "/api/model-provider-keys": {
+    "/api/model-provider-credentials/registry": {
       "get": {
-        "operationId": "listModelProviderKeys",
-        "tags": ["Model Provider Keys"],
-        "summary": "List organization model provider keys",
-        "description": "Returns all LLM model provider keys (Anthropic, OpenAI, etc.) for the current organization. API keys are never exposed.",
+        "operationId": "listModelProviderRegistry",
+        "tags": ["Model Provider Credentials"],
+        "summary": "List the in-code model provider registry",
+        "description": "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5780,7 +5867,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Model provider key list",
+            "description": "Model provider registry list",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5802,7 +5889,136 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/OrgModelProviderKey"
+                        "type": "object",
+                        "required": [
+                          "providerId",
+                          "displayName",
+                          "iconUrl",
+                          "apiShape",
+                          "defaultBaseUrl",
+                          "baseUrlOverridable",
+                          "authMode",
+                          "models"
+                        ],
+                        "properties": {
+                          "providerId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "iconUrl": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": ["string", "null"]
+                          },
+                          "docsUrl": {
+                            "type": ["string", "null"]
+                          },
+                          "apiShape": {
+                            "type": "string",
+                            "enum": [
+                              "anthropic-messages",
+                              "openai-chat",
+                              "openai-responses",
+                              "openai-codex-responses"
+                            ]
+                          },
+                          "defaultBaseUrl": {
+                            "type": "string"
+                          },
+                          "baseUrlOverridable": {
+                            "type": "boolean"
+                          },
+                          "authMode": {
+                            "type": "string",
+                            "enum": ["api_key", "oauth2"]
+                          },
+                          "models": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": ["id", "contextWindow", "capabilities", "recommended"],
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "contextWindow": {
+                                  "type": "integer"
+                                },
+                                "maxTokens": {
+                                  "type": ["integer", "null"]
+                                },
+                                "capabilities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "recommended": {
+                                  "type": "boolean",
+                                  "description": "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/model-provider-credentials": {
+      "get": {
+        "operationId": "listModelProviderCredentials",
+        "tags": ["Model Provider Credentials"],
+        "summary": "List organization model provider credentials",
+        "description": "Returns all LLM model provider credentials (API-key + OAuth alike) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model provider credentials list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelProviderCredential"
                       }
                     },
                     "hasMore": {
@@ -5817,9 +6033,10 @@
                     {
                       "id": "cm7stu901",
                       "label": "OpenAI Production",
-                      "api": "openai-responses",
-                      "baseUrl": "https://api.openai.com/v1",
+                      "apiShape": "openai-chat",
+                      "baseUrl": "https://api.openai.com",
                       "source": "custom",
+                      "authMode": "api_key",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -5837,10 +6054,10 @@
         }
       },
       "post": {
-        "operationId": "createModelProviderKey",
-        "tags": ["Model Provider Keys"],
-        "summary": "Create a model provider key",
-        "description": "Create a new LLM model provider key for the organization. The API key is encrypted at rest.",
+        "operationId": "createModelProviderCredential",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Create a model provider credential",
+        "description": "Create a new LLM model provider credential for the organization. The plaintext API key is encrypted at rest under a versioned envelope.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5852,27 +6069,27 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label", "api", "baseUrl", "apiKey"],
+                "required": ["label", "providerId", "apiKey"],
                 "properties": {
                   "label": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Display name for the model provider key"
+                    "description": "Display name for the model provider credential"
                   },
-                  "api": {
+                  "providerId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)"
-                  },
-                  "baseUrl": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Model provider API base URL"
+                    "description": "Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow."
                   },
                   "apiKey": {
                     "type": "string",
                     "minLength": 1,
                     "description": "API key for authentication"
+                  },
+                  "baseUrlOverride": {
+                    "type": ["string", "null"],
+                    "format": "uri",
+                    "description": "Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise."
                   }
                 }
               }
@@ -5881,7 +6098,7 @@
         },
         "responses": {
           "201": {
-            "description": "Model provider key created",
+            "description": "Model provider credential created",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5910,17 +6127,24 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/api/model-provider-keys/test": {
+    "/api/model-provider-credentials/test": {
       "post": {
-        "operationId": "testModelProviderKeyInline",
-        "tags": ["Model Provider Keys"],
-        "summary": "Test model provider key configuration inline",
-        "description": "Test a model provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "operationId": "testModelProviderCredentialInline",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Test model provider credential configuration inline",
+        "description": "Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5932,12 +6156,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["api", "baseUrl"],
+                "required": ["apiShape", "baseUrl"],
                 "properties": {
-                  "api": {
+                  "apiShape": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "API type"
+                    "description": "Wire format / API shape"
                   },
                   "baseUrl": {
                     "type": "string",
@@ -5946,11 +6170,11 @@
                   },
                   "apiKey": {
                     "type": "string",
-                    "description": "API key (required for new keys)"
+                    "description": "API key (required for new credentials)"
                   },
                   "existingKeyId": {
                     "type": "string",
-                    "description": "Existing model provider key ID to fall back to for stored API key"
+                    "description": "Existing credential ID to fall back to for stored API key"
                   }
                 }
               }
@@ -5991,12 +6215,12 @@
         }
       }
     },
-    "/api/model-provider-keys/{id}": {
+    "/api/model-provider-credentials/{id}": {
       "put": {
-        "operationId": "updateModelProviderKey",
-        "tags": ["Model Provider Keys"],
-        "summary": "Update a model provider key",
-        "description": "Update a model provider key configuration.",
+        "operationId": "updateModelProviderCredential",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Update a model provider credential",
+        "description": "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6021,14 +6245,6 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "api": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "baseUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
                   "apiKey": {
                     "type": "string",
                     "minLength": 1
@@ -6040,7 +6256,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model provider key updated",
+            "description": "Model provider credential updated",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6074,10 +6290,10 @@
         }
       },
       "delete": {
-        "operationId": "deleteModelProviderKey",
-        "tags": ["Model Provider Keys"],
-        "summary": "Delete a model provider key",
-        "description": "Delete a model provider key. Models using this key will have their providerKeyId set to null.",
+        "operationId": "deleteModelProviderCredential",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Delete a model provider credential",
+        "description": "Delete a model provider credential. Returns 409 with `credential_in_use` if any `org_models` row still references it (FK ON DELETE RESTRICT) — detach the model first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6093,7 +6309,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Model provider key deleted",
+            "description": "Model provider credential deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6105,16 +6321,26 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "Credential is still referenced by one or more models (credential_in_use)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/api/model-provider-keys/{id}/test": {
+    "/api/model-provider-credentials/{id}/test": {
       "post": {
-        "operationId": "testModelProviderKey",
-        "tags": ["Model Provider Keys"],
-        "summary": "Test model provider key connection",
-        "description": "Test that the model provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "operationId": "testModelProviderCredential",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Test model provider credential connection",
+        "description": "Test that the credential's API key (or OAuth token) and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6154,7 +6380,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Model provider key not found",
+            "description": "Model provider credential not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -6165,6 +6391,289 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/model-providers-oauth/pairing": {
+      "post": {
+        "operationId": "createOAuthModelProviderPairing",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Mint a one-shot pairing token for the connect helper",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["providerId"],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown ids → 404. The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pairing token created. The plaintext is included exactly once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "token", "command", "expiresAt"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^pair_[A-Za-z0-9_-]+$",
+                      "description": "Opaque pairing id, used by GET/DELETE /pairing/:id."
+                    },
+                    "token": {
+                      "type": "string",
+                      "description": "Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /import."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "Ready-to-paste shell command (`npx @appstrate/connect-helper@latest <token>`)."
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/model-providers-oauth/pairing/{id}": {
+      "get": {
+        "operationId": "getOAuthModelProviderPairing",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Read pairing status (for dashboard polling)",
+        "description": "Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. The plaintext token is never re-served — only status + timestamps.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pair_[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pairing status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "status", "consumedAt", "expiresAt", "credentialId"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^pair_[A-Za-z0-9_-]+$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "consumed", "expired"]
+                    },
+                    "consumedAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "credentialId": {
+                      "type": ["string", "null"],
+                      "format": "uuid",
+                      "description": "ID of the model_provider_credentials row created by the helper. Null while the pairing is still pending or expired without consumption."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelOAuthModelProviderPairing",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Cancel a pending pairing",
+        "description": "Idempotent — returns 204 even when the row is already gone (consumed, expired-and-purged, or belongs to another org). Wrong-org cancellations are silent for the same reason GET returns 404 rather than 403.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pair_[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Pairing cancelled (or no-op if absent)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/model-providers-oauth/import": {
+      "post": {
+        "operationId": "importOAuthModelProviderConnection",
+        "tags": ["Model Provider Credentials"],
+        "summary": "Import an OAuth model provider token bundle from the connect helper",
+        "description": "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["providerId", "label", "accessToken", "refreshToken"],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "description": "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400."
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "accessToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": ["integer", "null"],
+                    "description": "Unix milliseconds since epoch — when the access token expires."
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320,
+                    "description": "Account email — either forwarded from the OAuth response body or re-derived server-side by the provider's `extractTokenIdentity` hook."
+                  },
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection persisted; matching provider key created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["credentialId", "providerId", "availableModelIds"],
+                  "properties": {
+                    "credentialId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "providerId": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "availableModelIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -9787,6 +10296,117 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/internal/oauth-token/{credentialId}": {
+      "get": {
+        "operationId": "getOAuthModelProviderToken",
+        "tags": ["Internal"],
+        "summary": "Fetch a fresh access token for an OAuth model provider connection",
+        "description": "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "model_provider_credentials.id of the OAuth-backed credential."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved token and runtime config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "410": {
+            "description": "Connection needs reconnection (refresh token revoked or missing). Sidecar should propagate as 401 to the agent.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/oauth-token/{credentialId}/refresh": {
+      "post": {
+        "operationId": "refreshOAuthModelProviderToken",
+        "tags": ["Internal"],
+        "summary": "Force a refresh of the access token for an OAuth model provider connection",
+        "description": "Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on revoked refresh tokens, flips needsReconnection=true on the connection and returns 410.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refreshed token and runtime config (same shape as GET).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "410": {
+            "description": "Refresh token revoked — connection flagged needsReconnection.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -16872,7 +17492,7 @@
         "operationId": "llmProxyOpenaiChatCompletions",
         "tags": ["LLM Proxy"],
         "summary": "OpenAI Chat Completions — with server-side model injection",
-        "description": "Wire-compatible with the OpenAI `/v1/chat/completions` endpoint. The caller supplies `body.model` as an Appstrate **model preset id** (e.g. `m_` or a SYSTEM_PROVIDER_KEYS preset); the platform resolves the preset against `org_models` + `org_system_provider_keys`, substitutes the real upstream model id, injects the upstream API key, and forwards the request. Streaming responses pass through unchanged; usage is tapped in parallel for accounting.\n\nAuthentication: bearer only — API key with the `llm-proxy:call` scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, dashboard access token). Cookie sessions are rejected.",
+        "description": "Wire-compatible with the OpenAI `/v1/chat/completions` endpoint. The caller supplies `body.model` as an Appstrate **model preset id** (e.g. `m_` or a SYSTEM_PROVIDER_KEYS preset); the platform resolves the preset against `org_models` + `model_provider_credentials`, substitutes the real upstream model id, injects the upstream API key, and forwards the request. Streaming responses pass through unchanged; usage is tapped in parallel for accounting.\n\nAuthentication: bearer only — API key with the `llm-proxy:call` scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, dashboard access token). Cookie sessions are rejected.",
         "security": [
           {
             "bearerApiKey": []
@@ -19098,9 +19718,18 @@
           }
         }
       },
-      "OrgModelProviderKey": {
+      "ModelProviderCredential": {
         "type": "object",
-        "required": ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "label",
+          "apiShape",
+          "baseUrl",
+          "source",
+          "authMode",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -19108,7 +19737,7 @@
           "label": {
             "type": "string"
           },
-          "api": {
+          "apiShape": {
             "type": "string"
           },
           "baseUrl": {
@@ -19117,6 +19746,24 @@
           "source": {
             "type": "string",
             "enum": ["built-in", "custom"]
+          },
+          "authMode": {
+            "type": "string",
+            "enum": ["api_key", "oauth2"]
+          },
+          "providerId": {
+            "type": ["string", "null"],
+            "description": "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`."
+          },
+          "oauthEmail": {
+            "type": ["string", "null"]
+          },
+          "oauthExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "needsReconnection": {
+            "type": "boolean"
           },
           "createdBy": {
             "type": ["string", "null"]
@@ -19136,13 +19783,13 @@
         "required": [
           "id",
           "label",
-          "api",
+          "apiShape",
           "baseUrl",
           "modelId",
           "enabled",
           "isDefault",
           "source",
-          "providerKeyId",
+          "credentialId",
           "createdAt",
           "updatedAt"
         ],
@@ -19153,7 +19800,7 @@
           "label": {
             "type": "string"
           },
-          "api": {
+          "apiShape": {
             "type": "string"
           },
           "baseUrl": {
@@ -19187,18 +19834,14 @@
             "type": "string",
             "enum": ["built-in", "custom"]
           },
-          "providerKeyId": {
+          "credentialId": {
             "type": "string",
-            "description": "Provider key ID for API key credentials"
-          },
-          "providerKeyLabel": {
-            "type": ["string", "null"],
-            "description": "Provider key label for display"
+            "description": "ID of the backing `model_provider_credentials` row."
           },
           "keyKind": {
             "type": ["string", "null"],
             "enum": ["oauth", "api-key", null],
-            "description": "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping (Claude-Code system prompt + tool renaming) happens locally before the proxy ever sees the request. null for non-Anthropic protocols."
+            "description": "Anthropic-only: shape of the upstream credential. Drives the CLI's pi-ai placeholder so OAuth-gated body reshaping happens locally before the proxy ever sees the request. null for non-Anthropic protocols."
           },
           "cost": {
             "type": ["object", "null"],
@@ -19249,6 +19892,24 @@
           "message": {
             "type": "string",
             "description": "Human-readable error message"
+          }
+        }
+      },
+      "OAuthTokenResponse": {
+        "type": "object",
+        "description": "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, wireFormat, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
+        "required": ["accessToken", "expiresAt"],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": ["integer", "null"],
+            "description": "Epoch milliseconds. null when expiry is unknown."
+          },
+          "accountId": {
+            "type": "string",
+            "description": "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as."
           }
         }
       },

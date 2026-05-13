@@ -77,7 +77,7 @@ export const llmProxyPaths = {
         "Wire-compatible with the OpenAI `/v1/chat/completions` endpoint. " +
         "The caller supplies `body.model` as an Appstrate **model preset id** " +
         "(e.g. `m_` or a SYSTEM_PROVIDER_KEYS preset); the platform resolves " +
-        "the preset against `org_models` + `org_system_provider_keys`, " +
+        "the preset against `org_models` + `model_provider_credentials`, " +
         "substitutes the real upstream model id, injects the upstream API " +
         "key, and forwards the request. Streaming responses pass through " +
         "unchanged; usage is tapped in parallel for accounting.\n\n" +

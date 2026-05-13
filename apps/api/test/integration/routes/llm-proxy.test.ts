@@ -11,7 +11,7 @@
  *
  *   2. Request body.model is a preset id — the platform substitutes the
  *      real upstream model id before forwarding. `loadModel()` resolves
- *      against `org_models` + `org_system_provider_keys`.
+ *      against `org_models` + `model_provider_credentials`.
  *
  *   3. Protocol mismatch (preset.api != route.api) → 400.
  *
@@ -30,7 +30,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { encrypt } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -45,11 +44,11 @@ interface Harness {
   ctx: TestContext;
   apiKey: string;
   presetId: string;
-  providerKeyId: string;
+  credentialId: string;
 }
 
 async function buildHarness(overrides?: {
-  api?: string;
+  apiShape?: string;
   baseUrl?: string;
   modelId?: string;
   upstreamKey?: string;
@@ -59,15 +58,15 @@ async function buildHarness(overrides?: {
   const providerKey = await seedOrgModelProviderKey({
     orgId: ctx.orgId,
     label: "Upstream",
-    api: overrides?.api ?? "openai-completions",
+    apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
-    apiKeyEncrypted: encrypt(overrides?.upstreamKey ?? "sk-upstream-42"),
+    apiKey: overrides?.upstreamKey ?? "sk-upstream-42",
   });
   const model = await seedOrgModel({
     orgId: ctx.orgId,
-    providerKeyId: providerKey.id,
+    credentialId: providerKey.id,
     label: "Preset",
-    api: overrides?.api ?? "openai-completions",
+    apiShape: overrides?.apiShape ?? "openai-completions",
     baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
@@ -83,7 +82,7 @@ async function buildHarness(overrides?: {
     ctx,
     apiKey: key.rawKey,
     presetId: model.id,
-    providerKeyId: providerKey.id,
+    credentialId: providerKey.id,
   };
 }
 
@@ -209,7 +208,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
   });
 
   it("returns 400 when the preset uses a different protocol family", async () => {
-    const h = await buildHarness({ api: "anthropic-messages" });
+    const h = await buildHarness({ apiShape: "anthropic-messages" });
     mockUpstream(async () => new Response("should not be called", { status: 599 }));
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
@@ -296,7 +295,7 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
 
   it("forwards with x-api-key and merges SSE usage frames", async () => {
     const h = await buildHarness({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.test",
       modelId: "claude-sonnet-4-5-20250929",
       upstreamKey: "sk-ant-42",
@@ -396,7 +395,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
   it("forwards with Authorization: Bearer and substitutes the model id", async () => {
     const h = await buildHarness({
-      api: "mistral-conversations",
+      apiShape: "mistral-conversations",
       baseUrl: "https://api.mistral.test",
       modelId: "mistral-large-latest",
       upstreamKey: "mistral-upstream-99",
@@ -447,7 +446,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
   });
 
   it("returns 400 when the preset uses a different protocol family", async () => {
-    const h = await buildHarness({ api: "openai-completions" });
+    const h = await buildHarness({ apiShape: "openai-completions" });
     const res = await app.request("/api/llm-proxy/mistral-conversations/v1/chat/completions", {
       method: "POST",
       headers: authHeaders(h),

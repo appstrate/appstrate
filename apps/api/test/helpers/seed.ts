@@ -20,7 +20,7 @@ import {
   schedules,
   apiKeys,
   orgProxies,
-  orgSystemProviderKeys,
+  modelProviderCredentials,
   orgModels,
   connectionProfiles,
   userProviderConnections,
@@ -237,33 +237,113 @@ export async function seedOrgProxy(
   return proxy!;
 }
 
-// ─── Org Model Provider Keys ─────────────────────────────
+// ─── Model Provider Credentials ─────────────────────────────
 
-type OrgModelProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
+import { encryptCredentials } from "@appstrate/connect";
+
+interface ModelProviderCredentialSeed {
   orgId: string;
-};
+  label?: string;
+  /** Convenience alias for callers that think in apiShape terms — mapped to a built-in providerId. */
+  apiShape?: string;
+  baseUrl?: string;
+  /** Plaintext API key, wrapped into a `kind: "api_key"` blob before encryption. */
+  apiKey?: string;
+  /** Canonical registry providerId. Defaults derive from `apiShape` if absent. */
+  providerId?: string;
+  /** Override for self-hosted endpoints; honored only by providers with `baseUrlOverridable: true`. */
+  baseUrlOverride?: string | null;
+  createdBy?: string | null;
+}
+
+/**
+ * Best-effort default mapping for the built-in api shapes the test suite
+ * uses. Real production code uses the registry directly — this stays in
+ * the helper so existing tests calling `seedOrgModelProviderKey({ apiShape: "openai" })`
+ * keep working without each one knowing about providerIds.
+ */
+function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
+  if (apiShape === "anthropic-messages") return "anthropic";
+  if (apiShape === "openai" || apiShape === "openai-chat") return "openai";
+  if (baseUrl && /openai\.com/i.test(baseUrl)) return "openai";
+  if (baseUrl && /anthropic\.com/i.test(baseUrl)) return "anthropic";
+  return "openai-compatible";
+}
 
 export async function seedOrgModelProviderKey(
-  overrides: OrgModelProviderKeyInsert,
-): Promise<InferSelectModel<typeof orgSystemProviderKeys>> {
-  const [key] = await db
-    .insert(orgSystemProviderKeys)
+  overrides: ModelProviderCredentialSeed,
+): Promise<InferSelectModel<typeof modelProviderCredentials>> {
+  const apiKey = overrides.apiKey ?? "sk-test-placeholder";
+  const providerId =
+    overrides.providerId ?? defaultProviderId(overrides.apiShape, overrides.baseUrl);
+  const baseUrlOverride =
+    overrides.baseUrlOverride !== undefined
+      ? overrides.baseUrlOverride
+      : providerId === "openai-compatible" && overrides.baseUrl
+        ? overrides.baseUrl
+        : null;
+
+  const [row] = await db
+    .insert(modelProviderCredentials)
     .values({
-      label: "Test Model Provider Key",
-      api: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      apiKeyEncrypted: "encrypted-key-placeholder",
-      ...overrides,
+      orgId: overrides.orgId,
+      label: overrides.label ?? "Test Model Provider Key",
+      providerId,
+      credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
+      baseUrlOverride,
+      createdBy: overrides.createdBy ?? null,
     })
     .returning();
-  return key!;
+  return row!;
+}
+
+interface OAuthCredentialSeed {
+  orgId: string;
+  providerId?: string;
+  label?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  /** Epoch ms. `null` means "no upstream expiry" — passes through to the resolver as-is. */
+  expiresAt?: number | null;
+  needsReconnection?: boolean;
+  createdBy?: string | null;
+}
+
+/**
+ * Companion to `seedOrgModelProviderKey` for OAuth-backed model provider
+ * credentials. Both call-sites (`/internal/oauth-token` route tests,
+ * `/api/models/seed` integration tests, token-resolver tests, etc.)
+ * were repeating the same `db.insert(modelProviderCredentials)` boilerplate
+ * with slightly different blob fields — centralizing here keeps drift
+ * (e.g. a `kind` rename in the blob shape) to a single update.
+ */
+export async function seedOrgModelProviderOAuth(
+  overrides: OAuthCredentialSeed,
+): Promise<InferSelectModel<typeof modelProviderCredentials>> {
+  const [row] = await db
+    .insert(modelProviderCredentials)
+    .values({
+      orgId: overrides.orgId,
+      label: overrides.label ?? "Test OAuth Credential",
+      providerId: overrides.providerId ?? "test-oauth",
+      credentialsEncrypted: encryptCredentials({
+        kind: "oauth",
+        accessToken: overrides.accessToken ?? "test-access-token",
+        refreshToken: overrides.refreshToken ?? "test-refresh-token",
+        expiresAt: overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt,
+        needsReconnection: overrides.needsReconnection ?? false,
+      }),
+      createdBy: overrides.createdBy ?? null,
+    })
+    .returning();
+  return row!;
 }
 
 // ─── Org Models ───────────────────────────────────────────
 
 type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & {
   orgId: string;
-  providerKeyId: string;
+  credentialId: string;
 };
 
 export async function seedOrgModel(
@@ -273,7 +353,7 @@ export async function seedOrgModel(
     .insert(orgModels)
     .values({
       label: "Test Model",
-      api: "anthropic",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,

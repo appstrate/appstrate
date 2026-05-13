@@ -156,13 +156,19 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
 
-  // Model Provider Keys
-  "GET /api/model-provider-keys",
-  "POST /api/model-provider-keys",
-  "POST /api/model-provider-keys/test",
-  "PUT /api/model-provider-keys/{id}",
-  "DELETE /api/model-provider-keys/{id}",
-  "POST /api/model-provider-keys/{id}/test",
+  // Model Provider Credentials
+  "GET /api/model-provider-credentials/registry",
+  "GET /api/model-provider-credentials",
+  "POST /api/model-provider-credentials",
+  "POST /api/model-provider-credentials/test",
+  "PUT /api/model-provider-credentials/{id}",
+  "DELETE /api/model-provider-credentials/{id}",
+  "POST /api/model-provider-credentials/{id}/test",
+  // OAuth Model Providers (subscription billing)
+  "POST /api/model-providers-oauth/import",
+  "POST /api/model-providers-oauth/pairing",
+  "GET /api/model-providers-oauth/pairing/{id}",
+  "DELETE /api/model-providers-oauth/pairing/{id}",
 
   // Models
   "GET /api/models",
@@ -170,6 +176,7 @@ const expectedEndpoints = [
   "PUT /api/models/default",
   "GET /api/models/openrouter",
   "POST /api/models/test",
+  "POST /api/models/seed",
   "PUT /api/models/{id}",
   "DELETE /api/models/{id}",
   "POST /api/models/{id}/test",
@@ -286,6 +293,8 @@ const expectedEndpoints = [
   "GET /internal/memories",
   "GET /internal/credentials/{scope}/{name}",
   "POST /internal/credentials/{scope}/{name}/refresh",
+  "GET /internal/oauth-token/{credentialId}",
+  "POST /internal/oauth-token/{credentialId}/refresh",
 
   // Meta
   "GET /api/openapi.json",

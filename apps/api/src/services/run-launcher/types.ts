@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { modelCostSchema, tokenUsageSchema } from "@appstrate/shared-types";
-import type { ModelCost, TokenUsage } from "@appstrate/shared-types";
+import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle, PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
+import type { ResolvedModel } from "../org-models.ts";
 
-export type { ModelCost, ToolMeta, TokenUsage };
+export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
 
 export interface UploadedFile {
@@ -36,18 +37,6 @@ export interface ProviderSummary extends PlatformPromptProvider {
   categories?: string[];
 }
 
-export interface LlmConfig {
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
-}
-
 /**
  * Platform-specific run configuration — everything that does NOT fit in the
  * AFPS {@link ExecutionContext} (auth material, infrastructure wiring,
@@ -69,7 +58,13 @@ export interface AppstrateRunPlan {
   outputSchema?: JSONSchemaObject;
 
   // --- LLM ---
-  llmConfig: LlmConfig;
+  /**
+   * Resolved model + credential. `label`/`isSystemModel` are consumed by
+   * the caller for the run record; `accountId` is re-read by the sidecar
+   * from the credential row on each request. Both are passed through here
+   * verbatim — the executor only reads the inference fields.
+   */
+  llmConfig: ResolvedModel;
 
   // --- Platform wiring ---
   /** Callback URL + signed token for the agent container. Optional — runners that don't expose a callback API may omit it. */

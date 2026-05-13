@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,26 +26,34 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
-import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
-import { useModelProviderKeys } from "../hooks/use-model-provider-keys";
+import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
+import { type OpenRouterModel } from "../hooks/use-models";
+import type { ModelCost } from "@appstrate/core/module";
+import { CapabilitiesSection } from "./model-form/capabilities-section";
+import { useOpenRouterSearch } from "./model-form/use-open-router-search";
+import {
+  useModelProviderCredentials,
+  useProvidersRegistry,
+  type ProviderRegistryEntry,
+} from "../hooks/use-model-provider-credentials";
+import { OAuthPairingBody } from "./oauth-pairing-body";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
-  PROVIDER_PRESETS,
-  API_TYPES,
-  findPresetMatch,
+  PI_ADAPTER_TYPES,
+  findRegistryModel,
   getProviderById,
-  findProviderByApiAndBaseUrl,
-} from "@/lib/model-presets";
+  findProviderByApiShapeAndBaseUrl,
+  resolveProviderId,
+} from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 
 export interface ModelFormData {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
-  providerKeyId: string;
+  credentialId: string;
   newProviderKey?: { apiKey: string };
   input?: string[];
   contextWindow?: number;
@@ -65,10 +72,10 @@ interface ModelFormModalProps {
 
 interface ModelFormFields {
   label: string;
-  api: string;
+  apiShape: string;
   baseUrl: string;
   modelId: string;
-  providerKeyId: string;
+  credentialId: string;
   inlineApiKey: string;
   inputText: boolean;
   inputImage: boolean;
@@ -77,22 +84,24 @@ interface ModelFormFields {
   reasoning: boolean;
 }
 
-function detectProvider(model: OrgModelInfo | null): string {
+function detectProvider(
+  model: OrgModelInfo | null,
+  registry: readonly ProviderRegistryEntry[],
+): string {
   if (!model) return "";
-  const match = findPresetMatch(model.api, model.modelId);
-  if (match) return match.provider.id;
-  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
-  if (byApiAndUrl) return byApiAndUrl.id;
-  return CUSTOM_ID;
+  return resolveProviderId(model, registry);
 }
 
-function detectModel(model: OrgModelInfo | null): string {
+function detectModel(
+  model: OrgModelInfo | null,
+  registry: readonly ProviderRegistryEntry[],
+): string {
   if (!model) return "";
-  const match = findPresetMatch(model.api, model.modelId);
-  if (match) return match.model.modelId;
-  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
+  const match = findRegistryModel(model.apiShape, model.modelId, registry);
+  if (match) return match.model.id;
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
   if (byApiAndUrl) {
-    // Providers with no static presets (e.g. OpenRouter) use dynamic model IDs
+    // Providers with no curated catalog (e.g. OpenRouter) use dynamic model IDs
     if (byApiAndUrl.models.length === 0) return model.modelId;
     return CUSTOM_ID;
   }
@@ -215,25 +224,43 @@ function ModelFormBody({
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
-  const [providerId, setProviderId] = useState(() => detectProvider(model));
-  const [selectedModelId, setSelectedModelId] = useState(() => detectModel(model));
+  const registryQuery = useProvidersRegistry();
+  const registry = useMemo(() => registryQuery.data ?? [], [registryQuery.data]);
+  // openai-compatible is the operator escape hatch (free-form baseUrl, no
+  // catalog) and surfaces as the "Custom" option instead of a picker entry.
+  // OpenRouter has no curated catalog — its row stays so users can pick it
+  // and search models via the dedicated combobox.
+  const pickerEntries = useMemo(
+    () => registry.filter((p) => p.providerId !== "openai-compatible"),
+    [registry],
+  );
+
+  // User-driven provider/model overrides — `null` means "follow auto-detect".
+  const [providerOverride, setProviderOverride] = useState<string | null>(null);
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [cost, setCost] = useState<ModelCost | null>(null);
+
+  const providerId = providerOverride ?? detectProvider(model, registry);
+  const selectedModelId = modelOverride ?? detectModel(model, registry);
+  const setProviderId = (id: string) => setProviderOverride(id);
+  const setSelectedModelId = (id: string) => setModelOverride(id);
 
   const {
     register,
     handleSubmit,
     control,
     setValue,
+    setError,
     clearErrors,
     showError,
     formState: { errors },
   } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
-      api: model?.api ?? "",
+      apiShape: model?.apiShape ?? "",
       baseUrl: model?.baseUrl ?? "",
       modelId: model?.modelId ?? "",
-      providerKeyId: model?.providerKeyId ?? "",
+      credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
       inputText: model?.input?.includes("text") !== false,
       inputImage: model?.input?.includes("image") ?? false,
@@ -243,14 +270,14 @@ function ModelFormBody({
     },
   });
 
-  const [api, baseUrl, modelId, providerKeyId, inlineApiKey, inputText, inputImage, reasoning] =
+  const [apiShape, baseUrl, modelId, credentialId, inlineApiKey, inputText, inputImage, reasoning] =
     useWatch({
       control,
       name: [
-        "api",
+        "apiShape",
         "baseUrl",
         "modelId",
-        "providerKeyId",
+        "credentialId",
         "inlineApiKey",
         "inputText",
         "inputImage",
@@ -258,38 +285,72 @@ function ModelFormBody({
       ],
     });
 
-  const providerKeysQuery = useModelProviderKeys();
+  const providerKeysQuery = useModelProviderCredentials();
 
+  // `authMode` for the picked provider drives the credential UX:
+  //   - "oauth2"  → no inline apiKey, must select an existing connection or
+  //                 launch the OAuth dialog to create one.
+  //   - "api_key" → inline apiKey input OR pick an existing matching credential.
+  // The registry is the single source of truth — adding a provider on the
+  // server flows through here without any client edits.
+  const registryEntry = useMemo(
+    () => registryQuery.data?.find((p) => p.providerId === providerId),
+    [registryQuery.data, providerId],
+  );
+  const authMode: "api_key" | "oauth2" = registryEntry?.authMode ?? "api_key";
+  const isOauthProvider = authMode === "oauth2";
+
+  // Filter the existing credential list to those compatible with the picked
+  // provider:
+  //   - OAuth: pin to the canonical `providerId` (DB column) — apiShape +
+  //            baseUrl would collide with api-key Anthropic credentials.
+  //   - api-key: match on apiShape + baseUrl as before.
   const availableProviderKeys = useMemo(() => {
-    if (!providerKeysQuery.data || !api || !baseUrl) return [];
+    if (!providerKeysQuery.data) return [];
+    if (isOauthProvider) {
+      return providerKeysQuery.data.filter(
+        (k) => k.authMode === "oauth2" && k.providerId === providerId,
+      );
+    }
+    if (!apiShape || !baseUrl) return [];
     const normalizedBase = baseUrl.replace(/\/+$/, "");
     return providerKeysQuery.data.filter(
-      (k) => k.api === api && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
+      (k) =>
+        k.authMode === "api_key" &&
+        k.apiShape === apiShape &&
+        k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
-  }, [providerKeysQuery.data, api, baseUrl]);
+  }, [providerKeysQuery.data, apiShape, baseUrl, isOauthProvider, providerId]);
 
-  const selectedKey = availableProviderKeys.find((k) => k.id === providerKeyId);
-  const inlineKeyMode = !selectedKey && !providerKeyId;
+  const selectedKey = availableProviderKeys.find((k) => k.id === credentialId);
+  // For api-key providers, the third state is "no selection + about to type
+  // a new key inline". For OAuth providers there's no inline path — the
+  // user must either pick or click "Connect".
+  const inlineKeyMode = !isOauthProvider && !selectedKey && !credentialId;
 
-  const [openRouterSearch, setOpenRouterSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // OAuth connect dialog — the pairing endpoint now returns the new
+  // credentialId directly via `onConnected`, so we auto-select it in the
+  // form without diffing the credential list.
+  const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(openRouterSearch), 300);
-    return () => clearTimeout(timer);
-  }, [openRouterSearch]);
+  const handleOpenOauthDialog = () => {
+    setOauthDialogOpen(true);
+  };
 
-  const openRouterQuery = useOpenRouterModels(
-    providerId === "openrouter" ? debouncedSearch : undefined,
-  );
+  const handleOauthConnected = (newId: string) => {
+    setValue("credentialId", newId);
+    setValue("inlineApiKey", "");
+    clearErrors("credentialId");
+  };
 
   const isOpenRouter = providerId === "openrouter";
+  const openRouterSearch = useOpenRouterSearch(isOpenRouter);
   const isCustomProvider = providerId === CUSTOM_ID;
   const isCustomModel = selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
   const isCustom = isCustomProvider || isCustomModel;
 
-  const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId);
+  const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId, registry);
 
   const resetModelFields = () => {
     setValue("label", "");
@@ -308,18 +369,18 @@ function ModelFormBody({
 
     if (id === CUSTOM_ID) {
       setSelectedModelId(CUSTOM_ID);
-      setValue("api", "");
+      setValue("apiShape", "");
       setValue("baseUrl", "");
     } else {
       setSelectedModelId("");
-      const provider = getProviderById(id);
+      const provider = getProviderById(id, registry);
       if (provider) {
-        setValue("api", provider.api);
-        setValue("baseUrl", provider.baseUrl);
+        setValue("apiShape", provider.apiShape);
+        setValue("baseUrl", provider.defaultBaseUrl);
       }
     }
     resetModelFields();
-    setOpenRouterSearch("");
+    openRouterSearch.setSearch("");
   };
 
   const handleModelChange = (id: string) => {
@@ -331,17 +392,27 @@ function ModelFormBody({
       return;
     }
 
-    const preset = selectedProvider?.models.find((m) => m.modelId === id);
+    const preset = selectedProvider?.models.find((m) => m.id === id);
     if (!preset) return;
 
-    setValue("label", preset.label);
-    setValue("modelId", preset.modelId);
-    setValue("inputText", preset.input.includes("text"));
-    setValue("inputImage", preset.input.includes("image"));
+    const caps = preset.capabilities;
+    setValue("label", preset.label ?? preset.id);
+    setValue("modelId", preset.id);
+    setValue("inputText", caps.includes("text"));
+    setValue("inputImage", caps.includes("image"));
     setValue("contextWindow", preset.contextWindow.toString());
-    setValue("maxTokens", preset.maxTokens.toString());
-    setValue("reasoning", preset.reasoning);
-    setCost(preset.cost ?? null);
+    setValue("maxTokens", (preset.maxTokens ?? 0).toString());
+    setValue("reasoning", caps.includes("reasoning"));
+    setCost(
+      preset.cost
+        ? {
+            input: preset.cost.input,
+            output: preset.cost.output,
+            cacheRead: preset.cost.cacheRead ?? 0,
+            cacheWrite: preset.cost.cacheWrite ?? 0,
+          }
+        : null,
+    );
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -351,15 +422,32 @@ function ModelFormBody({
     const cw = data.contextWindow.trim() ? parseInt(data.contextWindow.trim(), 10) : undefined;
     const mt = data.maxTokens.trim() ? parseInt(data.maxTokens.trim(), 10) : undefined;
 
+    // Inline api-key creation only applies to api_key providers — OAuth
+    // credentials must exist before the model is saved (they're created via
+    // the pairing dialog and auto-selected into `credentialId`).
+    const willCreateNewKey =
+      !isOauthProvider && inlineKeyMode && data.inlineApiKey.trim().length > 0;
+
+    // OAuth path requires a selected credential — there's no "type your key
+    // inline" affordance, so emptiness is a hard error. The api-key path
+    // accepts either an existing selection OR an inline new key; the route
+    // handler validates the latter further down.
+    if (isOauthProvider && !data.credentialId) {
+      setError("credentialId", { message: t("models.form.connectionRequired") });
+      return;
+    }
+    if (!isOauthProvider && !data.credentialId && !willCreateNewKey) {
+      setError("credentialId", { message: t("models.form.apiKeyRequired") });
+      return;
+    }
+
     onSubmit({
       label: data.label.trim(),
-      api: data.api.trim(),
+      apiShape: data.apiShape.trim(),
       baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
-      providerKeyId: inlineKeyMode ? "" : data.providerKeyId,
-      ...(inlineKeyMode && data.inlineApiKey.trim()
-        ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } }
-        : {}),
+      credentialId: willCreateNewKey ? "" : data.credentialId,
+      ...(willCreateNewKey ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } } : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
@@ -395,13 +483,13 @@ function ModelFormBody({
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {PROVIDER_PRESETS.map((p) => {
-                const Icon = PROVIDER_ICONS[p.id];
+              {pickerEntries.map((p) => {
+                const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
                 return (
-                  <SelectItem key={p.id} value={p.id}>
+                  <SelectItem key={p.providerId} value={p.providerId}>
                     <span className="flex items-center gap-2">
                       {Icon && <Icon className="size-4" />}
-                      {p.label}
+                      {p.displayName}
                     </span>
                   </SelectItem>
                 );
@@ -412,7 +500,7 @@ function ModelFormBody({
         </div>
 
         {/* Model select (only for known providers, except OpenRouter) */}
-        {selectedProvider && !isOpenRouter && (
+        {selectedProvider && !isOpenRouter && selectedProvider.models.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
             <Select value={selectedModelId} onValueChange={handleModelChange}>
@@ -421,8 +509,8 @@ function ModelFormBody({
               </SelectTrigger>
               <SelectContent>
                 {selectedProvider.models.map((m) => (
-                  <SelectItem key={m.modelId} value={m.modelId}>
-                    {m.label}
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label ?? m.id}
                   </SelectItem>
                 ))}
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
@@ -437,10 +525,10 @@ function ModelFormBody({
             <Label>{t("models.form.modelId")}</Label>
             <OpenRouterCombobox
               value={modelId}
-              search={openRouterSearch}
-              onSearchChange={setOpenRouterSearch}
-              models={openRouterQuery.data ?? []}
-              isLoading={openRouterQuery.isLoading}
+              search={openRouterSearch.search}
+              onSearchChange={openRouterSearch.setSearch}
+              models={openRouterSearch.models}
+              isLoading={openRouterSearch.isLoading}
               placeholder={t("models.form.openRouterSearchPlaceholder")}
               emptyText={t("models.form.openRouterNoResults")}
               searchingText={t("models.form.openRouterSearching")}
@@ -484,15 +572,31 @@ function ModelFormBody({
           </div>
         )}
 
-        {/* Provider key — visible once a model is chosen */}
+        {/* Credential — visible once a model is chosen.
+            Two flavors keyed on the provider's authMode:
+              - OAuth: select an existing connection OR launch the pairing
+                dialog. No inline secret input.
+              - API key: type a new key inline OR pick an existing credential. */}
         {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
-            <Label>{t("providerKeys.form.apiKey")}</Label>
+            <Label>
+              {isOauthProvider ? t("models.form.connectionLabel") : t("providerKeys.form.apiKey")}
+            </Label>
+
             {selectedKey ? (
               <div className="flex gap-2">
                 <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
-                  <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
+                  {isOauthProvider ? (
+                    <Plug className="text-muted-foreground size-3.5 shrink-0" />
+                  ) : (
+                    <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
+                  )}
                   <span className="truncate">{selectedKey.label}</span>
+                  {isOauthProvider && selectedKey.oauthEmail && (
+                    <span className="text-muted-foreground truncate text-xs">
+                      ({selectedKey.oauthEmail})
+                    </span>
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -500,12 +604,66 @@ function ModelFormBody({
                   size="icon"
                   className="h-9 w-9 shrink-0"
                   onClick={() => {
-                    setValue("providerKeyId", "");
+                    setValue("credentialId", "");
                     setValue("inlineApiKey", "");
                   }}
                 >
                   <X className="size-4" />
-                  <span className="sr-only">Clear</span>
+                  <span className="sr-only">{t("btn.cancel")}</span>
+                </Button>
+              </div>
+            ) : isOauthProvider ? (
+              // OAuth: existing-connection select stacks ABOVE the connect
+              // button when there's at least one match — single column avoids
+              // the side-by-side overflow when the provider name is long.
+              <div className="flex flex-col gap-2">
+                {availableProviderKeys.length > 0 && (
+                  <Select
+                    value=""
+                    onValueChange={(id) => {
+                      setValue("credentialId", id);
+                      setValue("inlineApiKey", "");
+                      clearErrors("credentialId");
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t("models.form.useExistingConnection")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableProviderKeys.map((k) => (
+                        <SelectItem key={k.id} value={k.id}>
+                          <span className="flex items-center gap-2">
+                            <span className="truncate">{k.label}</span>
+                            {k.oauthEmail && (
+                              <span className="text-muted-foreground truncate text-xs">
+                                {k.oauthEmail}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(
+                    "w-full min-w-0 justify-start",
+                    showError("credentialId") && "border-destructive",
+                  )}
+                  onClick={handleOpenOauthDialog}
+                >
+                  <Plug className="mr-2 size-4 shrink-0" />
+                  <span className="truncate">
+                    {availableProviderKeys.length > 0
+                      ? t("models.form.connectAnother", {
+                          provider: registryEntry?.displayName ?? providerId,
+                        })
+                      : t("models.form.connectProvider", {
+                          provider: registryEntry?.displayName ?? providerId,
+                        })}
+                  </span>
                 </Button>
               </div>
             ) : (
@@ -514,18 +672,21 @@ function ModelFormBody({
                   type="password"
                   {...register("inlineApiKey")}
                   placeholder="sk-..."
-                  className={cn("flex-1", showError("providerKeyId") && "border-destructive")}
-                  aria-invalid={showError("providerKeyId") ? true : undefined}
+                  className={cn(
+                    "min-w-0 flex-1",
+                    showError("credentialId") && "border-destructive",
+                  )}
+                  aria-invalid={showError("credentialId") ? true : undefined}
                 />
                 {availableProviderKeys.length > 0 && (
                   <Select
                     value=""
                     onValueChange={(id) => {
-                      setValue("providerKeyId", id);
+                      setValue("credentialId", id);
                       setValue("inlineApiKey", "");
                     }}
                   >
-                    <SelectTrigger className="w-auto shrink-0">
+                    <SelectTrigger className="w-32 shrink-0">
                       <SelectValue placeholder={t("models.form.useExistingKey")} />
                     </SelectTrigger>
                     <SelectContent>
@@ -539,15 +700,42 @@ function ModelFormBody({
                 )}
               </div>
             )}
-            {!selectedKey && inlineApiKey.trim() && (
+
+            {!selectedKey && !isOauthProvider && inlineApiKey.trim() && (
               <div className="text-muted-foreground text-sm">
                 {t("models.form.createProviderKeyHint")}
               </div>
             )}
-            {showError("providerKeyId") && errors.providerKeyId?.message && (
-              <div className="text-destructive text-sm">{errors.providerKeyId.message}</div>
+            {!selectedKey && isOauthProvider && (
+              <div className="text-muted-foreground text-sm">
+                {t("models.form.connectProviderHint")}
+              </div>
+            )}
+            {showError("credentialId") && errors.credentialId?.message && (
+              <div className="text-destructive text-sm">{errors.credentialId.message}</div>
             )}
           </div>
+        )}
+
+        {oauthDialogOpen && (
+          <Modal
+            open
+            onClose={() => setOauthDialogOpen(false)}
+            title={t("providerKeys.oauth.cliStageTitle")}
+            actions={
+              <Button variant="ghost" onClick={() => setOauthDialogOpen(false)}>
+                {t("providerKeys.oauth.close")}
+              </Button>
+            }
+          >
+            <OAuthPairingBody
+              providerId={providerId}
+              onConnected={(newId) => {
+                handleOauthConnected(newId);
+                setOauthDialogOpen(false);
+              }}
+            />
+          </Modal>
         )}
 
         {/* Custom fields — visible for custom provider or custom model */}
@@ -557,28 +745,28 @@ function ModelFormBody({
               <div className="space-y-2">
                 <Label htmlFor="mdl-api">{t("models.form.api")}</Label>
                 <Select
-                  value={api}
+                  value={apiShape}
                   onValueChange={(v) => {
-                    setValue("api", v);
-                    clearErrors("api");
+                    setValue("apiShape", v);
+                    clearErrors("apiShape");
                   }}
                 >
                   <SelectTrigger
                     id="mdl-api"
-                    className={cn(showError("api") && "border-destructive")}
+                    className={cn(showError("apiShape") && "border-destructive")}
                   >
                     <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {API_TYPES.map((apiType) => (
+                    {PI_ADAPTER_TYPES.map((apiType) => (
                       <SelectItem key={apiType.value} value={apiType.value}>
                         {apiType.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {showError("api") && errors.api?.message && (
-                  <div className="text-destructive text-sm">{errors.api.message}</div>
+                {showError("apiShape") && errors.apiShape?.message && (
+                  <div className="text-destructive text-sm">{errors.apiShape.message}</div>
                 )}
               </div>
             )}
@@ -635,67 +823,16 @@ function ModelFormBody({
 
         {/* Capabilities — visible for custom provider/model only (preset + OpenRouter auto-fill from source of truth) */}
         {isCustom && (
-          <div className="mt-2 space-y-4 border-t pt-4">
-            <Label className="text-muted-foreground text-sm font-medium">
-              {t("models.form.capabilities")}
-            </Label>
-            <div className="space-y-2">
-              <Label>{t("models.form.input")}</Label>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="mdl-input-text"
-                    checked={inputText}
-                    onCheckedChange={(checked) => setValue("inputText", Boolean(checked))}
-                  />
-                  <Label htmlFor="mdl-input-text" className="cursor-pointer font-normal">
-                    {t("models.form.inputText")}
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="mdl-input-image"
-                    checked={inputImage}
-                    onCheckedChange={(checked) => setValue("inputImage", Boolean(checked))}
-                  />
-                  <Label htmlFor="mdl-input-image" className="cursor-pointer font-normal">
-                    {t("models.form.inputImage")}
-                  </Label>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-                <Input
-                  id="mdl-ctx"
-                  type="number"
-                  {...register("contextWindow")}
-                  placeholder="200000"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-                <Input
-                  id="mdl-maxtok"
-                  type="number"
-                  {...register("maxTokens")}
-                  placeholder="16384"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="mdl-reasoning"
-                checked={reasoning}
-                onCheckedChange={(checked) => setValue("reasoning", Boolean(checked))}
-              />
-              <Label htmlFor="mdl-reasoning" className="cursor-pointer font-normal">
-                {t("models.form.reasoning")}
-              </Label>
-            </div>
-            <div className="text-muted-foreground text-sm">{t("models.form.capabilitiesHint")}</div>
-          </div>
+          <CapabilitiesSection
+            contextWindowProps={register("contextWindow")}
+            maxTokensProps={register("maxTokens")}
+            inputText={inputText}
+            inputImage={inputImage}
+            reasoning={reasoning}
+            onInputTextChange={(v) => setValue("inputText", v)}
+            onInputImageChange={(v) => setValue("inputImage", v)}
+            onReasoningChange={(v) => setValue("reasoning", v)}
+          />
         )}
       </form>
     </Modal>

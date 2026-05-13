@@ -11,6 +11,8 @@ import {
   seedConnectionForApp,
   seedPackage,
   seedEndUser,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { db } from "../../helpers/db.ts";
@@ -848,6 +850,119 @@ describe("Internal API", () => {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── GET /internal/oauth-token/:credentialId ───────────
+  //
+  // The path param is a `model_provider_credentials.id`. These tests pin
+  // that contract so the bug that shipped pre-fix (validation against
+  // `userProviderConnections.id`, always 404) cannot reappear.
+
+  describe("GET /internal/oauth-token/:credentialId", () => {
+    async function seedOAuthCredential(orgId: string): Promise<string> {
+      const row = await seedOrgModelProviderOAuth({ orgId });
+      return row.id;
+    }
+
+    it("returns 401 without a run token", async () => {
+      const res = await app.request("/internal/oauth-token/some-id");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when the credentialId does not exist", async () => {
+      const res = await app.request("/internal/oauth-token/00000000-0000-0000-0000-000000000000", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 (not 500) when the credentialId is not a valid UUID", async () => {
+      const res = await app.request("/internal/oauth-token/not-a-uuid", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 403 when the credential belongs to another org", async () => {
+      const otherOrg = await createTestContext({ orgSlug: "otherorg" });
+      const credentialId = await seedOAuthCredential(otherOrg.orgId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with a resolved token when the credential matches the run org", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+      // The response wire shape (OAuthTokenResponse) deliberately omits
+      // provider invariants (providerId, baseUrl, wireFormat) — those live
+      // in the LlmProxyOauthConfig delivered to the sidecar at /configure
+      // and never change per refresh. See packages/core/src/sidecar-types.ts.
+      const body = (await res.json()) as { accessToken: string };
+      expect(body.accessToken).toBe("test-access-token");
+    });
+
+    it("rejects api_key credentials (only OAuth rows are valid here)", async () => {
+      const apiKeyRow = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiKey: "sk-test",
+        providerId: "anthropic",
+      });
+
+      const res = await app.request(`/internal/oauth-token/${apiKeyRow.id}`, {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      // assertOAuthModelCredential passes (orgId matches); resolveOAuthTokenForSidecar
+      // throws notFound because the provider isn't OAuth-enabled.
+      expect(res.status).toBe(404);
+    });
+
+    // Remote-origin runs execute on the customer's host and never need
+    // platform-stored OAuth tokens. The per-run pin is structurally NULL
+    // for that origin, so we reject access at the route boundary to prevent
+    // a leaked remote run-token from enumerating the org's OAuth credentials.
+    it("returns 403 when the run is remote-origin (even for a same-org credential)", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+      const remote = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+      });
+      const remoteToken = signRunToken(remote.id);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${remoteToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 on POST /refresh when the run is remote-origin", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+      const remote = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+      });
+      const remoteToken = signRunToken(remote.id);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${remoteToken}` },
+      });
+      expect(res.status).toBe(403);
     });
   });
 });

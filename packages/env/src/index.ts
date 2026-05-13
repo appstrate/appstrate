@@ -246,10 +246,24 @@ const envSchema = z
     RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(60),
     RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 
+    // OAuth Model Provider refresh worker — proactively refreshes credentials
+    // whose access_token is within the lead window so the next agent run
+    // doesn't pay a 401-retry on the hot path. Off by default: the sidecar's
+    // on-demand token-resolver + 401 retry path covers correctness on its
+    // own. Operators who care about (a) keeping refresh_tokens alive across
+    // long dormant windows and (b) shifting refresh latency off the hot path
+    // can opt in. Disabling drops 280+ lines of BullMQ scan/refresh worker
+    // wiring from a running instance.
+    OAUTH_REFRESH_WORKER_ENABLED: z
+      .string()
+      .default("false")
+      .transform((s) => s.toLowerCase() === "true" || s === "1"),
+
     // Modules (comma-separated specifiers).
-    // Default loads built-in OSS modules (oidc, webhooks).
-    // Append external specifiers (npm package names) to extend.
-    MODULES: z.string().default("oidc,webhooks"),
+    // Default loads the built-in OSS modules plus @appstrate/module-codex
+    // (ChatGPT/Codex OAuth). Remove module-codex to drop that provider
+    // surface. Append further external specifiers to extend.
+    MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

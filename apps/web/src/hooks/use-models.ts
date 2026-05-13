@@ -4,14 +4,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
+import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 import type { ModelFormData } from "../components/model-form-modal";
 import {
-  useCreateModelProviderKey,
-  useModelProviderKeys,
+  useCreateModelProviderCredential,
+  useModelProviderCredentials,
+  useProvidersRegistry,
   deduplicateLabel,
-} from "./use-model-provider-keys";
-import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
+} from "./use-model-provider-credentials";
+import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -27,10 +29,10 @@ export function useCreateModel() {
   return useMutation({
     mutationFn: async (data: {
       label: string;
-      api: string;
+      apiShape: string;
       baseUrl: string;
       modelId: string;
-      providerKeyId: string;
+      credentialId: string;
       input?: string[];
       contextWindow?: number;
       maxTokens?: number;
@@ -58,10 +60,10 @@ export function useUpdateModel() {
       id: string;
       data: {
         label?: string;
-        api?: string;
+        apiShape?: string;
         baseUrl?: string;
         modelId?: string;
-        providerKeyId?: string;
+        credentialId?: string;
         enabled?: boolean;
         input?: string[] | null;
         contextWindow?: number | null;
@@ -113,8 +115,6 @@ export function useTestModel() {
     mutationFn: (id: string) => api<TestResult>(`/models/${id}/test`, { method: "POST" }),
   });
 }
-
-export type { ModelCost };
 
 export interface OpenRouterModel {
   id: string;
@@ -175,21 +175,24 @@ export function useModelFormHandler(opts: {
 }) {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
-  const createPk = useCreateModelProviderKey();
-  const { data: providerKeys } = useModelProviderKeys();
+  const createPk = useCreateModelProviderCredential();
+  const { data: providerKeys } = useModelProviderCredentials();
+  const { data: registry } = useProvidersRegistry();
 
   const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
 
   const onSubmit = (data: ModelFormData) => {
     const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
-      const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
-      const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
+      const matched = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl, registry ?? []);
+      const label = deduplicateLabel(matched?.displayName ?? "Custom", providerKeys ?? []);
+      const providerId = matched?.providerId ?? "openai-compatible";
+      const baseUrlOverride = matched ? null : data.baseUrl;
       createPk.mutate(
         {
           label,
-          api: data.api,
-          baseUrl: data.baseUrl,
+          providerId,
           apiKey: data.newProviderKey!.apiKey,
+          ...(baseUrlOverride ? { baseUrlOverride } : {}),
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );
@@ -200,7 +203,7 @@ export function useModelFormHandler(opts: {
         createProviderKeyAndThen((keyId) => {
           const { newProviderKey: _, ...modelData } = data;
           updateModel.mutate(
-            { id: opts.editModel!.id, data: { ...modelData, providerKeyId: keyId } },
+            { id: opts.editModel!.id, data: { ...modelData, credentialId: keyId } },
             { onSuccess: opts.onSuccess },
           );
         });
@@ -210,7 +213,7 @@ export function useModelFormHandler(opts: {
     } else if (data.newProviderKey) {
       createProviderKeyAndThen((keyId) => {
         const { newProviderKey: _, ...modelData } = data;
-        createModel.mutate({ ...modelData, providerKeyId: keyId }, { onSuccess: opts.onSuccess });
+        createModel.mutate({ ...modelData, credentialId: keyId }, { onSuccess: opts.onSuccess });
       });
     } else {
       createModel.mutate(data, { onSuccess: opts.onSuccess });

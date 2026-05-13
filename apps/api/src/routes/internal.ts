@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, userProviderConnections } from "@appstrate/db/schema";
+import { modelProviderCredentials, runs, userProviderConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -30,6 +30,10 @@ import {
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import {
+  forceRefreshOAuthModelProviderToken,
+  resolveOAuthTokenForSidecar,
+} from "../services/model-providers/token-resolver.ts";
 
 /**
  * Safety margin used when deciding whether a stored access token is still
@@ -71,6 +75,8 @@ async function verifyRunToken(c: Context): Promise<{
     status: string;
     connectionProfileId: string | null;
     providerProfileIds: Record<string, string> | null;
+    modelCredentialId: string | null;
+    runOrigin: "platform" | "remote";
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -99,6 +105,8 @@ async function verifyRunToken(c: Context): Promise<{
       status: runs.status,
       connectionProfileId: runs.connectionProfileId,
       providerProfileIds: runs.providerProfileIds,
+      modelCredentialId: runs.modelCredentialId,
+      runOrigin: runs.runOrigin,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -124,6 +132,8 @@ async function verifyRunToken(c: Context): Promise<{
       status: run.status,
       connectionProfileId: run.connectionProfileId,
       providerProfileIds: run.providerProfileIds ?? null,
+      modelCredentialId: run.modelCredentialId ?? null,
+      runOrigin: run.runOrigin,
     },
   };
 }
@@ -413,5 +423,101 @@ export function createInternalRouter() {
     }
   });
 
+  // ─── OAuth Model Provider tokens ──────────────────────────────────────
+  //
+  // Sidecar polls these endpoints during /llm/* request lifecycle (cf.
+  // SPEC §5.2). Auth is the same Bearer run-token mechanism as the rest
+  // of /internal/* — `assertOAuthModelCredential` additionally verifies
+  // the requested credentialId resolves to a `model_provider_credentials`
+  // row owned by the run's org AND is pinned to this run.
+  //
+  // Remote-origin runs execute on the customer's host with their own
+  // model provider (e.g. local Claude Code subscription) — they have no
+  // platform sidecar to consume these tokens, and `model_credential_id`
+  // is always NULL for that origin. Rejecting them up-front prevents a
+  // leaked remote run-token from being used to enumerate the org's
+  // OAuth credentials (the per-run pin check is bypassed when the
+  // pin is NULL).
+
+  router.get("/oauth-token/:credentialId", async (c) => {
+    const { run } = await verifyRunToken(c);
+    assertPlatformOriginOAuthAccess(run.runOrigin);
+    const credentialId = c.req.param("credentialId");
+    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
+  });
+
+  router.post("/oauth-token/:credentialId/refresh", async (c) => {
+    const { run } = await verifyRunToken(c);
+    assertPlatformOriginOAuthAccess(run.runOrigin);
+    const credentialId = c.req.param("credentialId");
+    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+  });
+
   return router;
+}
+
+/**
+ * Reject `/internal/oauth-token` traffic from remote-origin runs. They
+ * execute on the customer's host with their own model provider and never
+ * legitimately need a platform-stored OAuth token. The per-run pin
+ * (`runs.model_credential_id`) is intentionally NULL for that origin,
+ * which would otherwise let the run-token bearer enumerate every OAuth
+ * credential in the org via `/internal/oauth-token/:credentialId`.
+ */
+function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void {
+  if (runOrigin !== "platform") {
+    throw forbidden("OAuth model provider tokens are not available for remote runs");
+  }
+}
+
+/**
+ * Verify a `model_provider_credentials` row exists and is reachable by
+ * this run. Three layers of checks:
+ *
+ *   1. Per-run pinning: when `pinnedCredentialId` is set (platform-origin
+ *      runs that resolved to an OAuth model), the requested credentialId
+ *      MUST match. This prevents a leaked run token from enumerating any
+ *      other OAuth credential the org might own.
+ *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
+ *   3. UUID well-formedness: malformed path params surface as 404 not 500.
+ *
+ * `pinnedCredentialId === null` is only reachable from platform-origin
+ * runs that resolved to an API-key model (no OAuth credential to bind
+ * against). Remote-origin runs (where the pin is structurally absent)
+ * are rejected upstream by `assertPlatformOriginOAuthAccess`.
+ */
+async function assertOAuthModelCredential(
+  credentialId: string,
+  runOrgId: string,
+  pinnedCredentialId: string | null,
+): Promise<void> {
+  if (pinnedCredentialId !== null && pinnedCredentialId !== credentialId) {
+    throw forbidden(`Credential ${credentialId} not pinned to this run`);
+  }
+  let row: { orgId: string } | undefined;
+  try {
+    [row] = await db
+      .select({ orgId: modelProviderCredentials.orgId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, credentialId))
+      .limit(1);
+  } catch (err) {
+    // PG `invalid_text_representation` (22P02) when the path param is not
+    // a valid UUID — treat as not-found rather than leaking a 500. Drizzle
+    // wraps the underlying postgres.js error via `new Error(…, { cause })`.
+    const code =
+      (err as { code?: string })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+    if (code === "22P02") {
+      throw notFound(`OAuth model provider credential ${credentialId} not found`);
+    }
+    throw err;
+  }
+  if (!row) {
+    throw notFound(`OAuth model provider credential ${credentialId} not found`);
+  }
+  if (row.orgId !== runOrgId) {
+    throw forbidden(`Credential ${credentialId} not in run org`);
+  }
 }

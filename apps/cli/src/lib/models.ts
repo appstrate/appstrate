@@ -10,20 +10,20 @@
  * the real upstream credentials.
  */
 
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 import { apiList } from "./api.ts";
 
 export interface ModelPreset {
   id: string;
   label: string;
   /**
-   * Protocol family the CLI must route through (selects the
-   * `/api/llm-proxy/<api>/…` sub-route). Known values today:
+   * Wire format / API shape the CLI must route through (selects the
+   * `/api/llm-proxy/<apiShape>/…` sub-route). Known values today:
    * `openai-completions`, `anthropic-messages`, `openai-responses`,
    * `google-generative-ai`, `google-vertex`, `azure-openai-responses`,
    * `bedrock-converse-stream`.
    */
-  api: string;
+  apiShape: string;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
@@ -36,12 +36,13 @@ export interface ModelPreset {
    * Anthropic-only: shape of the upstream credential. When `oauth`, the
    * CLI hands pi-ai an `sk-ant-oat-…`-shaped placeholder so pi-ai's
    * prefix-based OAuth detection fires locally and the body is reshaped
-   * (Claude-Code system prompt + tool renaming) BEFORE it reaches the
-   * proxy. Anthropic gates OAuth tokens to that body shape upstream, so
-   * the reshape has to happen client-side; the proxy only swaps the
-   * placeholder secret for the real OAuth bearer. null for non-Anthropic
-   * protocols and for Anthropic models whose creds aren't loadable
-   * (treat as api-key).
+   * BEFORE it reaches the proxy. Anthropic gates OAuth tokens to that
+   * body shape upstream, so the reshape has to happen client-side; the
+   * proxy only swaps the placeholder secret for the real OAuth bearer.
+   * null for non-Anthropic protocols and for Anthropic models whose
+   * creds aren't loadable (treat as api-key). OSS ships no Anthropic
+   * OAuth provider — this field stays as a contribution point for
+   * external operator-installed modules.
    */
   keyKind?: "oauth" | "api-key" | null;
 }

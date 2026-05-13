@@ -211,7 +211,12 @@ describe("POST /configure — llm SSRF protection", () => {
 
   it("allows llm config with null (clear)", async () => {
     const deps = makeDeps();
-    deps.config.llm = { baseUrl: "https://api.openai.com", apiKey: "key", placeholder: "ph" };
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "https://api.openai.com",
+      apiKey: "key",
+      placeholder: "ph",
+    };
     const app = createApp(deps);
     const res = await app.request("/configure", {
       method: "POST",
@@ -232,6 +237,7 @@ describe("POST /configure — llm field", () => {
       body: JSON.stringify({
         runToken: "tok",
         llm: {
+          authMode: "api_key",
           baseUrl: "https://api.openai.com/v1",
           apiKey: "sk-oai",
           placeholder: "sk-placeholder",
@@ -241,6 +247,7 @@ describe("POST /configure — llm field", () => {
     });
     expect(res.status).toBe(200);
     expect(deps.config.llm).toEqual({
+      authMode: "api_key",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-oai",
       placeholder: "sk-placeholder",
@@ -259,6 +266,7 @@ describe("POST /configure — llm field", () => {
 // response back to the agent.
 
 const LLM_CONFIG: LlmProxyConfig = {
+  authMode: "api_key",
   baseUrl: "https://api.anthropic.com",
   apiKey: "real-sk-ant-key",
   placeholder: "sk-placeholder",
@@ -267,7 +275,12 @@ const LLM_CONFIG: LlmProxyConfig = {
 describe("ALL /llm/* — SSRF protection", () => {
   it("returns 403 when baseUrl targets localhost", async () => {
     const deps = makeDeps();
-    deps.config.llm = { baseUrl: "http://localhost:8000", apiKey: "key", placeholder: "ph" };
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "http://localhost:8000",
+      apiKey: "key",
+      placeholder: "ph",
+    };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
@@ -278,6 +291,7 @@ describe("ALL /llm/* — SSRF protection", () => {
   it("returns 403 when baseUrl targets cloud metadata", async () => {
     const deps = makeDeps();
     deps.config.llm = {
+      authMode: "api_key",
       baseUrl: "http://169.254.169.254/metadata",
       apiKey: "key",
       placeholder: "ph",
@@ -289,7 +303,12 @@ describe("ALL /llm/* — SSRF protection", () => {
 
   it("returns 403 when baseUrl targets private IP", async () => {
     const deps = makeDeps();
-    deps.config.llm = { baseUrl: "http://10.0.0.1:8080", apiKey: "key", placeholder: "ph" };
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "http://10.0.0.1:8080",
+      apiKey: "key",
+      placeholder: "ph",
+    };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
@@ -374,6 +393,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = {
+      authMode: "api_key",
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-oat01-real-token",
       placeholder: "sk-ant-oat01-placeholder",

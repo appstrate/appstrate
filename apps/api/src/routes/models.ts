@@ -14,10 +14,14 @@ import {
   updateOrgModel,
   deleteOrgModel,
   setDefaultModel,
+  seedOrgModelsForCredential,
   testModelConnection,
   testModelConfig,
   loadModel,
+  type SeedModelEntry,
 } from "../services/org-models.ts";
+import { getModelProvider } from "../services/model-providers/registry.ts";
+import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
@@ -32,10 +36,10 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
-  api: z.string().min(1, "api is required"),
+  apiShape: z.string().min(1, "apiShape is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
-  providerKeyId: z.string().min(1, "providerKeyId is required"),
+  credentialId: z.string().min(1, "credentialId is required"),
   input: z.array(z.string()).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -45,10 +49,10 @@ export const createModelSchema = z.object({
 
 export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
-  api: z.string().min(1).optional(),
+  apiShape: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
-  providerKeyId: z.string().optional(),
+  credentialId: z.string().optional(),
   enabled: z.boolean().optional(),
   input: z.array(z.string()).nullable().optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
@@ -61,8 +65,13 @@ export const setDefaultSchema = z.object({
   modelId: z.string().nullable(),
 });
 
+export const seedModelsSchema = z.object({
+  credentialId: z.string().min(1, "credentialId is required"),
+  modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
+});
+
 export const testInlineSchema = z.object({
-  api: z.string().min(1),
+  apiShape: z.string().min(1),
   baseUrl: z.url(),
   modelId: z.string().min(1),
   apiKey: z.string().optional(),
@@ -89,34 +98,105 @@ export function createModelsRouter() {
     try {
       const {
         label,
-        api,
+        apiShape,
         baseUrl,
         modelId,
-        providerKeyId,
+        credentialId,
         input,
         contextWindow,
         maxTokens,
         reasoning,
         cost,
       } = data;
-      const id = await createOrgModel(orgId, label, api, baseUrl, modelId, user.id, providerKeyId, {
-        input,
-        contextWindow,
-        maxTokens,
-        reasoning,
-        cost,
-      });
+      const id = await createOrgModel(
+        orgId,
+        label,
+        apiShape,
+        baseUrl,
+        modelId,
+        user.id,
+        credentialId,
+        {
+          input,
+          contextWindow,
+          maxTokens,
+          reasoning,
+          cost,
+        },
+      );
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
         resourceId: id,
-        after: { label, api, baseUrl, modelId, providerKeyId },
+        after: { label, apiShape, baseUrl, modelId, credentialId },
       });
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Model create failed", {
         error: getErrorMessage(err),
       });
+      throw internalError();
+    }
+  });
+
+  // POST /api/models/seed — bulk-seed models from the registry for one credential.
+  // The credential's providerId pins the registry entry; modelIds are validated
+  // against it. Atomic — either all rows insert or none. Idempotent: returns
+  // `created: 0` when the org already has any model bound to this credential.
+  router.post("/seed", requirePermission("models", "write"), async (c) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+    const body = await c.req.json();
+    const data = parseBody(seedModelsSchema, body);
+
+    const creds = await loadInferenceCredentials(orgId, data.credentialId);
+    if (!creds || !creds.providerId) {
+      throw notFound("Credential not found or not registry-bound");
+    }
+    const registry = getModelProvider(creds.providerId);
+    if (!registry) {
+      throw notFound(`Provider ${creds.providerId} not registered`);
+    }
+
+    const knownIds = new Map(registry.models.map((m) => [m.id, m]));
+    const entries: SeedModelEntry[] = [];
+    for (const modelId of data.modelIds) {
+      const model = knownIds.get(modelId);
+      if (!model) {
+        throw invalidRequest(`Model ${modelId} is not part of provider ${creds.providerId}`);
+      }
+      entries.push({
+        modelId: model.id,
+        label: model.id,
+        apiShape: registry.apiShape,
+        baseUrl: creds.baseUrl,
+        input: model.capabilities.filter(
+          (c): c is "text" | "image" => c === "text" || c === "image",
+        ),
+        contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens ?? undefined,
+        reasoning: model.capabilities.includes("reasoning"),
+      });
+    }
+
+    try {
+      const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, entries);
+      await recordAuditFromContext(c, {
+        action: "model.seeded",
+        resourceType: "model",
+        resourceId: data.credentialId,
+        after: {
+          credentialId: data.credentialId,
+          providerId: creds.providerId,
+          created: result.created,
+          ids: result.ids,
+          promotedDefault: result.promotedDefault,
+        },
+      });
+      return c.json(result, 201);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      logger.error("Model seed failed", { error: getErrorMessage(err) });
       throw internalError();
     }
   });
@@ -257,7 +337,7 @@ export function createModelsRouter() {
 
     try {
       const result = await testModelConfig({
-        api: data.api,
+        apiShape: data.apiShape,
         baseUrl: data.baseUrl,
         modelId: data.modelId,
         apiKey,

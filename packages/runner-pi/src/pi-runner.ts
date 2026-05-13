@@ -111,6 +111,7 @@ function deriveProviderFromApi(api: string): string {
     "anthropic-messages": "anthropic",
     "openai-completions": "openai",
     "openai-responses": "openai",
+    "openai-codex-responses": "openai",
     "mistral-conversations": "mistral",
     "google-generative-ai": "google",
     "google-vertex": "google-vertex",

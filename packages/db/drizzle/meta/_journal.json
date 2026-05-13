@@ -141,6 +141,20 @@
       "when": 1784073600000,
       "tag": "0019_rename_dashboard_user_to_user",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788998400000,
+      "tag": "0020_model_provider_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789084800000,
+      "tag": "0021_model_provider_pairings",
+      "breakpoints": true
     }
   ]
 }

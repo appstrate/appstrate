@@ -20,6 +20,7 @@ import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts
 // --- Model schemas (routes/models.ts) ---
 import {
   createModelSchema,
+  seedModelsSchema,
   updateModelSchema,
   setDefaultSchema as modelsSetDefaultSchema,
   testInlineSchema as modelsTestInlineSchema,
@@ -77,12 +78,12 @@ import {
   removeProviderProfileSchema,
 } from "../routes/agents.ts";
 
-// --- Model Provider Key schemas (routes/model-provider-keys.ts) ---
+// --- Model Provider Credential schemas (routes/model-provider-credentials.ts) ---
 import {
-  createSchema as createModelProviderKeySchema,
-  updateSchema as updateModelProviderKeySchema,
-  testInlineSchema as modelProviderKeysTestInlineSchema,
-} from "../routes/model-provider-keys.ts";
+  createSchema as createModelProviderCredentialSchema,
+  updateSchema as updateModelProviderCredentialSchema,
+  testInlineSchema as modelProviderCredentialsTestInlineSchema,
+} from "../routes/model-provider-credentials.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
@@ -170,6 +171,12 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/models/test",
     jsonSchema: toJsonSchema(modelsTestInlineSchema),
     description: "Test model config inline",
+  },
+  {
+    method: "POST",
+    path: "/api/models/seed",
+    jsonSchema: toJsonSchema(seedModelsSchema),
+    description: "Bulk-seed models from registry",
   },
 
   // ─── API Keys ───────────────────────────────────────────────────────────
@@ -322,24 +329,24 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set agent app profile",
   },
 
-  // ─── Model Provider Keys ───────────────────────────────────────────────
+  // ─── Model Provider Credentials ────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/model-provider-keys",
-    jsonSchema: toJsonSchema(createModelProviderKeySchema),
-    description: "Create model provider key",
+    path: "/api/model-provider-credentials",
+    jsonSchema: toJsonSchema(createModelProviderCredentialSchema),
+    description: "Create model provider credential",
   },
   {
     method: "PUT",
-    path: "/api/model-provider-keys/{id}",
-    jsonSchema: toJsonSchema(updateModelProviderKeySchema),
-    description: "Update model provider key",
+    path: "/api/model-provider-credentials/{id}",
+    jsonSchema: toJsonSchema(updateModelProviderCredentialSchema),
+    description: "Update model provider credential",
   },
   {
     method: "POST",
-    path: "/api/model-provider-keys/test",
-    jsonSchema: toJsonSchema(modelProviderKeysTestInlineSchema),
-    description: "Test model provider key inline",
+    path: "/api/model-provider-credentials/test",
+    jsonSchema: toJsonSchema(modelProviderCredentialsTestInlineSchema),
+    description: "Test model provider credential inline",
   },
 
   // ─── Profile ────────────────────────────────────────────────────────────

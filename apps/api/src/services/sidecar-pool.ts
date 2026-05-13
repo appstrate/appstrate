@@ -14,6 +14,7 @@ import {
   removeNetwork,
 } from "./docker.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { SidecarConfig } from "@appstrate/core/sidecar-types";
 import {
   SIDECAR_MEMORY_BYTES,
   SIDECAR_NANO_CPUS,
@@ -90,12 +91,7 @@ export async function initSidecarPool(): Promise<void> {
 export async function acquireSidecar(
   runId: string,
   runNetworkId: string,
-  sidecarEnv: {
-    runToken: string;
-    platformApiUrl: string;
-    proxyUrl?: string;
-    llm?: { baseUrl: string; apiKey: string; placeholder: string };
-  },
+  sidecarEnv: SidecarConfig,
   platformNetwork?: { networkId: string; hostname: string } | null,
 ): Promise<string | null> {
   if (!enabled || pool.length === 0) return null;

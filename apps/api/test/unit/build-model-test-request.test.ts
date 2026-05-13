@@ -6,7 +6,7 @@ import { buildModelTestRequest } from "../../src/services/org-models.ts";
 describe("buildModelTestRequest", () => {
   it("anthropic-messages: appends /v1/models, x-api-key for sk-ant- keys", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       apiKey: "sk-ant-key",
     });
@@ -17,22 +17,24 @@ describe("buildModelTestRequest", () => {
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
-  it("anthropic-messages: uses Bearer + oauth beta for sk-ant-oat keys", () => {
+  it("anthropic-messages: uses x-api-key for every token form (no OAuth branching)", () => {
+    // The historical Bearer + oauth-2025-04-20 path was removed in PR 6
+    // (Anthropic Consumer ToS forbids using OAuth subscription tokens in
+    // third-party tools). All Anthropic calls route through x-api-key.
     const { headers } = buildModelTestRequest({
-      api: "anthropic-messages",
+      apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
-      apiKey: "sk-ant-oat-token",
+      apiKey: "sk-ant-api03-token",
     });
-    expect(headers["Authorization"]).toBe("Bearer sk-ant-oat-token");
-    expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    expect(headers["x-api-key"]).toBe("sk-ant-api03-token");
     expect(headers["anthropic-version"]).toBe("2023-06-01");
-    expect(headers["x-api-key"]).toBeUndefined();
+    expect(headers["Authorization"]).toBeUndefined();
   });
 
   // Regression: https://github.com/appstrate/appstrate/issues/148
   it("mistral-conversations: appends /v1/models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "mistral-conversations",
+      apiShape: "mistral-conversations",
       baseUrl: "https://api.mistral.ai",
       apiKey: "mistral-key",
     });
@@ -42,7 +44,7 @@ describe("buildModelTestRequest", () => {
 
   it("google-generative-ai: passes key as query param, no auth header", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "google-generative-ai",
+      apiShape: "google-generative-ai",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       apiKey: "google key/with+special",
     });
@@ -54,7 +56,7 @@ describe("buildModelTestRequest", () => {
 
   it("google-vertex: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "google-vertex",
+      apiShape: "google-vertex",
       baseUrl: "https://vertex.example.com/v1",
       apiKey: "vertex-token",
     });
@@ -64,7 +66,7 @@ describe("buildModelTestRequest", () => {
 
   it("azure-openai-responses: appends /models with api-key header", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "azure-openai-responses",
+      apiShape: "azure-openai-responses",
       baseUrl: "https://acme.openai.azure.com/openai",
       apiKey: "azure-key",
     });
@@ -75,7 +77,7 @@ describe("buildModelTestRequest", () => {
 
   it("openai-completions: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "openai-completions",
+      apiShape: "openai-completions",
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: "groq-key",
     });
@@ -85,7 +87,7 @@ describe("buildModelTestRequest", () => {
 
   it("openai-responses: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "openai-responses",
+      apiShape: "openai-responses",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "openai-key",
     });
@@ -95,7 +97,7 @@ describe("buildModelTestRequest", () => {
 
   it("bedrock-converse-stream: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "bedrock-converse-stream",
+      apiShape: "bedrock-converse-stream",
       baseUrl: "https://bedrock.example.com",
       apiKey: "bedrock-key",
     });
@@ -105,7 +107,7 @@ describe("buildModelTestRequest", () => {
 
   it("unknown api: falls back to default branch (/models + Bearer)", () => {
     const { url, headers } = buildModelTestRequest({
-      api: "some-future-api",
+      apiShape: "some-future-api",
       baseUrl: "https://example.com/v9",
       apiKey: "k",
     });
@@ -115,10 +117,29 @@ describe("buildModelTestRequest", () => {
 
   it("strips trailing slashes from baseUrl", () => {
     const { url } = buildModelTestRequest({
-      api: "openai-responses",
+      apiShape: "openai-responses",
       baseUrl: "https://api.openai.com/v1///",
       apiKey: "k",
     });
     expect(url).toBe("https://api.openai.com/v1/models");
   });
+
+  it("anthropic-messages: uses x-api-key (OAuth flavour removed in PR 6 for ToS reasons)", () => {
+    // PR 6 retired the Anthropic OAuth path (Authorization Bearer +
+    // oauth-2025-04-20 beta). Any Anthropic call goes through the API
+    // key flow now.
+    const { headers } = buildModelTestRequest({
+      apiShape: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant-api03-AbCdEf",
+    });
+    expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCdEf");
+    expect(headers["Authorization"]).toBeUndefined();
+    expect(headers["anthropic-version"]).toBe("2023-06-01");
+  });
 });
+
+// Provider-specific `buildInferenceProbe` hook behavior (e.g. fail-fast on
+// missing identity claims) is covered in each module's own unit suite
+// under `packages/module-*/test/`. This file owns only the request-shape
+// branches of `buildModelTestRequest` above.

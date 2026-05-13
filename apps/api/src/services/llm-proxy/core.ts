@@ -6,7 +6,7 @@
  * Pipeline:
  *   1. Parse the JSON body, extract `model` (the preset id), reject
  *      anything that doesn't look like a chat/messages payload.
- *   2. Resolve the preset against `org_models` + `org_system_provider_keys`
+ *   2. Resolve the preset against `org_models` + `model_provider_credentials`
  *      via `loadModel()`. Fail closed on protocol mismatch.
  *   3. Substitute `model` → real upstream id, forward to the adapter's
  *      upstream base URL with adapter-specific headers.
@@ -30,7 +30,7 @@ import type {
   UpstreamUsage,
 } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ModelCost } from "@appstrate/shared-types";
+import type { ModelCost } from "@appstrate/core/module";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -207,12 +207,12 @@ async function resolvePresetForOrg(
   if (!loaded) {
     throw new LlmProxyUnsupportedModelError(presetId);
   }
-  if (loaded.api !== expectedApi) {
-    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.api);
+  if (loaded.apiShape !== expectedApi) {
+    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
   }
   return {
     presetId,
-    api: loaded.api,
+    api: loaded.apiShape,
     baseUrl: loaded.baseUrl,
     realModelId: loaded.modelId,
     upstreamApiKey: loaded.apiKey,
@@ -336,7 +336,7 @@ function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
   const perMillion = 1_000_000;
   const inputCost = (usage.inputTokens * cost.input) / perMillion;
   const outputCost = (usage.outputTokens * cost.output) / perMillion;
-  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * cost.cacheRead) / perMillion;
-  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * cost.cacheWrite) / perMillion;
+  const cacheReadCost = ((usage.cacheReadTokens ?? 0) * (cost.cacheRead ?? 0)) / perMillion;
+  const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * (cost.cacheWrite ?? 0)) / perMillion;
   return inputCost + outputCost + cacheReadCost + cacheWriteCost;
 }

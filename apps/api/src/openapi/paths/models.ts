@@ -36,13 +36,13 @@ export const modelsPaths = {
                   {
                     id: "gpt-4o",
                     label: "GPT-4o",
-                    api: "openai-responses",
+                    apiShape: "openai-responses",
                     baseUrl: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
                     source: "built-in",
                     enabled: true,
                     isDefault: false,
-                    providerKeyId: "pk_abc123",
+                    credentialId: "pk_abc123",
                     contextWindow: 128000,
                     maxTokens: 16384,
                     reasoning: false,
@@ -70,14 +70,14 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "api", "baseUrl", "modelId", "providerKeyId"],
+              required: ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
               properties: {
                 label: { type: "string", minLength: 1, description: "Display name for the model" },
-                api: {
+                apiShape: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
+                    "Wire format / API shape (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
                 },
                 baseUrl: {
                   type: "string",
@@ -90,7 +90,7 @@ export const modelsPaths = {
                   minLength: 1,
                   description: "Model identifier (e.g. gpt-4o)",
                 },
-                providerKeyId: {
+                credentialId: {
                   type: "string",
                   minLength: 1,
                   description: "Provider key ID for API key credentials",
@@ -183,6 +183,62 @@ export const modelsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/models/seed": {
+    post: {
+      operationId: "seedModels",
+      tags: ["Models"],
+      summary: "Bulk-seed models from the registry for a credential",
+      description:
+        "Atomically seed multiple `org_models` rows from the registry entry pinned by the credential's `providerId`. Idempotent — returns `created: 0` when the org already has any model bound to this credential.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["credentialId", "modelIds"],
+              properties: {
+                credentialId: { type: "string", minLength: 1 },
+                modelIds: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 50,
+                  items: { type: "string", minLength: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Models seeded",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["created", "ids", "promotedDefault"],
+                properties: {
+                  created: { type: "integer", minimum: 0 },
+                  ids: { type: "array", items: { type: "string" } },
+                  promotedDefault: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -316,9 +372,13 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["api", "baseUrl", "modelId"],
+              required: ["apiShape", "baseUrl", "modelId"],
               properties: {
-                api: { type: "string", minLength: 1, description: "API type" },
+                apiShape: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Wire format / API shape",
+                },
                 baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
                 modelId: { type: "string", minLength: 1, description: "Model identifier" },
                 apiKey: { type: "string", description: "API key (required for new models)" },
@@ -369,10 +429,10 @@ export const modelsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                api: { type: "string", minLength: 1 },
+                apiShape: { type: "string", minLength: 1 },
                 baseUrl: { type: "string", format: "uri" },
                 modelId: { type: "string", minLength: 1 },
-                providerKeyId: {
+                credentialId: {
                   type: "string",
                   description: "Provider key ID to change which key is used",
                 },
