@@ -19,7 +19,7 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
-import { seedTestModelProviders } from "../../helpers/app.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 beforeAll(() => {
   resetModelProviders();

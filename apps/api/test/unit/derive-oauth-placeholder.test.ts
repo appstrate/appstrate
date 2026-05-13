@@ -18,7 +18,7 @@ import {
   _deriveOauthPlaceholderForTesting as deriveOauthPlaceholder,
 } from "../../src/services/run-launcher/pi.ts";
 import { registerModelProviders } from "../../src/services/model-providers/registry.ts";
-import { seedTestModelProviders } from "../helpers/app.ts";
+import { seedTestModelProviders } from "../helpers/model-providers.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 
 const SYNTH_PROVIDER_ID = "test-placeholder-oauth";

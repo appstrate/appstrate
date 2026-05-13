@@ -10,7 +10,7 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
-import { seedTestModelProviders } from "../helpers/app.ts";
+import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
 function fakeDef(
   id: string,
