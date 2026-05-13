@@ -525,6 +525,108 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   });
 
   // ---------------------------------------------------------------------
+  // Adapter-error backstop (issue #427). When the Pi SDK exhausts its
+  // internal retries on a fatal upstream error (OpenAI 429 TPM, auth
+  // failure, malformed response, …) it emits `appstrate.error` events
+  // but `runner.run()` resolves without throwing. The finalize body
+  // then lacks `status` / `error`, and previously the run was reported
+  // as `success` with `result: null`. Finalize must instead consult
+  // the `adapter_error` trail in `run_logs` and translate it into a
+  // `failed` status with the last error message.
+  // ---------------------------------------------------------------------
+  it("flips success → failed when run_logs contains adapter_error rows and output is null", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // Pre-seed the adapter_error trail the way `PersistingEventSink`
+    // would have on real `appstrate.error` ingestion. The shape mirrors
+    // `appstrate-event-sink.ts:appstrate.error` write.
+    await db.insert(runLogs).values([
+      {
+        runId,
+        orgId: ctx.orgId,
+        type: "system",
+        event: "adapter_error",
+        message: "Rate limit reached for gpt-5.4 (gpt-5.4-long-context)",
+        level: "error",
+      },
+      {
+        runId,
+        orgId: ctx.orgId,
+        type: "system",
+        event: "adapter_error",
+        message:
+          "Rate limit reached for gpt-5.4: TPM Limit 400000, Used 248785, Requested 312683. Please try again in 24.22s.",
+        level: "error",
+      },
+    ]);
+
+    // Runner reports success with non-zero tokens (partial output was
+    // produced before the fatal adapter error) but no `output` field —
+    // exactly the shape `runner.run()` resolves with when the Pi SDK
+    // abandons its retries.
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 5_000, output_tokens: 1_423 },
+      // No `output` — the LLM never produced a final answer.
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    // Last (most recent) adapter_error wins.
+    expect(row?.error).toMatch(/TPM Limit 400000/);
+  });
+
+  it("preserves success when output is null but no adapter_error rows exist", async () => {
+    // Negative regression: an agent that legitimately has no output
+    // schema and emits no `appstrate.error` must still resolve as
+    // `success`. This pins the backstop's specificity.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+      // No `output`, no adapter_error pre-seed.
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+  });
+
+  it("preserves success when output is present even if adapter_error rows exist", async () => {
+    // Negative regression: a recovered run (LLM retried successfully
+    // after a transient adapter error) ships a real `output`. The
+    // backstop must NOT punish recovered runs — it only fires on the
+    // "no final output AND adapter trail" combination.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    await db.insert(runLogs).values({
+      runId,
+      orgId: ctx.orgId,
+      type: "system",
+      event: "adapter_error",
+      message: "transient: 429 (retried)",
+      level: "error",
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { answer: "all good" },
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------
   // Authoritative cost in the finalize body — closes the second race
   // window. The runtime emits `appstrate.metric` as fire-and-forget
   // POST and `process.exit(0)` immediately after finalize returns; if

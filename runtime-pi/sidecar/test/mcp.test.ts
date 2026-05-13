@@ -1008,3 +1008,82 @@ describe("StreamableHTTPClientTransport interop (smoke test)", () => {
     expect(typeof Client).toBe("function");
   });
 });
+
+describe("POST /mcp — provider_call concurrency cap (issue #427)", () => {
+  // Regression: without a fan-out cap, an agent that issues N parallel
+  // `provider_call`s funnels their full payloads into the next LLM turn
+  // and blows past the upstream model's TPM window. The sidecar caps
+  // simultaneous upstream hops via `SIDECAR_PROVIDER_CALL_CONCURRENCY`
+  // (default 3). This test sets the cap to 2 and verifies that the 3rd
+  // and 4th calls park until earlier permits release.
+
+  it("limits concurrent upstream hops to SIDECAR_PROVIDER_CALL_CONCURRENCY", async () => {
+    process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY = "2";
+    try {
+      let active = 0;
+      let peak = 0;
+      // Each upstream fetch parks until the test releases it. We track
+      // the peak simultaneous in-flight count: if the cap holds, peak
+      // never exceeds 2 across 4 parallel `provider_call` invocations.
+      const gates: Array<() => void> = [];
+      const fetchFn = mock(async () => {
+        active++;
+        if (active > peak) peak = active;
+        await new Promise<void>((resolve) => gates.push(resolve));
+        active--;
+        return new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      const app = createApp(makeDeps({ fetchFn }));
+
+      const issue = (id: number) =>
+        rpc(app, {
+          method: "tools/call",
+          params: {
+            name: "provider_call",
+            arguments: {
+              providerId: "test-provider",
+              target: `https://api.example.com/items/${id}`,
+              method: "GET",
+            },
+          },
+        });
+
+      const calls = Promise.all([issue(1), issue(2), issue(3), issue(4)]);
+
+      // Yield the event loop enough times for the semaphore queue to
+      // settle. We need the first 2 calls to have reached `fetchFn` —
+      // 50 microtask turns is generous for the JSON-RPC + MCP plumbing.
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+      expect(active).toBeLessThanOrEqual(2);
+      expect(peak).toBeLessThanOrEqual(2);
+      expect(gates.length).toBe(2);
+
+      // Release one permit — exactly one more upstream call should
+      // immediately start. Peak must still be capped at 2.
+      gates.shift()!();
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+      expect(peak).toBeLessThanOrEqual(2);
+
+      // Release the rest so the test can wind down.
+      while (gates.length > 0) {
+        gates.shift()!();
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      }
+
+      const results = await calls;
+      // All four calls eventually succeed.
+      expect(results).toHaveLength(4);
+      for (const r of results) {
+        const result = r.json.result as { isError?: boolean };
+        expect(result.isError).toBeUndefined();
+      }
+      // Cap held throughout the whole test, not just at the start.
+      expect(peak).toBeLessThanOrEqual(2);
+    } finally {
+      delete process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY;
+    }
+  });
+});

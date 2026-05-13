@@ -3,6 +3,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { mountMcp } from "./mcp.ts";
+import {
+  DEFAULT_PROVIDER_CALL_CONCURRENCY,
+  Semaphore,
+  readPositiveConcurrencyEnv,
+} from "./semaphore.ts";
 import { BlobStore } from "./blob-store.ts";
 import {
   LLM_PROXY_TIMEOUT_MS,
@@ -498,9 +503,19 @@ export function createApp(deps: AppDeps): Hono {
     DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   );
   const tokenBudget = new TokenBudget({ inlineCapTokens, runBudgetTokens });
+  // Fan-out cap on `provider_call`. Defaults to
+  // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
+  // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
+  const providerCallSemaphore = new Semaphore(
+    readPositiveConcurrencyEnv(
+      "SIDECAR_PROVIDER_CALL_CONCURRENCY",
+      DEFAULT_PROVIDER_CALL_CONCURRENCY,
+    ),
+  );
   mountMcp(app, {
     blobStore,
     tokenBudget,
+    providerCallSemaphore,
     proxyDeps: {
       config,
       cookieJar,

@@ -80,16 +80,26 @@ const CHARS_PER_TOKEN = 3.5;
 export const DEFAULT_INLINE_OUTPUT_TOKENS = 8_000;
 
 /**
- * Default cumulative budget per run. 200 K tokens — the full default
+ * Default cumulative budget per run. 100 K tokens — half the default
  * Claude / Opus context window. The platform reserves additional space
  * for the system prompt, agent instructions, and conversation
  * history; this budget covers tool outputs only.
  *
- * Operators on 1 M-token Sonnet 4.6 deployments will likely raise this
- * via `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS`; OSS / dev defaults
- * stay conservative.
+ * Tightened from 200 K after issue #427: an agent fanning out 8
+ * parallel `provider_call`s could pack ~525 KB of JSON (~150 K tokens)
+ * of tool output into a single LLM turn and blow past the upstream
+ * model's TPM window before any retry / Retry-After negotiation
+ * could land. Keeping the ceiling well below typical model context
+ * windows leaves headroom for system prompt + conversation history
+ * while preserving the spill-to-blob escape hatch for anything
+ * heavier.
+ *
+ * Operators on 1 M-token Sonnet 4.6 deployments (or anyone whose
+ * upstream model TPM accommodates more) raise this via
+ * `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS`; OSS / dev defaults stay
+ * conservative.
  */
-export const DEFAULT_RUN_OUTPUT_BUDGET_TOKENS = 200_000;
+export const DEFAULT_RUN_OUTPUT_BUDGET_TOKENS = 100_000;
 
 /**
  * Pluggable token estimator. Receives a text payload, returns a

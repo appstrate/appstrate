@@ -22,9 +22,9 @@
  * design.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
+import { runs, runLogs, TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
@@ -241,6 +241,23 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       status = "failed";
       errorMessage = `Output validation failed: ${validation.errors.join("; ")}`;
       outputValidationErrors = validation.errors;
+    }
+  }
+
+  // Adapter-error backstop. The Pi SDK keeps the agent loop alive after
+  // an `appstrate.error` (e.g. OpenAI 429 TPM rate-limit exhausting the
+  // SDK's internal retries) so `runner.run()` resolves without throwing.
+  // The result then lacks an explicit `status` / `error`, defaults to
+  // `success`, and `output` is null because the LLM never produced one.
+  // The `runHadZeroTokens` heuristic below does NOT trigger when partial
+  // tokens were produced before the fatal adapter error. Without this
+  // check, a run that hit an unrecoverable upstream error is reported as
+  // `success` with `result: null`.
+  if (status === "success" && (result.output === null || result.output === undefined)) {
+    const lastAdapterError = await findLastAdapterError(run.id);
+    if (lastAdapterError !== null) {
+      status = "failed";
+      errorMessage = lastAdapterError;
     }
   }
 
@@ -551,6 +568,30 @@ async function runHadZeroTokens(runId: string, result: RunResult): Promise<boole
   if (!row?.tokenUsage) return true;
   const usage = row.tokenUsage as Partial<TokenUsage>;
   return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
+}
+
+/**
+ * Last `adapter_error` row written by the {@link PersistingEventSink} for
+ * this run, or `null` when none was recorded. `appstrate.error` events
+ * fired by the Pi SDK on fatal upstream failures (rate-limit exhaustion,
+ * auth failures, malformed responses) land in `run_logs` as
+ * `type='system', event='adapter_error'`. When the runner then resolves
+ * without throwing — which is the SDK's current behaviour for
+ * `stopReason=error` — finalize is the last chance to translate that
+ * trail into a `failed` status. Indexed via `idx_run_logs_lookup`
+ * (run_id, id).
+ */
+async function findLastAdapterError(runId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ message: runLogs.message })
+    .from(runLogs)
+    .where(
+      and(eq(runLogs.runId, runId), eq(runLogs.type, "system"), eq(runLogs.event, "adapter_error")),
+    )
+    .orderBy(desc(runLogs.id))
+    .limit(1);
+  if (!row) return null;
+  return typeof row.message === "string" && row.message.length > 0 ? row.message : null;
 }
 
 function llmUnreachableMessage(run: RunSinkContext): string {

@@ -52,6 +52,7 @@ import {
   ErrorCode,
   McpError,
   type AppstrateToolDefinition,
+  type CallToolResult,
   type ReadResourceResult,
   type Resource,
 } from "@appstrate/mcp-transport";
@@ -64,6 +65,7 @@ import {
   PROVIDER_ID_RE,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
+import { Semaphore } from "./semaphore.ts";
 import { logger } from "./logger.ts";
 
 /**
@@ -282,7 +284,7 @@ interface TokenBudgetMeta {
  * {@link TokenBudget} is wired (tests / embedders).
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
-  const { blobStore, proxyDeps, tokenBudget } = options;
+  const { blobStore, proxyDeps, tokenBudget, providerCallSemaphore } = options;
   const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
@@ -355,6 +357,29 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       },
     },
     handler: async (rawArgs) => {
+      // Run-scoped fan-out cap. Without this, an agent that issues N
+      // parallel `provider_call`s funnels their full payloads into the
+      // next LLM turn, blowing past upstream model TPM windows
+      // (issue #427). The permit is held only for the duration of the
+      // upstream HTTP hop; pre-flight validation errors return inside
+      // the try/finally so the permit is always released.
+      const release = providerCallSemaphore ? await providerCallSemaphore.acquire() : null;
+      try {
+        return await providerCallInner(rawArgs);
+      } finally {
+        release?.();
+      }
+    },
+  };
+
+  /**
+   * Inner handler for `provider_call` — extracted so the
+   * concurrency-limiting wrapper above can stay shallow and the
+   * pre-flight validation / upstream HTTP body can keep its existing
+   * control flow without nested closures.
+   */
+  async function providerCallInner(rawArgs: unknown): Promise<CallToolResult> {
+    {
       const args = rawArgs as {
         providerId: string;
         target: string;
@@ -518,8 +543,8 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         // `provider_call` — the runtime parser requires it.
         attachUpstreamMeta: true,
       });
-    },
-  };
+    }
+  }
 
   const runHistory: AppstrateToolDefinition = {
     descriptor: {
@@ -1117,6 +1142,18 @@ export interface MountMcpOptions {
    * unconditionally via `createApp` (see `app.ts`).
    */
   tokenBudget?: TokenBudget;
+  /**
+   * Run-scoped fan-out limiter for `provider_call`. Caps the number of
+   * concurrent upstream HTTP hops a single run can issue at once.
+   * Without a cap, an agent that fetches N items in parallel (8 Gmail
+   * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
+   * over-sized JSON dump and blow past the upstream model's TPM
+   * window. See issue #427 for the reference incident.
+   *
+   * Optional only so tests / embedders can omit it; production wires a
+   * `Semaphore` unconditionally via `createApp` (see `app.ts`).
+   */
+  providerCallSemaphore?: Semaphore;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
