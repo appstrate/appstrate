@@ -86,4 +86,11 @@ const app = createApp({
 
 logger.info("Sidecar proxy listening", { port });
 
-export default { port, fetch: app.fetch };
+// `idleTimeout: 255` mirrors `apps/api/src/index.ts` — Bun.serve's default
+// of 10 s otherwise kills any LLM stream that goes quiet (reasoning phase,
+// parallel tool-call generation, slow upstream networks) longer than that,
+// surfacing as `terminated` / `connection lost` to the agent which then
+// retries the same turn until the run timeout fires. 255 s is the maximum
+// allowed by Bun and sits comfortably under the 300 s run-tracker ceiling.
+// See issue #426.
+export default { port, fetch: app.fetch, idleTimeout: 255 };

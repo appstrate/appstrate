@@ -100,7 +100,22 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
   "x-ratelimit-reset": "X-RateLimit-Reset",
 };
 
-function passUpstream(upstream: Response): Response {
+/**
+ * Per-call telemetry attached to `/llm/*` pass-throughs. Each observation
+ * yields one info-level `llm.stream.observed` log on close (with TTFB,
+ * max inter-chunk gap, total bytes) plus warn-level `llm.stream.error` /
+ * `llm.stream.cancelled` on abnormal terminations. Added in #426 after a
+ * silent 10 s Bun.serve idleTimeout was burning the 300 s run timeout in
+ * a retry loop — keeping the closed-loop visibility avoids re-discovering
+ * that class of bug from scratch.
+ */
+interface LlmStreamObservation {
+  targetUrl?: string;
+  credentialId?: string;
+  authMode?: "oauth" | "api_key";
+}
+
+function passUpstream(upstream: Response, observe?: LlmStreamObservation): Response {
   const responseHeaders: Record<string, string> = {};
   for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
@@ -114,10 +129,59 @@ function passUpstream(upstream: Response): Response {
       responseHeaders[canonical] = value;
     }
   }
-  return new Response(upstream.body, {
+
+  if (!upstream.body) {
+    return new Response(null, { status: upstream.status, headers: responseHeaders });
+  }
+
+  const reader = upstream.body.getReader();
+  const start = Date.now();
+  let lastByteAt = start;
+  let maxIdleMs = 0;
+  let totalBytes = 0;
+  let chunks = 0;
+
+  const summary = (): Record<string, unknown> => ({
+    ...observe,
     status: upstream.status,
-    headers: responseHeaders,
+    totalMs: Date.now() - start,
+    ttfbMs: chunks > 0 ? lastByteAt - start : null,
+    maxIdleMs,
+    bytes: totalBytes,
+    chunks,
   });
+
+  const observed = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        const now = Date.now();
+        const gap = now - lastByteAt;
+        if (gap > maxIdleMs) maxIdleMs = gap;
+        if (done) {
+          logger.info("llm.stream.observed", summary());
+          controller.close();
+          return;
+        }
+        lastByteAt = now;
+        totalBytes += value.byteLength;
+        chunks += 1;
+        controller.enqueue(value);
+      } catch (err) {
+        logger.warn("llm.stream.error", {
+          ...summary(),
+          error: err instanceof Error ? err.message : String(err),
+        });
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      logger.warn("llm.stream.cancelled", { ...summary(), reason: String(reason ?? "") });
+      return reader.cancel(reason);
+    },
+  });
+
+  return new Response(observed, { status: upstream.status, headers: responseHeaders });
 }
 
 /**
@@ -320,7 +384,7 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    return passUpstream(upstream);
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" });
   });
 
   async function handleOauthLlmRequest(
@@ -444,7 +508,11 @@ export function createApp(deps: AppDeps): Hono {
           );
         }
         // Fall through with the original 401 — best-effort.
-        return passUpstream(upstream);
+        return passUpstream(upstream, {
+          targetUrl,
+          credentialId: llmConfig.credentialId,
+          authMode: "oauth",
+        });
       }
       forwardedHeaders = {
         ...forwardedHeaders,
@@ -477,7 +545,11 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    return passUpstream(upstream);
+    return passUpstream(upstream, {
+      targetUrl,
+      credentialId: llmConfig.credentialId,
+      authMode: "oauth",
+    });
   }
 
   // MCP exposure — the agent-facing surface for `provider_call`,

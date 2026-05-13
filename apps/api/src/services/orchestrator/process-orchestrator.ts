@@ -218,6 +218,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       stderr: "pipe",
     });
     this.drainStderr(proc, id);
+    // Sidecar logger emits info/debug lines on stdout (warn/error on stderr).
+    // Without this drain the pipe fills silently and `logger.info` calls from
+    // the sidecar (e.g. `llm.stream.observed` per-call telemetry) are
+    // invisible in local dev. Docker mode reads stdout via the Docker HTTP
+    // API, so this only matters for process mode.
+    this.drainStdout(proc, id);
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
@@ -503,6 +509,44 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
           }
         }
         if (buf.trim()) append(buf);
+      } catch {
+        // Stream closed
+      } finally {
+        reader.releaseLock();
+      }
+    };
+    drain().catch(() => {});
+  }
+
+  /**
+   * Drain stdout from a subprocess at info level. Used for sidecar
+   * subprocesses whose logger emits info/debug lines on stdout. Without
+   * this, the pipe fills silently and structured logs (e.g. per-call LLM
+   * stream telemetry) are invisible. Subject to the same Bun ≤1.3.9
+   * `stdout: "pipe"` premature-EOF bug described at the top of this file;
+   * we accept the partial-loss risk because total invisibility is worse.
+   */
+  private drainStdout(proc: BunProcess, label: string): void {
+    const stdout = proc.stdout;
+    if (!stdout || typeof stdout === "number") return;
+
+    const reader = (stdout as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    const drain = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line.trim()) logger.info(`[process:${label}:stdout] ${line}`);
+          }
+        }
+        if (buf.trim()) logger.info(`[process:${label}:stdout] ${buf}`);
       } catch {
         // Stream closed
       } finally {
