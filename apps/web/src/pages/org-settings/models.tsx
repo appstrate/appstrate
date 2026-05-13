@@ -405,7 +405,6 @@ export function OrgSettingsModelsPage() {
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
-  const registryQuery = useProvidersRegistry();
 
   if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
@@ -496,24 +495,12 @@ export function OrgSettingsModelsPage() {
             );
           } else {
             const uniqueLabel = deduplicateLabel(data.label, credentials ?? []);
-            // Form still emits (apiShape, baseUrl) for UX presets; map to the
-            // canonical (providerId, baseUrlOverride) the API expects. The
-            // registry exposes the same matching server-side; any future
-            // registry-aware form can drop this translation.
-            const matchedProvider = registryQuery.data?.find(
-              (p) =>
-                p.authMode === "api_key" &&
-                p.apiShape === data.apiShape &&
-                p.defaultBaseUrl.replace(/\/+$/, "") === data.baseUrl.replace(/\/+$/, ""),
-            );
-            const providerId = matchedProvider?.providerId ?? "openai-compatible";
-            const baseUrlOverride = matchedProvider ? null : data.baseUrl;
             createPkMutation.mutate(
               {
                 label: uniqueLabel,
-                providerId,
+                providerId: data.providerId,
                 apiKey: data.apiKey ?? "",
-                ...(baseUrlOverride ? { baseUrlOverride } : {}),
+                ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
               },
               { onSuccess: () => setPkModalOpen(false) },
             );

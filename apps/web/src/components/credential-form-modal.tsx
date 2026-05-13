@@ -11,6 +11,11 @@
  * `MODULES` env var with zero client churn — their entries appear or
  * disappear in the picker automatically.
  *
+ * The form posts the canonical `{ label, providerId, apiKey, baseUrlOverride? }`
+ * shape. The `baseUrlOverride` field is only surfaced for providers that
+ * declare `baseUrlOverridable: true` (today: `openai-compatible`, exposed
+ * via the picker's "Custom" entry as the self-hosted escape hatch).
+ *
  * Edit mode is API-key-only — OAuth rows are immutable (label included)
  * and use the dedicated "reconnect" affordance, which re-enters the
  * modal with the same provider preselected to re-pair.
@@ -39,20 +44,20 @@ import {
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
-import {
-  CUSTOM_ID,
-  PI_ADAPTER_TYPES,
-  getProviderById,
-  resolveProviderId,
-} from "@/lib/provider-registry-helpers";
+import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 
+/**
+ * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
+ * `baseUrlOverride` is only meaningful for providers with `baseUrlOverridable: true`
+ * (today: `openai-compatible`).
+ */
 export interface CredentialFormData {
   label: string;
-  apiShape: string;
-  baseUrl: string;
+  providerId: string;
   apiKey?: string;
+  baseUrlOverride?: string | null;
 }
 
 interface CredentialFormModalProps {
@@ -67,9 +72,8 @@ interface CredentialFormModalProps {
 
 interface CredentialFormFields {
   label: string;
-  apiShape: string;
-  baseUrl: string;
   apiKey: string;
+  baseUrlOverride: string;
 }
 
 function detectProviderFromCredential(
@@ -96,7 +100,7 @@ interface PickerOption {
 
 function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
   return registry
-    .filter((p) => p.providerId !== "openrouter" && p.providerId !== "openai-compatible")
+    .filter((p) => p.providerId !== "openrouter")
     .map((p) => ({
       id: p.authMode === "oauth2" ? `oauth:${p.providerId}` : p.providerId,
       label: p.displayName,
@@ -131,7 +135,10 @@ function CredentialFormBody({
   const isEditing = !!credential;
   const selectedOption = options.find((o) => o.id === selectedId);
   const isOAuthSelected = selectedOption?.authMode === "oauth2";
-  const isCustom = selectedId === CUSTOM_ID;
+  const selectedProvider = selectedOption
+    ? getProviderById(selectedOption.providerId, registry)
+    : undefined;
+  const needsBaseUrlOverride = !!selectedProvider?.baseUrlOverridable;
 
   const {
     register,
@@ -144,27 +151,37 @@ function CredentialFormBody({
   } = useAppForm<CredentialFormFields>({
     defaultValues: {
       label: credential?.label ?? "",
-      apiShape: credential?.apiShape ?? "",
-      baseUrl: credential?.baseUrl ?? "",
       apiKey: "",
+      baseUrlOverride: credential?.baseUrl ?? "",
     },
   });
 
-  const [apiShape, baseUrl, apiKey, label] = useWatch({
+  const [baseUrlOverride, apiKey, label] = useWatch({
     control,
-    name: ["apiShape", "baseUrl", "apiKey", "label"],
+    name: ["baseUrlOverride", "apiKey", "label"],
   });
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const canTest = !!apiShape.trim() && !!baseUrl.trim() && (!!apiKey.trim() || !!credential);
+  // Inline-test endpoint still takes (apiShape, baseUrl) — these are
+  // computed from the chosen provider's registry entry (+ override).
+  const testApiShape = selectedProvider?.apiShape ?? "";
+  const testBaseUrl = needsBaseUrlOverride
+    ? baseUrlOverride.trim()
+    : (selectedProvider?.defaultBaseUrl ?? "");
+  const canTest =
+    !!selectedProvider &&
+    !isOAuthSelected &&
+    !!testApiShape &&
+    !!testBaseUrl &&
+    (!!apiKey.trim() || !!credential);
 
   const handleTest = () => {
     setTestResult(null);
     testMutation.mutate(
       {
-        apiShape: apiShape.trim(),
-        baseUrl: baseUrl.trim(),
+        apiShape: testApiShape,
+        baseUrl: testBaseUrl,
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...(credential ? { existingKeyId: credential.id } : {}),
       },
@@ -184,28 +201,30 @@ function CredentialFormBody({
   const handleProviderChange = (id: string) => {
     setSelectedId(id);
     clearErrors();
-    if (id === CUSTOM_ID) {
-      setValue("apiShape", "");
-      setValue("baseUrl", "");
-      setValue("label", "");
+    const option = options.find((o) => o.id === id);
+    if (!option || option.authMode === "oauth2") {
+      setValue("baseUrlOverride", "");
       return;
     }
-    const option = options.find((o) => o.id === id);
-    if (!option || option.authMode === "oauth2") return;
     const provider = getProviderById(option.providerId, registry);
     if (provider) {
-      setValue("apiShape", provider.apiShape);
-      setValue("baseUrl", provider.defaultBaseUrl);
+      // Pre-seed the override field with the default base URL so users
+      // see the value they're customising. Non-overridable providers
+      // never read this field.
+      setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
       if (!label.trim()) setValue("label", provider.displayName);
     }
   };
 
   const onFormSubmit = handleSubmit((data) => {
+    if (!selectedProvider) return;
     onSubmit({
       label: data.label.trim(),
-      apiShape: data.apiShape.trim(),
-      baseUrl: data.baseUrl.trim(),
+      providerId: selectedProvider.providerId,
       ...(data.apiKey.trim() ? { apiKey: data.apiKey.trim() } : {}),
+      ...(needsBaseUrlOverride && data.baseUrlOverride.trim()
+        ? { baseUrlOverride: data.baseUrlOverride.trim() }
+        : {}),
     });
   });
 
@@ -274,7 +293,7 @@ function CredentialFormBody({
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="pk-form" disabled={isPending}>
+          <Button type="submit" form="pk-form" disabled={isPending || !selectedProvider}>
             {isPending ? <Spinner /> : t("btn.save")}
           </Button>
         </>
@@ -287,10 +306,7 @@ function CredentialFormBody({
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
-            <SelectContent>
-              {renderOptions(options, t)}
-              <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
-            </SelectContent>
+            <SelectContent>{renderOptions(options, t)}</SelectContent>
           </Select>
         </div>
 
@@ -311,66 +327,36 @@ function CredentialFormBody({
           )}
         </div>
 
-        {isCustom && (
-          <>
-            <div className="space-y-2">
-              <Label htmlFor="pk-api">{t("models.form.api")}</Label>
-              <Select
-                value={apiShape}
-                onValueChange={(v) => {
-                  setValue("apiShape", v);
-                  clearErrors("apiShape");
-                }}
-                disabled={isEditing}
-              >
-                <SelectTrigger
-                  id="pk-api"
-                  className={cn(showError("apiShape") && "border-destructive")}
-                >
-                  <SelectValue placeholder={t("models.form.apiPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {PI_ADAPTER_TYPES.map((apiType) => (
-                    <SelectItem key={apiType.value} value={apiType.value}>
-                      {apiType.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {showError("apiShape") && errors.apiShape?.message && (
-                <div className="text-destructive text-sm">{errors.apiShape.message}</div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pk-baseUrl">{t("credentials.form.baseUrl")}</Label>
-              <Input
-                id="pk-baseUrl"
-                type="url"
-                disabled={isEditing}
-                {...register("baseUrl", {
-                  validate: (v) => {
-                    if (!isCustom) return undefined;
-                    if (!v.trim()) return t("validation.required", { ns: "common" });
-                    try {
-                      new URL(v.trim());
-                    } catch {
-                      return t("validation.required", { ns: "common" });
-                    }
-                    return undefined;
-                  },
-                })}
-                placeholder="https://api.openai.com/v1"
-                aria-invalid={showError("baseUrl") ? true : undefined}
-                className={cn(showError("baseUrl") && "border-destructive")}
-              />
-              {showError("baseUrl") && errors.baseUrl?.message && (
-                <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
-              )}
-            </div>
-          </>
+        {needsBaseUrlOverride && (
+          <div className="space-y-2">
+            <Label htmlFor="pk-baseUrl">{t("credentials.form.baseUrl")}</Label>
+            <Input
+              id="pk-baseUrl"
+              type="url"
+              disabled={isEditing}
+              {...register("baseUrlOverride", {
+                validate: (v) => {
+                  if (!needsBaseUrlOverride) return undefined;
+                  if (!v.trim()) return t("validation.required", { ns: "common" });
+                  try {
+                    new URL(v.trim());
+                  } catch {
+                    return t("validation.required", { ns: "common" });
+                  }
+                  return undefined;
+                },
+              })}
+              placeholder="https://api.openai.com/v1"
+              aria-invalid={showError("baseUrlOverride") ? true : undefined}
+              className={cn(showError("baseUrlOverride") && "border-destructive")}
+            />
+            {showError("baseUrlOverride") && errors.baseUrlOverride?.message && (
+              <div className="text-destructive text-sm">{errors.baseUrlOverride.message}</div>
+            )}
+          </div>
         )}
 
-        {!!selectedId && (
+        {!!selectedProvider && (
           <div className="space-y-2">
             <Label htmlFor="pk-apiKey">{t("credentials.form.apiKey")}</Label>
             <Input
