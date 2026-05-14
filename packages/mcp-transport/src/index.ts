@@ -272,6 +272,8 @@ export {
   type AppstrateMcpClient,
   type AppstrateMcpClientOptions,
   type McpHttpClientOptions,
+  type McpConnectRetryOptions,
+  type McpRetryAttemptInfo,
 } from "./client.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child

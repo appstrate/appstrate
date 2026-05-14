@@ -60,6 +60,64 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
   fetch?: typeof fetch;
   /** Extra headers to merge into every request. */
   extraHeaders?: Record<string, string>;
+  /**
+   * Opt-in retry policy for the `client.connect(transport)` handshake.
+   * When omitted the legacy single-shot behaviour is preserved — callers
+   * that race against an external boot sequence (runtime-pi waiting on
+   * the sidecar's `/mcp`) opt in explicitly to avoid surprising other
+   * call sites that want a fail-fast surface.
+   */
+  retry?: McpConnectRetryOptions;
+  /**
+   * Cancellation signal for the entire connect (including all retries).
+   * Independent from the deadline budget — `signal.abort()` short-circuits
+   * the retry loop, while the deadline triggers a separate AbortError.
+   */
+  signal?: AbortSignal;
+}
+
+/** Retry tuning for `createMcpHttpClient`'s initial connect. */
+export interface McpConnectRetryOptions {
+  /**
+   * Hard wall-clock budget for the entire connect (including all retries
+   * + final attempt). Defaults to 30s — matches the sidecar's outbound
+   * upstream timeout so a sidecar that never boots eventually surfaces.
+   */
+  deadlineMs?: number;
+  /**
+   * Base delay for the exponential backoff. The actual delay for attempt
+   * `n` (0-indexed) is `random(0, min(capMs, baseMs * 2^n))` — AWS-style
+   * full jitter, which is the proven shape for thundering-herd avoidance
+   * on a single dependency that crashes and recovers (e.g. sidecar boot).
+   * See https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/.
+   * Defaults to 50ms.
+   */
+  baseMs?: number;
+  /**
+   * Cap on the exponential growth — once `baseMs * 2^n` exceeds `capMs`,
+   * the jitter window stays at `[0, capMs]`. Defaults to 1000ms.
+   */
+  capMs?: number;
+  /**
+   * Optional hook fired before each post-failure sleep. Receives the
+   * structured retry context so callers can plug in their preferred
+   * logger (the package itself never reaches for `console.*`).
+   */
+  onRetry?: (info: McpRetryAttemptInfo) => void;
+}
+
+/** Structured payload passed to `McpConnectRetryOptions.onRetry`. */
+export interface McpRetryAttemptInfo {
+  /** Final URL the connect was targeting (post-`new URL()` normalization). */
+  url: string;
+  /** 0-indexed attempt that just failed. The next attempt is `attempt + 1`. */
+  attempt: number;
+  /** Sleep window the loop is about to honour, in milliseconds. */
+  delayMs: number;
+  /** Best-effort Node-style error code surfaced from the error chain. */
+  errorCode: string | undefined;
+  /** The thrown error itself, for callers that want the full message. */
+  error: unknown;
 }
 
 /**
@@ -111,12 +169,19 @@ export interface AppstrateMcpClient {
  *
  * The transport uses the `Authorization: Bearer <token>` header when a
  * `bearerToken` is supplied. The server is expected to validate it with
- * a constant-time compare and respond `401` on miss — the caller must
- * surface 401 as a fatal config error (no retry, no fallback).
+ * a constant-time compare and respond `401` on miss — 401 is treated as
+ * a fatal config error and bypasses retry even when retry is enabled.
  *
  * The returned client is **already connected** (we await
  * `client.connect()`). On error, the partially-constructed transport is
  * cleaned up before the error propagates.
+ *
+ * When `options.retry` is set, connection-level failures (ECONNREFUSED,
+ * ENOTFOUND, ECONNRESET, ETIMEDOUT, generic "fetch failed" with one of
+ * those in `cause`, and SDK transport reset shapes) are retried with
+ * AWS-style exponential backoff + full jitter inside the configured
+ * deadline. Fatal errors (HTTP 4xx other than 408/429, TypeError, …)
+ * still short-circuit on the first attempt.
  */
 export async function createMcpHttpClient(
   url: string | URL,
@@ -129,21 +194,247 @@ export async function createMcpHttpClient(
     headers.Authorization = `Bearer ${options.bearerToken}`;
   }
 
-  const transport = new StreamableHTTPClientTransport(targetUrl, {
-    requestInit: { headers },
-    ...(options.fetch ? { fetch: options.fetch as never } : {}),
-  });
-
-  const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
-
-  try {
-    await client.connect(transport);
-  } catch (err) {
-    await transport.close().catch(() => {});
-    throw err;
+  // Single-shot path — preserves the pre-retry behaviour for callers
+  // that explicitly opt out (and keeps the contract narrow for callers
+  // that have their own retry harness around the factory).
+  if (!options.retry) {
+    const transport = new StreamableHTTPClientTransport(targetUrl, {
+      requestInit: { headers },
+      ...(options.fetch ? { fetch: options.fetch as never } : {}),
+    });
+    const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
+    try {
+      await client.connect(transport);
+    } catch (err) {
+      await transport.close().catch(() => {});
+      throw err;
+    }
+    return wrapClient(client, transport, options.defaultTimeoutMs);
   }
 
-  return wrapClient(client, transport, options.defaultTimeoutMs);
+  return await connectWithRetry(targetUrl, headers, options, options.retry);
+}
+
+/**
+ * Drive the retry loop for `createMcpHttpClient`. Kept private so the
+ * single-shot fast path stays one allocation away from the pre-retry
+ * behaviour and the retry policy is centralised in one place.
+ *
+ * Backoff shape: `random(0, min(capMs, baseMs * 2^attempt))` (AWS full
+ * jitter). The constant-pressure shape (no minimum delay) keeps the
+ * platform absorbing the warm-path race (~50-130ms pooled sidecar boot)
+ * without paying a fixed retry tax on every healthy run.
+ */
+async function connectWithRetry(
+  targetUrl: URL,
+  headers: Record<string, string>,
+  options: McpHttpClientOptions,
+  retry: McpConnectRetryOptions,
+): Promise<AppstrateMcpClient> {
+  const deadlineMs = retry.deadlineMs ?? 30_000;
+  const baseMs = retry.baseMs ?? 50;
+  const capMs = retry.capMs ?? 1_000;
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + deadlineMs;
+
+  // Independent abort: caller signal short-circuits the loop; the
+  // deadline timer raises a synthetic AbortError when the budget is
+  // exhausted mid-sleep. Combined via a tiny composite so a single
+  // listener registration covers both.
+  const externalSignal = options.signal;
+
+  let attempt = 0;
+  let lastError: unknown;
+  let lastErrorCode: string | undefined;
+
+  while (true) {
+    if (externalSignal?.aborted) {
+      throw new DOMException("MCP connect aborted by caller signal", "AbortError");
+    }
+
+    const transport = new StreamableHTTPClientTransport(targetUrl, {
+      requestInit: { headers },
+      ...(options.fetch ? { fetch: options.fetch as never } : {}),
+    });
+    const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
+
+    try {
+      await client.connect(transport);
+      return wrapClient(client, transport, options.defaultTimeoutMs);
+    } catch (err) {
+      await transport.close().catch(() => {});
+      lastError = err;
+      lastErrorCode = extractErrorCode(err);
+
+      if (isFatalConnectError(err)) {
+        throw err;
+      }
+
+      // Check deadline BEFORE sleeping so we don't burn budget on an
+      // unreachable host that's still being retried.
+      const now = Date.now();
+      if (now >= deadlineAt) {
+        throw buildDeadlineExceededError(deadlineMs, lastError, lastErrorCode);
+      }
+
+      // Full jitter: `random(0, min(cap, base * 2^attempt))`. Clamped to
+      // the remaining deadline so the final attempt fires exactly at
+      // (not after) the budget edge.
+      const expCap = Math.min(capMs, baseMs * Math.pow(2, attempt));
+      const remaining = deadlineAt - now;
+      const delayMs = Math.min(Math.floor(Math.random() * expCap), remaining);
+
+      retry.onRetry?.({
+        url: targetUrl.toString(),
+        attempt,
+        delayMs,
+        errorCode: lastErrorCode,
+        error: err,
+      });
+
+      await sleep(delayMs, externalSignal, deadlineAt);
+      attempt += 1;
+    }
+  }
+}
+
+/**
+ * Sleep for `ms` milliseconds, returning early on caller-signal abort or
+ * when the deadline elapses (whichever fires first). Throws
+ * `AbortError` for caller signal; the deadline path is handled by the
+ * outer loop's `Date.now() >= deadlineAt` check after wake.
+ */
+async function sleep(
+  ms: number,
+  signal: AbortSignal | undefined,
+  deadlineAt: number,
+): Promise<void> {
+  const effective = Math.max(0, Math.min(ms, Math.max(0, deadlineAt - Date.now())));
+  if (effective === 0) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, effective);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("MCP connect aborted by caller signal", "AbortError"));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(new DOMException("MCP connect aborted by caller signal", "AbortError"));
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+}
+
+/**
+ * Surface a Node-style error code from anywhere in the error chain.
+ * undici / Bun's fetch wraps the syscall error inside `err.cause` (or
+ * deeper) and only exposes a generic `"fetch failed"` message at the
+ * top — the retry policy needs the inner code to decide whether to
+ * retry, so we walk the chain bounded by a safety depth.
+ */
+function extractErrorCode(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let i = 0; i < 8 && cur != null; i++) {
+    if (typeof cur === "object" && cur !== null) {
+      const c = (cur as { code?: unknown }).code;
+      if (typeof c === "string") return c;
+      cur = (cur as { cause?: unknown }).cause;
+    } else {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Connection-level error codes that warrant a retry. */
+const RETRYABLE_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "EPIPE",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+/**
+ * Decide whether an error from `client.connect()` is a permanent failure
+ * (no retry) or a transient connection-level shape that should bounce.
+ *
+ * The SDK's `StreamableHTTPClientTransport` wraps HTTP responses, so a
+ * 401/403/4xx surfaces as a thrown Error with the status code embedded
+ * in the message. We match conservatively: anything with a non-retryable
+ * HTTP code in the message is fatal; anything else without a recognised
+ * retryable network code falls through to the "treat as fatal" branch
+ * (e.g. TypeError from a malformed URL).
+ */
+function isFatalConnectError(err: unknown): boolean {
+  // Abort always wins — caller has explicitly bailed.
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+
+  // Look for a retryable network code FIRST — Bun/undici wrap socket
+  // errors as `TypeError("fetch failed")` with the real code on
+  // `err.cause.code`, so checking `instanceof TypeError` before the code
+  // probe would short-circuit on legitimate network blips.
+  const code = extractErrorCode(err);
+  if (code && RETRYABLE_CODES.has(code)) return false;
+
+  // TypeError without a retryable code in the chain = programmer error
+  // (malformed URL, bad headers, …). Fatal.
+  if (err instanceof TypeError) return true;
+
+  // SDK surfaces HTTP failures as `Error: ... HTTP <status> ...` or
+  // similar. Sniff the message for fatal status codes. 408 and 429 are
+  // retryable per RFC 9110 / common API conventions.
+  const msg = err instanceof Error ? err.message : String(err);
+  const statusMatch = /\b(?:HTTP|status(?: code)?)[:\s]*(\d{3})\b/i.exec(msg);
+  if (statusMatch) {
+    const status = Number(statusMatch[1]);
+    if (status === 408 || status === 429) return false;
+    if (status >= 400 && status < 500) return true;
+    if (status >= 500) return false;
+  }
+
+  // Generic "Error POSTing to endpoint (HTTP 401)" shape used by the
+  // SDK — already matched above. Fall through.
+  if (/\b(?:Unauthorized|Forbidden|401|403)\b/.test(msg)) return true;
+
+  // Common SDK transport reset wording — retryable.
+  if (/\b(?:fetch failed|Failed to connect|network|reset|socket hang up)\b/i.test(msg)) {
+    return false;
+  }
+
+  // Default: unknown error shape → treat as fatal. Better to surface a
+  // weird failure than to spin the retry loop on an unexpected error
+  // class (the deadline would catch it but the noise isn't worth it).
+  return true;
+}
+
+/**
+ * Compose the terminal error thrown when the retry deadline is
+ * exhausted. Carries the last underlying error so operators can
+ * distinguish "sidecar never booted" (ECONNREFUSED) from "sidecar
+ * crashed mid-handshake" (ECONNRESET) at a glance.
+ */
+function buildDeadlineExceededError(
+  deadlineMs: number,
+  lastError: unknown,
+  lastErrorCode: string | undefined,
+): Error {
+  const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
+  const codeHint = lastErrorCode ? ` ${lastErrorCode}` : "";
+  const err = new Error(
+    `MCP connect deadline exceeded after ${deadlineMs}ms (last error:${codeHint} ${lastMsg})`,
+  );
+  (err as { cause?: unknown }).cause = lastError;
+  return err;
 }
 
 /**

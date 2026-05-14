@@ -14,8 +14,9 @@ import type {
 import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import * as sidecarPool from "../sidecar-pool.ts";
-import { getSidecarImage, startSidecarAndHealthCheck } from "../sidecar-pool.ts";
+import { getSidecarImage } from "../sidecar-pool.ts";
 import {
   SIDECAR_MEMORY_BYTES,
   SIDECAR_NANO_CPUS,
@@ -33,6 +34,13 @@ class DockerWorkloadHandle implements WorkloadHandle {
 
 export class DockerOrchestrator implements ContainerOrchestrator {
   private egressNetworkId: string | null = null;
+  /**
+   * Set of sidecar container IDs whose exit is expected (run is being
+   * torn down). The {@link watchSidecarExit} watcher consults this set
+   * to suppress the "sidecar exited unexpectedly" log on the cleanup
+   * path. Removed in {@link stopWorkload} / {@link removeWorkload}.
+   */
+  private expectedSidecarExits = new Set<string>();
 
   async initialize(): Promise<void> {
     // Ensure runtime images are present (may have been pruned by host cleanup).
@@ -113,6 +121,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       if (this.egressNetworkId) {
         await docker.connectContainerToNetwork(this.egressNetworkId, pooled);
       }
+      // Pool sidecars are already health-checked at pool creation, but
+      // they still need an exit watcher: a sidecar that crashes mid-run
+      // (e.g. OOM under heavy provider_call) must surface loudly rather
+      // than letting the agent's next MCP request time out silently.
+      this.watchSidecarExit(runId, pooled);
       return new DockerWorkloadHandle(pooled, runId, "sidecar");
     }
 
@@ -165,9 +178,78 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
     }
 
-    await startSidecarAndHealthCheck(containerId);
+    // #406 — parallel boot. Start the sidecar but DO NOT block on its
+    // `/health` here. The agent (started in parallel by pi.ts) drives
+    // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
+    //   - ECONNREFUSED while the sidecar is wiring its listener
+    //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
+    //   - ECONNRESET on the pool's `/configure` warm-path race
+    // Sidecar exit detection still happens loudly: a non-blocking
+    // watcher races `waitForExit` against the run. If the sidecar dies
+    // before MCP connects, the watcher logs `exitCode` + buffered
+    // stderr/stdout, so operators see "sidecar exited 1 (npm not found)"
+    // rather than the agent's eventual "deadline exceeded" hand-wave.
+    await docker.startContainer(containerId);
+    this.watchSidecarExit(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
+  }
+
+  /**
+   * Non-blocking watcher: race the sidecar's exit against the run. The
+   * caller never awaits this — its only job is to surface a sidecar
+   * that crashes mid-handshake with a structured log line carrying the
+   * exit code + a snippet of the container's stderr. Without it, a
+   * dead-on-arrival sidecar manifests as an agent-side "MCP connect
+   * deadline exceeded after 30000ms" 30s later, with no platform-side
+   * evidence of root cause.
+   *
+   * Best-effort: errors are swallowed (the orchestrator's main lifecycle
+   * is the source of truth for failure surfaces). Errors here would only
+   * add noise to a path that's already going to fail loudly somewhere.
+   */
+  private watchSidecarExit(runId: string, containerId: string): void {
+    void (async () => {
+      try {
+        const exitCode = await docker.waitForExit(containerId);
+        // Cleanup path stops/removes the sidecar after the run terminates
+        // — those exits are expected and never indicate a problem.
+        if (this.expectedSidecarExits.has(containerId)) {
+          this.expectedSidecarExits.delete(containerId);
+          return;
+        }
+        if (exitCode !== 0) {
+          // Pull a short tail of logs — best-effort, bounded so we
+          // don't keep a generator open forever if logs are streamed.
+          let tail = "";
+          try {
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), 500);
+            const lines: string[] = [];
+            for await (const line of docker.streamLogs(containerId, abort.signal)) {
+              lines.push(line);
+              if (lines.length >= 30) break;
+            }
+            clearTimeout(timer);
+            tail = lines.slice(-30).join("\n");
+          } catch {
+            // Swallow — diagnostic is best-effort.
+          }
+          logger.error("Sidecar exited before run completed", {
+            runId,
+            containerId,
+            exitCode,
+            ...(tail ? { tail } : {}),
+          });
+        }
+      } catch (err) {
+        logger.debug("Sidecar exit watcher errored", {
+          runId,
+          containerId,
+          error: getErrorMessage(err),
+        });
+      }
+    })();
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
@@ -193,10 +275,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
+    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
     await docker.stopContainer(handle.id, timeoutSeconds);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
+    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
     await docker.removeContainer(handle.id);
   }
 
