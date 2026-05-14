@@ -155,6 +155,47 @@ export interface AvailableScope {
 }
 
 /**
+ * Closed list of supported TLS-client identifiers for the
+ * `x-tlsClientByUrl` provider manifest extension. Adding a new entry
+ * here requires a matching dispatcher in the sidecar (see
+ * `runtime-pi/sidecar/curl-runner.ts` for the curl path). Kept narrow
+ * on purpose — the goal is "opt-in per URL pattern", not "arbitrary
+ * client plugin surface".
+ */
+export const TLS_CLIENTS = ["undici", "curl"] as const;
+/** Union of supported TLS-client identifiers. */
+export type TlsClient = (typeof TLS_CLIENTS)[number];
+
+/**
+ * Single entry in a provider's `x-tlsClientByUrl` array. `pattern`
+ * follows the same glob semantics as {@link ResolvedProviderDefinition.authorizedUris}
+ * (`*` = one path segment, `**` = any substring — enforced by
+ * `matchesAuthorizedUriSpec`).
+ */
+export interface TlsClientByUrlEntry {
+  pattern: string;
+  client: TlsClient;
+}
+
+/**
+ * Zod schema for the `x-tlsClientByUrl` provider manifest extension.
+ * The pattern is reused by route validators, the inline-manifest gate,
+ * and the resolved provider definition builder.
+ *
+ * Vendor extension — AFPS reserves `x-`-prefixed manifest fields for
+ * implementation extensions, so adding this field at the appstrate
+ * layer keeps the spec untouched (issue #403).
+ */
+export const tlsClientByUrlSchema = z
+  .array(
+    z.object({
+      pattern: z.string().min(1, { error: "pattern must be a non-empty URL glob" }),
+      client: z.enum(TLS_CLIENTS),
+    }),
+  )
+  .optional();
+
+/**
  * Zod schema for provider manifests — extends AFPS with relaxed optional metadata.
  * Uses `.safeExtend()` because AFPS provider schema has `.superRefine()` (Zod 4 restriction).
  */
@@ -262,6 +303,40 @@ export function formatCredentialKeyError(error: CredentialKeyError): string {
 }
 
 /**
+ * Validate the `x-tlsClientByUrl` vendor extension on a raw provider
+ * manifest. Pure function — returns dotted-path error strings (empty =
+ * valid). Called from {@link validateManifest} and from the inline-run
+ * manifest gate. The field itself is optional; presence with a malformed
+ * shape fails closed (the sidecar must never silently fall back to the
+ * default client for a request the operator declared as curl-only).
+ */
+export function validateTlsClientByUrl(manifest: Record<string, unknown>): string[] {
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const raw = def["x-tlsClientByUrl"];
+  if (raw === undefined) return [];
+  const parsed = tlsClientByUrlSchema.safeParse(raw);
+  if (parsed.success) return [];
+  return parsed.error.issues.map(
+    (issue) => `definition.x-tlsClientByUrl.${issue.path.join(".")}: ${issue.message}`,
+  );
+}
+
+/**
+ * Extract `x-tlsClientByUrl` from a raw provider manifest definition
+ * after schema validation. Returns `undefined` when absent or empty —
+ * the sidecar treats both as "use the default fetch path".
+ */
+export function extractTlsClientByUrl(
+  def: Record<string, unknown>,
+): TlsClientByUrlEntry[] | undefined {
+  const raw = def["x-tlsClientByUrl"];
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const parsed = tlsClientByUrlSchema.safeParse(raw);
+  if (!parsed.success || !parsed.data || parsed.data.length === 0) return undefined;
+  return parsed.data;
+}
+
+/**
  * OAuth2 token-endpoint auth method, `tokenContentType` and
  * `credentialTransform` are part of AFPS v1 (§7.2 and §7.4). Types are
  * derived from the canonical Zod enums so appstrate cannot drift.
@@ -315,6 +390,21 @@ export interface ResolvedProviderDefinition {
   credentialTransform?: CredentialTransform;
   authorizedUris?: string[];
   allowAllUris: boolean;
+  /**
+   * Per-URL TLS client routing. When a request's resolved URL matches
+   * one of these glob patterns (same semantics as {@link authorizedUris}),
+   * the sidecar dispatches the request through the named client instead
+   * of the default Bun/undici fetch. Currently supported clients:
+   *   - `"undici"` — default Bun fetch (no-op opt-in).
+   *   - `"curl"`   — argv-form `Bun.spawn(["curl", …])`, used to clear
+   *                  plain ClientHello mismatch checks behind Cloudflare /
+   *                  Akamai / JA3/JA4 fingerprinting.
+   *
+   * Vendor extension (AFPS allows `x-`-prefixed manifest fields). See
+   * issue #403 for the rationale and `runtime-pi/sidecar/curl-runner.ts`
+   * for the curl execution path.
+   */
+  tlsClientByUrl?: TlsClientByUrlEntry[];
   availableScopes?: AvailableScope[];
   requestTokenUrl?: string;
   accessTokenUrl?: string;
@@ -379,6 +469,7 @@ export function buildProviderDefinitionFromManifest(
       ? (rawDef.authorizedUris as string[])
       : undefined,
     allowAllUris: (rawDef.allowAllUris as boolean) ?? false,
+    tlsClientByUrl: extractTlsClientByUrl(rawDef),
     availableScopes: (rawDef.availableScopes as AvailableScope[])?.length
       ? (rawDef.availableScopes as AvailableScope[])
       : undefined,
@@ -457,6 +548,10 @@ function parseWithSchema(
     const credentialErrors = validateProviderCredentialKeys(result.data as Record<string, unknown>);
     if (credentialErrors.length > 0) {
       return { valid: false, errors: credentialErrors.map(formatCredentialKeyError) };
+    }
+    const tlsErrors = validateTlsClientByUrl(result.data as Record<string, unknown>);
+    if (tlsErrors.length > 0) {
+      return { valid: false, errors: tlsErrors };
     }
   }
 

@@ -127,7 +127,7 @@ export async function getCredentials(
 // both the DB-backed platform path and the HTTP-backed sidecar (which
 // cannot import @appstrate/db) share a single type definition.
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
-import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
+import type { ProxyCredentialsPayload, ProxyTlsClientByUrlEntry } from "./proxy-primitives.ts";
 
 /**
  * Resolve credentials for the sidecar proxy.
@@ -157,6 +157,7 @@ export async function resolveCredentialsForProxy(
     credentials: buildSidecarCredentials(result.credentials, def, authMode),
     ...extractUriConfig(def),
     ...extractInjection(def, authMode),
+    ...extractTlsClientByUrl(def),
   };
 }
 
@@ -210,6 +211,7 @@ export async function forceRefreshCredentials(
     credentials: buildSidecarCredentials(credentials, def, authMode),
     ...extractUriConfig(def),
     ...extractInjection(def, authMode),
+    ...extractTlsClientByUrl(def),
   };
 }
 
@@ -472,6 +474,32 @@ export function buildSidecarCredentials(
     }
   }
   return credentials;
+}
+
+/**
+ * Extract the `x-tlsClientByUrl` vendor extension off the resolved
+ * provider definition for inclusion in the sidecar credentials
+ * payload. Filters out malformed entries defensively (the manifest
+ * validator should have caught those at import time, but we never
+ * want a typo in JSONB to crash the credential fetch path). See
+ * issue #403.
+ */
+function extractTlsClientByUrl(def: Record<string, unknown>): {
+  tlsClientByUrl?: ProxyTlsClientByUrlEntry[];
+} {
+  const raw = def["x-tlsClientByUrl"];
+  if (!Array.isArray(raw) || raw.length === 0) return {};
+  const out: ProxyTlsClientByUrlEntry[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const pattern = e.pattern;
+    const client = e.client;
+    if (typeof pattern !== "string" || pattern.length === 0) continue;
+    if (client !== "curl" && client !== "undici") continue;
+    out.push({ pattern, client });
+  }
+  return out.length > 0 ? { tlsClientByUrl: out } : {};
 }
 
 /** Extract authorizedUris and allowAllUris from provider definition. */

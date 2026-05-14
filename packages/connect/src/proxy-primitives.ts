@@ -51,6 +51,18 @@ export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
  * sidecar (which must not pull @appstrate/db) can consume it via the
  * `@appstrate/connect/proxy-primitives` subpath.
  */
+/**
+ * Per-URL TLS client routing entry. Mirrored from
+ * `@appstrate/core/validation::TlsClientByUrlEntry` to avoid pulling
+ * `@appstrate/core` into the sidecar's tight dependency graph. The
+ * shape is intentionally narrow — only `pattern` + `client` reach the
+ * wire. See issue #403.
+ */
+export interface ProxyTlsClientByUrlEntry {
+  pattern: string;
+  client: "undici" | "curl";
+}
+
 export interface ProxyCredentialsPayload {
   /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
   credentials: Record<string, string>;
@@ -58,6 +70,15 @@ export interface ProxyCredentialsPayload {
   authorizedUris: string[] | null;
   /** When true, skip allowlist enforcement (still block private/internal ranges). */
   allowAllUris: boolean;
+  /**
+   * Vendor extension `x-tlsClientByUrl`. When a resolved URL matches
+   * one of these patterns the sidecar dispatches the request through
+   * the named TLS client (currently `curl`) instead of the default
+   * Bun/undici fetch — used to clear plain ClientHello mismatch checks
+   * behind Cloudflare / Akamai / JA3/JA4 fingerprinting (issue #403).
+   * Absent / empty = always use the default fetch path.
+   */
+  tlsClientByUrl?: ProxyTlsClientByUrlEntry[];
   /**
    * Header name the upstream expects the credential under
    * (e.g. `Authorization`, `X-Api-Key`). Absent = the proxy does not

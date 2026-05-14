@@ -225,3 +225,140 @@ describe("executeProviderCall — 401 retry path", () => {
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("executeProviderCall — x-tlsClientByUrl dispatch (issue #403)", () => {
+  it("routes a URL matching a curl pattern through curlFetchFn, not fetchFn", async () => {
+    const fetchFn = mock(async () => new Response("from-fetch", { status: 200 }));
+    const curlFetchFn = mock(async () => new Response("from-curl", { status: 200 }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+        tlsClientByUrl: [{ pattern: "https://api.example.com/**", client: "curl" }],
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      curlFetchFn: curlFetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://api.example.com/messages",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(curlFetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(await result.response.text()).toBe("from-curl");
+    }
+    // Credential header still server-side injected — the curl path must
+    // see Authorization just like the fetch path.
+    const curlInit = curlFetchFn.mock.calls[0]![1] as {
+      headers: Record<string, string>;
+    };
+    expect(curlInit.headers["Authorization"]).toBe("Bearer tok-123");
+  });
+
+  it("non-matching URL uses default fetchFn, not curlFetchFn", async () => {
+    const fetchFn = mock(async () => new Response("from-fetch", { status: 200 }));
+    const curlFetchFn = mock(async () => new Response("from-curl", { status: 200 }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: ["https://api.example.com/**", "https://other.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+        // Only api.example.com is curl-bound; other.example.com falls
+        // through to the default fetch.
+        tlsClientByUrl: [{ pattern: "https://api.example.com/**", client: "curl" }],
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      curlFetchFn: curlFetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://other.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(curlFetchFn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to fetchFn when no tlsClientByUrl is declared", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const curlFetchFn = mock(async () => new Response("never", { status: 200 }));
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      curlFetchFn: curlFetchFn as unknown as typeof fetch,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(curlFetchFn).not.toHaveBeenCalled();
+  });
+
+  it('explicit client: "undici" pattern is a no-op (uses fetchFn)', async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const curlFetchFn = mock(async () => new Response("never", { status: 200 }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+        tlsClientByUrl: [{ pattern: "https://api.example.com/**", client: "undici" }],
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      curlFetchFn: curlFetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(curlFetchFn).not.toHaveBeenCalled();
+  });
+});

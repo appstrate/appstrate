@@ -93,8 +93,16 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 # Runtime dependencies:
 #   - libstdc++, libgcc  glibc-like symbols the Bun-compiled binary links against
 #   - ca-certificates    TLS trust store for outbound provider calls
+#   - curl               TLS-stack alternative for `x-tlsClientByUrl` opt-in
+#                        (issue #403). Plain curl clears ClientHello mismatch
+#                        checks for many Cloudflare/Akamai upstreams; for
+#                        JA3/JA4 fingerprinting the follow-up is
+#                        `curl-impersonate` (swap this base image — no API
+#                        change). The full curl binary (~1 MB) replaces the
+#                        busybox stub: busybox curl lacks `--data-binary @-`,
+#                        `--proto`, and other flags `curl-runner.ts` relies on.
 # `wget` ships with busybox in Alpine → HEALTHCHECK adds no install cost.
-RUN apk add --no-cache libstdc++ libgcc ca-certificates
+RUN apk add --no-cache libstdc++ libgcc ca-certificates curl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 

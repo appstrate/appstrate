@@ -40,6 +40,7 @@ import {
   type CredentialsResponse,
   type SidecarConfig,
 } from "./helpers.ts";
+import { curlFetch, selectTlsClient, type CurlFetchInit } from "./curl-runner.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 
@@ -96,6 +97,12 @@ export interface ProviderCallDeps {
   config: SidecarConfig;
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
+  /**
+   * curl-backed fetch shim. Optional — defaults to {@link curlFetch}.
+   * Injected explicitly so unit tests can stub the spawn without
+   * touching the real `Bun.spawn` API. See issue #403.
+   */
+  curlFetchFn?: (url: string, init: CurlFetchInit) => Promise<Response>;
   fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
   refreshCredentials?: (providerId: string) => Promise<CredentialsResponse>;
   /**
@@ -121,6 +128,7 @@ export async function executeProviderCall(
 ): Promise<ProviderCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
+  const curlFetchFn = deps.curlFetchFn ?? curlFetch;
   const { providerId, targetUrl, method, callerHeaders, body, substituteBody } = args;
 
   // 1. Validate providerId format (defence in depth — callers should
@@ -234,10 +242,11 @@ export async function executeProviderCall(
         : storedCookies.join("; ");
     }
 
+    const builtBody = buildBody(activeCreds.credentials);
     const init: RequestInit & Record<string, unknown> = {
       method,
       headers: resolvedHeaders,
-      body: buildBody(activeCreds.credentials),
+      body: builtBody,
       signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
       proxy: args.proxyUrl || undefined,
     };
@@ -245,6 +254,34 @@ export async function executeProviderCall(
       // Required by fetch when sending a streaming request body.
       init.duplex = "half";
     }
+
+    // x-tlsClientByUrl dispatch (issue #403). When the provider's
+    // manifest declares a curl client for this URL, route through
+    // `curlFetch` instead of Bun's default fetch — different TLS
+    // stack, accepted by upstreams that reject Bun/undici clients
+    // (Cloudflare, Akamai, JA3/JA4 fingerprinting). Streaming bodies
+    // are NOT supported on the curl path — curl reads stdin as a
+    // single blob; falling back to fetch keeps the streaming
+    // contract intact for the (rare) buffered-on-curl + streaming-
+    // on-fetch hybrid case.
+    const client = selectTlsClient(
+      resolvedUrl,
+      activeCreds.tlsClientByUrl,
+      // Local alias keeps the signature `(url, patterns[]) => boolean`
+      // identical to authorizedUris consumption.
+      (url, patterns) => matchesAuthorizedUri(url, patterns),
+    );
+    if (client === "curl" && !(builtBody instanceof ReadableStream)) {
+      const curlInit: CurlFetchInit = {
+        method,
+        headers: resolvedHeaders,
+        timeoutMs: OUTBOUND_TIMEOUT_MS,
+        ...(args.proxyUrl ? { proxyUrl: args.proxyUrl } : {}),
+        ...(builtBody !== undefined ? { body: builtBody as ArrayBuffer | string } : {}),
+      };
+      return curlFetchFn(resolvedUrl, curlInit);
+    }
+
     return fetchFn(resolvedUrl, init);
   };
 

@@ -847,6 +847,109 @@ describe("buildProviderDefinitionFromManifest", () => {
     });
     expect(resolved.credentialFieldName).toBe("token");
   });
+
+  // Issue #403 — `x-tlsClientByUrl` vendor extension.
+  it("extracts x-tlsClientByUrl when present", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: {
+        authMode: "api_key",
+        "x-tlsClientByUrl": [
+          { pattern: "https://api.example.com/**", client: "curl" },
+          { pattern: "https://other.example.com/**", client: "undici" },
+        ],
+      },
+    });
+    expect(resolved.tlsClientByUrl).toEqual([
+      { pattern: "https://api.example.com/**", client: "curl" },
+      { pattern: "https://other.example.com/**", client: "undici" },
+    ]);
+  });
+
+  it("tlsClientByUrl is undefined when extension is absent", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: { authMode: "api_key" },
+    });
+    expect(resolved.tlsClientByUrl).toBeUndefined();
+  });
+
+  it("tlsClientByUrl is undefined when extension is an empty array", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: { authMode: "api_key", "x-tlsClientByUrl": [] },
+    });
+    expect(resolved.tlsClientByUrl).toBeUndefined();
+  });
+
+  it("tlsClientByUrl drops malformed entries", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: {
+        authMode: "api_key",
+        "x-tlsClientByUrl": [
+          { pattern: "https://ok.example.com/**", client: "curl" },
+          { pattern: "", client: "curl" }, // empty pattern
+          { pattern: "https://bad.example.com/**", client: "fake" }, // unknown client
+        ],
+      },
+    });
+    // The Zod schema is all-or-nothing — a malformed entry causes the
+    // whole field to fail to parse, so we expect `undefined` rather
+    // than partial pass-through. Validation at import-time catches the
+    // typo loudly; the runtime extractor fails closed.
+    expect(resolved.tlsClientByUrl).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────
+// x-tlsClientByUrl — manifest-level validation (issue #403)
+// ─────────────────────────────────────────────
+
+describe("validateManifest — x-tlsClientByUrl", () => {
+  it("accepts a provider with valid x-tlsClientByUrl", () => {
+    const result = validateManifest({
+      name: "@test/p",
+      version: "1.0.0",
+      type: "provider",
+      displayName: "P",
+      definition: {
+        authMode: "api_key",
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        "x-tlsClientByUrl": [{ pattern: "https://api.example.com/**", client: "curl" }],
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects unknown client values", () => {
+    const result = validateManifest({
+      name: "@test/p",
+      version: "1.0.0",
+      type: "provider",
+      displayName: "P",
+      definition: {
+        authMode: "api_key",
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        "x-tlsClientByUrl": [
+          { pattern: "https://api.example.com/**", client: "tls-fingerprint-bypass-3000" },
+        ],
+      },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/x-tlsClientByUrl/);
+  });
+
+  it("rejects empty pattern strings", () => {
+    const result = validateManifest({
+      name: "@test/p",
+      version: "1.0.0",
+      type: "provider",
+      displayName: "P",
+      definition: {
+        authMode: "api_key",
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        "x-tlsClientByUrl": [{ pattern: "", client: "curl" }],
+      },
+    });
+    expect(result.valid).toBe(false);
+  });
 });
 
 // ─────────────────────────────────────────────
