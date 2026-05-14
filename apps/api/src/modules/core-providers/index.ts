@@ -15,8 +15,8 @@
  * Featured semantics: any id present in `featuredModels` is marked
  * `featured: true` in the registry response. For catalog-covered
  * providers, the picker also exposes every other catalog model under
- * "All models". `recommendedModels` (optional subset) drives the
- * onboarding auto-seed.
+ * "All models". The same `featuredModels` set also drives the
+ * onboarding auto-seed (`use-auto-seed-models.ts`).
  *
  * The UI consumes this catalog exclusively via
  * `GET /api/model-provider-credentials/registry` — no client-side
