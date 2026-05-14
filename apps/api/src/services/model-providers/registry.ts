@@ -26,6 +26,7 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 
 // ---------------------------------------------------------------------------
 // Singleton state
@@ -53,7 +54,58 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
         `Provider ids must be unique — the second definition would silently shadow the first.`,
     );
   }
+  validateCatalogReferences(def);
   _byId.set(def.providerId, def);
+}
+
+/**
+ * Loud boot-time check that every id declared in `featuredModels` /
+ * `recommendedModels` exists in the resolved catalog
+ * (`catalogProviderId ?? providerId`), and that `recommendedModels` is a
+ * strict subset of `featuredModels`. The vendored pricing catalog is the
+ * single source of truth for per-model metadata — a typo or stale id
+ * here would silently render with `contextWindow: 0` and `cost: null`,
+ * so we fail fast.
+ *
+ * Providers with no own catalog AND no `catalogProviderId` are allowed
+ * IFF `featuredModels` is empty (openrouter, openai-compatible).
+ */
+function validateCatalogReferences(def: ModelProviderDefinition): void {
+  const catalogKey = def.catalogProviderId ?? def.providerId;
+  const catalogExists = hasCatalog(catalogKey);
+
+  if (def.featuredModels.length > 0 && !catalogExists) {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} declares featuredModels ` +
+        `but no catalog exists for ${JSON.stringify(catalogKey)}. ` +
+        `Either drop the featured list or set catalogProviderId to a catalogued provider.`,
+    );
+  }
+
+  if (catalogExists) {
+    for (const modelId of def.featuredModels) {
+      if (!lookupCatalogModel(catalogKey, modelId)) {
+        throw new Error(
+          `Model provider ${JSON.stringify(def.providerId)} features ` +
+            `${JSON.stringify(modelId)} which is not in the ${catalogKey} catalog. ` +
+            `Featured ids must exist in the catalog — drop the entry or add it via the refresh script.`,
+        );
+      }
+    }
+  }
+
+  if (def.recommendedModels) {
+    const featuredSet = new Set(def.featuredModels);
+    for (const modelId of def.recommendedModels) {
+      if (!featuredSet.has(modelId)) {
+        throw new Error(
+          `Model provider ${JSON.stringify(def.providerId)} recommends ` +
+            `${JSON.stringify(modelId)} which is not in featuredModels. ` +
+            `recommendedModels must be a subset of featuredModels.`,
+        );
+      }
+    }
+  }
 }
 
 /**

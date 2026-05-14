@@ -39,14 +39,9 @@ const testOAuthProvider: ModelProviderDefinition = {
     scopes: ["openid", "profile"],
     pkce: "S256",
   },
-  models: [
-    {
-      id: "test-model",
-      contextWindow: 8000,
-      capabilities: ["text"],
-      recommended: true,
-    },
-  ],
+  // Synthetic provider — no catalog, so featured stays empty. The OAuth
+  // identity/refresh tests under this fixture don't exercise the picker.
+  featuredModels: [],
 };
 
 /**
@@ -83,14 +78,7 @@ const testOAuthHooksProvider: ModelProviderDefinition = {
     scopes: ["openid", "profile"],
     pkce: "S256",
   },
-  models: [
-    {
-      id: "test-hooks-model",
-      contextWindow: 8000,
-      capabilities: ["text"],
-      recommended: true,
-    },
-  ],
+  featuredModels: [],
   requiredIdentityClaims: ["accountId"],
   hooks: {
     extractTokenIdentity(accessToken) {

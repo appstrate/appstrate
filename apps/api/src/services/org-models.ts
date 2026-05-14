@@ -300,7 +300,7 @@ export interface ResolvedModel {
   credentialId?: string;
 }
 
-interface OrgModelRow {
+interface DbOrgModelRow {
   apiShape: string;
   baseUrl: string;
   modelId: string;
@@ -313,41 +313,42 @@ interface OrgModelRow {
   cost: unknown;
 }
 
-type ResolvedSource =
-  | { kind: "system"; def: ModelDefinition }
-  | {
-      kind: "db";
-      row: OrgModelRow;
-      creds: { apiKey: string; providerId: string; accountId?: string };
-    };
+interface DbModelCredentials {
+  apiKey: string;
+  providerId: string;
+  accountId?: string;
+}
 
 /**
- * Build a `ResolvedModel` from either a system `ModelDefinition` (env)
- * or a DB `org_models` row + its credentials. The pricing fallback is
- * unified: an explicit per-row `cost` always wins; on miss we hit the
- * vendored pricing catalog (`@appstrate/core/data/pricing/*.json`) keyed
- * on `(providerId, modelId)`. Misses flow through as null and
+ * Build a `ResolvedModel` from a system `ModelDefinition` (env-driven).
+ * Pricing fallback: explicit `def.cost` wins; on miss the vendored
+ * pricing catalog (`@appstrate/core/data/pricing/*.json`) is consulted
+ * by `(providerId, modelId)`. Misses flow through as null and
  * `computeCostUsd()` short-circuits to 0.
  */
-function buildResolvedModel(source: ResolvedSource): ResolvedModel {
-  if (source.kind === "system") {
-    const def = source.def;
-    return {
-      providerId: def.providerId,
-      apiShape: def.apiShape,
-      baseUrl: def.baseUrl,
-      modelId: def.modelId,
-      apiKey: def.apiKey,
-      label: def.label,
-      input: def.input ?? null,
-      contextWindow: def.contextWindow ?? null,
-      maxTokens: def.maxTokens ?? null,
-      reasoning: def.reasoning ?? null,
-      cost: def.cost ?? lookupCatalogModel(def.providerId, def.modelId)?.cost ?? null,
-      isSystemModel: true,
-    };
-  }
-  const { row, creds } = source;
+function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
+  return {
+    providerId: def.providerId,
+    apiShape: def.apiShape,
+    baseUrl: def.baseUrl,
+    modelId: def.modelId,
+    apiKey: def.apiKey,
+    label: def.label,
+    input: def.input ?? null,
+    contextWindow: def.contextWindow ?? null,
+    maxTokens: def.maxTokens ?? null,
+    reasoning: def.reasoning ?? null,
+    cost: def.cost ?? lookupCatalogModel(def.providerId, def.modelId)?.cost ?? null,
+    isSystemModel: true,
+  };
+}
+
+/**
+ * Build a `ResolvedModel` from a DB `org_models` row + its credentials.
+ * Same pricing fallback as the system path: explicit per-row `cost` wins,
+ * then the vendored catalog, then null.
+ */
+function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   return {
     providerId: creds.providerId,
     apiShape: row.apiShape,
@@ -398,14 +399,14 @@ export async function resolveModel(
 
   if (dbDefault) {
     const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
-    if (creds) return buildResolvedModel({ kind: "db", row: dbDefault, creds });
+    if (creds) return buildDbResolvedModel(dbDefault, creds);
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return buildResolvedModel({ kind: "system", def });
+      return buildSystemResolvedModel(def);
     }
   }
 
@@ -418,7 +419,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
-    return buildResolvedModel({ kind: "system", def: systemDef });
+    return buildSystemResolvedModel(systemDef);
   }
 
   // Check DB
@@ -445,7 +446,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return buildResolvedModel({ kind: "db", row, creds });
+  return buildDbResolvedModel(row, creds);
 }
 
 // --- Connection test ---

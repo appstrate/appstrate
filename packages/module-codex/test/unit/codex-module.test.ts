@@ -31,9 +31,8 @@ describe("codex module", () => {
 
   it("exposes a non-empty model catalog with recommended seeds", () => {
     const codex = codexModule.modelProviders?.()[0];
-    expect(codex?.models.length).toBeGreaterThan(0);
-    const recommended = codex?.models.filter((m) => m.recommended).map((m) => m.id);
-    expect(recommended).toEqual(["gpt-5.5", "gpt-5.4-mini"]);
+    expect(codex?.featuredModels.length).toBeGreaterThan(0);
+    expect(codex?.recommendedModels).toEqual(["gpt-5.5", "gpt-5.4-mini"]);
   });
 });
 

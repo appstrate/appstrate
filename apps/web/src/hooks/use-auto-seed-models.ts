@@ -8,8 +8,8 @@
  *
  * Delegates to the platform's `POST /api/models/seed` endpoint, which:
  *   1. Skips entirely if any model already binds to this credential.
- *   2. Seeds every recommended model from the registry (falls back to the
- *      full model list when no model carries `recommended: true`).
+ *   2. Seeds every recommended model from the registry (falls back to
+ *      the featured list when no model carries `recommended: true`).
  *   3. Promotes the first inserted row to default if the org has none.
  *
  * One round-trip, atomic — the previous N-POST-per-model dance was
@@ -42,8 +42,12 @@ export function useAutoSeedRecommendedModels() {
     const entry = registry?.find((p) => p.providerId === providerId);
     if (!entry) return { created: 0, promotedDefault: false };
 
+    // Auto-seed = recommended ⊆ featured (never the full catalog).
+    // Catalog-covered providers expose every catalog model via the
+    // registry, but we only seed the curated subset on first connection.
     const recommended = entry.models.filter((m) => m.recommended);
-    const toSeed = recommended.length > 0 ? recommended : entry.models;
+    const featured = entry.models.filter((m) => m.featured);
+    const toSeed = recommended.length > 0 ? recommended : featured;
     if (toSeed.length === 0) return { created: 0, promotedDefault: false };
 
     try {

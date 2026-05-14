@@ -542,16 +542,16 @@ export interface ProviderRegistryModelEntry {
   cost: ModelCost | null;
   /**
    * Curated default for first-connection auto-seed (onboarding
-   * quick-connect). When at least one model carries the flag, the seeder
-   * inserts only those; otherwise it seeds every entry.
+   * quick-connect). When at least one model carries the flag, the
+   * seeder inserts only those; otherwise it falls back to every
+   * `featured: true` entry.
    */
   recommended: boolean;
   /**
    * Surface in the picker's "Featured" group for this provider. Set when
-   * the model id appears in the provider's curated `models[]` (see
-   * `core-providers/index.ts`); the rest of the catalog falls under
-   * "All models". Always `false` for non-catalog providers (their inline
-   * models are the entire picker, no two-tier grouping).
+   * the model id appears in the provider's `featuredModels` (see
+   * `core-providers/index.ts` or any module's `modelProviders()`
+   * contribution); the rest of the catalog falls under "All models".
    */
   featured: boolean;
 }

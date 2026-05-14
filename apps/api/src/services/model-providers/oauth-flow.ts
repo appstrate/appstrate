@@ -103,6 +103,6 @@ export async function importOAuthModelProviderConnection(
     credentialId,
     providerId: input.providerId,
     email,
-    availableModelIds: config.models.map((m) => m.id),
+    availableModelIds: [...config.featuredModels],
   };
 }

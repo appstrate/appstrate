@@ -159,30 +159,31 @@ export function createModelsRouter() {
       throw notFound(`Provider ${creds.providerId} not registered`);
     }
 
-    // Inline `registry.models[]` only carries the featured whitelist for
-    // catalog-covered providers. Merge with the vendored catalog so the
-    // seed route can accept any model id surfaced through the picker.
-    const inlineById = new Map(registry.models.map((m) => [m.id, m]));
-    const catalogById = new Map(listCatalogModels(creds.providerId).map((m) => [m.id, m]));
+    // The vendored pricing catalog is the single source of truth for
+    // per-model metadata. The picker surfaces ids from this catalog
+    // (filtered by `featuredModels` when `catalogProviderId` is set), so
+    // we accept any id that lives in the resolved catalog.
+    const catalogKey = registry.catalogProviderId ?? creds.providerId;
+    const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
+    const featuredSet = new Set(registry.featuredModels);
     const entries: SeedModelEntry[] = [];
     for (const modelId of data.modelIds) {
-      const inline = inlineById.get(modelId);
       const cat = catalogById.get(modelId);
-      if (!inline && !cat) {
-        throw invalidRequest(`Model ${modelId} is not part of provider ${creds.providerId}`);
+      if (!cat) {
+        throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
       }
-      const capabilities = inline?.capabilities ?? cat?.capabilities ?? [];
-      const contextWindow = inline?.contextWindow ?? cat?.contextWindow ?? 0;
-      const maxTokens = inline?.maxTokens ?? cat?.maxTokens ?? undefined;
+      if (registry.catalogProviderId && !featuredSet.has(modelId)) {
+        throw invalidRequest(`Model ${modelId} is not featured for provider ${creds.providerId}`);
+      }
       entries.push({
         modelId,
-        label: inline?.label ?? modelId,
+        label: cat.label,
         apiShape: registry.apiShape,
         baseUrl: creds.baseUrl,
-        input: capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
-        contextWindow,
-        maxTokens: maxTokens === null ? undefined : maxTokens,
-        reasoning: capabilities.includes("reasoning"),
+        input: cat.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+        contextWindow: cat.contextWindow,
+        maxTokens: cat.maxTokens ?? undefined,
+        reasoning: cat.capabilities.includes("reasoning"),
       });
     }
 

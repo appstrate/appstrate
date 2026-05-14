@@ -65,7 +65,7 @@ describe("importOAuthModelProviderConnection", () => {
 
     expect(result.providerId).toBe(TEST_OAUTH_PROVIDER_ID);
     expect(result.credentialId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.availableModelIds.length).toBeGreaterThan(0);
+    expect(Array.isArray(result.availableModelIds)).toBe(true);
 
     const [row] = await db
       .select()

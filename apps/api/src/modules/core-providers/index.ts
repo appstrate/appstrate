@@ -5,20 +5,18 @@
  * shipped with every Appstrate deployment.
  *
  * Each entry is a `ModelProviderDefinition` carrying wire format, auth
- * metadata, and a *curated featured list* (3-5 ids per provider). For
- * providers covered by the vendored LiteLLM catalog (openai / anthropic
- * / mistral / google-ai / cerebras / groq / xai), the inline `models[]`
- * carries only `{ id, label?, recommended? }` — `contextWindow`,
- * `maxTokens`, `capabilities`, and `cost` come from
- * `apps/api/src/services/pricing-catalog.ts`. Inline metadata stays
- * full only for non-catalog providers (codex subscription,
- * `openai-compatible`, `openrouter`'s live-search shape).
+ * metadata, and a curated featured list (just catalog ids). All per-
+ * model metadata (label, contextWindow, maxTokens, capabilities, cost)
+ * comes from the vendored LiteLLM catalog
+ * (`apps/api/src/services/pricing-catalog.ts`). A boot-time check fails
+ * loudly if any featured id is absent from the catalog — there are no
+ * inline overrides.
  *
- * Featured semantics: any id present in this inline `models[]` is
- * marked `featured: true` in the registry response. The picker also
- * exposes every other catalog model under "All models" — so the
- * platform stays a marketplace of the full vendored catalog without
- * losing editorial curation up top.
+ * Featured semantics: any id present in `featuredModels` is marked
+ * `featured: true` in the registry response. For catalog-covered
+ * providers, the picker also exposes every other catalog model under
+ * "All models". `recommendedModels` (optional subset) drives the
+ * onboarding auto-seed.
  *
  * The UI consumes this catalog exclusively via
  * `GET /api/model-provider-credentials/registry` — no client-side
@@ -49,11 +47,7 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  models: [
-    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-    { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
-    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  ],
+  featuredModels: ["claude-haiku-4-5-20251001", "claude-opus-4-6", "claude-sonnet-4-6"],
 };
 
 const cerebras: ModelProviderDefinition = {
@@ -66,13 +60,7 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  // `llama-3.3-70b` (with dash, LiteLLM canonical) — note the catalog
-  // doesn't carry `llama-4-scout-17b-16e-instruct`; users who need it
-  // pick "Custom".
-  models: [
-    { id: "llama-3.3-70b", label: "Llama 3.3 70B" },
-    { id: "gpt-oss-120b", label: "GPT-OSS 120B" },
-  ],
+  featuredModels: ["llama-3.3-70b", "gpt-oss-120b"],
 };
 
 const googleAi: ModelProviderDefinition = {
@@ -86,11 +74,7 @@ const googleAi: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  models: [
-    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  ],
+  featuredModels: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
 };
 
 const groq: ModelProviderDefinition = {
@@ -103,12 +87,7 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  // `gemma2-9b-it` / `mixtral-8x7b-32768` aren't in LiteLLM's groq
-  // index; users still pick them via "Custom" if needed.
-  models: [
-    { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
-    { id: "kimi-k2-instruct-0905", label: "Kimi K2 Instruct" },
-  ],
+  featuredModels: ["llama-3.3-70b-versatile", "kimi-k2-instruct-0905"],
 };
 
 const mistral: ModelProviderDefinition = {
@@ -122,12 +101,12 @@ const mistral: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  models: [
-    { id: "codestral-latest", label: "Codestral" },
-    { id: "devstral-2512", label: "Devstral 2" },
-    { id: "mistral-large-latest", label: "Mistral Large" },
-    { id: "mistral-medium-latest", label: "Mistral Medium" },
-    { id: "mistral-small-latest", label: "Mistral Small" },
+  featuredModels: [
+    "codestral-latest",
+    "devstral-2512",
+    "mistral-large-latest",
+    "mistral-medium-latest",
+    "mistral-small-latest",
   ],
 };
 
@@ -142,11 +121,7 @@ const openai: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  models: [
-    { id: "gpt-5-mini", label: "GPT-5 mini" },
-    { id: "gpt-5.4", label: "GPT-5.4" },
-    { id: "o4-mini", label: "o4-mini" },
-  ],
+  featuredModels: ["gpt-5-mini", "gpt-5.4", "o4-mini"],
 };
 
 const openrouter: ModelProviderDefinition = {
@@ -160,7 +135,7 @@ const openrouter: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   // Empty catalog — the UI fetches models live via the OpenRouter search combobox.
-  models: [],
+  featuredModels: [],
 };
 
 const xai: ModelProviderDefinition = {
@@ -173,11 +148,7 @@ const xai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.x.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    { id: "grok-3", label: "Grok 3" },
-    { id: "grok-3-mini", label: "Grok 3 Mini" },
-    { id: "grok-4", label: "Grok 4" },
-  ],
+  featuredModels: ["grok-3", "grok-3-mini", "grok-4"],
 };
 
 const openaiCompatible: ModelProviderDefinition = {
@@ -190,7 +161,7 @@ const openaiCompatible: ModelProviderDefinition = {
   defaultBaseUrl: "http://localhost:11434",
   baseUrlOverridable: true,
   authMode: "api_key",
-  models: [],
+  featuredModels: [],
 };
 
 const coreProvidersModule: AppstrateModule = {

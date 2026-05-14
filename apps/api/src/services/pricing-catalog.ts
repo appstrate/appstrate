@@ -92,6 +92,11 @@ export function listCatalogModels(providerId: string): Array<CatalogModel & { id
   return Object.entries(file).map(([id, entry]) => ({ id, ...entry }));
 }
 
+/** True iff `providerId` has a vendored catalog file. Used at boot to gate `featuredModels` validation. */
+export function hasCatalog(providerId: string): boolean {
+  return providerId in PROVIDER_INDEX;
+}
+
 /**
  * Resolve a single `(providerId, modelId)` to its catalog entry.
  * Returns null on any miss — unmapped provider, unknown model id, or

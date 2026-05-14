@@ -363,7 +363,7 @@ export interface AppstrateModule {
    *   apiShape: "openai-chat",
    *   authMode: "oauth2",
    *   oauth: { clientId: "...", ... },
-   *   models: [...],
+   *   featuredModels: [...],
    *   hooks: { extractTokenIdentity: (jwt) => ({ accountId: "...", email: "..." }) },
    * }]
    * ```
@@ -513,9 +513,6 @@ export interface ModuleEvents {
 // per provider definition rather than by hook name.
 // ---------------------------------------------------------------------------
 
-/** Capabilities surfaced for model selection UIs. */
-export type ModelProviderCapability = "text" | "image" | "reasoning" | "long-context-1m";
-
 /** Per-1M-token cost (USD). All cache fields optional — providers may omit pricing. */
 export interface ModelCost {
   /** USD per 1M input tokens. */
@@ -526,44 +523,6 @@ export interface ModelCost {
   cacheRead?: number;
   /** USD per 1M cache-write tokens (Anthropic-style prompt caching). */
   cacheWrite?: number;
-}
-
-/**
- * A single selectable model exposed by a provider.
- *
- * For providers covered by the vendored LiteLLM catalog
- * (`apps/api/src/services/pricing-catalog.ts`), only `id`, optional
- * `label` (for a prettier display), and optional `recommended` are
- * read — the registry endpoint pulls `contextWindow`, `maxTokens`,
- * `capabilities`, and `cost` from the catalog. The inline metadata
- * fields below remain for non-catalog providers (Codex subscription,
- * `openai-compatible`).
- */
-export interface ModelProviderModelEntry {
-  /** Canonical model identifier accepted by the provider's API. */
-  id: string;
-  /** Human-readable label for picker UIs. Falls back to `id` when absent. */
-  label?: string;
-  /** Maximum input context window in tokens. Required for non-catalog providers. */
-  contextWindow?: number;
-  /** Maximum response tokens (provider-defined ceiling). */
-  maxTokens?: number;
-  /** Surfaced capabilities for selection UIs. */
-  capabilities?: readonly ModelProviderCapability[];
-  /**
-   * Per-token cost override. The vendored LiteLLM catalog is the primary
-   * source for catalog-covered providers; set inline only for non-catalog
-   * providers (codex/`openai-compatible`) or to pin a value diverging from
-   * upstream.
-   */
-  cost?: ModelCost;
-  /**
-   * Curated default for first-connection auto-seed flows. When `true`, the
-   * model is created in `org_models` automatically right after a fresh
-   * pairing succeeds. If no model in a provider's list carries this flag,
-   * callers fall back to seeding every entry.
-   */
-  recommended?: true;
 }
 
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
@@ -781,26 +740,34 @@ export interface ModelProviderDefinition {
 
   // — Catalog —
   /**
-   * Curated model whitelist. Has two roles depending on catalog coverage:
-   *
-   *   - **Catalog-covered providers** (openai/anthropic/mistral/google-ai/
-   *     cerebras/groq/xai): the entries here mark the picker's "Featured"
-   *     group — typically 3-5 pretty-labelled ids. The registry endpoint
-   *     unions them with `listCatalogModels(providerId)` so every catalog
-   *     model still appears (under "All models"); the inline entries
-   *     contribute their (better) label and the `featured: true` marker.
-   *     Inline metadata fields beyond `id`/`label`/`recommended` are
-   *     ignored — context window, capabilities, and cost come from the
-   *     catalog.
-   *   - **Non-catalog providers** (codex/Claude OAuth, openai-compatible,
-   *     openrouter's live-search shape): the entries here are the
-   *     ENTIRE picker for that provider. The registry endpoint surfaces
-   *     them as-is, with full inline metadata.
-   *
-   * May be empty when the picker should show only "Custom" for this
-   * provider (openrouter, openai-compatible).
+   * Catalog key used to look up per-model metadata (`label`,
+   * `contextWindow`, `maxTokens`, `capabilities`, `cost`). Defaults to
+   * `providerId` when omitted — set this when an OAuth-flavoured
+   * provider reuses an underlying API catalog (e.g. `codex` →
+   * `"openai"`, `claude-code` → `"anthropic"`).
    */
-  models: readonly ModelProviderModelEntry[];
+  catalogProviderId?: string;
+
+  /**
+   * Catalog model ids to surface in the picker's "Featured" section AND
+   * the auto-seed fallback list. Every id MUST exist in the resolved
+   * catalog (`catalogProviderId ?? providerId`) — boot fails loudly
+   * otherwise. For providers whose catalog covers the whole product
+   * (openai/anthropic/mistral/google-ai/cerebras/groq/xai), the picker
+   * also exposes every other catalog model under "All models". For
+   * providers backed by a foreign catalog (`catalogProviderId` set), the
+   * picker shows ONLY these ids — the underlying API has more models
+   * than the OAuth product actually exposes. Empty for openrouter
+   * (live-search) and openai-compatible (Custom only).
+   */
+  featuredModels: readonly string[];
+
+  /**
+   * Subset of `featuredModels` to auto-seed in `org_models` on first
+   * connection. Boot validation enforces the subset relation. Defaults
+   * to `featuredModels` itself when omitted (auto-seed all featured).
+   */
+  recommendedModels?: readonly string[];
 
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */
