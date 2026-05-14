@@ -45,13 +45,21 @@ import { logger } from "./logger.ts";
 
 /**
  * Body modes the proxy core accepts. The HTTP handler can produce
- * any of the three; the MCP handler only ever produces "buffered"
- * (since JSON-RPC carries body as a string).
+ * "none" / "buffered" / "streaming"; the MCP handler produces
+ * "buffered" for text + binary uploads, and "formData" for the
+ * `{ multipart: [...] }` body shape.
+ *
+ * The `formData` variant carries a builder closure rather than a
+ * pre-baked `FormData` so the per-attempt body can be regenerated with
+ * the current credentials — `substituteBody: true` on a string field
+ * part must see the refreshed token after a 401-retry, identical to
+ * the buffered text path.
  */
 export type ProviderRequestBody =
   | { kind: "none" }
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
-  | { kind: "streaming"; stream: ReadableStream };
+  | { kind: "streaming"; stream: ReadableStream }
+  | { kind: "formData"; build: (activeCreds: Record<string, string>) => FormData };
 
 export interface ProviderCallArgs {
   providerId: string;
@@ -204,9 +212,10 @@ export async function executeProviderCall(
   /** Build the request body with credential substitution applied. */
   const buildBody = (
     activeCreds: Record<string, string>,
-  ): ArrayBuffer | string | ReadableStream | undefined => {
+  ): ArrayBuffer | string | ReadableStream | FormData | undefined => {
     if (body.kind === "none") return undefined;
     if (body.kind === "streaming") return body.stream;
+    if (body.kind === "formData") return body.build(activeCreds);
     if (substituteBody && body.text !== undefined) {
       return substituteVars(body.text, activeCreds);
     }
@@ -232,6 +241,21 @@ export async function executeProviderCall(
       resolvedHeaders["cookie"] = existing
         ? `${existing}; ${storedCookies.join("; ")}`
         : storedCookies.join("; ");
+    }
+
+    // For the FormData body shape, drop any caller-supplied
+    // multipart Content-Type so Bun's fetch generates the right
+    // `boundary=…` token itself — supplying a stale boundary would
+    // produce a wire-broken request.
+    if (body.kind === "formData") {
+      for (const key of Object.keys(resolvedHeaders)) {
+        if (
+          key.toLowerCase() === "content-type" &&
+          /^multipart\//i.test(resolvedHeaders[key] ?? "")
+        ) {
+          delete resolvedHeaders[key];
+        }
+      }
     }
 
     const init: RequestInit & Record<string, unknown> = {
