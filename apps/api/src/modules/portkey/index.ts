@@ -19,7 +19,11 @@
 import type { AppstrateModule } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
-import { setPortkeyRouter, type PortkeyRouter } from "../../services/portkey-router.ts";
+import {
+  setPortkeyInprocessRouter,
+  setPortkeyRouter,
+  type PortkeyRouter,
+} from "../../services/portkey-router.ts";
 import { buildPortkeyRouting } from "./config.ts";
 import { getPortkeyPort, startPortkey, stopPortkey } from "./lifecycle.ts";
 
@@ -37,6 +41,15 @@ function portkeyUrlForSidecar(port: number): string {
   return `http://host.docker.internal:${port}`;
 }
 
+/**
+ * In-process callers (the `apps/api` process itself, hosting
+ * `services/llm-proxy/*` for remote runners) reach Portkey on the
+ * loopback. The sub-process listens on `127.0.0.1:<port>`.
+ */
+function portkeyUrlForInprocess(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
+
 const portkeyModule: AppstrateModule = {
   manifest: { id: "portkey", name: "Portkey Gateway", version: "1.0.0" },
 
@@ -45,15 +58,19 @@ const portkeyModule: AppstrateModule = {
     await startPortkey({ port });
 
     const sidecarUrl = portkeyUrlForSidecar(port);
+    const inprocessUrl = portkeyUrlForInprocess(port);
 
-    const router: PortkeyRouter = (model) => buildPortkeyRouting(model, sidecarUrl);
-    setPortkeyRouter(router);
+    const sidecarRouter: PortkeyRouter = (model) => buildPortkeyRouting(model, sidecarUrl);
+    const inprocessRouter: PortkeyRouter = (model) => buildPortkeyRouting(model, inprocessUrl);
+    setPortkeyRouter(sidecarRouter);
+    setPortkeyInprocessRouter(inprocessRouter);
 
-    logger.info("Portkey module ready", { port, sidecarUrl });
+    logger.info("Portkey module ready", { port, sidecarUrl, inprocessUrl });
   },
 
   async shutdown() {
     setPortkeyRouter(null);
+    setPortkeyInprocessRouter(null);
     const port = getPortkeyPort();
     await stopPortkey();
     if (port !== null) logger.info("Portkey module stopped", { port });

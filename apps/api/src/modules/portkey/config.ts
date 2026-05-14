@@ -10,8 +10,7 @@
  * single entry here.
  */
 
-import type { ResolvedModel } from "../../services/org-models.ts";
-import type { PortkeyRouting } from "../../services/portkey-router.ts";
+import type { PortkeyModelInput, PortkeyRouting } from "../../services/portkey-router.ts";
 
 /**
  * `apiShape` (Appstrate canonical) → Portkey provider slug. Slugs are
@@ -31,6 +30,26 @@ const API_SHAPE_TO_PORTKEY_PROVIDER: Record<string, string> = {
   "bedrock-converse-stream": "bedrock",
 };
 
+/**
+ * Per-shape path prefix appended to the gateway base URL so the final
+ * URL matches Portkey's HTTP surface for each provider:
+ *
+ *   • OpenAI / Mistral SDKs append `/chat/completions` to a `/v1`-baked
+ *     baseUrl. Portkey serves them at `<gateway>/v1/chat/completions`,
+ *     so we bake `/v1` into the routing baseUrl.
+ *   • Anthropic SDK already includes `/v1` in the request path
+ *     (`/v1/messages`), so the gateway baseUrl stays bare.
+ *
+ * Unmapped shapes default to empty — the gateway baseUrl is passed
+ * through unchanged, matching the historical direct-upstream behavior.
+ */
+const API_SHAPE_PORTKEY_PATH_PREFIX: Record<string, string> = {
+  "openai-chat": "/v1",
+  "openai-completions": "/v1",
+  "openai-responses": "/v1",
+  "mistral-conversations": "/v1",
+};
+
 /** HTTP status codes Portkey will retry on. Mirrors the smoke-test config. */
 const RETRY_ON_STATUS = [429, 500, 502, 503, 504] as const;
 
@@ -42,7 +61,10 @@ const RETRY_ON_STATUS = [429, 500, 502, 503, 504] as const;
  * incremental — adding a new provider is one map entry above without
  * breaking the existing path.
  */
-export function buildPortkeyRouting(model: ResolvedModel, baseUrl: string): PortkeyRouting | null {
+export function buildPortkeyRouting(
+  model: PortkeyModelInput,
+  baseUrl: string,
+): PortkeyRouting | null {
   const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
   if (!provider) return null;
 
@@ -64,8 +86,10 @@ export function buildPortkeyRouting(model: ResolvedModel, baseUrl: string): Port
     config.custom_host = model.baseUrl;
   }
 
+  const prefix = API_SHAPE_PORTKEY_PATH_PREFIX[model.apiShape] ?? "";
+  const trimmedBase = baseUrl.replace(/\/+$/, "");
   return {
-    baseUrl,
+    baseUrl: `${trimmedBase}${prefix}`,
     portkeyConfig: JSON.stringify(config),
   };
 }

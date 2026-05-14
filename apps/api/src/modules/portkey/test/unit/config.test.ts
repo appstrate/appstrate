@@ -2,16 +2,13 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildPortkeyRouting, _API_SHAPE_TO_PORTKEY_PROVIDER } from "../../config.ts";
-import type { ResolvedModel } from "../../../../services/org-models.ts";
+import type { PortkeyModelInput } from "../../../../services/portkey-router.ts";
 
-function makeModel(overrides: Partial<ResolvedModel> = {}): ResolvedModel {
+function makeModel(overrides: Partial<PortkeyModelInput> = {}): PortkeyModelInput {
   return {
     apiShape: "openai-completions",
     baseUrl: "https://api.openai.com/v1",
-    modelId: "gpt-5.4",
     apiKey: "sk-test-12345",
-    label: "GPT 5.4",
-    isSystemModel: false,
     ...overrides,
   };
 }
@@ -67,8 +64,29 @@ describe("buildPortkeyRouting", () => {
     expect(_API_SHAPE_TO_PORTKEY_PROVIDER["openai-codex-responses"]).toBeUndefined();
   });
 
-  it("threads the supplied sidecar URL through verbatim", () => {
+  it("appends /v1 to the gateway baseUrl for OpenAI-family shapes", () => {
     const r = buildPortkeyRouting(makeModel(), "http://host.docker.internal:9001");
+    expect(r!.baseUrl).toBe("http://host.docker.internal:9001/v1");
+  });
+
+  it("does not append /v1 for anthropic-messages (path already carries /v1)", () => {
+    const r = buildPortkeyRouting(
+      makeModel({ apiShape: "anthropic-messages", baseUrl: "https://api.anthropic.com" }),
+      "http://host.docker.internal:9001",
+    );
     expect(r!.baseUrl).toBe("http://host.docker.internal:9001");
+  });
+
+  it("appends /v1 for mistral-conversations", () => {
+    const r = buildPortkeyRouting(
+      makeModel({ apiShape: "mistral-conversations", baseUrl: "https://api.mistral.ai/v1" }),
+      "http://pk:8787",
+    );
+    expect(r!.baseUrl).toBe("http://pk:8787/v1");
+  });
+
+  it("strips a trailing slash on the gateway URL before appending the prefix", () => {
+    const r = buildPortkeyRouting(makeModel(), "http://pk:8787/");
+    expect(r!.baseUrl).toBe("http://pk:8787/v1");
   });
 });

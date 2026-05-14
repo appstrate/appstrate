@@ -37,6 +37,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { seedApiKey, seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import {
+  setPortkeyInprocessRouter,
+  type PortkeyRouter,
+} from "../../../src/services/portkey-router.ts";
 
 const app = getTestApp();
 
@@ -456,5 +460,126 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
       }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * Portkey in-process routing — covers phase 1.5 (#437) wiring of
+ * `services/llm-proxy/*` through the optional Portkey gateway.
+ *
+ * The legacy direct-upstream path is already covered by every test
+ * above (no router installed). These tests exercise the router-installed
+ * path: upstream URL is swapped to the gateway, `x-portkey-config` is
+ * injected on the upstream call, and cost tracking still happens
+ * (Portkey is transparent — adapter parses the same response shape).
+ */
+describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+
+  afterEach(() => {
+    restoreFetch();
+    setPortkeyInprocessRouter(null);
+  });
+
+  it("swaps upstream to Portkey and injects x-portkey-config when the router is installed", async () => {
+    const h = await buildHarness();
+
+    // Mirrors the production routing emitted by
+    // `apps/api/src/modules/portkey/config.ts`: OpenAI-family shapes get
+    // `/v1` baked into the routing baseUrl so the proxy's appended
+    // `/chat/completions` lands on Portkey's `/v1/chat/completions`.
+    const router: PortkeyRouter = (model) => ({
+      baseUrl: "http://127.0.0.1:8787/v1",
+      portkeyConfig: JSON.stringify({
+        provider: "openai",
+        api_key: model.apiKey,
+        retry: { attempts: 3, on_status_codes: [429, 500, 502, 503, 504] },
+      }),
+    });
+    setPortkeyInprocessRouter(router);
+
+    let captured: { url: string; headers: Headers; bodyBytes: Uint8Array } | null = null;
+    mockUpstream(async (input, init) => {
+      captured = {
+        url: typeof input === "string" ? input : (input as URL).toString(),
+        headers: new Headers(init?.headers as Record<string, string>),
+        bodyBytes: init?.body as Uint8Array,
+      };
+      return new Response(
+        JSON.stringify({
+          id: "chatcmpl_pk",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 12, completion_tokens: 8 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured).not.toBeNull();
+    // URL re-pointed at the local Portkey gateway, path preserved verbatim.
+    expect(captured!.url).toBe("http://127.0.0.1:8787/v1/chat/completions");
+    // The inline `x-portkey-config` carries the routing + credential.
+    const cfg = captured!.headers.get("x-portkey-config");
+    expect(cfg).not.toBeNull();
+    const parsed = JSON.parse(cfg!) as { provider: string; api_key: string };
+    expect(parsed.provider).toBe("openai");
+    expect(parsed.api_key).toBe("sk-upstream-42");
+    // Body still has the substituted real-model id (adapter ran).
+    const body = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
+    expect(body.model).toBe("gpt-4o-2024-08-06");
+    // Cost is still recorded — Portkey is transparent for usage parsing.
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row).toBeDefined();
+    expect(row!.inputTokens).toBe(12);
+    expect(row!.outputTokens).toBe(8);
+  });
+
+  it("falls through to direct upstream when the router returns null (unmapped apiShape)", async () => {
+    const h = await buildHarness();
+    // Router installed but rejects this model — proxy must keep its
+    // legacy behavior (direct upstream + no x-portkey-config).
+    setPortkeyInprocessRouter(() => null);
+
+    let captured: { url: string; headers: Headers } | null = null;
+    mockUpstream(async (input, init) => {
+      captured = {
+        url: typeof input === "string" ? input : (input as URL).toString(),
+        headers: new Headers(init?.headers as Record<string, string>),
+      };
+      return new Response(
+        JSON.stringify({
+          id: "chatcmpl_direct",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
+    expect(captured!.headers.get("x-portkey-config")).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ import { llmUsage } from "@appstrate/db/schema";
 import { loadModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
+import { getPortkeyInprocessRouter } from "../portkey-router.ts";
 import type {
   LlmProxyAdapter,
   LlmProxyPrincipal,
@@ -81,11 +82,32 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const resolved = await resolvePresetForOrg(presetId, inputs.principal.orgId, inputs.adapter.api);
 
   const rewrittenBody = inputs.adapter.substituteModel(inputs.rawBody, resolved.realModelId);
-  const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
+
+  // Consult the Portkey in-process router (installed by the `portkey`
+  // module when `MODULES=portkey,…`). When present, swap the upstream
+  // URL to the local Portkey gateway and inject `x-portkey-config` so
+  // Portkey routes + retries + honors `Retry-After` server-side. Cost
+  // tracking is unaffected: Portkey passes the upstream response
+  // (including the SSE `usage` frame / JSON `usage` block) verbatim, so
+  // the existing adapter-driven metering still applies. When the module
+  // is absent (default OSS), this is a no-op — direct upstream path.
+  const portkeyRouting =
+    getPortkeyInprocessRouter()?.({
+      apiShape: resolved.api,
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.upstreamApiKey,
+    }) ?? null;
+
+  const upstreamUrl = portkeyRouting
+    ? joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath)
+    : joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.upstreamApiKey,
   );
+  if (portkeyRouting) {
+    upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
+  }
 
   const started = Date.now();
   let upstream: Response;
