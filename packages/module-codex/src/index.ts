@@ -215,7 +215,7 @@ const codexProvider: ModelProviderDefinition = {
   // `gpt-5.3-codex` is intentionally absent: not vendored by LiteLLM,
   // operators add it manually via the UI if needed.
   catalogProviderId: "openai",
-  featuredModels: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4"],
+  featuredModels: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a
