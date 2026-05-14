@@ -540,7 +540,14 @@ export interface ModelProviderModelEntry {
   maxTokens?: number;
   /** Surfaced capabilities for selection UIs. */
   capabilities: readonly ModelProviderCapability[];
-  /** Default per-token cost. Self-hosters can override via env. */
+  /**
+   * Per-token cost override. The platform's vendored pricing catalog
+   * (`apps/api/src/services/pricing-catalog.ts`) is the primary source —
+   * the registry endpoint fills `cost` from `lookupModelCost(apiShape, id)`
+   * when this field is unset. Set it inline only for providers absent
+   * from the catalog (currently cerebras / groq / xai / codex) or to
+   * pin a value that diverges from upstream.
+   */
   cost?: ModelCost;
   /**
    * Curated default for first-connection auto-seed flows. When `true`, the

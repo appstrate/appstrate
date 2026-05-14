@@ -5,10 +5,16 @@
  * shipped with every Appstrate deployment.
  *
  * Each entry is a `ModelProviderDefinition` carrying its own apiShape,
- * default base URL, and a curated model catalog (id, label, context
- * window, capabilities, per-token cost). The UI consumes this catalog
- * exclusively via `GET /api/model-provider-credentials/registry` — no
- * client-side hardcoding. Adding a new provider is a single entry here.
+ * default base URL, and a curated model whitelist (id, label, context
+ * window, capabilities). Per-token cost is **not** stored inline when
+ * the model is covered by the vendored Portkey pricing catalog
+ * (openai / anthropic / mistral / google) — the registry endpoint
+ * derives `cost` from `lookupModelCost(apiShape, id)` at serialization,
+ * keeping a single source of truth. Inline `cost` is reserved for
+ * catalog-absent providers (cerebras, groq, xai, codex) or intentional
+ * overrides. The UI consumes this catalog exclusively via
+ * `GET /api/model-provider-credentials/registry` — no client-side
+ * hardcoding. Adding a new provider is a single entry here.
  *
  * OAuth-flavoured providers live in their own opt-in workspace modules
  * (`@appstrate/module-codex`, `@appstrate/module-claude-code`, …). The
@@ -37,7 +43,6 @@ const anthropic: ModelProviderDefinition = {
       contextWindow: 200_000,
       maxTokens: 64_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
     },
     {
       id: "claude-opus-4-6",
@@ -45,7 +50,6 @@ const anthropic: ModelProviderDefinition = {
       contextWindow: 200_000,
       maxTokens: 128_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
     },
     {
       id: "claude-sonnet-4-6",
@@ -53,7 +57,6 @@ const anthropic: ModelProviderDefinition = {
       contextWindow: 200_000,
       maxTokens: 64_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
     },
   ],
 };
@@ -178,7 +181,6 @@ const mistral: ModelProviderDefinition = {
       contextWindow: 256_000,
       maxTokens: 32_768,
       capabilities: ["text"],
-      cost: { input: 0.3, output: 0.9 },
     },
     {
       id: "devstral-2512",
@@ -186,7 +188,6 @@ const mistral: ModelProviderDefinition = {
       contextWindow: 256_000,
       maxTokens: 32_768,
       capabilities: ["text"],
-      cost: { input: 0.4, output: 2 },
     },
     {
       id: "mistral-large-latest",
@@ -194,7 +195,6 @@ const mistral: ModelProviderDefinition = {
       contextWindow: 128_000,
       maxTokens: 32_768,
       capabilities: ["text", "image"],
-      cost: { input: 2, output: 6 },
     },
     {
       id: "mistral-medium-latest",
@@ -202,7 +202,6 @@ const mistral: ModelProviderDefinition = {
       contextWindow: 128_000,
       maxTokens: 32_768,
       capabilities: ["text"],
-      cost: { input: 0.4, output: 2 },
     },
     {
       id: "mistral-small-latest",
@@ -210,7 +209,6 @@ const mistral: ModelProviderDefinition = {
       contextWindow: 128_000,
       maxTokens: 32_768,
       capabilities: ["text", "image"],
-      cost: { input: 0.15, output: 0.6 },
     },
   ],
 };
@@ -233,7 +231,6 @@ const openai: ModelProviderDefinition = {
       contextWindow: 400_000,
       maxTokens: 128_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.75, output: 4.5 },
     },
     {
       id: "gpt-5.4",
@@ -241,7 +238,6 @@ const openai: ModelProviderDefinition = {
       contextWindow: 1_050_000,
       maxTokens: 128_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2.5, output: 15 },
     },
     {
       id: "o4-mini",
@@ -249,7 +245,6 @@ const openai: ModelProviderDefinition = {
       contextWindow: 200_000,
       maxTokens: 100_000,
       capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1.1, output: 4.4 },
     },
   ],
 };

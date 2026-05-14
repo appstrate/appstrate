@@ -15,6 +15,48 @@ describe("Model Provider Keys API", () => {
     ctx = await createTestContext();
   });
 
+  describe("GET /api/model-provider-credentials/registry", () => {
+    it("fills cost from the pricing catalog when the inline definition omits it", async () => {
+      // Phase 5 invariant: openai/anthropic/mistral are covered by the
+      // vendored Portkey catalog, so `core-providers/index.ts` no longer
+      // duplicates `cost` inline — the registry serializer must derive
+      // it via `lookupModelCost(apiShape, modelId)`. If this regresses,
+      // the form UI and the run cost would diverge again.
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { providerId: string; models: { id: string; cost: unknown }[] }[];
+      };
+      const anthropic = body.data.find((p) => p.providerId === "anthropic");
+      expect(anthropic).toBeDefined();
+      const haiku = anthropic!.models.find((m) => m.id === "claude-haiku-4-5-20251001");
+      expect(haiku).toBeDefined();
+      expect(haiku!.cost).toEqual({
+        input: expect.closeTo(1, 4),
+        output: expect.closeTo(5, 4),
+        cacheRead: expect.closeTo(0.1, 4),
+        cacheWrite: expect.closeTo(1.25, 4),
+      });
+    });
+
+    it("keeps inline cost for providers absent from the catalog (xai)", async () => {
+      // xAI has no pricing JSON shipped under `apps/api/src/data/pricing/`
+      // — the inline `cost` on `core-providers/index.ts` stays the only
+      // source. Pin that the registry surfaces it unchanged.
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as {
+        data: { providerId: string; models: { id: string; cost: unknown }[] }[];
+      };
+      const xai = body.data.find((p) => p.providerId === "xai");
+      const grok4 = xai?.models.find((m) => m.id === "grok-4");
+      expect(grok4?.cost).toEqual({ input: 2, output: 6 });
+    });
+  });
+
   describe("GET /api/model-provider-credentials", () => {
     it("returns list of model provider keys", async () => {
       const res = await app.request("/api/model-provider-credentials", {

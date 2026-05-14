@@ -15,6 +15,7 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
+import { lookupModelCost } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry } from "@appstrate/shared-types";
 import { testModelConfig } from "../services/org-models.ts";
@@ -94,13 +95,17 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
+      // Cost: inline value wins (for catalog-absent providers or
+      // intentional overrides), then the vendored Portkey pricing catalog,
+      // then null. Single source-of-truth pattern — see
+      // `pricing-catalog.ts` doc for why we vendor.
       models: p.models.map((m) => ({
         id: m.id,
         label: m.label ?? null,
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens ?? null,
         capabilities: m.capabilities,
-        cost: m.cost ?? null,
+        cost: m.cost ?? lookupModelCost(p.apiShape, m.id),
         recommended: m.recommended ?? false,
       })),
     }));
