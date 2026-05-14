@@ -305,6 +305,13 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
  * it from the credential row on each request, so the executor ignores it.
  */
 export interface ResolvedModel {
+  /**
+   * Registered ModelProviderDefinition id. Drives Portkey routing
+   * (`portkeyProvider`), OAuth identity hooks, and the inference probe.
+   * Always populated — env-driven system keys declare it on their
+   * `SYSTEM_PROVIDER_KEYS` entry, DB credentials store it on the row.
+   */
+  providerId: string;
   apiShape: string;
   baseUrl: string;
   modelId: string;
@@ -317,8 +324,6 @@ export interface ResolvedModel {
   cost?: ModelCost | null;
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
-  /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
-  providerId?: string;
   /**
    * Abstract account/tenant identifier surfaced by the credential's
    * `extractTokenIdentity` hook — passed to the provider's
@@ -331,6 +336,7 @@ export interface ResolvedModel {
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   return {
+    providerId: def.providerId,
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
@@ -343,13 +349,11 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     // Vendored pricing catalog (#437 phase 2) fills the gap when the
     // operator's `SYSTEM_PROVIDER_KEYS` JSON doesn't supply per-model
     // pricing. The explicit per-model `cost` still wins — same semantic
-    // as DB rows below.
-    // System model PK id is the providerId here — operators who name their
-    // SYSTEM_PROVIDER_KEYS entry after a canonical providerId (`anthropic`,
-    // `openai`, `mistral`, `google-ai`, `cerebras`, `groq`, `xai`) get
-    // catalog fallback for free; others (e.g. `id: "my-anthropic-prod"`)
-    // skip the fallback and stay on the explicit per-model `cost`.
-    cost: def.cost ?? lookupModelCost(def.credentialId, def.modelId),
+    // as DB rows below. Keyed on the declared `providerId` (one of
+    // `anthropic`, `openai`, `mistral`, `google-ai`, `cerebras`, `groq`,
+    // `xai`); env entries pinned to other providers skip the fallback
+    // and stay on the explicit per-model `cost`.
+    cost: def.cost ?? lookupModelCost(def.providerId, def.modelId),
     isSystemModel: true,
   };
 }
@@ -369,7 +373,7 @@ interface OrgModelRow {
 
 function dbRowToResolved(
   row: OrgModelRow,
-  creds: { apiKey: string; providerId?: string; accountId?: string },
+  creds: { apiKey: string; providerId: string; accountId?: string },
 ): ResolvedModel {
   // `row.cost` is the per-org override (operator manually pinned pricing
   // for this preset). When null, fall back to the vendored pricing
@@ -379,6 +383,7 @@ function dbRowToResolved(
   // as null and `computeCostUsd()` short-circuits to 0.
   const override = row.cost as ModelCost | null;
   return {
+    providerId: creds.providerId,
     apiShape: row.apiShape,
     baseUrl: row.baseUrl,
     modelId: row.modelId,
@@ -388,9 +393,8 @@ function dbRowToResolved(
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: override ?? (creds.providerId ? lookupModelCost(creds.providerId, row.modelId) : null),
+    cost: override ?? lookupModelCost(creds.providerId, row.modelId),
     isSystemModel: false,
-    providerId: creds.providerId,
     accountId: creds.accountId,
     credentialId: row.credentialId,
   };

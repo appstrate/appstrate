@@ -122,6 +122,7 @@ function buildPlan(): AppstrateRunPlan {
     },
     rawPrompt: "Do the thing.",
     llmConfig: {
+      providerId: "openai",
       apiShape: "openai-completions",
       baseUrl: "https://api.openai.com/v1",
       modelId: "gpt-5.4",
@@ -191,7 +192,7 @@ describe("runPlatformContainer — Portkey routing integration", () => {
         }),
         orchestrator: fake.orchestrator,
       }),
-    ).rejects.toThrow(/Portkey provider mapping/i);
+    ).rejects.toThrow(/Portkey routing/i);
 
     // No sidecar config captured — we fail before any container is created.
     expect(fake.capturedSidecarConfig).toBeNull();

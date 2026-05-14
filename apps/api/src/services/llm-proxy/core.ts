@@ -74,15 +74,16 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
-/** Raised when a preset's `apiShape` has no Portkey provider mapping. */
+/** Raised when a preset's `providerId` has no Portkey provider slug. */
 export class LlmProxyUnroutableModelError extends Error {
   constructor(
     public readonly presetId: string,
-    public readonly apiShape: string,
+    public readonly providerId: string,
   ) {
     super(
-      `Model "${presetId}" uses apiShape "${apiShape}" which has no Portkey provider mapping. ` +
-        `Add an entry to API_SHAPE_TO_PORTKEY_PROVIDER in services/pricing-catalog.ts.`,
+      `Model "${presetId}" providerId "${providerId}" has no Portkey routing. ` +
+        `Declare \`portkeyProvider\` on the matching ModelProviderDefinition, ` +
+        `or remove the model from the org catalog.`,
     );
     this.name = "LlmProxyUnroutableModelError";
   }
@@ -96,7 +97,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const presetId = extractPresetId(inputs.rawBody);
-  const resolved = await resolvePresetForOrg(presetId, inputs.principal.orgId, inputs.adapter.api);
+  const resolved = await resolvePresetForOrg(
+    presetId,
+    inputs.principal.orgId,
+    inputs.adapter.apiShape,
+  );
 
   const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.realModelId);
 
@@ -112,7 +117,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     const probe = await lookupResponse({
       orgId: inputs.principal.orgId,
       presetId,
-      apiShape: resolved.api,
+      apiShape: resolved.apiShape,
       realModelId: resolved.realModelId,
       requestBody: rewrittenBody,
     });
@@ -129,22 +134,20 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   // Portkey is mandatory for the proxy path. `boot.ts` asserts the router
   // slot is installed via `assertPortkeyRoutersInstalled()`. The router
-  // returns null only for an `apiShape` outside `API_SHAPE_TO_PORTKEY_PROVIDER`
-  // — that's a config bug (a preset whose protocol we can't route), so we
-  // fail fast with a clear error instead of silently bypassing the gateway.
-  const portkeyRouting = getPortkeyInprocessRouter()({
-    apiShape: resolved.api,
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.upstreamApiKey,
-  });
+  // returns null only when the resolved `providerId` is unregistered or
+  // its definition omits `portkeyProvider` — that's a config bug (a
+  // preset we can't route), so we fail fast with a clear error instead
+  // of silently bypassing the gateway. `ResolvedProxyModel` structurally
+  // satisfies `PortkeyModelInput`.
+  const portkeyRouting = getPortkeyInprocessRouter()(resolved);
   if (!portkeyRouting) {
-    throw new LlmProxyUnroutableModelError(presetId, resolved.api);
+    throw new LlmProxyUnroutableModelError(presetId, resolved.providerId);
   }
 
   const upstreamUrl = joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath);
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
-    resolved.upstreamApiKey,
+    resolved.apiKey,
   );
   upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
   // Belt-and-braces: ask Portkey upstream for identity. Portkey 1.15.2
@@ -301,12 +304,20 @@ async function resolvePresetForOrg(
   if (loaded.apiShape !== expectedApi) {
     throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
   }
+  if (!loaded.providerId) {
+    // Models routed through the proxy MUST resolve to a registered
+    // provider — env-driven system keys without `providerId` can't
+    // address a `portkeyProvider` slug. Surface this as an unsupported
+    // preset (clean 400) rather than letting the router return null.
+    throw new LlmProxyUnsupportedModelError(presetId);
+  }
   return {
     presetId,
-    api: loaded.apiShape,
+    providerId: loaded.providerId,
+    apiShape: loaded.apiShape,
     baseUrl: loaded.baseUrl,
     realModelId: loaded.modelId,
-    upstreamApiKey: loaded.apiKey,
+    apiKey: loaded.apiKey,
     cost: loaded.cost ?? null,
   };
 }
@@ -397,7 +408,7 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
       runId: inputs.runId,
       model: inputs.resolved.presetId,
       realModel: inputs.resolved.realModelId,
-      api: inputs.resolved.api,
+      api: inputs.resolved.apiShape,
       inputTokens: inputs.usage.inputTokens,
       outputTokens: inputs.usage.outputTokens,
       cacheReadTokens: inputs.usage.cacheReadTokens ?? null,

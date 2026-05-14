@@ -133,14 +133,27 @@ export async function runPlatformContainer(
     } else if (llmApiKey) {
       // API-key LLM requests are mandatorily routed through Portkey. The
       // boot-time `assertPortkeyRoutersInstalled()` guarantees the router
-      // is non-null here; if the router can't route the model's apiShape
+      // is non-null here; if the router can't route the model's
+      // `providerId` (unregistered or no `portkeyProvider` slug declared)
       // it returns null, which is a config bug — fail fast so the bad
       // preset can't silently bypass the gateway.
-      const portkey = getPortkeyRouter()(llmConfig);
+      if (!llmConfig.providerId) {
+        throw new Error(
+          `Model "${llmConfig.label}" has no providerId. ` +
+            `API-key models must resolve to a registered ModelProviderDefinition ` +
+            `(SYSTEM_PROVIDER_KEYS entries must declare \`providerId\`).`,
+        );
+      }
+      const portkey = getPortkeyRouter()({
+        providerId: llmConfig.providerId,
+        apiShape: llmConfig.apiShape,
+        baseUrl: llmConfig.baseUrl,
+        apiKey: llmApiKey,
+      });
       if (!portkey) {
         throw new Error(
-          `Model apiShape "${llmConfig.apiShape}" has no Portkey provider mapping. ` +
-            `Add an entry to API_SHAPE_TO_PORTKEY_PROVIDER in services/pricing-catalog.ts.`,
+          `Model providerId "${llmConfig.providerId}" has no Portkey routing. ` +
+            `Declare \`portkeyProvider\` on its ModelProviderDefinition.`,
         );
       }
       sidecarLlm = {

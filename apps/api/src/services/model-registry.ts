@@ -11,6 +11,8 @@ import type { ModelCost } from "@appstrate/core/module";
 export interface SystemModelProviderKeyDefinition {
   id: string;
   label: string;
+  /** Registered ModelProviderDefinition id this env entry binds to (e.g. "anthropic", "openai"). */
+  providerId: string;
   apiShape: string;
   baseUrl: string;
   apiKey: string;
@@ -19,6 +21,8 @@ export interface SystemModelProviderKeyDefinition {
 export interface ModelDefinition {
   id: string;
   label: string;
+  /** Registered ModelProviderDefinition id — propagated from the parent system key. */
+  providerId: string;
   apiShape: string;
   baseUrl: string;
   modelId: string;
@@ -56,6 +60,13 @@ const rawModelSchema = z.object({
 const rawModelProviderKeySchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
+  /**
+   * Binds this env entry to a registered ModelProviderDefinition. Required
+   * because Portkey routing is keyed on the `portkeyProvider` slug each
+   * provider definition declares — `apiShape` alone can't disambiguate
+   * (cerebras / groq / xai all share `openai-completions`).
+   */
+  providerId: z.string().min(1),
   apiShape: z.string().min(1),
   baseUrl: z.string().min(1),
   apiKey: z.string().min(1),
@@ -77,6 +88,7 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  * [{
  *   "id": "anthropic-prod",
  *   "label": "Anthropic",
+ *   "providerId": "anthropic",
  *   "apiShape": "anthropic-messages",
  *   "baseUrl": "https://api.anthropic.com",
  *   "apiKey": "sk-ant-...",
@@ -106,6 +118,7 @@ export function initSystemModelProviderKeys(): void {
     pkMap.set(validPk.id, {
       id: validPk.id,
       label: validPk.label,
+      providerId: validPk.providerId,
       apiShape: validPk.apiShape,
       baseUrl: validPk.baseUrl,
       apiKey: validPk.apiKey,
@@ -129,6 +142,7 @@ export function initSystemModelProviderKeys(): void {
         mdlMap.set(modelId, {
           id: modelId,
           label: validM.label,
+          providerId: validPk.providerId,
           apiShape: validPk.apiShape,
           baseUrl: validPk.baseUrl,
           modelId: validM.modelId,

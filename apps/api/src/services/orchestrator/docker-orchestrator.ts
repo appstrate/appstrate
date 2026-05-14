@@ -146,8 +146,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         // routing JSON so the sidecar emits `x-portkey-config` on every
         // /llm/* request AND so its SSRF guard accepts the platform-managed
         // gateway baseUrl (host.docker.internal:<PORTKEY_PORT>).
-        if (resolvedConfig.llm.portkeyConfig)
-          sidecarEnv.PI_PORTKEY_CONFIG = resolvedConfig.llm.portkeyConfig;
+        sidecarEnv.PI_PORTKEY_CONFIG = resolvedConfig.llm.portkeyConfig;
       }
     }
 

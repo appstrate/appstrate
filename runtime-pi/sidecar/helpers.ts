@@ -118,16 +118,17 @@ export type {
 import type { LlmProxyConfig as _LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
 /**
- * Platform-vouched LLM baseUrl check. When the platform routes through
- * Portkey it points the sidecar at a loopback / Docker-host literal
- * (`127.0.0.1:8787`, `host.docker.internal:8787`) that the generic SSRF
- * guard would reject as a private-network target. Returning `true` here
- * carves the URL out of the SSRF check — user input is the inline
- * `portkeyConfig` JSON, not the baseUrl, so the platform is the only
- * party that can place a value into this field.
+ * Platform-vouched LLM baseUrl check. The platform points the sidecar
+ * at a loopback / Docker-host literal (`127.0.0.1:8787`,
+ * `host.docker.internal:8787`) that the generic SSRF guard would reject
+ * as a private-network target. Returning `true` here carves the URL out
+ * of the SSRF check — every `api_key` config is Portkey-routed by
+ * construction (the run launcher fails fast on unmapped shapes via
+ * `LlmProxyUnroutableModelError`), so a matching `authMode` is the
+ * sufficient platform-vouched signal.
  */
 export function isPortkeyManaged(llm: _LlmProxyConfig | undefined): boolean {
-  return llm?.authMode === "api_key" && Boolean(llm.portkeyConfig);
+  return llm?.authMode === "api_key";
 }
 
 // The credentials payload the sidecar receives over HTTP is

@@ -22,8 +22,8 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 describe("openaiCompletionsAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
-    expect(openaiCompletionsAdapter.api).toBe("openai-completions");
+  it("apiShape discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
+    expect(openaiCompletionsAdapter.apiShape).toBe("openai-completions");
   });
 
   it("rewrites body.model while preserving the rest of the payload verbatim", () => {
@@ -46,7 +46,7 @@ describe("openaiCompletionsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <upstreamApiKey>", () => {
+  it("injects Authorization: Bearer <apiKey>", () => {
     const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
       new Headers({ "x-something": "ignored" }),
       "sk-upstream",
@@ -95,8 +95,8 @@ describe("openaiCompletionsAdapter", () => {
 });
 
 describe("anthropicMessagesAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/anthropic-messages/ route", () => {
-    expect(anthropicMessagesAdapter.api).toBe("anthropic-messages");
+  it("apiShape discriminator matches the /api/llm-proxy/anthropic-messages/ route", () => {
+    expect(anthropicMessagesAdapter.apiShape).toBe("anthropic-messages");
   });
 
   it("rewrites body.model and leaves cache_control / system / tools untouched", () => {
@@ -214,8 +214,8 @@ describe("anthropicMessagesAdapter", () => {
 });
 
 describe("mistralConversationsAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/mistral-conversations/ route", () => {
-    expect(mistralConversationsAdapter.api).toBe("mistral-conversations");
+  it("apiShape discriminator matches the /api/llm-proxy/mistral-conversations/ route", () => {
+    expect(mistralConversationsAdapter.apiShape).toBe("mistral-conversations");
   });
 
   it("rewrites body.model while preserving the rest of the payload verbatim", () => {
@@ -240,7 +240,7 @@ describe("mistralConversationsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <upstreamApiKey> and forwards no extra headers", () => {
+  it("injects Authorization: Bearer <apiKey> and forwards no extra headers", () => {
     const headers = mistralConversationsAdapter.buildUpstreamHeaders(
       new Headers({
         "x-affinity": "session-123",

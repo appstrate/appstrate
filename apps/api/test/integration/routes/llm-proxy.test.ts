@@ -616,7 +616,7 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { detail?: string; title?: string };
-    expect(body.detail ?? body.title ?? "").toMatch(/Portkey provider mapping/i);
+    expect(body.detail ?? body.title ?? "").toMatch(/Portkey routing/i);
     // Crucially: no upstream call was made — the proxy fails before fetch.
     expect(upstreamHit).toBe(false);
   });

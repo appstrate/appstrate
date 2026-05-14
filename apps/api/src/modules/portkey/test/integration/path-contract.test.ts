@@ -19,9 +19,7 @@
  *      upgrade changes the convention, this test fails on the next
  *      `bun test` run.
  *   2. **What the canonical Portkey HTTP surface is for that shape** —
- *      declared as a constant in `PORTKEY_CANONICAL_PATH`. Adding a
- *      new `apiShape` to `API_SHAPE_TO_PORTKEY_PROVIDER` without an
- *      entry here trips the guard test below.
+ *      declared as a constant in `PORTKEY_CANONICAL_PATH`.
  *   3. **The composition invariant**: `buildPortkeyRouting(shape)
  *      .baseUrl + sdkEmittedPath` must equal `<gateway>` +
  *      `PORTKEY_CANONICAL_PATH[shape]`. This is the routing math the
@@ -29,30 +27,105 @@
  *      `/llm` and concatenates onto `baseUrl`).
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { serve } from "bun";
 import { streamMistral } from "@mariozechner/pi-ai/mistral";
 import { streamAnthropic } from "@mariozechner/pi-ai/anthropic";
 import { streamOpenAICompletions } from "@mariozechner/pi-ai/openai-completions";
 import type { Api, Context, Model } from "@mariozechner/pi-ai";
-import { buildPortkeyRouting, _API_SHAPE_TO_PORTKEY_PROVIDER } from "../../config.ts";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { buildPortkeyRouting } from "../../config.ts";
+import {
+  listModelProviders,
+  registerModelProvider,
+  resetModelProviders,
+} from "../../../../services/model-providers/registry.ts";
+
+/**
+ * Standalone tests don't reach `getTestApp()` (which seeds the registry
+ * via `seedTestModelProviders()`), so install minimal fixtures here for
+ * the apiShapes this file empirically exercises. One provider per shape
+ * is enough — only the `portkeyProvider` slug is consumed by the
+ * routing math.
+ */
+const FIXTURE_PROVIDERS: readonly ModelProviderDefinition[] = [
+  {
+    providerId: "test-openai",
+    displayName: "Test OpenAI",
+    iconUrl: "openai",
+    apiShape: "openai-completions",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    baseUrlOverridable: false,
+    authMode: "api_key",
+    portkeyProvider: "openai",
+    models: [],
+  },
+  {
+    providerId: "test-anthropic",
+    displayName: "Test Anthropic",
+    iconUrl: "anthropic",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://api.anthropic.com",
+    baseUrlOverridable: false,
+    authMode: "api_key",
+    portkeyProvider: "anthropic",
+    models: [],
+  },
+  {
+    providerId: "test-mistral",
+    displayName: "Test Mistral",
+    iconUrl: "mistral",
+    apiShape: "mistral-conversations",
+    defaultBaseUrl: "https://api.mistral.ai",
+    baseUrlOverridable: false,
+    authMode: "api_key",
+    portkeyProvider: "mistral-ai",
+    models: [],
+  },
+];
+
+let restored: readonly ModelProviderDefinition[] = [];
+beforeAll(() => {
+  restored = listModelProviders();
+  resetModelProviders();
+  for (const def of FIXTURE_PROVIDERS) registerModelProvider(def);
+});
+afterAll(() => {
+  resetModelProviders();
+  for (const def of restored) registerModelProvider(def);
+});
 
 /**
  * Canonical Portkey HTTP surface per `apiShape`. Operators reading a
  * 4xx in the routing logs should recognise the path on sight.
  *
  * Coverage is intentionally narrow: only shapes that are exercised
- * end-to-end today (an entry in `INVOKERS` below). Catalog-only
- * shapes in `_API_SHAPE_TO_PORTKEY_PROVIDER` (`google-vertex`,
- * `bedrock-converse-stream`, …) aren't asserted here — wiring one up
- * means adding an INVOKER, which is the forcing function for
- * declaring its canonical path (see the declaration guard below).
+ * end-to-end today (an entry in `INVOKERS` below). Adding a shape
+ * means adding an INVOKER, which forces declaring its canonical path
+ * (see the declaration guard below).
  */
 const PORTKEY_CANONICAL_PATH: Record<string, string> = {
   "openai-completions": "/v1/chat/completions",
   "anthropic-messages": "/v1/messages",
   "mistral-conversations": "/v1/chat/completions",
 };
+
+/**
+ * Pick one registered providerId per apiShape the empirical test
+ * exercises. The shape→providerId mapping is many-to-one for some
+ * shapes (e.g. cerebras + groq + xai all share `openai-completions`);
+ * for the routing math only the `portkeyProvider` slug matters, so any
+ * registered match works. Fails loudly if a shape has no registered
+ * provider — that's a regression in the core-providers module.
+ */
+function pickProviderIdForShape(apiShape: string): string {
+  for (const def of listModelProviders()) {
+    if (def.apiShape === apiShape && def.portkeyProvider) return def.providerId;
+  }
+  throw new Error(
+    `No registered ModelProviderDefinition with apiShape=${apiShape} and a portkeyProvider slug.`,
+  );
+}
 
 // Generic preserves the literal `apiShape` so pi-ai's per-shape
 // `StreamFunction<"mistral-conversations", …>` typings accept the
@@ -162,9 +235,8 @@ async function captureSdkPath(invoke: (baseUrl: string) => void): Promise<{
 
 describe("Portkey routing path contract", () => {
   // Forcing function: every wired invoker MUST have a declared
-  // canonical path. Catalog-only shapes are intentionally exempt —
-  // adding `INVOKERS["x"]` without `PORTKEY_CANONICAL_PATH["x"]`
-  // fails here.
+  // canonical path. Adding `INVOKERS["x"]` without
+  // `PORTKEY_CANONICAL_PATH["x"]` fails here.
   for (const shape of Object.keys(INVOKERS)) {
     if (PORTKEY_CANONICAL_PATH[shape] === undefined) {
       it(`${shape}: declares a canonical Portkey path`, () => {
@@ -177,13 +249,19 @@ describe("Portkey routing path contract", () => {
     }
   }
 
-  // Every Portkey-mapped shape must produce a non-null routing tuple.
-  // Cheap structural check — catches accidental deletion of catalog
-  // entries.
-  for (const shape of Object.keys(_API_SHAPE_TO_PORTKEY_PROVIDER)) {
-    it(`${shape}: buildPortkeyRouting returns a non-null tuple`, () => {
+  // Every registered provider that declares `portkeyProvider` must
+  // produce a non-null routing tuple. Catches a regression where a
+  // provider's slug is dropped or its definition is malformed.
+  for (const def of listModelProviders()) {
+    if (!def.portkeyProvider) continue;
+    it(`${def.providerId}: buildPortkeyRouting returns a non-null tuple`, () => {
       const r = buildPortkeyRouting(
-        { apiShape: shape, baseUrl: "https://upstream.example", apiKey: "k" },
+        {
+          providerId: def.providerId,
+          apiShape: def.apiShape,
+          baseUrl: "https://upstream.example",
+          apiKey: "k",
+        },
         "http://gw.test",
       );
       expect(r).not.toBeNull();
@@ -197,7 +275,12 @@ describe("Portkey routing path contract", () => {
       const cap = await captureSdkPath(invoke);
       try {
         const routing = buildPortkeyRouting(
-          { apiShape: shape, baseUrl: "https://upstream.example", apiKey: "k" },
+          {
+            providerId: pickProviderIdForShape(shape),
+            apiShape: shape,
+            baseUrl: "https://upstream.example",
+            apiKey: "k",
+          },
           "http://gw.test",
         );
         expect(routing).not.toBeNull();

@@ -65,14 +65,10 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * `getModelProvider`. The declarative `oauthWireFormat` quirks are NOT
  * ferried here — consumers (pi.ts) read them straight from the registry
  * by `providerId` at the sidecar-config boundary.
- *
- * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
- * entries have no registry providerId — they are flat wire-format
- * descriptors. OAuth + DB rows always carry one.
  */
 export interface DecryptedModelProviderCredentials {
-  /** Canonical registry id ("anthropic", "openai", …). Absent for env-driven system keys. */
-  providerId?: string;
+  /** Canonical registry id ("anthropic", "openai", …). */
+  providerId: string;
   apiShape: ModelApiShape;
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
@@ -510,10 +506,14 @@ export async function loadInferenceCredentials(
   orgId: string,
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
-  // 1) System (env-driven) keys — no registry providerId, just wire format.
+  // 1) System (env-driven) keys — providerId is declared on the env
+  // entry so downstream code (Portkey routing, refresh worker, hooks)
+  // resolves the same registered ModelProviderDefinition it would for
+  // a DB-stored credential.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return {
+      providerId: systemKey.providerId,
       apiShape: systemKey.apiShape as ModelApiShape,
       baseUrl: systemKey.baseUrl,
       apiKey: systemKey.apiKey,

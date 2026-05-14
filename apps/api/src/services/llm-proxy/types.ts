@@ -16,18 +16,25 @@ export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string };
 
-/** Preset model resolved against `org_models` + `model_provider_credentials`. */
+/**
+ * Preset model resolved against `org_models` + `model_provider_credentials`.
+ * Field names align with `PortkeyModelInput` (`providerId`, `apiShape`,
+ * `baseUrl`, `apiKey`) so the resolved tuple can be passed to the
+ * Portkey router without renaming at the call site.
+ */
 export interface ResolvedProxyModel {
   /** The preset id the caller asked for (echoed into usage rows for audit). */
   presetId: string;
+  /** Registered model-provider id used to look up Portkey routing + identity hooks. */
+  providerId: string;
   /** Protocol family (must match the route's adapter). */
-  api: string;
+  apiShape: string;
   /** Upstream base URL the platform forwards to. */
   baseUrl: string;
   /** Real model id forwarded to upstream (`body.model` is rewritten to this). */
   realModelId: string;
   /** Upstream API key the platform injects server-side. */
-  upstreamApiKey: string;
+  apiKey: string;
   /** Per-million-token pricing used to compute `cost_usd`. Nullable for unknown models. */
   cost: ModelCost | null;
 }
@@ -49,10 +56,10 @@ export interface UpstreamUsage {
  * needed.
  */
 export interface LlmProxyAdapter {
-  /** Protocol string — must match `ResolvedProxyModel.api`. */
-  readonly api: string;
+  /** Protocol string — must match `ResolvedProxyModel.apiShape`. */
+  readonly apiShape: string;
   /** Build the upstream request headers (auth + protocol-specific). */
-  buildUpstreamHeaders(incoming: Headers, upstreamApiKey: string): Record<string, string>;
+  buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;
   /** Extract usage from a non-streaming JSON body. Returns null if the shape is unexpected. */
   parseJsonUsage(body: unknown): UpstreamUsage | null;
   /** Extract usage from a streamed SSE payload. Returns null if none was observed. */

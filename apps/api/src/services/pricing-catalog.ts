@@ -46,32 +46,6 @@ import groqPricing from "../data/pricing/groq.json" with { type: "json" };
 import xaiPricing from "../data/pricing/xai.json" with { type: "json" };
 
 /**
- * Wire-format mapping for the Portkey gateway (`x-portkey-config.provider`).
- *
- * Kept here for backward-compat — the portkey module imports it. It is
- * **NOT** used by this file's catalog lookups anymore (phase 6 keyed
- * those on `providerId`). The portkey module retains this map because
- * the gateway expects its own provider slug, distinct from our
- * `providerId`s (e.g. our `google-ai` → Portkey's `google`, multiple
- * Appstrate providers with `openai-completions` apiShape → Portkey's
- * `openai` slug + custom_host).
- *
- * The subscription-OAuth shape `openai-codex-responses` is intentionally
- * absent — those calls bypass Portkey entirely.
- */
-export const API_SHAPE_TO_PORTKEY_PROVIDER: Record<string, string> = {
-  "anthropic-messages": "anthropic",
-  "openai-chat": "openai",
-  "openai-completions": "openai",
-  "openai-responses": "openai",
-  "mistral-conversations": "mistral-ai",
-  "google-generative-ai": "google",
-  "google-vertex": "vertex-ai",
-  "azure-openai-responses": "azure-openai",
-  "bedrock-converse-stream": "bedrock",
-};
-
-/**
  * Compact model entry — the projection emitted by the refresh script.
  * Mirrors the JSON shape exactly. Read-only at runtime.
  */

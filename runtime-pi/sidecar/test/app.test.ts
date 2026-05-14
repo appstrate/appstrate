@@ -239,25 +239,6 @@ describe("POST /configure — llm SSRF protection", () => {
     });
   });
 
-  it("still rejects loopback baseUrl when portkeyConfig is absent (direct upstream)", async () => {
-    const deps = makeDeps();
-    const app = createApp(deps);
-    const res = await app.request("/configure", {
-      method: "POST",
-      body: JSON.stringify({
-        llm: {
-          authMode: "api_key",
-          baseUrl: "http://127.0.0.1:8787/v1",
-          apiKey: "key",
-          placeholder: "ph",
-        },
-      }),
-      headers: { "Content-Type": "application/json" },
-    });
-    expect(res.status).toBe(403);
-    expect(deps.config.llm).toBeUndefined();
-  });
-
   it("allows llm config with null (clear)", async () => {
     const deps = makeDeps();
     deps.config.llm = {
@@ -319,48 +300,26 @@ const LLM_CONFIG: LlmProxyConfig = {
   baseUrl: "https://api.anthropic.com",
   apiKey: "real-sk-ant-key",
   placeholder: "sk-placeholder",
+  portkeyConfig: '{"provider":"anthropic","api_key":"real-sk-ant-key"}',
 };
 
 describe("ALL /llm/* — SSRF protection", () => {
-  it("returns 403 when baseUrl targets localhost", async () => {
+  it("returns 403 when oauth baseUrl targets a blocked network range", async () => {
+    // SSRF protection applies to OAuth mode (which routes direct to the
+    // upstream provider). api_key mode is platform-vouched via the
+    // Portkey-managed carve-out, so its loopback gateway baseUrl is
+    // accepted by design (#437).
     const deps = makeDeps();
     deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://localhost:8000",
-      apiKey: "key",
-      placeholder: "ph",
+      authMode: "oauth",
+      baseUrl: "http://169.254.169.254/metadata",
+      credentialId: "cred_blocked",
     };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("blocked network range");
-  });
-
-  it("returns 403 when baseUrl targets cloud metadata", async () => {
-    const deps = makeDeps();
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://169.254.169.254/metadata",
-      apiKey: "key",
-      placeholder: "ph",
-    };
-    const app = createApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(403);
-  });
-
-  it("returns 403 when baseUrl targets private IP", async () => {
-    const deps = makeDeps();
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://10.0.0.1:8080",
-      apiKey: "key",
-      placeholder: "ph",
-    };
-    const app = createApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(403);
   });
 
   it("forwards through to Portkey-managed loopback baseUrl (platform-vouched, #437 follow-up)", async () => {
@@ -529,18 +488,7 @@ describe("ALL /llm/* — Portkey config forwarding", () => {
     expect(headers["x-portkey-config"]).toBe(portkeyConfig);
   });
 
-  it("does not attach x-portkey-config when absent (legacy direct-upstream path)", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
-    await app.request("/llm/v1/messages", { method: "POST" });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
-    const headers = opts.headers as Record<string, string>;
-    expect(headers["x-portkey-config"]).toBeUndefined();
-  });
-
-  it("disables Bun fetch auto-decompression when Portkey is in the path (#437 follow-up)", async () => {
+  it("disables Bun fetch auto-decompression (#437 follow-up)", async () => {
     // Regression for the brotli/gzip decompression crash discovered
     // during the #437 real-key smoke. Portkey 1.15.2 OSS returns bodies
     // whose `Content-Encoding` header lies (advertises "br" / "gzip" but
@@ -548,33 +496,15 @@ describe("ALL /llm/* — Portkey config forwarding", () => {
     // for metrics). Bun's auto-decompressor crashes on that framing.
     // `decompress: false` keeps the bytes raw — the response allow-list
     // never forwards `content-encoding`, so the agent sees clean
-    // identity bytes.
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "https://api.example.com",
-      apiKey: "real-sk-key",
-      placeholder: "sk-placeholder",
-      portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk-key" }),
-    };
-    const app = createApp(deps);
-    await app.request("/llm/v1/messages", { method: "POST" });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit & { decompress?: boolean }])[1];
-    expect(opts.decompress).toBe(false);
-  });
-
-  it("leaves Bun fetch auto-decompression on for the direct-upstream path", async () => {
-    // No Portkey routing → upstream is the real provider, whose
-    // Content-Encoding header is honest. Bun's auto-decompress is the
-    // right default there.
+    // identity bytes. api_key mode is always Portkey-routed so we always
+    // need this disabled.
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
     await app.request("/llm/v1/messages", { method: "POST" });
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit & { decompress?: boolean }])[1];
-    expect(opts.decompress).toBeUndefined();
+    expect(opts.decompress).toBe(false);
   });
 });
 

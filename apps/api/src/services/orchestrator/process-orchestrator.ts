@@ -222,12 +222,11 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
         env.PI_BASE_URL = baseUrl;
         env.PI_API_KEY = config.llm.apiKey;
         env.PI_PLACEHOLDER = config.llm.placeholder;
-        // Phase 2.5 (#437) Portkey-mandatory wiring: when the launcher
-        // routed this call through Portkey, the inline routing JSON gets
-        // forwarded to the sidecar so it can emit `x-portkey-config` on
-        // every /llm/* request AND so the SSRF guard accepts the
-        // platform-managed gateway baseUrl.
-        if (config.llm.portkeyConfig) env.PI_PORTKEY_CONFIG = config.llm.portkeyConfig;
+        // Phase 2.5 (#437) Portkey-mandatory wiring: forward the inline
+        // routing JSON so the sidecar emits `x-portkey-config` on every
+        // /llm/* request AND so the SSRF guard accepts the platform-managed
+        // gateway baseUrl.
+        env.PI_PORTKEY_CONFIG = config.llm.portkeyConfig;
       }
     }
 

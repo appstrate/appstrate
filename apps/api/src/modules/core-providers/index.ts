@@ -43,6 +43,7 @@ const anthropic: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.anthropic.com",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "anthropic",
   featured: true,
   models: [
     { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
@@ -61,6 +62,7 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "openai",
   // `llama-3.3-70b` (with dash, LiteLLM canonical) — note the catalog
   // doesn't carry `llama-4-scout-17b-16e-instruct`; users who need it
   // pick "Custom".
@@ -80,6 +82,7 @@ const googleAi: ModelProviderDefinition = {
   defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "google",
   featured: true,
   models: [
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
@@ -98,6 +101,7 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "openai",
   // `gemma2-9b-it` / `mixtral-8x7b-32768` aren't in LiteLLM's groq
   // index; users still pick them via "Custom" if needed.
   models: [
@@ -116,6 +120,7 @@ const mistral: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.mistral.ai",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "mistral-ai",
   featured: true,
   models: [
     { id: "codestral-latest", label: "Codestral" },
@@ -136,6 +141,7 @@ const openai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "openai",
   featured: true,
   models: [
     { id: "gpt-5-mini", label: "GPT-5 mini" },
@@ -154,6 +160,11 @@ const openrouter: ModelProviderDefinition = {
   defaultBaseUrl: "https://openrouter.ai/api/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  // Portkey OSS has no native `openrouter` slug — route through `openai`
+  // with the upstream URL forced via `custom_host`. Portkey's OpenAI
+  // implementation rewrites paths permissively enough for OpenRouter's
+  // OpenAI-completions surface.
+  portkeyProvider: "openai",
   // Empty catalog — the UI fetches models live via the OpenRouter search combobox.
   models: [],
 };
@@ -168,6 +179,7 @@ const xai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.x.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  portkeyProvider: "openai",
   models: [
     { id: "grok-3", label: "Grok 3" },
     { id: "grok-3-mini", label: "Grok 3 Mini" },
@@ -185,6 +197,7 @@ const openaiCompatible: ModelProviderDefinition = {
   defaultBaseUrl: "http://localhost:11434",
   baseUrlOverridable: true,
   authMode: "api_key",
+  portkeyProvider: "openai",
   models: [],
 };
 

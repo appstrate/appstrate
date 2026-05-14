@@ -33,11 +33,11 @@ import type { LlmProxyAdapter } from "./types.ts";
 import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./helpers.ts";
 
 export const mistralConversationsAdapter: LlmProxyAdapter = {
-  api: "mistral-conversations",
+  apiShape: "mistral-conversations",
 
-  buildUpstreamHeaders(_incoming, upstreamApiKey) {
+  buildUpstreamHeaders(_incoming, apiKey) {
     return {
-      Authorization: `Bearer ${upstreamApiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     };
   },

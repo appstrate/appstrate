@@ -10,12 +10,10 @@
  *   2. `lookupCatalogModel(providerId, modelId)` — full metadata block.
  *   3. `listCatalogModels(providerId)` — every catalogued model for a
  *      provider (drives the picker's "All models" group).
- *   4. `API_SHAPE_TO_PORTKEY_PROVIDER` — kept for Portkey routing only.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  API_SHAPE_TO_PORTKEY_PROVIDER,
   _catalogSize,
   listCatalogModels,
   lookupCatalogModel,
@@ -102,29 +100,5 @@ describe("listCatalogModels", () => {
 describe("_catalogSize", () => {
   it("indexes at least 200 chat models across the 7 vendored providers", () => {
     expect(_catalogSize()).toBeGreaterThan(200);
-  });
-});
-
-describe("API_SHAPE_TO_PORTKEY_PROVIDER", () => {
-  it("does NOT include subscription-OAuth shapes (bypass-billing invariant)", () => {
-    expect(API_SHAPE_TO_PORTKEY_PROVIDER["openai-codex-responses"]).toBeUndefined();
-  });
-
-  it("covers the 9 Portkey-routable shapes we promised in the README", () => {
-    const expected = [
-      "anthropic-messages",
-      "openai-chat",
-      "openai-completions",
-      "openai-responses",
-      "mistral-conversations",
-      "google-generative-ai",
-      "google-vertex",
-      "azure-openai-responses",
-      "bedrock-converse-stream",
-    ];
-    for (const shape of expected) {
-      expect(API_SHAPE_TO_PORTKEY_PROVIDER[shape]).toBeDefined();
-    }
-    expect(Object.keys(API_SHAPE_TO_PORTKEY_PROVIDER)).toHaveLength(expected.length);
   });
 });

@@ -273,10 +273,11 @@ export function createApp(deps: AppDeps): Hono {
 
   // LLM reverse proxy. Two modes:
   //
-  //   - api_key (legacy): the Pi SDK formats every header (auth, beta,
-  //     identity) using the platform-supplied placeholder; we swap the
-  //     placeholder for the real key. Request/response bodies stream
-  //     through zero-copy.
+  //   - api_key (Portkey-routed): the Pi SDK formats every header (auth,
+  //     beta, identity) using the platform-supplied placeholder; we swap
+  //     the placeholder for the real key and forward `x-portkey-config`
+  //     verbatim to the gateway. Request/response bodies stream through
+  //     zero-copy.
   //   - oauth: the sidecar resolves a fresh access token from the
   //     platform (`/internal/oauth-token/:id`), injects bearer +
   //     provider identity headers, applies the declarative body
@@ -316,16 +317,13 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
-    // Portkey opt-in: when the platform has the Portkey module loaded, it
-    // points `baseUrl` at the local Portkey gateway and ships an inline
-    // config carrying the real provider routing (`{ provider, api_key,
-    // custom_host?, retry?, … }`). We forward it as `x-portkey-config` so
-    // Portkey can route + rate-limit + retry without a Portkey-side
-    // credential store. Authorization stays substituted but Portkey
-    // ignores it — `api_key` in the inline config wins.
-    if (apiKeyConfig.portkeyConfig) {
-      forwardedHeaders["x-portkey-config"] = apiKeyConfig.portkeyConfig;
-    }
+    // Portkey routing is mandatory in api_key mode — the platform points
+    // `baseUrl` at the local Portkey gateway and ships an inline routing
+    // config (`{ provider, api_key, custom_host?, retry?, … }`) that we
+    // forward verbatim as `x-portkey-config`. Authorization stays
+    // substituted but Portkey ignores it — `api_key` in the inline
+    // config wins.
+    forwardedHeaders["x-portkey-config"] = apiKeyConfig.portkeyConfig;
 
     const method = c.req.method;
     const body = method !== "GET" && method !== "HEAD" ? (c.req.raw.body ?? undefined) : undefined;
@@ -338,17 +336,15 @@ export function createApp(deps: AppDeps): Hono {
         body,
         signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
-        // Bun-specific (undocumented in 1.3.x). When routing through
-        // Portkey, the gateway internally decodes upstream brotli/gzip
-        // for metrics but forwards the upstream's `Content-Encoding`
-        // header verbatim — leaving a body that's already identity but
-        // labelled as compressed. Bun's auto-decompressor then crashes
-        // on the bogus framing (`BrotliDecompressionError`/`ZlibError`).
-        // `decompress: false` keeps the bytes raw; `passUpstream` drops
-        // `Content-Encoding` from the response headers, so the agent
-        // sees clean identity. Direct path (no Portkey) keeps the
-        // default — upstream really is compressed there.
-        ...(apiKeyConfig.portkeyConfig ? { decompress: false } : {}),
+        // Bun-specific (undocumented in 1.3.x). Portkey internally decodes
+        // upstream brotli/gzip for metrics but forwards the upstream's
+        // `Content-Encoding` header verbatim — leaving a body that's
+        // already identity but labelled as compressed. Bun's auto-
+        // decompressor then crashes on the bogus framing
+        // (`BrotliDecompressionError`/`ZlibError`). `decompress: false`
+        // keeps the bytes raw; `passUpstream` drops `Content-Encoding`
+        // from the response headers, so the agent sees clean identity.
+        decompress: false,
       } as RequestInit & { decompress?: boolean });
     } catch (err) {
       return llmFetchErrorResponse(c, targetUrl, err);

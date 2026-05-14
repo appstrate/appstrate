@@ -18,11 +18,11 @@ import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./help
 const HEADERS_TO_FORWARD = new Set(["openai-organization", "openai-beta"]);
 
 export const openaiCompletionsAdapter: LlmProxyAdapter = {
-  api: "openai-completions",
+  apiShape: "openai-completions",
 
-  buildUpstreamHeaders(incoming, upstreamApiKey) {
+  buildUpstreamHeaders(incoming, apiKey) {
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${upstreamApiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     };
     for (const [k, v] of incoming) {

@@ -592,7 +592,7 @@ export interface ModelProviderProxyContext {
   /** Credential kind backing this call — providers can choose to skip hooks for API-key flows. */
   credentialKind: "api_key" | "oauth";
   /** The access token (OAuth) or API key (api_key) the platform will forward upstream. */
-  upstreamApiKey: string;
+  apiKey: string;
   /** The incoming request headers from the agent — read-only. */
   incomingHeaders: Headers;
 }
@@ -761,6 +761,19 @@ export interface ModelProviderDefinition {
   defaultBaseUrl: string;
   /** Whether the user can override `defaultBaseUrl` per credential row. */
   baseUrlOverridable: boolean;
+  /**
+   * Portkey gateway provider slug emitted into `x-portkey-config.provider`
+   * for API-key flows. The Portkey OSS gateway expects this slug to pick
+   * the upstream implementation (auth headers, path rewriting, retry
+   * policy); it is a Portkey-internal identifier disjoint from our
+   * `providerId`. Multiple Appstrate providers may share the same slug
+   * (e.g. cerebras/groq/xai all route via Portkey's `openai` slug +
+   * custom_host).
+   *
+   * Required iff `authMode === "api_key"`. OAuth subscription providers
+   * (Codex, Claude Pro) bypass Portkey entirely and leave this unset.
+   */
+  portkeyProvider?: string;
 
   // — Auth —
   authMode: "api_key" | "oauth2";

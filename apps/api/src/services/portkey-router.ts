@@ -30,12 +30,18 @@
 
 /**
  * Narrow structural input — both `ResolvedModel` (from `org-models.ts`)
- * and `ResolvedProxyModel` (from `llm-proxy/types.ts`) satisfy it once
- * the proxy caller renames `upstreamApiKey → apiKey` and `api → apiShape`
- * at the call site. Keeping the router stub free of either concrete type
- * lets the module remain agnostic of where it's invoked from.
+ * and `ResolvedProxyModel` (from `llm-proxy/types.ts`) satisfy it
+ * directly. Keeping the router stub free of either concrete type lets
+ * the module remain agnostic of where it's invoked from.
+ *
+ * `providerId` is the Appstrate-side registry key — the router resolves
+ * it to a Portkey gateway slug via `getModelProvider(providerId)
+ * ?.portkeyProvider`. `apiShape` stays load-bearing because it drives
+ * the URL prefix (`/v1` vs bare) per SDK convention, independent of
+ * upstream identity.
  */
 export interface PortkeyModelInput {
+  providerId: string;
   apiShape: string;
   baseUrl: string;
   apiKey: string;

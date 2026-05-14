@@ -78,6 +78,11 @@ delete process.env.SMTP_FROM;
 // Disable Google social auth in tests
 delete process.env.GOOGLE_CLIENT_ID;
 delete process.env.GOOGLE_CLIENT_SECRET;
+
+// Clear env-driven system provider keys — local dev configurations
+// shouldn't leak into the test suite (they'd populate the registry
+// asymmetrically and break the zero-footprint invariant).
+delete process.env.SYSTEM_PROVIDER_KEYS;
 process.env.SIDECAR_POOL_SIZE = "0"; // Disable sidecar pool in tests
 process.env.DOCKER_SOCKET = "http://localhost:2375";
 
@@ -239,7 +244,7 @@ const { setPortkeyRouter, setPortkeyInprocessRouter } =
   await import("../../apps/api/src/services/portkey-router.ts");
 const { buildPortkeyRouting } = await import("../../apps/api/src/modules/portkey/config.ts");
 function buildTestRouter(host: string) {
-  return (model: { apiShape: string; baseUrl: string; apiKey: string }) =>
+  return (model: { providerId: string; apiShape: string; baseUrl: string; apiKey: string }) =>
     buildPortkeyRouting(model, host);
 }
 setPortkeyRouter(buildTestRouter("http://host.docker.internal:8787"));

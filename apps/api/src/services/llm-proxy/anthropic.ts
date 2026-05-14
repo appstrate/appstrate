@@ -38,12 +38,12 @@ function readForwardedHeader(incoming: Headers, name: string): string | null {
 }
 
 export const anthropicMessagesAdapter: LlmProxyAdapter = {
-  api: "anthropic-messages",
+  apiShape: "anthropic-messages",
 
-  buildUpstreamHeaders(incoming, upstreamApiKey) {
+  buildUpstreamHeaders(incoming, apiKey) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "x-api-key": upstreamApiKey,
+      "x-api-key": apiKey,
     };
 
     const callerBeta = readForwardedHeader(incoming, "anthropic-beta");

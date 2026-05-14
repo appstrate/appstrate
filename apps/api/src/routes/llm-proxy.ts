@@ -161,7 +161,7 @@ async function handleProxy(
       apiKeyId,
       userId,
       orgId,
-      api: adapter.api,
+      apiShape: adapter.apiShape,
       runId,
       status: response.status,
       durationMs: Date.now() - started,

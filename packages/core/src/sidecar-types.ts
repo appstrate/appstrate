@@ -55,12 +55,14 @@ export interface LlmProxyApiKeyConfig {
   placeholder: string;
   /**
    * Opaque JSON string forwarded as `x-portkey-config` on every upstream
-   * call when the Portkey module is loaded. Carries `{ provider, api_key,
-   * custom_host?, retry?, … }` — see Portkey's gateway docs. The sidecar
-   * never inspects it; it only attaches the header. When unset, the
-   * sidecar falls through to the legacy direct-upstream path.
+   * call. Carries `{ provider, api_key, custom_host?, retry?, … }` — see
+   * Portkey's gateway docs. The sidecar never inspects it; it only
+   * attaches the header. Portkey is mandatory for `api_key` mode so this
+   * field is always populated by the run launcher (the Portkey module
+   * raises `LlmProxyUnroutableModelError` for unmapped `apiShape`s
+   * rather than falling back to a direct upstream).
    */
-  portkeyConfig?: string;
+  portkeyConfig: string;
 }
 
 export interface LlmProxyOauthConfig {
