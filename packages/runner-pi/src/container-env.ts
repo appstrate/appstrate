@@ -188,7 +188,7 @@ export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
  * return a record suitable for spreading into a container env. Empty
  * and undefined values are omitted so the container falls back to the
  * compiled defaults rather than seeing an empty string (which would
- * fail `readPositiveByteEnv` validation and crash the sidecar at boot).
+ * fail `readPositiveIntEnv` validation and crash the sidecar at boot).
  *
  * Restrict the returned set with `keys` when only a subset is relevant
  * (e.g. the agent container only needs the request-body cap).

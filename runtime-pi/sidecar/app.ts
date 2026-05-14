@@ -3,16 +3,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { mountMcp } from "./mcp.ts";
-import {
-  DEFAULT_PROVIDER_CALL_CONCURRENCY,
-  Semaphore,
-  readPositiveConcurrencyEnv,
-} from "./semaphore.ts";
+import { LimiterRegistry, parseConcurrencyConfig } from "./limiter.ts";
 import { BlobStore } from "./blob-store.ts";
 import {
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
   isBlockedUrl,
+  readPositiveIntEnv,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
@@ -21,7 +18,6 @@ import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   TokenBudget,
-  readPositiveTokenEnv,
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import {
@@ -69,6 +65,15 @@ export interface AppDeps {
    * / `/configure`.
    */
   runId?: string;
+  /**
+   * Per-provider fan-out limiter for `provider_call`. Optional — when
+   * omitted, `createApp` builds one from
+   * `SIDECAR_PROVIDER_CALL_CONCURRENCY`. Production passes its own
+   * instance in so `server.ts` can drive the SIGTERM drain path (#435)
+   * via `limiter.pause()` + `limiter.onIdle()` without having to reach
+   * back into the Hono app.
+   */
+  providerCallLimiter?: LimiterRegistry;
 }
 
 /**
@@ -295,10 +300,26 @@ export function createApp(deps: AppDeps): Hono {
   const isReady = deps.isReady ?? (() => true);
   const reportedAuthFailures = new Set<string>();
 
+  // Built here (not inside mountMcp) so the SIGTERM handler in
+  // server.ts can call `.pause()` / `.onIdle()` on it directly.
+  const providerCallLimiter =
+    deps.providerCallLimiter ??
+    new LimiterRegistry(parseConcurrencyConfig(process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY));
+
   const app = new Hono();
 
-  // Health check for startup readiness (includes forward proxy readiness)
+  // Drain signal: while the limiter is paused, surface the operational
+  // status on the readiness probe so external orchestrators (k8s, the
+  // sidecar pool) can stop sending new traffic. /llm/* and /mcp still
+  // serve in-flight requests; the limiter rejects new provider_call
+  // backpressure with a structured tool error so the agent can react.
+  // Standardise on `X-Drain-Reason: shutdown` so operator dashboards
+  // can distinguish a deliberate drain from a generic 503.
   app.get("/health", (c) => {
+    if (providerCallLimiter.isDraining()) {
+      c.header("X-Drain-Reason", "shutdown");
+      return c.json({ status: "draining", reason: "shutdown" }, 503);
+    }
     if (!isReady()) {
       return c.json({ status: "degraded", proxy: "not ready" }, 503);
     }
@@ -589,28 +610,23 @@ export function createApp(deps: AppDeps): Hono {
   // a per-call inline cap and a cumulative run-level ceiling. Both
   // are configurable via env vars; defaults stay conservative for
   // OSS / dev (200 K-token context window equivalent).
-  const inlineCapTokens = readPositiveTokenEnv(
+  const inlineCapTokens = readPositiveIntEnv(
     "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
     DEFAULT_INLINE_OUTPUT_TOKENS,
+    { unit: "tokens" },
   );
-  const runBudgetTokens = readPositiveTokenEnv(
+  const runBudgetTokens = readPositiveIntEnv(
     "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
     DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+    { unit: "tokens" },
   );
   const tokenBudget = new TokenBudget({ inlineCapTokens, runBudgetTokens });
-  // Fan-out cap on `provider_call`. Defaults to
-  // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
-  // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
-  const providerCallSemaphore = new Semaphore(
-    readPositiveConcurrencyEnv(
-      "SIDECAR_PROVIDER_CALL_CONCURRENCY",
-      DEFAULT_PROVIDER_CALL_CONCURRENCY,
-    ),
-  );
+  // `providerCallLimiter` is built at the top of createApp so the
+  // /health route can read its drain state in the same closure.
   mountMcp(app, {
     blobStore,
     tokenBudget,
-    providerCallSemaphore,
+    providerCallLimiter,
     proxyDeps: {
       config,
       cookieJar,

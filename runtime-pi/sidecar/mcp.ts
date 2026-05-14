@@ -65,7 +65,7 @@ import {
   PROVIDER_ID_RE,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
-import { Semaphore } from "./semaphore.ts";
+import { DrainingError, LimiterRegistry } from "./limiter.ts";
 import { logger } from "./logger.ts";
 
 /**
@@ -284,7 +284,7 @@ interface TokenBudgetMeta {
  * {@link TokenBudget} is wired (tests / embedders).
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
-  const { blobStore, proxyDeps, tokenBudget, providerCallSemaphore } = options;
+  const { blobStore, proxyDeps, tokenBudget, providerCallLimiter } = options;
   const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
@@ -360,14 +360,35 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       // Run-scoped fan-out cap. Without this, an agent that issues N
       // parallel `provider_call`s funnels their full payloads into the
       // next LLM turn, blowing past upstream model TPM windows
-      // (issue #427). The permit is held only for the duration of the
-      // upstream HTTP hop; pre-flight validation errors return inside
-      // the try/finally so the permit is always released.
-      const release = providerCallSemaphore ? await providerCallSemaphore.acquire() : null;
+      // (issue #427). The limiter is per-provider so generous providers
+      // (Gmail >>10) can run higher than rate-sensitive ones without
+      // every fanned-out call being capped by the slowest lane. When
+      // the sidecar is draining (SIGTERM, issue #435), the limiter
+      // rejects with `DrainingError` and the handler surfaces a
+      // structured tool error so the agent can react.
+      const providerId =
+        typeof (rawArgs as { providerId?: unknown })?.providerId === "string"
+          ? (rawArgs as { providerId: string }).providerId
+          : "_unknown";
+      const run = (): Promise<CallToolResult> => providerCallInner(rawArgs);
+      if (!providerCallLimiter) return run();
       try {
-        return await providerCallInner(rawArgs);
-      } finally {
-        release?.();
+        return await providerCallLimiter.run(providerId, run);
+      } catch (err) {
+        if (err instanceof DrainingError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "provider_call: sidecar is draining (SIGTERM received). Retry after the agent restarts.",
+              },
+            ],
+            structuredContent: { error: { code: "DRAINING", scope: "sidecar" } },
+            isError: true,
+            _meta: PROVIDER_CALL_PREFLIGHT_META,
+          };
+        }
+        throw err;
       }
     },
   };
@@ -379,171 +400,169 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
    * control flow without nested closures.
    */
   async function providerCallInner(rawArgs: unknown): Promise<CallToolResult> {
-    {
-      const args = rawArgs as {
-        providerId: string;
-        target: string;
-        method?: string;
-        headers?: Record<string, string>;
-        body?: string | { fromBytes: string; encoding: "base64" };
-        substituteBody?: boolean;
+    const args = rawArgs as {
+      providerId: string;
+      target: string;
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string | { fromBytes: string; encoding: "base64" };
+      substituteBody?: boolean;
+    };
+
+    const method = args.method ?? "GET";
+
+    // Refuse `body` on GET/HEAD explicitly rather than silently
+    // dropping it. A model that supplies a body genuinely expects it
+    // to be sent — silent drop produces a confusing upstream behaviour
+    // (server returns "missing field X" while the agent thinks it
+    // sent X). Surface the contract violation as a clear tool-level
+    // error instead. JSON Schema can't express conditional `required`
+    // cleanly across all MCP clients, so we enforce it in the handler.
+    if (args.body !== undefined && (method === "GET" || method === "HEAD")) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `provider_call: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
+          },
+        ],
+        isError: true,
+        _meta: PROVIDER_CALL_PREFLIGHT_META,
       };
+    }
 
-      const method = args.method ?? "GET";
+    const { headers: callerHeaders, dropped } = sanitiseProviderCallHeaders(args.headers);
+    if (dropped.length > 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `provider_call: caller-supplied headers may not include sidecar-control names: ` +
+              `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
+          },
+        ],
+        isError: true,
+        _meta: PROVIDER_CALL_PREFLIGHT_META,
+      };
+    }
 
-      // Refuse `body` on GET/HEAD explicitly rather than silently
-      // dropping it. A model that supplies a body genuinely expects it
-      // to be sent — silent drop produces a confusing upstream behaviour
-      // (server returns "missing field X" while the agent thinks it
-      // sent X). Surface the contract violation as a clear tool-level
-      // error instead. JSON Schema can't express conditional `required`
-      // cleanly across all MCP clients, so we enforce it in the handler.
-      if (args.body !== undefined && (method === "GET" || method === "HEAD")) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `provider_call: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
-            },
-          ],
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
-        };
-      }
-
-      const { headers: callerHeaders, dropped } = sanitiseProviderCallHeaders(args.headers);
-      if (dropped.length > 0) {
+    // Resolve the request body to raw bytes. Two shapes supported:
+    //  - string: TextEncoder → bytes (text/JSON endpoints)
+    //  - { fromBytes, encoding: "base64" }: base64 → bytes (binary
+    //    uploads — runtime resolvers materialise workspace files into
+    //    this shape before MCP because JSON-RPC has no native byte
+    //    type and forwarding bytes as a string corrupts non-UTF-8
+    //    payloads).
+    let buffered: ArrayBuffer | undefined;
+    let bodyText: string | undefined;
+    if (typeof args.body === "string") {
+      buffered = new TextEncoder().encode(args.body).buffer;
+      bodyText = args.body;
+    } else if (args.body && typeof args.body === "object" && "fromBytes" in args.body) {
+      if (args.substituteBody) {
         return {
           content: [
             {
               type: "text",
               text:
-                `provider_call: caller-supplied headers may not include sidecar-control names: ` +
-                `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
+                "provider_call: substituteBody requires a text body — pass body as a string, " +
+                "not { fromBytes }.",
             },
           ],
           isError: true,
           _meta: PROVIDER_CALL_PREFLIGHT_META,
         };
       }
-
-      // Resolve the request body to raw bytes. Two shapes supported:
-      //  - string: TextEncoder → bytes (text/JSON endpoints)
-      //  - { fromBytes, encoding: "base64" }: base64 → bytes (binary
-      //    uploads — runtime resolvers materialise workspace files into
-      //    this shape before MCP because JSON-RPC has no native byte
-      //    type and forwarding bytes as a string corrupts non-UTF-8
-      //    payloads).
-      let buffered: ArrayBuffer | undefined;
-      let bodyText: string | undefined;
-      if (typeof args.body === "string") {
-        buffered = new TextEncoder().encode(args.body).buffer;
-        bodyText = args.body;
-      } else if (args.body && typeof args.body === "object" && "fromBytes" in args.body) {
-        if (args.substituteBody) {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  "provider_call: substituteBody requires a text body — pass body as a string, " +
-                  "not { fromBytes }.",
-              },
-            ],
-            isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
-          };
-        }
-        const decoded = decodeStrictBase64(args.body.fromBytes);
-        if (decoded === "invalid") {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  "provider_call: body.fromBytes is not standard base64 (RFC 4648 §4, " +
-                  "alphabet `+/`, no whitespace).",
-              },
-            ],
-            isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
-          };
-        }
-        if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  `provider_call: body.fromBytes is ${decoded.byteLength} bytes, ` +
-                  `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
-                  `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
-                  `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
-                  `the JSON-RPC envelope). Files larger than the cap must be split across ` +
-                  `multiple provider_call invocations.`,
-              },
-            ],
-            structuredContent: {
-              error: {
-                code: "PAYLOAD_TOO_LARGE",
-                scope: "request_body",
-                limit: MAX_REQUEST_BODY_SIZE,
-                actual: decoded.byteLength,
-                envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-              },
-            },
-            isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
-          };
-        }
-        buffered = decoded.buffer.slice(
-          decoded.byteOffset,
-          decoded.byteOffset + decoded.byteLength,
-        ) as ArrayBuffer;
-      }
-
-      const result = await executeProviderCall(
-        {
-          providerId: args.providerId,
-          targetUrl: args.target,
-          method,
-          callerHeaders,
-          body: buffered
-            ? {
-                kind: "buffered",
-                bytes: buffered,
-                ...(bodyText !== undefined && args.substituteBody ? { text: bodyText } : {}),
-              }
-            : { kind: "none" },
-          substituteBody: !!args.substituteBody,
-          proxyUrl: config.proxyUrl,
-        },
-        proxyDeps,
-      );
-      if (!result.ok) {
+      const decoded = decodeStrictBase64(args.body.fromBytes);
+      if (decoded === "invalid") {
         return {
-          content: [{ type: "text", text: `provider_call: ${result.error}` }],
+          content: [
+            {
+              type: "text",
+              text:
+                "provider_call: body.fromBytes is not standard base64 (RFC 4648 §4, " +
+                "alphabet `+/`, no whitespace).",
+            },
+          ],
           isError: true,
-          // Pre-flight failure (cred fetch, URL allowlist, etc): no
-          // upstream contact, but the runtime parser requires `_meta`
-          // on every CallToolResult — surface `status: 0` so the agent
-          // can distinguish "no upstream contact" from "upstream
-          // returned 5xx" via the status code.
           _meta: PROVIDER_CALL_PREFLIGHT_META,
         };
       }
-      return responseToToolResult(result.response, {
-        ...(blobStore ? { blobStore } : {}),
-        ...(tokenBudget ? { tokenBudget } : {}),
-        source: `provider:${args.providerId}`,
-        // Attach upstream `{ status, headers }` to the CallToolResult
-        // `_meta` payload so the agent-side resolver can surface real
-        // HTTP status / response headers (Location, ETag,
-        // Upload-Offset, …) to chunked-upload protocols. Always on for
-        // `provider_call` — the runtime parser requires it.
-        attachUpstreamMeta: true,
-      });
+      if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `provider_call: body.fromBytes is ${decoded.byteLength} bytes, ` +
+                `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
+                `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
+                `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
+                `the JSON-RPC envelope). Files larger than the cap must be split across ` +
+                `multiple provider_call invocations.`,
+            },
+          ],
+          structuredContent: {
+            error: {
+              code: "PAYLOAD_TOO_LARGE",
+              scope: "request_body",
+              limit: MAX_REQUEST_BODY_SIZE,
+              actual: decoded.byteLength,
+              envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+            },
+          },
+          isError: true,
+          _meta: PROVIDER_CALL_PREFLIGHT_META,
+        };
+      }
+      buffered = decoded.buffer.slice(
+        decoded.byteOffset,
+        decoded.byteOffset + decoded.byteLength,
+      ) as ArrayBuffer;
     }
+
+    const result = await executeProviderCall(
+      {
+        providerId: args.providerId,
+        targetUrl: args.target,
+        method,
+        callerHeaders,
+        body: buffered
+          ? {
+              kind: "buffered",
+              bytes: buffered,
+              ...(bodyText !== undefined && args.substituteBody ? { text: bodyText } : {}),
+            }
+          : { kind: "none" },
+        substituteBody: !!args.substituteBody,
+        proxyUrl: config.proxyUrl,
+      },
+      proxyDeps,
+    );
+    if (!result.ok) {
+      return {
+        content: [{ type: "text", text: `provider_call: ${result.error}` }],
+        isError: true,
+        // Pre-flight failure (cred fetch, URL allowlist, etc): no
+        // upstream contact, but the runtime parser requires `_meta`
+        // on every CallToolResult — surface `status: 0` so the agent
+        // can distinguish "no upstream contact" from "upstream
+        // returned 5xx" via the status code.
+        _meta: PROVIDER_CALL_PREFLIGHT_META,
+      };
+    }
+    return responseToToolResult(result.response, {
+      ...(blobStore ? { blobStore } : {}),
+      ...(tokenBudget ? { tokenBudget } : {}),
+      source: `provider:${args.providerId}`,
+      // Attach upstream `{ status, headers }` to the CallToolResult
+      // `_meta` payload so the agent-side resolver can surface real
+      // HTTP status / response headers (Location, ETag,
+      // Upload-Offset, …) to chunked-upload protocols. Always on for
+      // `provider_call` — the runtime parser requires it.
+      attachUpstreamMeta: true,
+    });
   }
 
   const runHistory: AppstrateToolDefinition = {
@@ -1144,16 +1163,22 @@ export interface MountMcpOptions {
   tokenBudget?: TokenBudget;
   /**
    * Run-scoped fan-out limiter for `provider_call`. Caps the number of
-   * concurrent upstream HTTP hops a single run can issue at once.
-   * Without a cap, an agent that fetches N items in parallel (8 Gmail
-   * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
-   * over-sized JSON dump and blow past the upstream model's TPM
-   * window. See issue #427 for the reference incident.
+   * concurrent upstream HTTP hops a single run can issue at once,
+   * per `providerId`. Without a cap an agent that fetches N items in
+   * parallel (8 Gmail messages, 20 ClickUp tasks, …) can feed the
+   * next LLM turn an over-sized JSON dump and blow past the upstream
+   * model's TPM window — see issue #427 for the reference incident
+   * and #435 for the per-provider extension.
    *
-   * Optional only so tests / embedders can omit it; production wires a
-   * `Semaphore` unconditionally via `createApp` (see `app.ts`).
+   * The registry also implements the SIGTERM drain path (#435):
+   * once `pause()` is called every subsequent `run()` rejects with
+   * `DrainingError`, which surfaces to the agent as a structured
+   * `DRAINING` tool error so it can react instead of hanging.
+   *
+   * Optional only so tests / embedders can omit it; production wires
+   * a `LimiterRegistry` unconditionally via `createApp` (see `app.ts`).
    */
-  providerCallSemaphore?: Semaphore;
+  providerCallLimiter?: LimiterRegistry;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {

@@ -186,19 +186,10 @@ export interface TokenBudgetOptions {
 }
 
 /**
- * Read a positive-integer token cap from an env var, falling back to
- * `defaultValue` when unset/empty. Mirrors `readPositiveByteEnv` in
- * `helpers.ts` so misconfiguration fails loud at boot.
+ * Token-cap env parsing was unified into `readPositiveIntEnv` in
+ * `helpers.ts`. Callers that previously imported `readPositiveTokenEnv`
+ * now call `readPositiveIntEnv(name, default, { unit: "tokens" })`.
  */
-export function readPositiveTokenEnv(name: string, defaultValue: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer (tokens), got ${JSON.stringify(raw)}.`);
-  }
-  return parsed;
-}
 
 /**
  * Run-scoped cumulative token budget tracker.

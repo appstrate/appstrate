@@ -8,10 +8,12 @@
  * Coverage focus:
  *   - estimateTokens — chars/3.5 heuristic, edge cases (empty, unicode,
  *     short strings round up).
- *   - readPositiveTokenEnv — fail-loud parsing of env overrides.
  *   - TokenBudget — constructor invariants, decide() purity, record()
  *     accumulation + saturation, run-level cumulative pressure,
  *     tryReserve() atomicity, injected estimator, dev-loud record().
+ *
+ * Env-var parsing (previously `readPositiveTokenEnv`) is now exercised
+ * generically by the `readPositiveIntEnv` tests in `helpers.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -20,7 +22,6 @@ import {
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   TokenBudget,
   estimateTokens,
-  readPositiveTokenEnv,
   type TokenEstimator,
 } from "../token-budget.ts";
 
@@ -61,52 +62,6 @@ describe("estimateTokens", () => {
   it("is deterministic (same input → same output)", () => {
     const s = "lorem ipsum dolor sit amet ".repeat(500);
     expect(estimateTokens(s)).toBe(estimateTokens(s));
-  });
-});
-
-describe("readPositiveTokenEnv", () => {
-  const envName = "TEST_TOKEN_BUDGET_ENV_VAR";
-  it("returns default when unset", () => {
-    delete process.env[envName];
-    expect(readPositiveTokenEnv(envName, 1234)).toBe(1234);
-  });
-
-  it("returns default when empty string", () => {
-    process.env[envName] = "";
-    expect(readPositiveTokenEnv(envName, 99)).toBe(99);
-    delete process.env[envName];
-  });
-
-  it("parses positive integers", () => {
-    process.env[envName] = "5000";
-    expect(readPositiveTokenEnv(envName, 99)).toBe(5000);
-    delete process.env[envName];
-  });
-
-  it("throws on non-integer", () => {
-    process.env[envName] = "5.5";
-    expect(() => readPositiveTokenEnv(envName, 1)).toThrow(/positive integer/);
-    delete process.env[envName];
-  });
-
-  it("throws on zero / negative", () => {
-    for (const v of ["0", "-1", "-100"]) {
-      process.env[envName] = v;
-      expect(() => readPositiveTokenEnv(envName, 1)).toThrow(/positive integer/);
-    }
-    delete process.env[envName];
-  });
-
-  it("throws on non-numeric", () => {
-    process.env[envName] = "not-a-number";
-    expect(() => readPositiveTokenEnv(envName, 1)).toThrow(/positive integer/);
-    delete process.env[envName];
-  });
-
-  it("includes the variable name in the error", () => {
-    process.env[envName] = "abc";
-    expect(() => readPositiveTokenEnv(envName, 1)).toThrow(envName);
-    delete process.env[envName];
   });
 });
 

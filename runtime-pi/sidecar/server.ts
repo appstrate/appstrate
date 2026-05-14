@@ -3,6 +3,12 @@
 import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
+import {
+  DEFAULT_DRAIN_TIMEOUT_MS,
+  LimiterRegistry,
+  drainRegistry,
+  parseConcurrencyConfig,
+} from "./limiter.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 
@@ -73,6 +79,17 @@ const oauthTokenCache = new OAuthTokenCache({
   getPlatformApiUrl: () => config.platformApiUrl,
   getRunToken: () => config.runToken,
 });
+
+// Built here (not inside createApp) so the SIGTERM handler can call
+// `pause()` + `onIdle()` directly without having to fish references
+// out of the Hono app. Start the queue-depth watcher: any provider
+// whose backlog stays > threshold for the dwell window emits one
+// `appstrate.error` line (issue #435).
+const providerCallLimiter = new LimiterRegistry(
+  parseConcurrencyConfig(process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY),
+);
+providerCallLimiter.startQueueDepthWatcher();
+
 const app = createApp({
   config,
   fetchCredentials,
@@ -82,9 +99,28 @@ const app = createApp({
   configSecret: process.env.CONFIG_SECRET || undefined,
   preConfigured,
   oauthTokenCache,
+  providerCallLimiter,
 });
 
 logger.info("Sidecar proxy listening", { port });
+
+let drainStarted = false;
+function handleSignal(signal: string): void {
+  if (drainStarted) return;
+  drainStarted = true;
+  void drainRegistry(providerCallLimiter, signal, {
+    timeoutMs: DEFAULT_DRAIN_TIMEOUT_MS,
+    onStart: (e) => logger.info("sidecar.drain.start", e),
+    onComplete: (e) => {
+      if (e.idle) logger.info("sidecar.drain.complete", e);
+      else logger.warn("sidecar.drain.timeout", e);
+    },
+    exit: (code) => process.exit(code),
+  });
+}
+
+process.on("SIGTERM", () => handleSignal("SIGTERM"));
+process.on("SIGINT", () => handleSignal("SIGINT"));
 
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound

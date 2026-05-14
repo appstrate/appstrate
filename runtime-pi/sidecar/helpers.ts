@@ -32,29 +32,41 @@ export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_0
 export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
 
 /**
- * Resolve a positive-integer byte cap from an env var, falling back to
- * `defaultValue` when unset/empty. Throws on malformed values or values
- * above {@link ABSOLUTE_BODY_CEILING} so misconfiguration fails loud at
- * sidecar boot rather than silently masking the problem at runtime.
+ * Resolve a positive-integer env override, falling back to
+ * `defaultValue` when unset/empty. Throws on malformed values so
+ * misconfiguration fails loud at sidecar boot rather than silently
+ * masking the problem at runtime.
  *
- * Exported for tests and for the runtime-side mirror in
+ * Options:
+ *   - `unit`: appended to error messages (e.g. `"bytes"`, `"tokens"`)
+ *     so callers don't all hand-roll their own phrasing.
+ *   - `ceiling`: absolute upper bound. Values above the ceiling throw
+ *     with a "requires code changes" hint — used by byte caps tied
+ *     to a memory-pressure invariant.
+ *
+ * Replaces three near-identical helpers that used to live alongside
+ * each caller (`readPositiveByteEnv`, `readPositiveTokenEnv`,
+ * `readPositiveConcurrencyEnv`). Exported for tests and for the
+ * runtime-side mirror in
  * `packages/afps-runtime/src/resolvers/provider-tool.ts`.
  */
-export function readPositiveByteEnv(
+export function readPositiveIntEnv(
   name: string,
   defaultValue: number,
-  ceiling = ABSOLUTE_BODY_CEILING,
+  opts: { unit?: string; ceiling?: number } = {},
 ): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return defaultValue;
   const parsed = Number(raw);
+  const unitTag = opts.unit ? ` (${opts.unit})` : "";
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer (bytes), got ${JSON.stringify(raw)}.`);
+    throw new Error(`${name} must be a positive integer${unitTag}, got ${JSON.stringify(raw)}.`);
   }
-  if (parsed > ceiling) {
+  if (opts.ceiling !== undefined && parsed > opts.ceiling) {
+    const unitWord = opts.unit ? ` ${opts.unit}` : "";
     throw new Error(
-      `${name}=${parsed} exceeds the absolute ceiling of ${ceiling} bytes. ` +
-        `Caps above this require code changes (memory pressure on the sidecar).`,
+      `${name}=${parsed} exceeds the absolute ceiling of ${opts.ceiling}${unitWord}. ` +
+        `Caps above this require code changes.`,
     );
   }
   return parsed;
@@ -69,9 +81,10 @@ export function readPositiveByteEnv(
  * {@link MAX_MCP_ENVELOPE_SIZE} since base64 inflation (~1.37×) plus
  * JSON-RPC overhead must fit in the MCP envelope.
  */
-export const MAX_REQUEST_BODY_SIZE = readPositiveByteEnv(
+export const MAX_REQUEST_BODY_SIZE = readPositiveIntEnv(
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   10 * 1024 * 1024,
+  { unit: "bytes", ceiling: ABSOLUTE_BODY_CEILING },
 );
 
 /**
@@ -84,9 +97,10 @@ export const MAX_REQUEST_BODY_SIZE = readPositiveByteEnv(
  * base64-encoded {@link MAX_REQUEST_BODY_SIZE} (10 MB × ~1.37) plus
  * JSON-RPC overhead.
  */
-export const MAX_MCP_ENVELOPE_SIZE = readPositiveByteEnv(
+export const MAX_MCP_ENVELOPE_SIZE = readPositiveIntEnv(
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
   16 * 1024 * 1024,
+  { unit: "bytes", ceiling: ABSOLUTE_BODY_CEILING },
 );
 
 /**

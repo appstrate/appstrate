@@ -14,7 +14,7 @@ import {
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   OUTBOUND_TIMEOUT_MS,
-  readPositiveByteEnv,
+  readPositiveIntEnv,
 } from "../helpers.ts";
 
 // --- Constants ---
@@ -313,23 +313,23 @@ describe("matchesAuthorizedUri", () => {
   });
 });
 
-describe("readPositiveByteEnv", () => {
+describe("readPositiveIntEnv", () => {
   // Use a unique env var name per test to avoid leakage between cases.
   // bun:test runs sequentially within a file so reuse-with-cleanup is
   // also safe, but unique names keep failures attributable.
-  const NAME_BASE = "__APPSTRATE_TEST_BYTE_ENV";
+  const NAME_BASE = "__APPSTRATE_TEST_INT_ENV";
 
   it("returns the default when the env var is unset", () => {
     const name = `${NAME_BASE}_UNSET`;
     delete process.env[name];
-    expect(readPositiveByteEnv(name, 1234)).toBe(1234);
+    expect(readPositiveIntEnv(name, 1234)).toBe(1234);
   });
 
   it("returns the default when the env var is empty", () => {
     const name = `${NAME_BASE}_EMPTY`;
     process.env[name] = "";
     try {
-      expect(readPositiveByteEnv(name, 1234)).toBe(1234);
+      expect(readPositiveIntEnv(name, 1234)).toBe(1234);
     } finally {
       delete process.env[name];
     }
@@ -339,7 +339,7 @@ describe("readPositiveByteEnv", () => {
     const name = `${NAME_BASE}_VALID`;
     process.env[name] = "5242880"; // 5 MB
     try {
-      expect(readPositiveByteEnv(name, 1234)).toBe(5_242_880);
+      expect(readPositiveIntEnv(name, 1234)).toBe(5_242_880);
     } finally {
       delete process.env[name];
     }
@@ -349,7 +349,7 @@ describe("readPositiveByteEnv", () => {
     const name = `${NAME_BASE}_NON_NUMERIC`;
     process.env[name] = "ten megabytes";
     try {
-      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+      expect(() => readPositiveIntEnv(name, 1234)).toThrow(/positive integer/);
     } finally {
       delete process.env[name];
     }
@@ -359,7 +359,7 @@ describe("readPositiveByteEnv", () => {
     const name = `${NAME_BASE}_NEGATIVE`;
     process.env[name] = "-1";
     try {
-      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+      expect(() => readPositiveIntEnv(name, 1234)).toThrow(/positive integer/);
     } finally {
       delete process.env[name];
     }
@@ -367,7 +367,7 @@ describe("readPositiveByteEnv", () => {
     const zeroName = `${NAME_BASE}_ZERO`;
     process.env[zeroName] = "0";
     try {
-      expect(() => readPositiveByteEnv(zeroName, 1234)).toThrow(/positive integer/);
+      expect(() => readPositiveIntEnv(zeroName, 1234)).toThrow(/positive integer/);
     } finally {
       delete process.env[zeroName];
     }
@@ -377,18 +377,20 @@ describe("readPositiveByteEnv", () => {
     const name = `${NAME_BASE}_FLOAT`;
     process.env[name] = "1.5";
     try {
-      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/positive integer/);
+      expect(() => readPositiveIntEnv(name, 1234)).toThrow(/positive integer/);
     } finally {
       delete process.env[name];
     }
   });
 
-  it("throws when the env var exceeds the absolute ceiling", () => {
+  it("throws when the value exceeds the provided ceiling", () => {
     const name = `${NAME_BASE}_OVER_CEILING`;
-    // Default ceiling is 100 MB; ask for 200 MB.
+    // Mirror the byte-cap usage: caller opts in to a ceiling.
     process.env[name] = String(200 * 1024 * 1024);
     try {
-      expect(() => readPositiveByteEnv(name, 1234)).toThrow(/absolute ceiling/);
+      expect(() =>
+        readPositiveIntEnv(name, 1234, { unit: "bytes", ceiling: ABSOLUTE_BODY_CEILING }),
+      ).toThrow(/absolute ceiling/);
     } finally {
       delete process.env[name];
     }
@@ -399,7 +401,7 @@ describe("readPositiveByteEnv", () => {
     process.env[name] = "1000";
     try {
       // Within the custom ceiling — accepted.
-      expect(readPositiveByteEnv(name, 100, 5000)).toBe(1000);
+      expect(readPositiveIntEnv(name, 100, { ceiling: 5000 })).toBe(1000);
     } finally {
       delete process.env[name];
     }
@@ -408,7 +410,28 @@ describe("readPositiveByteEnv", () => {
     try {
       // Above the custom ceiling — rejected even though far below the
       // module-level ABSOLUTE_BODY_CEILING.
-      expect(() => readPositiveByteEnv(name, 100, 5000)).toThrow(/absolute ceiling/);
+      expect(() => readPositiveIntEnv(name, 100, { ceiling: 5000 })).toThrow(/absolute ceiling/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("includes the unit hint in error messages when provided", () => {
+    const name = `${NAME_BASE}_UNIT`;
+    process.env[name] = "-1";
+    try {
+      expect(() => readPositiveIntEnv(name, 1, { unit: "tokens" })).toThrow(/\(tokens\)/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("omits the unit hint when not provided", () => {
+    const name = `${NAME_BASE}_NOUNIT`;
+    process.env[name] = "-1";
+    try {
+      // Generic error — must not contain parenthesised unit.
+      expect(() => readPositiveIntEnv(name, 1)).toThrow(/positive integer,/);
     } finally {
       delete process.env[name];
     }

@@ -16,6 +16,7 @@
 import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
+import { LimiterRegistry } from "../limiter.ts";
 import { logger } from "../logger.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
@@ -90,6 +91,26 @@ describe("GET /health", () => {
     const app = createApp(makeDeps());
     const res = await app.request("/health");
     expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("returns 503 with X-Drain-Reason: shutdown once the limiter is paused (#435)", async () => {
+    // SIGTERM drain path: server.ts flips the limiter into drain
+    // mode, which surfaces on /health so external orchestrators
+    // (k8s, the sidecar pool) stop sending new traffic.
+    const providerCallLimiter = new LimiterRegistry({ default: 3, perProvider: new Map() });
+    const app = createApp(makeDeps({ providerCallLimiter }));
+    // Baseline: 200 ok before SIGTERM.
+    let res = await app.request("/health");
+    expect(res.status).toBe(200);
+
+    providerCallLimiter.pause();
+
+    res = await app.request("/health");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("X-Drain-Reason")).toBe("shutdown");
+    const body = (await res.json()) as { status: string; reason: string };
+    expect(body.status).toBe("draining");
+    expect(body.reason).toBe("shutdown");
   });
 });
 

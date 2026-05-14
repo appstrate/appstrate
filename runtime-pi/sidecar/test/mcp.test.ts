@@ -15,6 +15,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { createApp, type AppDeps } from "../app.ts";
 import { MAX_MCP_ENVELOPE_SIZE, MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { LimiterRegistry } from "../limiter.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -1085,5 +1086,356 @@ describe("POST /mcp — provider_call concurrency cap (issue #427)", () => {
     } finally {
       delete process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY;
     }
+  });
+
+  // Regression for #430. The MCP-level race: fire many simultaneous
+  // `tools/call` invocations against a slow mock upstream, instrument
+  // the limiter, assert peak ≤ cap.
+  //
+  // The old hand-rolled Semaphore had a release-then-resolve gap that
+  // allowed a synchronous fresh `acquire()` to slip past `maxConcurrent`
+  // before the parked waiter resumed. Under the new `LimiterRegistry`
+  // (p-queue-backed) the permit is transferred synchronously, so even
+  // with releases and arrivals jittered into the same event-loop tick
+  // peak never exceeds the cap.
+  it("never exceeds the cap under 50 simultaneous provider_call invocations (#430)", async () => {
+    let active = 0;
+    let peak = 0;
+    const gates: Array<() => void> = [];
+    const fetchFn = mock(async () => {
+      active++;
+      if (active > peak) peak = active;
+      await new Promise<void>((resolve) => gates.push(resolve));
+      active--;
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    // Build the limiter explicitly so the test can pin the cap
+    // without relying on env-var ordering.
+    const providerCallLimiter = new LimiterRegistry({ default: 3, perProvider: new Map() });
+    const app = createApp(makeDeps({ fetchFn, providerCallLimiter }));
+    const issue = (id: number) =>
+      rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "provider_call",
+          arguments: {
+            providerId: "test-provider",
+            target: `https://api.example.com/items/${id}`,
+            method: "GET",
+          },
+        },
+      });
+    const inflight: Array<Promise<unknown>> = [];
+    for (let i = 0; i < 50; i++) inflight.push(issue(i));
+    // Drip-feed releases. Each release yields the event loop so the
+    // limiter can dequeue the next parked task and reach fetchFn,
+    // exercising the release-then-arrival window every iteration.
+    let drained = 0;
+    while (drained < 50) {
+      // Wait until at least one task is parked at the gate.
+      let spins = 0;
+      while (gates.length === 0 && drained < 50) {
+        await Promise.resolve();
+        if (++spins > 200) break;
+      }
+      if (gates.length === 0) break;
+      gates.shift()!();
+      drained++;
+      // Yield to let the limiter dequeue the next waiter (microtask
+      // round-trip) and let fetchFn reach the gate push.
+      for (let k = 0; k < 5; k++) await Promise.resolve();
+    }
+    const results = await Promise.all(inflight);
+    expect(results).toHaveLength(50);
+    expect(peak).toBeLessThanOrEqual(3);
+    // Sanity: the limiter must have actually saturated, otherwise the
+    // test never visited the race window.
+    expect(peak).toBe(3);
+  });
+
+  // Per-provider caps (#435). The limiter applies a generous cap on
+  // `fast` and a tight cap on `slow`; even with both providers under
+  // load simultaneously each provider's peak respects its own bound.
+  it("isolates per-provider caps so a hot lane doesn't starve a strict one", async () => {
+    let fastActive = 0;
+    let fastPeak = 0;
+    let slowActive = 0;
+    let slowPeak = 0;
+    const gates: Array<() => void> = [];
+    const fetchFn = mock(async (input: RequestInfo) => {
+      const url = String(input);
+      const slow = url.includes("/slow/");
+      if (slow) {
+        slowActive++;
+        if (slowActive > slowPeak) slowPeak = slowActive;
+      } else {
+        fastActive++;
+        if (fastActive > fastPeak) fastPeak = fastActive;
+      }
+      await new Promise<void>((resolve) => gates.push(resolve));
+      if (slow) slowActive--;
+      else fastActive--;
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const fetchCredentials = mock(
+      async (providerId: string): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok" },
+        authorizedUris: [
+          providerId === "fast"
+            ? "https://api.example.com/fast/**"
+            : "https://api.example.com/slow/**",
+        ],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      }),
+    );
+    const providerCallLimiter = new LimiterRegistry({
+      default: 1,
+      perProvider: new Map([["fast", 4]]),
+    });
+    const app = createApp(makeDeps({ fetchFn, fetchCredentials, providerCallLimiter }));
+    const issue = (provider: "fast" | "slow", id: number) =>
+      rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "provider_call",
+          arguments: {
+            providerId: provider,
+            target: `https://api.example.com/${provider}/${id}`,
+            method: "GET",
+          },
+        },
+      });
+    const inflight: Array<Promise<unknown>> = [];
+    for (let i = 0; i < 8; i++) inflight.push(issue("fast", i));
+    for (let i = 0; i < 5; i++) inflight.push(issue("slow", i));
+    // Yield enough to saturate both lanes.
+    for (let i = 0; i < 60; i++) await Promise.resolve();
+    expect(fastPeak).toBe(4);
+    expect(slowPeak).toBe(1);
+    // Drain.
+    while (gates.length > 0) {
+      gates.shift()!();
+      for (let k = 0; k < 30; k++) await Promise.resolve();
+    }
+    await Promise.all(inflight);
+    expect(fastPeak).toBe(4);
+    expect(slowPeak).toBe(1);
+  });
+
+  // Graceful drain (#435). Once the limiter is paused (SIGTERM), new
+  // `provider_call` invocations land with a structured `DRAINING` tool
+  // error and the existing in-flight calls drain cleanly via
+  // `onIdle()`.
+  it("returns a structured DRAINING tool error after pause()", async () => {
+    let active = 0;
+    const gates: Array<() => void> = [];
+    const fetchFn = mock(async () => {
+      active++;
+      await new Promise<void>((resolve) => gates.push(resolve));
+      active--;
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const providerCallLimiter = new LimiterRegistry({ default: 2, perProvider: new Map() });
+    const app = createApp(makeDeps({ fetchFn, providerCallLimiter }));
+    const issue = (id: number) =>
+      rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "provider_call",
+          arguments: {
+            providerId: "test-provider",
+            target: `https://api.example.com/items/${id}`,
+            method: "GET",
+          },
+        },
+      });
+    // Start two in-flight calls so the limiter has a real backlog to
+    // drain.
+    const r1 = issue(1);
+    const r2 = issue(2);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(active).toBe(2);
+    // SIGTERM moment: flip into drain mode.
+    providerCallLimiter.pause();
+    expect(providerCallLimiter.isDraining()).toBe(true);
+    // A subsequent call lands on the structured tool error — no
+    // upstream contact, no permit allocated, agent gets a clear
+    // signal to retry after the sidecar restarts.
+    const r3 = await issue(3);
+    const r3Result = r3.json.result as {
+      isError?: boolean;
+      content: Array<{ type: string; text: string }>;
+      structuredContent?: { error?: { code?: string } };
+    };
+    expect(r3Result.isError).toBe(true);
+    expect(r3Result.content[0]!.text).toMatch(/draining/i);
+    expect(r3Result.structuredContent?.error?.code).toBe("DRAINING");
+    // The pre-existing calls drain to completion.
+    while (gates.length > 0) {
+      gates.shift()!();
+      for (let k = 0; k < 30; k++) await Promise.resolve();
+    }
+    await Promise.all([r1, r2]);
+    expect(active).toBe(0);
+    // onIdle returns true now that everything's flushed.
+    expect(await providerCallLimiter.onIdle(1000)).toBe(true);
+  });
+});
+
+describe("provider_call concurrency — JSON config + queue-depth alert", () => {
+  // The env var accepts either a plain int (legacy form) or a JSON
+  // object with `default` plus per-provider overrides. Wire-level
+  // parsing has its own unit tests in limiter.test.ts; this test
+  // verifies the env-var → behaviour roundtrip via createApp.
+  it("parses SIDECAR_PROVIDER_CALL_CONCURRENCY as JSON when it starts with {", async () => {
+    process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY = '{"default":1,"fast":3}';
+    try {
+      let fastActive = 0;
+      let fastPeak = 0;
+      let slowActive = 0;
+      let slowPeak = 0;
+      const gates: Array<() => void> = [];
+      const fetchFn = mock(async (input: RequestInfo) => {
+        const url = String(input);
+        const slow = url.includes("/slow/");
+        if (slow) {
+          slowActive++;
+          if (slowActive > slowPeak) slowPeak = slowActive;
+        } else {
+          fastActive++;
+          if (fastActive > fastPeak) fastPeak = fastActive;
+        }
+        await new Promise<void>((resolve) => gates.push(resolve));
+        if (slow) slowActive--;
+        else fastActive--;
+        return new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      const fetchCredentials = mock(
+        async (providerId: string): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: [
+            providerId === "fast"
+              ? "https://api.example.com/fast/**"
+              : "https://api.example.com/slow/**",
+          ],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        }),
+      );
+      const app = createApp(makeDeps({ fetchFn, fetchCredentials }));
+      const issue = (provider: "fast" | "slow", id: number) =>
+        rpc(app, {
+          method: "tools/call",
+          params: {
+            name: "provider_call",
+            arguments: {
+              providerId: provider,
+              target: `https://api.example.com/${provider}/${id}`,
+              method: "GET",
+            },
+          },
+        });
+      const inflight: Array<Promise<unknown>> = [];
+      for (let i = 0; i < 6; i++) inflight.push(issue("fast", i));
+      for (let i = 0; i < 4; i++) inflight.push(issue("slow", i));
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+      expect(fastPeak).toBe(3);
+      expect(slowPeak).toBe(1);
+      while (gates.length > 0) {
+        gates.shift()!();
+        for (let k = 0; k < 30; k++) await Promise.resolve();
+      }
+      await Promise.all(inflight);
+    } finally {
+      delete process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY;
+    }
+  });
+
+  // Queue-depth alert (#435). The limiter emits one `appstrate.error`
+  // log line when a provider's parked count stays above the threshold
+  // for the configured dwell window. The unit test in
+  // limiter.test.ts pins the timer logic on injected fakes; this test
+  // confirms the alert sink fires under realistic MCP traffic.
+  it("emits a queue-depth alert when a provider's backlog stays above threshold", async () => {
+    const alerts: Array<{ providerId: string; depth: number; dwellMs: number }> = [];
+    let now = 0;
+    const providerCallLimiter = new LimiterRegistry(
+      { default: 1, perProvider: new Map() },
+      {
+        queueDepthAlertThreshold: 3,
+        queueDepthDwellMs: 100,
+        queueDepthPollMs: 25,
+        alertSink: (line) => alerts.push(line),
+        now: () => now,
+      },
+    );
+    const gates: Array<() => void> = [];
+    const fetchFn = mock(async () => {
+      await new Promise<void>((resolve) => gates.push(resolve));
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const app = createApp(makeDeps({ fetchFn, providerCallLimiter }));
+    const issue = (id: number) =>
+      rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "provider_call",
+          arguments: {
+            providerId: "noisy-provider",
+            target: `https://api.example.com/items/${id}`,
+            method: "GET",
+          },
+        },
+      });
+    // 1 concurrency × 12 calls = depth 11 (1 active + 11 parked).
+    const inflight: Array<Promise<unknown>> = [];
+    for (let i = 0; i < 12; i++) inflight.push(issue(i));
+    // Yield long enough for the active call to reach fetchFn.
+    for (let i = 0; i < 60; i++) await Promise.resolve();
+    // T=0: depth above threshold → arm dwell timer.
+    providerCallLimiter.checkQueueDepth();
+    expect(alerts.length).toBe(0);
+    // T=50: dwell 50ms < 100ms → still no alert.
+    now = 50;
+    providerCallLimiter.checkQueueDepth();
+    expect(alerts.length).toBe(0);
+    // T=150: dwell ≥ 100ms → fire one alert.
+    now = 150;
+    providerCallLimiter.checkQueueDepth();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.providerId).toBe("noisy-provider");
+    expect(alerts[0]!.depth).toBeGreaterThanOrEqual(3);
+    expect(alerts[0]!.dwellMs).toBeGreaterThanOrEqual(100);
+    // T=200: still over threshold — no spam.
+    now = 200;
+    providerCallLimiter.checkQueueDepth();
+    expect(alerts).toHaveLength(1);
+    // Drain.
+    providerCallLimiter.dispose();
+    while (gates.length > 0) {
+      gates.shift()!();
+      for (let k = 0; k < 30; k++) await Promise.resolve();
+    }
+    await Promise.all(inflight);
   });
 });

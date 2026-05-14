@@ -58,7 +58,7 @@ The sidecar layers two token-aware checks on top of the byte caps (see `token-bu
 | --------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SIDECAR_INLINE_TOOL_OUTPUT_TOKENS`     | 8 000 tokens   | Per-call inline cap. Tool outputs above this spill to the `BlobStore` regardless of size — keeps the agent's context cost per call bounded.                                                                                                                                                                                  |
 | `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS` | 100 000 tokens | Cumulative ceiling per run. As the agent's tool outputs accumulate, the inline path tightens; once the ceiling is breached, every text response spills. Tightened from 200 K after issue #427 — keeps a default-context run well under upstream TPM windows. Operators on 1 M-context Sonnet 4.6 deployments can raise this. |
-| `SIDECAR_PROVIDER_CALL_CONCURRENCY`     | 3              | Maximum number of concurrent `provider_call` MCP invocations a single run can issue. Caps fan-out so the next LLM turn cannot be stuffed with N parallel-fetched payloads at once (issue #427).                                                                                                                              |
+| `SIDECAR_PROVIDER_CALL_CONCURRENCY`     | 3              | Per-provider cap on concurrent `provider_call` MCP invocations. Caps fan-out so the next LLM turn cannot be stuffed with N parallel-fetched payloads at once (issue #427). See "Provider concurrency" below for the per-provider override schema.                                                                            |
 
 Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `provider_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
 
@@ -85,6 +85,50 @@ Each text-path tool result carries an `appstrate://token-budget` `_meta` payload
 - `under_inline_cap` / `exceeds_inline_cap` / `exceeds_run_budget` — what the budget tracker decided.
 - `blob_store_full` — the budget said spill but the blob store rejected the put (cumulative cap reached); the agent gets the content inline as a last resort and the override is recorded in the meta.
 - `no_blob_store_configured` — the budget said spill but no blob store was wired (tests / embedders); same forced-inline outcome, but a distinct reason so operators can tell misconfiguration from saturation.
+
+## Provider concurrency
+
+`SIDECAR_PROVIDER_CALL_CONCURRENCY` caps simultaneous `provider_call` MCP invocations per `providerId`. It accepts two forms:
+
+- **Plain integer** (legacy, backwards-compatible): `SIDECAR_PROVIDER_CALL_CONCURRENCY=5` applies the same cap to every provider.
+- **JSON object** with a `default` plus per-providerId overrides:
+
+  ```json
+  {
+    "default": 3,
+    "@appstrate/gmail": 8,
+    "@appstrate/clickup": 2
+  }
+  ```
+
+  Generous providers (Gmail tolerates >>10 parallel reads) can run higher than rate-sensitive ones (ClickUp throttles fast) without sacrificing safety for everyone. Missing `default` falls back to the platform default (3).
+
+Malformed values fail loud at sidecar boot — the parser refuses non-positive, non-integer, or non-object inputs rather than silently masking the misconfiguration. The limiter is backed by `p-queue` (zero-deps within the sidecar bundle save for `eventemitter3` + `p-timeout`), which transfers permits synchronously between callers — closing the race window described in issue #430.
+
+### Graceful drain (SIGTERM)
+
+On SIGTERM (or SIGINT), the sidecar flips its limiter into drain mode:
+
+1. `GET /health` flips to `503` with `X-Drain-Reason: shutdown`.
+2. Every new `provider_call` MCP invocation returns an `isError: true` tool result with `structuredContent.error.code = "DRAINING"` so the agent can react instead of hanging.
+3. In-flight `provider_call`s drain to completion. The wait is capped at 30 s — beyond that the process exits with code 1 so external orchestrators can distinguish a clean drain (exit 0) from a stuck upstream (exit 1).
+
+### Queue-depth alert
+
+When any provider's parked-waiter count stays above 10 for more than 30 s, the sidecar emits one `appstrate.error` structured log line:
+
+```jsonc
+{
+  "level": "error",
+  "msg": "appstrate.error",
+  "kind": "sidecar.provider_call.queue_depth",
+  "providerId": "@appstrate/clickup",
+  "depth": 12,
+  "dwellMs": 30000,
+}
+```
+
+Strong signal that the agent's fan-out logic is broken — surfaces the bug before the run times out. Re-armed only after depth drops below threshold, so steady overload produces one alert per crossing rather than a stream.
 
 ## The `body.fromFile` contract
 
