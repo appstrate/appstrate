@@ -71,21 +71,27 @@ export const modelProviderCredentialsPaths = {
                           type: "array",
                           items: {
                             type: "object",
-                            required: ["id", "contextWindow", "capabilities", "featured"],
+                            required: [
+                              "id",
+                              "label",
+                              "contextWindow",
+                              "capabilities",
+                              "cost",
+                              "featured",
+                            ],
                             properties: {
                               id: { type: "string" },
                               label: {
-                                type: ["string", "null"],
+                                type: "string",
                                 description:
-                                  "Human-readable label for picker UIs; falls back to `id` when null.",
+                                  "Human-readable label, derived from the id at vendoring time.",
                               },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
                               cost: {
-                                type: ["object", "null"],
-                                description:
-                                  "Per-1M-token cost (USD). Null when the provider doesn't publish pricing.",
+                                type: "object",
+                                description: "Per-1M-token cost (USD).",
                                 properties: {
                                   input: { type: "number" },
                                   output: { type: "number" },

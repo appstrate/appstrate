@@ -45,7 +45,7 @@ import {
   resolveModelEntryId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
-import { PROVIDER_ICONS } from "./icons";
+import { getProviderIcon } from "./icons";
 
 export interface ModelFormData {
   label: string;
@@ -468,7 +468,7 @@ function ModelFormBody({
                 featuredLabel={t("models.form.providerGroupFeatured")}
                 otherLabel={t("models.form.providerGroupOther")}
                 renderItem={(p) => {
-                  const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
+                  const Icon = getProviderIcon(p);
                   return (
                     <SelectItem key={p.providerId} value={p.providerId}>
                       <span className="flex items-center gap-2">

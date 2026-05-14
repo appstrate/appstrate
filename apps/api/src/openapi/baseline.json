@@ -5950,14 +5950,21 @@
                             "type": "array",
                             "items": {
                               "type": "object",
-                              "required": ["id", "contextWindow", "capabilities", "featured"],
+                              "required": [
+                                "id",
+                                "label",
+                                "contextWindow",
+                                "capabilities",
+                                "cost",
+                                "featured"
+                              ],
                               "properties": {
                                 "id": {
                                   "type": "string"
                                 },
                                 "label": {
-                                  "type": ["string", "null"],
-                                  "description": "Human-readable label for picker UIs; falls back to `id` when null."
+                                  "type": "string",
+                                  "description": "Human-readable label, derived from the id at vendoring time."
                                 },
                                 "contextWindow": {
                                   "type": "integer"
@@ -5972,8 +5979,8 @@
                                   }
                                 },
                                 "cost": {
-                                  "type": ["object", "null"],
-                                  "description": "Per-1M-token cost (USD). Null when the provider doesn't publish pricing.",
+                                  "type": "object",
+                                  "description": "Per-1M-token cost (USD).",
                                   "properties": {
                                     "input": {
                                       "type": "number"

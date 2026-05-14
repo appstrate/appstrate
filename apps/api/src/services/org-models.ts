@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { lookupCatalogModel, type CatalogModel } from "./pricing-catalog.ts";
+import { lookupCatalogModel } from "./pricing-catalog.ts";
+import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -163,7 +164,7 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
  * (idempotent for re-connect flows). Promotes the first newly-created row to
  * default when the org has no default yet.
  *
- * Models are taken verbatim from {@link CatalogModel}. The caller validates
+ * Models are taken verbatim from {@link CatalogModelEntry}. The caller validates
  * membership against the catalog and resolves the provider's `apiShape` +
  * `baseUrl` (from the credential), so the service stays pure DB — no registry
  * or catalog lookup here.
@@ -177,7 +178,7 @@ export interface SeedModelsResult {
 export interface SeedModelsInput {
   apiShape: string;
   baseUrl: string;
-  models: ReadonlyArray<CatalogModel & { id: string }>;
+  models: ReadonlyArray<CatalogModelEntry & { id: string }>;
 }
 
 export async function seedOrgModelsForCredential(
@@ -264,25 +265,25 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
  * only reads inference fields. `accountId` is set for OAuth credentials
  * whose provider hook surfaced an identity claim — the sidecar re-reads
  * it from the credential row on each request, so the executor ignores it.
+ *
+ * Inference fields (providerId, apiShape, …, cost) mirror
+ * {@link ModelDefinition} so the env-driven and DB-driven paths feed the
+ * run executor the same shape.
  */
-export interface ResolvedModel {
-  /**
-   * Registered ModelProviderDefinition id. Drives OAuth identity hooks
-   * and the inference probe. Always populated — env-driven system keys
-   * declare it on their `SYSTEM_PROVIDER_KEYS` entry, DB credentials
-   * store it on the row.
-   */
-  providerId: string;
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
+export interface ResolvedModel extends Pick<
+  ModelDefinition,
+  | "providerId"
+  | "apiShape"
+  | "baseUrl"
+  | "modelId"
+  | "apiKey"
+  | "label"
+  | "input"
+  | "contextWindow"
+  | "maxTokens"
+  | "reasoning"
+  | "cost"
+> {
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
   /**
@@ -315,12 +316,20 @@ interface DbModelCredentials {
 }
 
 /**
- * Build a `ResolvedModel` from a system `ModelDefinition` (env-driven).
- * Pricing fallback: explicit `def.cost` wins; on miss the vendored
- * pricing catalog (`@appstrate/core/data/pricing/*.json`) is consulted
- * by `(providerId, modelId)`. Misses flow through as null and
- * `computeCostUsd()` short-circuits to 0.
+ * Pricing fallback: explicit `cost` wins, then the vendored LiteLLM
+ * catalog (`apps/api/src/data/pricing/*.json`) keyed by `(providerId,
+ * modelId)`. Misses flow through as null and `computeCostUsd()`
+ * short-circuits to 0.
  */
+function resolveCost(
+  providerId: string,
+  modelId: string,
+  explicit: ModelCost | null | undefined,
+): ModelCost | null {
+  return explicit ?? lookupCatalogModel(providerId, modelId)?.cost ?? null;
+}
+
+/** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   return {
     providerId: def.providerId,
@@ -333,16 +342,12 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     contextWindow: def.contextWindow ?? null,
     maxTokens: def.maxTokens ?? null,
     reasoning: def.reasoning ?? null,
-    cost: def.cost ?? lookupCatalogModel(def.providerId, def.modelId)?.cost ?? null,
+    cost: resolveCost(def.providerId, def.modelId, def.cost),
     isSystemModel: true,
   };
 }
 
-/**
- * Build a `ResolvedModel` from a DB `org_models` row + its credentials.
- * Same pricing fallback as the system path: explicit per-row `cost` wins,
- * then the vendored catalog, then null.
- */
+/** Build a `ResolvedModel` from a DB `org_models` row + its credentials. */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   return {
     providerId: creds.providerId,
@@ -355,10 +360,7 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost:
-      (row.cost as ModelCost | null) ??
-      lookupCatalogModel(creds.providerId, row.modelId)?.cost ??
-      null,
+    cost: resolveCost(creds.providerId, row.modelId, row.cost as ModelCost | null),
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,

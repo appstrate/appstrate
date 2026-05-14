@@ -20,7 +20,8 @@ import {
   loadModel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
-import { listCatalogModels, type CatalogModel } from "../services/pricing-catalog.ts";
+import { listCatalogModels } from "../services/pricing-catalog.ts";
+import type { CatalogModelEntry } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -165,7 +166,7 @@ export function createModelsRouter() {
     const catalogKey = registry.catalogProviderId ?? creds.providerId;
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
     const featuredSet = new Set(registry.featuredModels);
-    const models: Array<CatalogModel & { id: string }> = [];
+    const models: Array<CatalogModelEntry & { id: string }> = [];
     for (const modelId of data.modelIds) {
       const cat = catalogById.get(modelId);
       if (!cat) {

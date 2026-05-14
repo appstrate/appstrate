@@ -57,7 +57,7 @@ describe("listCatalogModels", () => {
   it("returns every catalogued model for a provider", () => {
     const all = listCatalogModels("anthropic");
     expect(all.length).toBeGreaterThan(15);
-    // Each entry shape matches CatalogModel + id.
+    // Each entry shape matches CatalogModelEntry + id.
     for (const m of all) {
       expect(m.id).toBeString();
       expect(m.contextWindow).toBeNumber();

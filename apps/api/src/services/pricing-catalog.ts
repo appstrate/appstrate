@@ -35,7 +35,7 @@
  * single `ModelProviderDefinition` and a single vendored JSON file.
  */
 
-import type { ModelCost } from "@appstrate/core/module";
+import type { CatalogModelEntry } from "@appstrate/shared-types";
 import openaiPricing from "../data/pricing/openai.json" with { type: "json" };
 import anthropicPricing from "../data/pricing/anthropic.json" with { type: "json" };
 import mistralPricing from "../data/pricing/mistral.json" with { type: "json" };
@@ -43,23 +43,6 @@ import googlePricing from "../data/pricing/google-ai.json" with { type: "json" }
 import cerebrasPricing from "../data/pricing/cerebras.json" with { type: "json" };
 import groqPricing from "../data/pricing/groq.json" with { type: "json" };
 import xaiPricing from "../data/pricing/xai.json" with { type: "json" };
-
-/**
- * Compact model entry — the projection emitted by the refresh script.
- * Mirrors the JSON shape exactly. Read-only at runtime.
- */
-export interface CatalogModel {
-  /** Display label derived from the id at vendoring time (title-cased). */
-  label: string;
-  /** Maximum input context window in tokens. */
-  contextWindow: number;
-  /** Maximum response tokens (provider-defined ceiling). May be null. */
-  maxTokens: number | null;
-  /** Capabilities surfaced for selection UIs. */
-  capabilities: readonly string[];
-  /** Per-1M-token cost (USD). Always present — entries without pricing are dropped at vendoring. */
-  cost: ModelCost;
-}
 
 /**
  * Catalog index keyed on `providerId`. Adding a JSON under
@@ -72,14 +55,14 @@ export interface CatalogModel {
  * declare a catalog without bundling a JSON into the production data
  * directory. Production providers register at import-time above.
  */
-const PROVIDER_INDEX: Record<string, Record<string, CatalogModel>> = {
-  openai: openaiPricing as Record<string, CatalogModel>,
-  anthropic: anthropicPricing as Record<string, CatalogModel>,
-  mistral: mistralPricing as Record<string, CatalogModel>,
-  "google-ai": googlePricing as Record<string, CatalogModel>,
-  cerebras: cerebrasPricing as Record<string, CatalogModel>,
-  groq: groqPricing as Record<string, CatalogModel>,
-  xai: xaiPricing as Record<string, CatalogModel>,
+const PROVIDER_INDEX: Record<string, Record<string, CatalogModelEntry>> = {
+  openai: openaiPricing as Record<string, CatalogModelEntry>,
+  anthropic: anthropicPricing as Record<string, CatalogModelEntry>,
+  mistral: mistralPricing as Record<string, CatalogModelEntry>,
+  "google-ai": googlePricing as Record<string, CatalogModelEntry>,
+  cerebras: cerebrasPricing as Record<string, CatalogModelEntry>,
+  groq: groqPricing as Record<string, CatalogModelEntry>,
+  xai: xaiPricing as Record<string, CatalogModelEntry>,
 };
 
 /**
@@ -89,7 +72,10 @@ const PROVIDER_INDEX: Record<string, Record<string, CatalogModel>> = {
  * bundling a JSON into `apps/api/src/data/pricing/`. Idempotent
  * overwrites are allowed so test setup can re-register on each run.
  */
-export function registerCatalog(providerId: string, catalog: Record<string, CatalogModel>): void {
+export function registerCatalog(
+  providerId: string,
+  catalog: Record<string, CatalogModelEntry>,
+): void {
   PROVIDER_INDEX[providerId] = catalog;
 }
 
@@ -102,7 +88,7 @@ export function registerCatalog(providerId: string, catalog: Record<string, Cata
  * (`openai-compatible`, `openrouter`, `codex`, …). Inline `models[]`
  * on the provider definition covers those cases.
  */
-export function listCatalogModels(providerId: string): Array<CatalogModel & { id: string }> {
+export function listCatalogModels(providerId: string): Array<CatalogModelEntry & { id: string }> {
   const file = PROVIDER_INDEX[providerId];
   if (!file) return [];
   return Object.entries(file).map(([id, entry]) => ({ id, ...entry }));
@@ -118,7 +104,7 @@ export function hasCatalog(providerId: string): boolean {
  * Returns null on any miss — unmapped provider, unknown model id, or
  * entry stripped at vendoring time.
  */
-export function lookupCatalogModel(providerId: string, modelId: string): CatalogModel | null {
+export function lookupCatalogModel(providerId: string, modelId: string): CatalogModelEntry | null {
   const file = PROVIDER_INDEX[providerId];
   if (!file) return null;
   return file[modelId] ?? null;

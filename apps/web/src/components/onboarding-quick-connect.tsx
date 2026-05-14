@@ -46,11 +46,10 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
 
-  // `iconUrl` is the canonical PROVIDER_ICONS key surfaced by the registry
-  // (the value points at a brand glyph slug, not at the provider id).
-  // Falls back to a generic plug glyph for providers without a registered
-  // brand icon.
-  const Icon = entry.iconUrl ? (PROVIDER_ICONS[entry.iconUrl] ?? null) : null;
+  // Inline lookup to satisfy `react-hooks/static-components` — the rule
+  // flags PascalCase consts assigned from helper calls. Equivalent to
+  // `getProviderIcon(entry)` but a direct dict access.
+  const Icon = PROVIDER_ICONS[entry.iconUrl] ?? null;
 
   const openDialog = () => {
     if (alreadyConnected || working) return;

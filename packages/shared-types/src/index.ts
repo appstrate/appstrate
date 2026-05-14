@@ -531,15 +531,35 @@ export interface ProviderRegistryEntry {
   models: ProviderRegistryModelEntry[];
 }
 
-export interface ProviderRegistryModelEntry {
-  id: string;
-  /** Human-readable label; falls back to `id` when null. */
-  label: string | null;
+/**
+ * Single curated-catalog entry — used both runtime-side (vendored LiteLLM
+ * pricing files in `apps/api/src/data/pricing/*.json` consumed by
+ * `pricing-catalog.ts`) and wire-side (the registry endpoint splices `id`
+ * back in and tags `featured` per provider).
+ *
+ * `label` and `cost` are non-nullable: the vendoring script drops entries
+ * without usable pricing, and labels are title-cased from the id at
+ * vendoring time.
+ */
+export interface CatalogModelEntry {
+  /** Human-readable label, derived from the id at vendoring time. */
+  label: string;
   contextWindow: number;
+  /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
-  /** Per-1M-token pricing; null when the provider doesn't publish it. */
-  cost: ModelCost | null;
+  /** Per-1M-token pricing in USD. */
+  cost: ModelCost;
+}
+
+/**
+ * Wire shape of a single model in
+ * `GET /api/model-provider-credentials/registry`. Surfaces the catalog
+ * entry verbatim plus the provider-scoped `featured` flag (driven by
+ * the provider's `featuredModels` whitelist) and the catalog id.
+ */
+export interface ProviderRegistryModelEntry extends CatalogModelEntry {
+  id: string;
   /**
    * Surface in the picker's "Featured" group for this provider AND
    * auto-seed in `org_models` on first connection. Set when the model

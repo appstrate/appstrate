@@ -16,22 +16,7 @@ import { OnboardingQuickConnect } from "../../components/onboarding-quick-connec
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
-import { PROVIDER_ICONS } from "../../components/icons";
-import type { OrgModelInfo } from "@appstrate/shared-types";
-import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-credentials";
-
-/**
- * Resolve a model's provider icon entirely from the runtime registry —
- * both the providerId lookup and the `iconUrl` hint live there. The
- * `iconUrl` fallback path matters for providers whose `providerId` isn't
- * a key in PROVIDER_ICONS but whose `iconUrl` is (e.g. the codex OAuth
- * module ships `iconUrl: "openai"`).
- */
-function resolveProviderIcon(model: OrgModelInfo, registry: ProviderRegistryEntry[] | undefined) {
-  const match = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry ?? []);
-  if (!match) return undefined;
-  return PROVIDER_ICONS[match.providerId] ?? PROVIDER_ICONS[match.iconUrl ?? ""];
-}
+import { getProviderIcon } from "../../components/icons";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -74,7 +59,9 @@ export function OnboardingModelStep() {
             </div>
             <div className="flex flex-col gap-1.5">
               {models.map((m) => {
-                const ProviderIcon = resolveProviderIcon(m, registry);
+                const ProviderIcon = getProviderIcon(
+                  findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []),
+                );
                 return (
                   <div
                     key={m.id}

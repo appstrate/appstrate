@@ -103,15 +103,7 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
   // expose everything.
   const surfaced = p.catalogProviderId ? catalog.filter((m) => featuredSet.has(m.id)) : catalog;
 
-  return surfaced.map((m) => ({
-    id: m.id,
-    label: m.label,
-    contextWindow: m.contextWindow,
-    maxTokens: m.maxTokens,
-    capabilities: m.capabilities,
-    cost: m.cost,
-    featured: featuredSet.has(m.id),
-  }));
+  return surfaced.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
 
 export function createModelProviderCredentialsRouter() {

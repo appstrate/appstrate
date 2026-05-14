@@ -29,7 +29,7 @@ import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { cn } from "@/lib/utils";
-import { PROVIDER_ICONS } from "../../components/icons";
+import { getProviderIcon } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -151,7 +151,7 @@ function ModelsList({
               m.baseUrl,
               registry ?? [],
             );
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
+            const ProviderIcon = getProviderIcon(provider);
             return (
               <div key={m.id} className="border-border bg-card rounded-lg border p-5">
                 <div className="mb-3 flex items-center gap-3">
@@ -270,7 +270,7 @@ function CredentialsSection({
               pk.baseUrl,
               registry ?? [],
             );
-            const ProviderIcon = provider ? PROVIDER_ICONS[provider.providerId] : undefined;
+            const ProviderIcon = getProviderIcon(provider);
             const isOauth = pk.authMode === "oauth2";
             return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">

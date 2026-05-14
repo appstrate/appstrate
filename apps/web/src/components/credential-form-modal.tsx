@@ -89,6 +89,7 @@ interface PickerOption {
   label: string;
   authMode: "api_key" | "oauth2";
   providerId: string;
+  iconUrl: string;
   featured: boolean;
 }
 
@@ -100,6 +101,7 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
       label: p.displayName,
       authMode: p.authMode,
       providerId: p.providerId,
+      iconUrl: p.iconUrl,
       featured: p.featured,
     }));
 }
@@ -403,7 +405,10 @@ function PickerOptionItem({
   option: PickerOption;
   t: (key: string) => string;
 }): React.ReactNode {
-  const Icon = PROVIDER_ICONS[option.providerId];
+  // Inline lookup to satisfy `react-hooks/static-components` — the rule
+  // flags PascalCase consts assigned from helper calls at the top of a
+  // component body. Equivalent to `getProviderIcon(option)`.
+  const Icon = PROVIDER_ICONS[option.iconUrl];
   return (
     <SelectItem key={option.id} value={option.id}>
       <span className="flex items-center gap-2">
