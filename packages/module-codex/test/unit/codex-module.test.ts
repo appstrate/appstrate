@@ -29,10 +29,9 @@ describe("codex module", () => {
     expect(codex?.oauth?.scopes).toEqual(["openid", "profile", "email"]);
   });
 
-  it("exposes a non-empty model catalog with recommended seeds", () => {
+  it("exposes a non-empty featured catalog", () => {
     const codex = codexModule.modelProviders?.()[0];
-    expect(codex?.featuredModels.length).toBeGreaterThan(0);
-    expect(codex?.recommendedModels).toEqual(["gpt-5.5", "gpt-5.4-mini"]);
+    expect(codex?.featuredModels).toEqual(["gpt-5.5", "gpt-5.4-mini", "gpt-5.4"]);
   });
 });
 

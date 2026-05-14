@@ -541,15 +541,9 @@ export interface ProviderRegistryModelEntry {
   /** Per-1M-token pricing; null when the provider doesn't publish it. */
   cost: ModelCost | null;
   /**
-   * Curated default for first-connection auto-seed (onboarding
-   * quick-connect). When at least one model carries the flag, the
-   * seeder inserts only those; otherwise it falls back to every
-   * `featured: true` entry.
-   */
-  recommended: boolean;
-  /**
-   * Surface in the picker's "Featured" group for this provider. Set when
-   * the model id appears in the provider's `featuredModels` (see
+   * Surface in the picker's "Featured" group for this provider AND
+   * auto-seed in `org_models` on first connection. Set when the model
+   * id appears in the provider's `featuredModels` (see
    * `core-providers/index.ts` or any module's `modelProviders()`
    * contribution); the rest of the catalog falls under "All models".
    */

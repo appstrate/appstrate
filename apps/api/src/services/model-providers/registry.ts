@@ -59,13 +59,11 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
 }
 
 /**
- * Loud boot-time check that every id declared in `featuredModels` /
- * `recommendedModels` exists in the resolved catalog
- * (`catalogProviderId ?? providerId`), and that `recommendedModels` is a
- * strict subset of `featuredModels`. The vendored pricing catalog is the
- * single source of truth for per-model metadata — a typo or stale id
- * here would silently render with `contextWindow: 0` and `cost: null`,
- * so we fail fast.
+ * Loud boot-time check that every id declared in `featuredModels` exists
+ * in the resolved catalog (`catalogProviderId ?? providerId`). The
+ * vendored pricing catalog is the single source of truth for per-model
+ * metadata — a typo or stale id here would silently render with
+ * `contextWindow: 0` and `cost: null`, so we fail fast.
  *
  * Providers with no own catalog AND no `catalogProviderId` are allowed
  * IFF `featuredModels` is empty (openrouter, openai-compatible).
@@ -89,19 +87,6 @@ function validateCatalogReferences(def: ModelProviderDefinition): void {
           `Model provider ${JSON.stringify(def.providerId)} features ` +
             `${JSON.stringify(modelId)} which is not in the ${catalogKey} catalog. ` +
             `Featured ids must exist in the catalog — drop the entry or add it via the refresh script.`,
-        );
-      }
-    }
-  }
-
-  if (def.recommendedModels) {
-    const featuredSet = new Set(def.featuredModels);
-    for (const modelId of def.recommendedModels) {
-      if (!featuredSet.has(modelId)) {
-        throw new Error(
-          `Model provider ${JSON.stringify(def.providerId)} recommends ` +
-            `${JSON.stringify(modelId)} which is not in featuredModels. ` +
-            `recommendedModels must be a subset of featuredModels.`,
         );
       }
     }

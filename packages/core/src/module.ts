@@ -750,24 +750,18 @@ export interface ModelProviderDefinition {
 
   /**
    * Catalog model ids to surface in the picker's "Featured" section AND
-   * the auto-seed fallback list. Every id MUST exist in the resolved
-   * catalog (`catalogProviderId ?? providerId`) — boot fails loudly
-   * otherwise. For providers whose catalog covers the whole product
-   * (openai/anthropic/mistral/google-ai/cerebras/groq/xai), the picker
-   * also exposes every other catalog model under "All models". For
-   * providers backed by a foreign catalog (`catalogProviderId` set), the
-   * picker shows ONLY these ids — the underlying API has more models
-   * than the OAuth product actually exposes. Empty for openrouter
-   * (live-search) and openai-compatible (Custom only).
+   * auto-seed in `org_models` on first connection. Every id MUST exist
+   * in the resolved catalog (`catalogProviderId ?? providerId`) — boot
+   * fails loudly otherwise. For providers whose catalog covers the
+   * whole product (openai/anthropic/mistral/google-ai/cerebras/groq/
+   * xai), the picker also exposes every other catalog model under
+   * "All models". For providers backed by a foreign catalog
+   * (`catalogProviderId` set), the picker shows ONLY these ids — the
+   * underlying API has more models than the OAuth product actually
+   * exposes. Empty for openrouter (live-search) and openai-compatible
+   * (Custom only).
    */
   featuredModels: readonly string[];
-
-  /**
-   * Subset of `featuredModels` to auto-seed in `org_models` on first
-   * connection. Boot validation enforces the subset relation. Defaults
-   * to `featuredModels` itself when omitted (auto-seed all featured).
-   */
-  recommendedModels?: readonly string[];
 
   // — Behavior —
   /** Provider-scoped hooks (header injection, identity extraction). */

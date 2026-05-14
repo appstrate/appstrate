@@ -82,12 +82,11 @@ export const testInlineSchema = z.object({
  *
  *   - **Own catalog, no `catalogProviderId`** (openai/anthropic/mistral/
  *     google-ai/cerebras/groq/xai): expose every catalog entry; ids in
- *     `featuredModels` get `featured: true`, ids in `recommendedModels`
- *     get `recommended: true`.
+ *     `featuredModels` get `featured: true`.
  *   - **Foreign catalog** (`catalogProviderId` set — codex → openai,
- *     claude-code → anthropic): expose ONLY `featuredModels`, marked
- *     `featured: true` and (for the recommended subset) `recommended: true`.
- *     The underlying catalog has more models than the OAuth product exposes.
+ *     claude-code → anthropic): expose ONLY `featuredModels`, all
+ *     marked `featured: true`. The underlying catalog has more models
+ *     than the OAuth product exposes.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
  *     openai-compatible Custom): empty list. The picker falls back to
  *     "Custom" or its own live-search UI.
@@ -98,7 +97,6 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
   if (catalog.length === 0) return [];
 
   const featuredSet = new Set(p.featuredModels);
-  const recommendedSet = new Set(p.recommendedModels ?? p.featuredModels);
 
   // Foreign-catalog providers expose featuredModels only (the underlying
   // catalog is wider than the OAuth surface). Own-catalog providers
@@ -113,7 +111,6 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
     capabilities: m.capabilities,
     cost: m.cost,
     featured: featuredSet.has(m.id),
-    recommended: recommendedSet.has(m.id),
   }));
 }
 
