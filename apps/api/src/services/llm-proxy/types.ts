@@ -9,32 +9,10 @@
  * one adapter per endpoint and hands it to the shared core.
  */
 
-import type { ModelCost } from "@appstrate/core/module";
-
 /** Principal that minted the proxy call — mirrors credential-proxy. */
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string };
-
-/**
- * Preset model resolved against `org_models` + `model_provider_credentials`.
- */
-export interface ResolvedProxyModel {
-  /** The preset id the caller asked for (echoed into usage rows for audit). */
-  presetId: string;
-  /** Registered model-provider id used to look up identity hooks. */
-  providerId: string;
-  /** Protocol family (must match the route's adapter). */
-  apiShape: string;
-  /** Upstream base URL the platform forwards to. */
-  baseUrl: string;
-  /** Model id forwarded to upstream (`body.model` is rewritten to this). Distinct from `presetId`, which is the org-scoped alias the caller requested. */
-  upstreamModelId: string;
-  /** Upstream API key the platform injects server-side. */
-  apiKey: string;
-  /** Per-million-token pricing used to compute `cost_usd`. Nullable for unknown models. */
-  cost: ModelCost | null;
-}
 
 /** Usage numbers parsed from the upstream response. */
 export interface UpstreamUsage {
@@ -53,7 +31,7 @@ export interface UpstreamUsage {
  * needed.
  */
 export interface LlmProxyAdapter {
-  /** Protocol string — must match `ResolvedProxyModel.apiShape`. */
+  /** Protocol string — must match the route's apiShape and the resolved model's apiShape. */
   readonly apiShape: string;
   /** Build the upstream request headers (auth + protocol-specific). */
   buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;

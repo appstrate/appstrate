@@ -20,18 +20,13 @@
 
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
-import { loadModel } from "../org-models.ts";
+import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
 import { substituteModelJson } from "./helpers.ts";
-import type {
-  LlmProxyAdapter,
-  LlmProxyPrincipal,
-  ResolvedProxyModel,
-  UpstreamUsage,
-} from "./types.ts";
+import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelCost } from "@appstrate/core/module";
 
@@ -87,10 +82,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.apiShape,
   );
 
-  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.upstreamModelId);
+  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.modelId);
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
-  // apiShape, upstreamModelId, requestBody)` so cross-org / cross-preset
+  // apiShape, modelId, requestBody)` so cross-org / cross-preset
   // requests never collide. Skips streaming (`stream: true`) requests —
   // SSE replays are far less useful and complicate the contract.
   // Misses still cost us the key hash, but `lookupResponse` returns
@@ -102,7 +97,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       orgId: inputs.principal.orgId,
       presetId,
       apiShape: resolved.apiShape,
-      upstreamModelId: resolved.upstreamModelId,
+      upstreamModelId: resolved.modelId,
       requestBody: rewrittenBody,
     });
     if (probe.hit) {
@@ -159,6 +154,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       recordUsage({
         principal: inputs.principal,
         runId: inputs.runId,
+        presetId,
         resolved,
         usage,
         durationMs: Date.now() - started,
@@ -196,6 +192,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     await recordUsage({
       principal: inputs.principal,
       runId: inputs.runId,
+      presetId,
       resolved,
       usage,
       durationMs: Date.now() - started,
@@ -241,7 +238,7 @@ async function resolvePresetForOrg(
   presetId: string,
   orgId: string,
   expectedApi: string,
-): Promise<ResolvedProxyModel> {
+): Promise<ResolvedModel> {
   // `loadModel` hits `org_models` by UUID — passing a string that isn't a
   // UUID raises a DB-level error rather than returning null. Catch and
   // normalise into "preset not found" so the caller sees a clean 400
@@ -265,15 +262,7 @@ async function resolvePresetForOrg(
     // unsupported preset (clean 400).
     throw new LlmProxyUnsupportedModelError(presetId);
   }
-  return {
-    presetId,
-    providerId: loaded.providerId,
-    apiShape: loaded.apiShape,
-    baseUrl: loaded.baseUrl,
-    upstreamModelId: loaded.modelId,
-    apiKey: loaded.apiKey,
-    cost: loaded.cost ?? null,
-  };
+  return loaded;
 }
 
 function joinUpstreamUrl(base: string, path: string): string {
@@ -346,7 +335,8 @@ async function tapSseStream(
 interface RecordUsageInputs {
   principal: LlmProxyPrincipal;
   runId: string | null;
-  resolved: ResolvedProxyModel;
+  presetId: string;
+  resolved: ResolvedModel;
   usage: UpstreamUsage | null;
   durationMs: number;
 }
@@ -360,14 +350,14 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
       apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
       userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
       runId: inputs.runId,
-      model: inputs.resolved.presetId,
-      realModel: inputs.resolved.upstreamModelId,
+      model: inputs.presetId,
+      realModel: inputs.resolved.modelId,
       api: inputs.resolved.apiShape,
       inputTokens: inputs.usage.inputTokens,
       outputTokens: inputs.usage.outputTokens,
       cacheReadTokens: inputs.usage.cacheReadTokens ?? null,
       cacheWriteTokens: inputs.usage.cacheWriteTokens ?? null,
-      costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost),
+      costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost ?? null),
       durationMs: inputs.durationMs,
       // Fresh UUID per upstream call — satisfies the partial-unique index
       // on (source='proxy', request_id). CLI-level retries land as new
@@ -381,7 +371,7 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
     // ops can reconcile from upstream provider invoices.
     logger.error("llm-proxy: failed to record usage", {
       orgId: inputs.principal.orgId,
-      presetId: inputs.resolved.presetId,
+      presetId: inputs.presetId,
       error: getErrorMessage(err),
     });
   }

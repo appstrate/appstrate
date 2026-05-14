@@ -334,30 +334,6 @@ export interface ResolvedModel {
   credentialId?: string;
 }
 
-function systemDefToResolved(def: ModelDefinition): ResolvedModel {
-  return {
-    providerId: def.providerId,
-    apiShape: def.apiShape,
-    baseUrl: def.baseUrl,
-    modelId: def.modelId,
-    apiKey: def.apiKey,
-    label: def.label,
-    input: def.input ?? null,
-    contextWindow: def.contextWindow ?? null,
-    maxTokens: def.maxTokens ?? null,
-    reasoning: def.reasoning ?? null,
-    // Vendored pricing catalog (#437 phase 2) fills the gap when the
-    // operator's `SYSTEM_PROVIDER_KEYS` JSON doesn't supply per-model
-    // pricing. The explicit per-model `cost` still wins — same semantic
-    // as DB rows below. Keyed on the declared `providerId` (one of
-    // `anthropic`, `openai`, `mistral`, `google-ai`, `cerebras`, `groq`,
-    // `xai`); env entries pinned to other providers skip the fallback
-    // and stay on the explicit per-model `cost`.
-    cost: def.cost ?? lookupModelCost(def.providerId, def.modelId),
-    isSystemModel: true,
-  };
-}
-
 interface OrgModelRow {
   apiShape: string;
   baseUrl: string;
@@ -371,17 +347,41 @@ interface OrgModelRow {
   cost: unknown;
 }
 
-function dbRowToResolved(
-  row: OrgModelRow,
-  creds: { apiKey: string; providerId: string; accountId?: string },
-): ResolvedModel {
-  // `row.cost` is the per-org override (operator manually pinned pricing
-  // for this preset). When null, fall back to the vendored pricing
-  // catalog keyed on `(apiShape, modelId)` — #437 phase 2. The catalog
-  // covers ~400 mainstream models across openai / anthropic / mistral /
-  // google; misses (custom fine-tunes, brand-new releases) flow through
-  // as null and `computeCostUsd()` short-circuits to 0.
-  const override = row.cost as ModelCost | null;
+type ResolvedSource =
+  | { kind: "system"; def: ModelDefinition }
+  | {
+      kind: "db";
+      row: OrgModelRow;
+      creds: { apiKey: string; providerId: string; accountId?: string };
+    };
+
+/**
+ * Build a `ResolvedModel` from either a system `ModelDefinition` (env)
+ * or a DB `org_models` row + its credentials. The pricing fallback is
+ * unified: an explicit per-row `cost` always wins; on miss we hit the
+ * vendored pricing catalog (`@appstrate/core/data/pricing/*.json`) keyed
+ * on `(providerId, modelId)`. Misses flow through as null and
+ * `computeCostUsd()` short-circuits to 0.
+ */
+function buildResolvedModel(source: ResolvedSource): ResolvedModel {
+  if (source.kind === "system") {
+    const def = source.def;
+    return {
+      providerId: def.providerId,
+      apiShape: def.apiShape,
+      baseUrl: def.baseUrl,
+      modelId: def.modelId,
+      apiKey: def.apiKey,
+      label: def.label,
+      input: def.input ?? null,
+      contextWindow: def.contextWindow ?? null,
+      maxTokens: def.maxTokens ?? null,
+      reasoning: def.reasoning ?? null,
+      cost: def.cost ?? lookupModelCost(def.providerId, def.modelId),
+      isSystemModel: true,
+    };
+  }
+  const { row, creds } = source;
   return {
     providerId: creds.providerId,
     apiShape: row.apiShape,
@@ -393,7 +393,7 @@ function dbRowToResolved(
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: override ?? lookupModelCost(creds.providerId, row.modelId),
+    cost: (row.cost as ModelCost | null) ?? lookupModelCost(creds.providerId, row.modelId),
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,
@@ -429,14 +429,14 @@ export async function resolveModel(
 
   if (dbDefault) {
     const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
-    if (creds) return dbRowToResolved(dbDefault, creds);
+    if (creds) return buildResolvedModel({ kind: "db", row: dbDefault, creds });
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return systemDefToResolved(def);
+      return buildResolvedModel({ kind: "system", def });
     }
   }
 
@@ -449,7 +449,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
-    return systemDefToResolved(systemDef);
+    return buildResolvedModel({ kind: "system", def: systemDef });
   }
 
   // Check DB
@@ -476,7 +476,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return dbRowToResolved(row, creds);
+  return buildResolvedModel({ kind: "db", row, creds });
 }
 
 // --- Connection test ---
