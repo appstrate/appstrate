@@ -550,6 +550,8 @@ export interface ProviderRegistryEntry {
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";
+  /** Surface in the picker's "Featured" group. Module-supplied metadata. */
+  featured: boolean;
   models: ProviderRegistryModelEntry[];
 }
 

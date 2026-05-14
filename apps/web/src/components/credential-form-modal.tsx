@@ -34,7 +34,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -96,6 +98,7 @@ interface PickerOption {
   label: string;
   authMode: "api_key" | "oauth2";
   providerId: string;
+  featured: boolean;
 }
 
 function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
@@ -106,6 +109,7 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
       label: p.displayName,
       authMode: p.authMode,
       providerId: p.providerId,
+      featured: p.featured,
     }));
 }
 
@@ -386,7 +390,12 @@ function CredentialFormBody({
 }
 
 function renderOptions(options: PickerOption[], t: (key: string) => string): React.ReactNode {
-  return options.map((opt) => {
+  // Two-section split: featured first (module-declared canonical
+  // providers), then "Other providers". The flag is metadata only —
+  // every option remains selectable from either group.
+  const featured = options.filter((o) => o.featured);
+  const other = options.filter((o) => !o.featured);
+  const renderItem = (opt: PickerOption) => {
     const Icon = PROVIDER_ICONS[opt.providerId];
     return (
       <SelectItem key={opt.id} value={opt.id}>
@@ -401,7 +410,23 @@ function renderOptions(options: PickerOption[], t: (key: string) => string): Rea
         </span>
       </SelectItem>
     );
-  });
+  };
+  return (
+    <>
+      {featured.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>{t("models.form.providerGroupFeatured")}</SelectLabel>
+          {featured.map(renderItem)}
+        </SelectGroup>
+      )}
+      {other.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>{t("models.form.providerGroupOther")}</SelectLabel>
+          {other.map(renderItem)}
+        </SelectGroup>
+      )}
+    </>
+  );
 }
 
 export function CredentialFormModal({

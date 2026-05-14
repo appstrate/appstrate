@@ -93,6 +93,7 @@ export function createModelProviderCredentialsRouter() {
       defaultBaseUrl: p.defaultBaseUrl,
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
+      featured: p.featured ?? false,
       models: p.models.map((m) => ({
         id: m.id,
         label: m.label ?? null,

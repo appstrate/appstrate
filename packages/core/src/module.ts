@@ -730,6 +730,14 @@ export interface ModelProviderDefinition {
   description?: string;
   /** Provider-side documentation URL surfaced as a "learn more" link. */
   docsUrl?: string;
+  /**
+   * Surface this provider in the "Featured" section of the model picker
+   * (above an "Other providers" divider). Defaults to `false` — niche or
+   * self-hosted entries (OpenAI-compatible, OpenRouter, xAI…) stay below
+   * the fold without being hidden. The flag is advisory metadata only,
+   * never gates writes — operators can always select any entry.
+   */
+  featured?: boolean;
 
   // — Inference wire format —
   /** Shape the runtime serializes against. */

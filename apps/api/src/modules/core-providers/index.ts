@@ -29,6 +29,7 @@ const anthropic: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.anthropic.com",
   baseUrlOverridable: false,
   authMode: "api_key",
+  featured: true,
   models: [
     {
       id: "claude-haiku-4-5-20251001",
@@ -95,6 +96,7 @@ const googleAi: ModelProviderDefinition = {
   defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
   baseUrlOverridable: false,
   authMode: "api_key",
+  featured: true,
   models: [
     {
       id: "gemini-2.5-flash",
@@ -168,6 +170,7 @@ const mistral: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.mistral.ai",
   baseUrlOverridable: false,
   authMode: "api_key",
+  featured: true,
   models: [
     {
       id: "codestral-latest",
@@ -222,6 +225,7 @@ const openai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  featured: true,
   models: [
     {
       id: "gpt-5-mini",

@@ -13,7 +13,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -230,10 +232,17 @@ function ModelFormBody({
   // catalog) and surfaces as the "Custom" option instead of a picker entry.
   // OpenRouter has no curated catalog — its row stays so users can pick it
   // and search models via the dedicated combobox.
+  //
+  // The picker is split into two visual sections — "Featured" (the
+  // module-declared canonical providers operators usually want) and
+  // "Other" (everything else). The flag is metadata only; no write path
+  // gates on it, so any entry remains selectable from either group.
   const pickerEntries = useMemo(
     () => registry.filter((p) => p.providerId !== "openai-compatible"),
     [registry],
   );
+  const featuredEntries = useMemo(() => pickerEntries.filter((p) => p.featured), [pickerEntries]);
+  const otherEntries = useMemo(() => pickerEntries.filter((p) => !p.featured), [pickerEntries]);
 
   // User-driven provider/model overrides — `null` means "follow auto-detect".
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
@@ -483,17 +492,38 @@ function ModelFormBody({
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {pickerEntries.map((p) => {
-                const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
-                return (
-                  <SelectItem key={p.providerId} value={p.providerId}>
-                    <span className="flex items-center gap-2">
-                      {Icon && <Icon className="size-4" />}
-                      {p.displayName}
-                    </span>
-                  </SelectItem>
-                );
-              })}
+              {featuredEntries.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>{t("models.form.providerGroupFeatured")}</SelectLabel>
+                  {featuredEntries.map((p) => {
+                    const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
+                    return (
+                      <SelectItem key={p.providerId} value={p.providerId}>
+                        <span className="flex items-center gap-2">
+                          {Icon && <Icon className="size-4" />}
+                          {p.displayName}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              )}
+              {otherEntries.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>{t("models.form.providerGroupOther")}</SelectLabel>
+                  {otherEntries.map((p) => {
+                    const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
+                    return (
+                      <SelectItem key={p.providerId} value={p.providerId}>
+                        <span className="flex items-center gap-2">
+                          {Icon && <Icon className="size-4" />}
+                          {p.displayName}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              )}
               <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
             </SelectContent>
           </Select>

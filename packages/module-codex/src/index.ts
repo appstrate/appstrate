@@ -201,6 +201,7 @@ const codexProvider: ModelProviderDefinition = {
   defaultBaseUrl: "https://chatgpt.com/backend-api",
   baseUrlOverridable: false,
   authMode: "oauth2",
+  featured: true,
   oauth: {
     clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
     authorizationUrl: "https://auth.openai.com/oauth/authorize",

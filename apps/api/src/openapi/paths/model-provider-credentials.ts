@@ -35,6 +35,7 @@ export const modelProviderCredentialsPaths = {
                         "defaultBaseUrl",
                         "baseUrlOverridable",
                         "authMode",
+                        "featured",
                         "models",
                       ],
                       properties: {
@@ -61,6 +62,11 @@ export const modelProviderCredentialsPaths = {
                         defaultBaseUrl: { type: "string" },
                         baseUrlOverridable: { type: "boolean" },
                         authMode: { type: "string", enum: ["api_key", "oauth2"] },
+                        featured: {
+                          type: "boolean",
+                          description:
+                            "Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable.",
+                        },
                         models: {
                           type: "array",
                           items: {
