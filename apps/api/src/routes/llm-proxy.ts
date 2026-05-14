@@ -4,10 +4,14 @@
  * `/api/llm-proxy/<api>/*` — server-side LLM model injection for
  * remote-backed AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
  *
- * Two concrete protocol families ship today:
+ * Three protocol families ship today (each `urlPath` mirrors the
+ * upstream SDK's own path convention so a stored `baseUrl` produces
+ * the same final URL whether pi-ai calls the upstream directly or via
+ * this proxy):
  *
- *   - `openai-completions` → `/v1/chat/completions`
- *   - `anthropic-messages` → `/v1/messages`
+ *   - `openai-completions`   → `/v1/chat/completions`
+ *   - `anthropic-messages`   → `/v1/messages`
+ *   - `mistral-conversations` → `/v1/chat/completions`
  *
  * Additional families (`openai-responses`, `google-generative-ai`, …)
  * are mechanical — drop a new adapter + route and wire it here. The
@@ -86,11 +90,14 @@ export function createLlmProxyRouter() {
       upstreamPath: "/v1/messages",
       adapter: anthropicMessagesAdapter,
     },
-    // Mistral SDK appends `/chat/completions` → baseUrl carries `/v1`
-    // (`https://api.mistral.ai/v1`), same convention as OpenAI.
+    // Mistral SDK (`@mistralai/mistralai` `chat.stream`) appends
+    // `/v1/chat/completions` to its `serverURL` — same convention as
+    // Anthropic, NOT OpenAI. So upstreamPath carries `/v1/chat/completions`
+    // and the Portkey routing baseUrl stays bare (no `/v1` prefix in
+    // `apps/api/src/modules/portkey/config.ts:API_SHAPE_PORTKEY_PATH_PREFIX`).
     {
       urlPath: "/mistral-conversations/v1/chat/completions",
-      upstreamPath: "/chat/completions",
+      upstreamPath: "/v1/chat/completions",
       adapter: mistralConversationsAdapter,
     },
   ];

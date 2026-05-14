@@ -27,23 +27,19 @@ import { runs } from "@appstrate/db/schema";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { setPortkeyRouter, type PortkeyRouter } from "../../../src/services/portkey-router.ts";
-import { API_SHAPE_TO_PORTKEY_PROVIDER } from "../../../src/services/pricing-catalog.ts";
+import { buildPortkeyRouting } from "../../../src/modules/portkey/config.ts";
 
 /**
  * Restore the preload-baseline router (passthrough mock pointing at
  * `host.docker.internal:8787`). Tests that need a different router
  * install their own, then call this to put the baseline back so the
  * next test starts from a clean known state.
+ *
+ * Delegates to the production `buildPortkeyRouting()` so per-shape
+ * path math stays in one place — no second per-shape table to drift.
  */
 function installBaselineRouter(): void {
-  setPortkeyRouter((model) => {
-    const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
-    if (!provider) return null;
-    return {
-      baseUrl: "http://host.docker.internal:8787",
-      portkeyConfig: JSON.stringify({ provider, api_key: model.apiKey }),
-    };
-  });
+  setPortkeyRouter((model) => buildPortkeyRouting(model, "http://host.docker.internal:8787"));
 }
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";

@@ -41,7 +41,11 @@ import {
   setPortkeyInprocessRouter,
   type PortkeyRouter,
 } from "../../../src/services/portkey-router.ts";
-import { API_SHAPE_TO_PORTKEY_PROVIDER } from "../../../src/services/pricing-catalog.ts";
+import { buildPortkeyRouting } from "../../../src/modules/portkey/config.ts";
+import {
+  resetResponseCacheConfigForTesting,
+  setResponseCacheConfig,
+} from "../../../src/lib/llm-proxy-cache-config.ts";
 
 /**
  * Restore the preload-baseline router (passthrough mock pointing at
@@ -49,25 +53,14 @@ import { API_SHAPE_TO_PORTKEY_PROVIDER } from "../../../src/services/pricing-cat
  * own, then call this in `afterEach` so the next test starts from a
  * clean known state — never `() => null`, which would crash subsequent
  * tests now that Portkey routing is mandatory.
+ *
+ * Delegates to the production `buildPortkeyRouting()` so per-shape
+ * path math (e.g. `/v1` prefix for OpenAI shapes only) stays in one
+ * place — no second per-shape table to drift.
  */
 function installBaselineInprocessRouter(): void {
-  setPortkeyInprocessRouter((model) => {
-    const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
-    if (!provider) return null;
-    // Mirror production: OpenAI/Mistral SDKs append `/chat/completions`
-    // to a `/v1`-baked baseUrl; Anthropic SDK already includes `/v1`
-    // in the request path, so the gateway baseUrl stays bare.
-    const prefix = model.apiShape === "anthropic-messages" ? "" : "/v1";
-    return {
-      baseUrl: `http://127.0.0.1:8787${prefix}`,
-      portkeyConfig: JSON.stringify({ provider, api_key: model.apiKey }),
-    };
-  });
+  setPortkeyInprocessRouter((model) => buildPortkeyRouting(model, "http://127.0.0.1:8787"));
 }
-import {
-  resetResponseCacheConfigForTesting,
-  setResponseCacheConfig,
-} from "../../../src/lib/llm-proxy-cache-config.ts";
 
 const app = getTestApp();
 
@@ -431,7 +424,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
   it("forwards with Authorization: Bearer and substitutes the model id", async () => {
     const h = await buildHarness({
       apiShape: "mistral-conversations",
-      baseUrl: "https://api.mistral.test/v1",
+      baseUrl: "https://api.mistral.test",
       modelId: "mistral-large-latest",
       upstreamKey: "mistral-upstream-99",
     });

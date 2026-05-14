@@ -25,20 +25,27 @@ const API_SHAPE_TO_PORTKEY_PROVIDER = CATALOG_MAP;
  * Per-shape path prefix appended to the gateway base URL so the final
  * URL matches Portkey's HTTP surface for each provider:
  *
- *   • OpenAI / Mistral SDKs append `/chat/completions` to a `/v1`-baked
- *     baseUrl. Portkey serves them at `<gateway>/v1/chat/completions`,
- *     so we bake `/v1` into the routing baseUrl.
+ *   • OpenAI SDKs append `/chat/completions` (no `/v1`) to baseUrl, so
+ *     we bake `/v1` into the routing baseUrl. Final URL:
+ *     `<gateway>/v1/chat/completions`.
  *   • Anthropic SDK already includes `/v1` in the request path
  *     (`/v1/messages`), so the gateway baseUrl stays bare.
+ *   • Mistral SDK (`@mistralai/mistralai` `chat.stream`) also appends
+ *     `/v1/chat/completions` to its `serverURL`, so its prefix must
+ *     stay empty too — otherwise the sidecar forwards
+ *     `<gateway>/v1/v1/chat/completions` and Portkey 404s. Verified by
+ *     reading `node_modules/@mistralai/mistralai/esm/funcs/chatStream.js`:
+ *     `pathToFunc("/v1/chat/completions#stream")`.
  *
- * Unmapped shapes default to empty — the gateway baseUrl is passed
- * through unchanged, matching the historical direct-upstream behavior.
+ * Shapes without an explicit entry use an empty prefix — the gateway
+ * baseUrl is forwarded verbatim. Wiring a new shape whose SDK
+ * convention diverges from that default requires an entry here (and
+ * the path-contract integration test will catch the omission).
  */
 const API_SHAPE_PORTKEY_PATH_PREFIX: Record<string, string> = {
   "openai-chat": "/v1",
   "openai-completions": "/v1",
   "openai-responses": "/v1",
-  "mistral-conversations": "/v1",
 };
 
 /** HTTP status codes Portkey will retry on. Mirrors the smoke-test config. */
@@ -58,12 +65,14 @@ export interface PortkeyRoutingOptions {
 }
 
 /**
- * Build the routing tuple the sidecar consumes. Returns `null` when the
- * model's `apiShape` is not yet wired (e.g. exotic OpenAI-compatible
- * endpoints under `openai-compatible`); the run launcher then falls
- * through to the legacy direct-upstream path. This keeps the rollout
- * incremental — adding a new provider is one map entry above without
- * breaking the existing path.
+ * Build the routing tuple the sidecar consumes. Returns `null` when
+ * the model's `apiShape` is not in `API_SHAPE_TO_PORTKEY_PROVIDER`
+ * (e.g. exotic OpenAI-compatible endpoints under `openai-compatible`)
+ * — callers (run launcher / llm-proxy) raise `LlmProxyUnroutableModelError`
+ * since Portkey is mandatory and there is no direct-upstream fallback.
+ * Adding a new provider is one entry in the provider map; if the SDK's
+ * URL convention differs from the default empty prefix, also add an
+ * entry to `API_SHAPE_PORTKEY_PATH_PREFIX`.
  */
 export function buildPortkeyRouting(
   model: PortkeyModelInput,

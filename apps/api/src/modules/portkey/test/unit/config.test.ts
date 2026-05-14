@@ -77,12 +77,17 @@ describe("buildPortkeyRouting", () => {
     expect(r!.baseUrl).toBe("http://host.docker.internal:9001");
   });
 
-  it("appends /v1 for mistral-conversations", () => {
+  it("does not append /v1 for mistral-conversations (SDK already carries /v1)", () => {
+    // The Mistral SDK (`@mistralai/mistralai` `chat.stream`) appends
+    // `/v1/chat/completions` to its `serverURL` — same convention as
+    // Anthropic, NOT OpenAI. If the gateway baseUrl also carried `/v1`
+    // the sidecar would forward `<gateway>/v1/v1/chat/completions` and
+    // Portkey would 404. Discovered in real-key smoke (#437 follow-up).
     const r = buildPortkeyRouting(
-      makeModel({ apiShape: "mistral-conversations", baseUrl: "https://api.mistral.ai/v1" }),
+      makeModel({ apiShape: "mistral-conversations", baseUrl: "https://api.mistral.ai" }),
       "http://pk:8787",
     );
-    expect(r!.baseUrl).toBe("http://pk:8787/v1");
+    expect(r!.baseUrl).toBe("http://pk:8787");
   });
 
   it("strips a trailing slash on the gateway URL before appending the prefix", () => {
