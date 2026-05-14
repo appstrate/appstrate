@@ -24,6 +24,10 @@ import {
   setPortkeyRouter,
   type PortkeyRouter,
 } from "../../services/portkey-router.ts";
+import {
+  resetResponseCacheConfigForTesting,
+  setResponseCacheConfig,
+} from "../../lib/llm-proxy-cache-config.ts";
 import { buildPortkeyRouting, type PortkeyRoutingOptions } from "./config.ts";
 import { getPortkeyPort, startPortkey, stopPortkey } from "./lifecycle.ts";
 
@@ -56,17 +60,48 @@ const portkeyModule: AppstrateModule = {
   async init() {
     const env = getEnv();
     const port = env.PORTKEY_PORT;
+
+    // Cache mode resolution. Portkey 1.15.2 OSS exposes a `cache: { mode }`
+    // contract in its inline config but its standalone `start-server.js`
+    // bundle never installs the `getFromCache` middleware — every
+    // response comes back `cacheStatus: DISABLED` regardless of mode.
+    // So Appstrate owns the cache layer (`services/llm-proxy/response-cache.ts`)
+    // and emits a Portkey-compatible `x-portkey-cache-status: HIT|MISS`
+    // header. `PORTKEY_CACHE_MODE` now gates that layer; the Portkey
+    // inline `cache` field is still emitted for forward-compatibility
+    // when upstream fixes the bundled server.
+    //
+    // - `off`     → disable response cache entirely
+    // - `simple`  → enable response cache (Redis-backed when REDIS_URL
+    //               is set, in-memory per-process otherwise)
+    // - `semantic`→ warn unsupported (no embedding store), downgrade to
+    //               `simple`. Reserved for a follow-up.
+    let effectiveCacheMode: "off" | "simple" | "semantic" = env.PORTKEY_CACHE_MODE;
+    if (effectiveCacheMode === "semantic") {
+      logger.warn(
+        "PORTKEY_CACHE_MODE=semantic is not implemented yet — needs an embedding store. Downgrading to `simple`.",
+      );
+      effectiveCacheMode = "simple";
+    }
+    setResponseCacheConfig({
+      enabled: effectiveCacheMode !== "off",
+      ttlSeconds: env.PORTKEY_CACHE_MAX_AGE,
+    });
+
     await startPortkey({ port });
 
     const sidecarUrl = portkeyUrlForSidecar(port);
     const inprocessUrl = portkeyUrlForInprocess(port);
 
-    // Cache config is read once at init — operators flip the env vars
-    // and restart. Keeps the per-request path free of env-getter calls.
     const routingOptions: PortkeyRoutingOptions =
-      env.PORTKEY_CACHE_MODE === "off"
+      effectiveCacheMode === "off"
         ? {}
-        : { cache: { mode: env.PORTKEY_CACHE_MODE, maxAge: env.PORTKEY_CACHE_MAX_AGE } };
+        : {
+            cache: {
+              mode: effectiveCacheMode as "simple" | "semantic",
+              maxAge: env.PORTKEY_CACHE_MAX_AGE,
+            },
+          };
 
     const sidecarRouter: PortkeyRouter = (model) =>
       buildPortkeyRouting(model, sidecarUrl, routingOptions);
@@ -79,13 +114,15 @@ const portkeyModule: AppstrateModule = {
       port,
       sidecarUrl,
       inprocessUrl,
-      cacheMode: env.PORTKEY_CACHE_MODE,
+      cacheMode: effectiveCacheMode,
+      cacheBackend: env.REDIS_URL ? "redis" : "in-memory",
     });
   },
 
   async shutdown() {
     setPortkeyRouter(null);
     setPortkeyInprocessRouter(null);
+    resetResponseCacheConfigForTesting();
     const port = getPortkeyPort();
     await stopPortkey();
     if (port !== null) logger.info("Portkey module stopped", { port });

@@ -24,6 +24,8 @@ import { loadModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getPortkeyInprocessRouter } from "../portkey-router.ts";
+import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
+import { lookupResponse, storeResponse } from "./response-cache.ts";
 import type {
   LlmProxyAdapter,
   LlmProxyPrincipal,
@@ -83,6 +85,33 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const rewrittenBody = inputs.adapter.substituteModel(inputs.rawBody, resolved.realModelId);
 
+  // Response-cache lookup. The cache is keyed on `(orgId, presetId,
+  // apiShape, realModel, requestBody)` so cross-org / cross-preset
+  // requests never collide. Skips streaming (`stream: true`) requests —
+  // SSE replays are far less useful and complicate the contract.
+  // Misses still cost us the key hash, but `lookupResponse` returns
+  // it so the writer side doesn't have to recompute.
+  const cacheConfig = getResponseCacheConfig();
+  let cacheKeyForWrite: string | null = null;
+  if (cacheConfig.enabled) {
+    const probe = await lookupResponse({
+      orgId: inputs.principal.orgId,
+      presetId,
+      apiShape: resolved.api,
+      realModelId: resolved.realModelId,
+      requestBody: rewrittenBody,
+    });
+    if (probe.hit) {
+      logger.info("llm-proxy: cache hit", {
+        presetId,
+        cacheKey: probe.cacheKey,
+        orgId: inputs.principal.orgId,
+      });
+      return probe.response;
+    }
+    cacheKeyForWrite = probe.cacheKey;
+  }
+
   // Route every API-key LLM request through the Portkey in-process
   // gateway. `boot.ts` guarantees the router slot is installed via
   // `assertPortkeyRoutersInstalled()`. The router itself can still return
@@ -105,13 +134,15 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   );
   if (portkeyRouting) {
     upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
-    // Portkey 1.15.2 re-emits Anthropic's streamed responses with a gzip
-    // content-encoding that Bun's fetch decompressor occasionally rejects
-    // (ZlibError on mid-stream chunked frames). Force identity encoding —
-    // the SSE payload is small relative to the network/inference cost,
-    // and direct upstream calls work fine because they don't go through
-    // Portkey's compression rewrite. Discovered during real-key Anthropic
-    // smoke (#437 phase 1).
+    // Belt-and-braces: ask Portkey upstream for identity. Portkey 1.15.2
+    // OSS ignores Accept-Encoding and always copies the upstream's
+    // Content-Encoding header verbatim, but the bytes it forwards have
+    // already been decoded internally (Portkey buffers the upstream for
+    // metrics). Result: header says "br" / "gzip" but body is plain JSON
+    // → every strict decoder (Bun fetch, node:zlib) rejects the stream.
+    // The actual fix is `decompress: false` on the fetch below, which
+    // hands us the raw (already-identity) bytes; we strip the bogus
+    // Content-Encoding via `cloneResponseHeaders` before forwarding.
     upstreamHeaders["accept-encoding"] = "identity";
   }
 
@@ -122,7 +153,13 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       method: "POST",
       headers: upstreamHeaders,
       body: rewrittenBody,
-    });
+      // Bun-specific (undocumented in 1.3.x). Disables auto-decompression
+      // so we receive whatever bytes the upstream actually wrote. Required
+      // because Portkey lies about Content-Encoding (see note above) and
+      // Bun's brotli/zlib decoders crash on the malformed framing it
+      // produces. Type cast keeps the option invisible to `RequestInit`.
+      ...(portkeyRouting ? { decompress: false } : {}),
+    } as RequestInit & { decompress?: boolean });
   } catch (err) {
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
@@ -196,6 +233,20 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const headers = cloneResponseHeaders(upstream.headers);
+  // Persist 2xx replies for future lookups. Always tag the response we
+  // return with `MISS` so observability (and Portkey-compatible
+  // consumers) see a consistent contract whether the cache is enabled
+  // or off.
+  if (cacheKeyForWrite) {
+    void storeResponse({
+      cacheKey: cacheKeyForWrite,
+      ttlSeconds: cacheConfig.ttlSeconds,
+      status: upstream.status,
+      headers,
+      body: bodyText,
+    });
+    headers.set("x-portkey-cache-status", "MISS");
+  }
   return new Response(bodyText, { status: upstream.status, headers });
 }
 

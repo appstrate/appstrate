@@ -41,6 +41,10 @@ import {
   setPortkeyInprocessRouter,
   type PortkeyRouter,
 } from "../../../src/services/portkey-router.ts";
+import {
+  resetResponseCacheConfigForTesting,
+  setResponseCacheConfig,
+} from "../../../src/lib/llm-proxy-cache-config.ts";
 
 const app = getTestApp();
 
@@ -505,12 +509,18 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     });
     setPortkeyInprocessRouter(router);
 
-    let captured: { url: string; headers: Headers; bodyBytes: Uint8Array } | null = null;
+    let captured: {
+      url: string;
+      headers: Headers;
+      bodyBytes: Uint8Array;
+      init: RequestInit & { decompress?: boolean };
+    } | null = null;
     mockUpstream(async (input, init) => {
       captured = {
         url: typeof input === "string" ? input : (input as URL).toString(),
         headers: new Headers(init?.headers as Record<string, string>),
         bodyBytes: init?.body as Uint8Array,
+        init: (init ?? {}) as RequestInit & { decompress?: boolean },
       };
       return new Response(
         JSON.stringify({
@@ -545,6 +555,13 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     // the path — works around Bun fetch ZlibError on Anthropic SSE
     // through the gateway (discovered in #437 real-key smoke).
     expect(captured!.headers.get("accept-encoding")).toBe("identity");
+    // `decompress: false` on the Bun fetch — Portkey 1.15.2 OSS lies
+    // about Content-Encoding (says "br"/"gzip" while the bytes are
+    // already identity because Portkey internally decoded upstream).
+    // Letting Bun auto-decompress trips `BrotliDecompressionError` /
+    // `ZlibError` on every response. The flag keeps the bytes raw, and
+    // `cloneResponseHeaders` strips the bogus encoding before forwarding.
+    expect(captured!.init.decompress).toBe(false);
     // Body still has the substituted real-model id (adapter ran).
     const body = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
     expect(body.model).toBe("gpt-4o-2024-08-06");
@@ -561,11 +578,16 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     // legacy behavior (direct upstream + no x-portkey-config).
     setPortkeyInprocessRouter(() => null);
 
-    let captured: { url: string; headers: Headers } | null = null;
+    let captured: {
+      url: string;
+      headers: Headers;
+      init: RequestInit & { decompress?: boolean };
+    } | null = null;
     mockUpstream(async (input, init) => {
       captured = {
         url: typeof input === "string" ? input : (input as URL).toString(),
         headers: new Headers(init?.headers as Record<string, string>),
+        init: (init ?? {}) as RequestInit & { decompress?: boolean },
       };
       return new Response(
         JSON.stringify({
@@ -592,5 +614,291 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     // Direct upstream — no encoding override; we don't need to fight
     // Bun's decompressor when Portkey isn't rewriting the response.
     expect(captured!.headers.get("accept-encoding")).toBeNull();
+    // And no `decompress: false` override either — direct path keeps
+    // Bun's auto-decompression (upstream really is compressed there).
+    expect(captured!.init.decompress).toBeUndefined();
+  });
+
+  it("forwards the body unmodified when Portkey lies about Content-Encoding (#437 follow-up)", async () => {
+    // Regression for the brotli/gzip decompression crash discovered
+    // post-merge. Portkey 1.15.2 OSS sets `Content-Encoding: br` on
+    // responses whose body is already identity (Portkey internally
+    // decoded upstream's brotli for metrics but kept the original header).
+    // With Bun's auto-decompression we crashed every call; with
+    // `decompress: false` the bytes pass through and `cloneResponseHeaders`
+    // drops the bogus encoding so the consumer sees a clean payload.
+    const h = await buildHarness();
+    setPortkeyInprocessRouter((model) => ({
+      baseUrl: "http://127.0.0.1:8787/v1",
+      portkeyConfig: JSON.stringify({ provider: "openai", api_key: model.apiKey }),
+    }));
+
+    // Plain identity JSON — but advertised as brotli (Portkey's lie).
+    const upstreamBody = JSON.stringify({
+      id: "chatcmpl_liar",
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+      usage: { prompt_tokens: 3, completion_tokens: 2 },
+    });
+
+    mockUpstream(async () => {
+      return new Response(upstreamBody, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-encoding": "br", // ← the lie
+        },
+      });
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    // Bogus encoding header MUST be stripped.
+    expect(res.headers.get("content-encoding")).toBeNull();
+    // Body passes through verbatim — no double-decoding, no truncation.
+    const body = (await res.json()) as { id: string };
+    expect(body.id).toBe("chatcmpl_liar");
+    // Usage row still recorded — cost metering is decoupled from
+    // transport quirks.
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row).toBeDefined();
+    expect(row!.inputTokens).toBe(3);
+    expect(row!.outputTokens).toBe(2);
+  });
+});
+
+/**
+ * Response-level cache (#437 Phase 4a) — `services/llm-proxy/response-cache.ts`.
+ *
+ * Portkey 1.15.2 OSS exposes a `cache: { mode }` contract in inline
+ * config but its standalone `start-server.js` never installs the
+ * `getFromCache` middleware, so every response comes back
+ * `cacheStatus: DISABLED` regardless of mode. Appstrate owns the cache
+ * layer instead and emits a Portkey-compatible `x-portkey-cache-status`
+ * header so consumers (and observability) treat HIT/MISS uniformly.
+ *
+ * These tests assert the cache contract independent of the upstream
+ * transport: identical (orgId, presetId, apiShape, model, body) → HIT
+ * on the second call; differences anywhere in the key → MISS.
+ */
+describe("POST /api/llm-proxy/* — response cache (#437 Phase 4a)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    setResponseCacheConfig({ enabled: true, ttlSeconds: 120 });
+  });
+
+  afterEach(() => {
+    restoreFetch();
+    resetResponseCacheConfigForTesting();
+  });
+
+  it("returns x-portkey-cache-status: MISS on first call and HIT on identical second call", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "cache me" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-portkey-cache-status")).toBe("MISS");
+    const firstJson = (await first.json()) as { id: string };
+    expect(firstJson.id).toBe("chatcmpl_1");
+
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-portkey-cache-status")).toBe("HIT");
+    const secondJson = (await second.json()) as { id: string };
+    // Replayed verbatim — same id as the first call, no upstream re-hit.
+    expect(secondJson.id).toBe("chatcmpl_1");
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("misses when the request body changes (key includes request payload)", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const callWith = (prompt: string) =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+    const a = await callWith("first prompt");
+    expect(a.headers.get("x-portkey-cache-status")).toBe("MISS");
+    const b = await callWith("second prompt");
+    expect(b.headers.get("x-portkey-cache-status")).toBe("MISS");
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("skips the cache entirely for streaming requests", async () => {
+    const h = await buildHarness({
+      apiShape: "anthropic-messages",
+      baseUrl: "https://api.anthropic.test",
+      modelId: "claude-sonnet-4-5-20250929",
+      upstreamKey: "sk-ant-42",
+    });
+
+    const sseBody =
+      `event: message_start\n` +
+      `data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}\n\n` +
+      `event: message_delta\n` +
+      `data: {"type":"message_delta","usage":{"output_tokens":3}}\n\n` +
+      `event: message_stop\n` +
+      `data: {"type":"message_stop"}\n\n`;
+
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(sseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      max_tokens: 32,
+      messages: [{ role: "user", content: "hi" }],
+      stream: true,
+    });
+
+    const first = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
+      method: "POST",
+      headers: authHeaders(h, { "anthropic-version": "2024-10-01" }),
+      body,
+    });
+    expect(first.status).toBe(200);
+    // Streaming responses are not tagged with cache status — they bypass
+    // the cache layer entirely.
+    expect(first.headers.get("x-portkey-cache-status")).toBeNull();
+    await first.text(); // drain
+
+    const second = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
+      method: "POST",
+      headers: authHeaders(h, { "anthropic-version": "2024-10-01" }),
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-portkey-cache-status")).toBeNull();
+    await second.text();
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("does not cache upstream error responses (4xx/5xx)", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.status).toBe(429);
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.status).toBe(429);
+    // Both requests hit upstream — 4xx bodies must never be cached.
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("is fully disabled when setResponseCacheConfig({ enabled: false }) — no header, no replay", async () => {
+    setResponseCacheConfig({ enabled: false, ttlSeconds: 0 });
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.headers.get("x-portkey-cache-status")).toBeNull();
+
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.headers.get("x-portkey-cache-status")).toBeNull();
+    expect(upstreamCalls).toBe(2);
   });
 });

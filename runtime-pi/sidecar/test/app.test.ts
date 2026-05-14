@@ -209,6 +209,55 @@ describe("POST /configure — llm SSRF protection", () => {
     expect(deps.config.llm).toBeUndefined();
   });
 
+  it("accepts a Portkey-managed baseUrl on host.docker.internal (platform-vouched loopback)", async () => {
+    // Regression for the Phase 2.5 (#437) Portkey-mandatory rollout: when
+    // the platform routes API-key LLM calls through the local Portkey
+    // gateway, baseUrl intentionally lands on host.docker.internal or
+    // 127.0.0.1 — both literals the generic SSRF guard rejects. The
+    // platform vouches for these URLs (user input is the inline
+    // portkeyConfig JSON, not the baseUrl), so the guard must let them
+    // through when `portkeyConfig` is present.
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        llm: {
+          authMode: "api_key",
+          baseUrl: "http://host.docker.internal:8787/v1",
+          apiKey: "real-sk",
+          placeholder: "sk-placeholder",
+          portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk" }),
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect(deps.config.llm).toMatchObject({
+      authMode: "api_key",
+      baseUrl: "http://host.docker.internal:8787/v1",
+    });
+  });
+
+  it("still rejects loopback baseUrl when portkeyConfig is absent (direct upstream)", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        llm: {
+          authMode: "api_key",
+          baseUrl: "http://127.0.0.1:8787/v1",
+          apiKey: "key",
+          placeholder: "ph",
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+    expect(deps.config.llm).toBeUndefined();
+  });
+
   it("allows llm config with null (clear)", async () => {
     const deps = makeDeps();
     deps.config.llm = {
@@ -312,6 +361,38 @@ describe("ALL /llm/* — SSRF protection", () => {
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
+  });
+
+  it("forwards through to Portkey-managed loopback baseUrl (platform-vouched, #437 follow-up)", async () => {
+    // Same carve-out as `/configure`: when `portkeyConfig` is present the
+    // baseUrl is the local Portkey gateway, intentionally on the loopback
+    // / docker-internal range. The forwarder must NOT short-circuit with
+    // 403 in this case — the request body and the inline `portkeyConfig`
+    // header are how the platform reaches its own gateway.
+    const fetchFn = mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "http://host.docker.internal:8787/v1",
+      apiKey: "real-sk",
+      placeholder: "sk-placeholder",
+      portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk" }),
+    };
+    const app = createApp(deps);
+    const res = await app.request("/llm/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"model":"gpt-4o-mini"}',
+    });
+    expect(res.status).toBe(200);
+    const url = (fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toBe("http://host.docker.internal:8787/v1/chat/completions");
   });
 });
 
@@ -457,6 +538,43 @@ describe("ALL /llm/* — Portkey config forwarding", () => {
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     const headers = opts.headers as Record<string, string>;
     expect(headers["x-portkey-config"]).toBeUndefined();
+  });
+
+  it("disables Bun fetch auto-decompression when Portkey is in the path (#437 follow-up)", async () => {
+    // Regression for the brotli/gzip decompression crash discovered
+    // during the #437 real-key smoke. Portkey 1.15.2 OSS returns bodies
+    // whose `Content-Encoding` header lies (advertises "br" / "gzip" but
+    // the bytes are already identity because Portkey decoded upstream
+    // for metrics). Bun's auto-decompressor crashes on that framing.
+    // `decompress: false` keeps the bytes raw — the response allow-list
+    // never forwards `content-encoding`, so the agent sees clean
+    // identity bytes.
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "https://api.example.com",
+      apiKey: "real-sk-key",
+      placeholder: "sk-placeholder",
+      portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk-key" }),
+    };
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", { method: "POST" });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit & { decompress?: boolean }])[1];
+    expect(opts.decompress).toBe(false);
+  });
+
+  it("leaves Bun fetch auto-decompression on for the direct-upstream path", async () => {
+    // No Portkey routing → upstream is the real provider, whose
+    // Content-Encoding header is honest. Bun's auto-decompress is the
+    // right default there.
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", { method: "POST" });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit & { decompress?: boolean }])[1];
+    expect(opts.decompress).toBeUndefined();
   });
 });
 
