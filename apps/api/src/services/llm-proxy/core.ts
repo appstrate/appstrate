@@ -87,10 +87,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.apiShape,
   );
 
-  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.realModelId);
+  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.upstreamModelId);
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
-  // apiShape, realModel, requestBody)` so cross-org / cross-preset
+  // apiShape, upstreamModelId, requestBody)` so cross-org / cross-preset
   // requests never collide. Skips streaming (`stream: true`) requests —
   // SSE replays are far less useful and complicate the contract.
   // Misses still cost us the key hash, but `lookupResponse` returns
@@ -102,7 +102,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       orgId: inputs.principal.orgId,
       presetId,
       apiShape: resolved.apiShape,
-      realModelId: resolved.realModelId,
+      upstreamModelId: resolved.upstreamModelId,
       requestBody: rewrittenBody,
     });
     if (probe.hit) {
@@ -270,7 +270,7 @@ async function resolvePresetForOrg(
     providerId: loaded.providerId,
     apiShape: loaded.apiShape,
     baseUrl: loaded.baseUrl,
-    realModelId: loaded.modelId,
+    upstreamModelId: loaded.modelId,
     apiKey: loaded.apiKey,
     cost: loaded.cost ?? null,
   };
@@ -361,7 +361,7 @@ async function recordUsage(inputs: RecordUsageInputs): Promise<void> {
       userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
       runId: inputs.runId,
       model: inputs.resolved.presetId,
-      realModel: inputs.resolved.realModelId,
+      realModel: inputs.resolved.upstreamModelId,
       api: inputs.resolved.apiShape,
       inputTokens: inputs.usage.inputTokens,
       outputTokens: inputs.usage.outputTokens,

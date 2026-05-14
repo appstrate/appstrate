@@ -27,12 +27,12 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Rewrite `body.model` to `realModelId` without parsing-then-reserialising
+ * Rewrite `body.model` to `upstreamModelId` without parsing-then-reserialising
  * the whole payload when it isn't shaped like a JSON object. A non-JSON
  * or non-object body is forwarded as-is — the upstream is in a better
  * position to reject it than the proxy is to second-guess it.
  */
-export function substituteModelJson(rawBody: Uint8Array, realModelId: string): Uint8Array {
+export function substituteModelJson(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
   const text = new TextDecoder().decode(rawBody);
   let parsed: unknown;
   try {
@@ -46,7 +46,7 @@ export function substituteModelJson(rawBody: Uint8Array, realModelId: string): U
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return rawBody;
   }
-  (parsed as Record<string, unknown>)["model"] = realModelId;
+  (parsed as Record<string, unknown>)["model"] = upstreamModelId;
   return new TextEncoder().encode(JSON.stringify(parsed));
 }
 

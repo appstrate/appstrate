@@ -28,8 +28,8 @@ export interface ResolvedProxyModel {
   apiShape: string;
   /** Upstream base URL the platform forwards to. */
   baseUrl: string;
-  /** Real model id forwarded to upstream (`body.model` is rewritten to this). */
-  realModelId: string;
+  /** Model id forwarded to upstream (`body.model` is rewritten to this). Distinct from `presetId`, which is the org-scoped alias the caller requested. */
+  upstreamModelId: string;
   /** Upstream API key the platform injects server-side. */
   apiKey: string;
   /** Per-million-token pricing used to compute `cost_usd`. Nullable for unknown models. */
