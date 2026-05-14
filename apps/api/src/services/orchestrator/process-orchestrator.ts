@@ -218,12 +218,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       stderr: "pipe",
     });
     this.drainStderr(proc, id);
-    // Sidecar logger emits info/debug lines on stdout (warn/error on stderr).
-    // Without this drain the pipe fills silently and `logger.info` calls from
-    // the sidecar (e.g. `llm.stream.observed` per-call telemetry) are
-    // invisible in local dev. Docker mode reads stdout via the Docker HTTP
-    // API, so this only matters for process mode.
-    this.drainStdout(proc, id);
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
@@ -478,10 +472,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
    * for live tailing; the same line is appended to {@link tail} (capped
    * at the last 50 lines) so the platform can surface stderr in the
    * agent-exit error log even when the process dies before the live
-   * warn lines reach the user's filtered view. Lines that parse as
-   * structured pino-style JSON are forwarded through the matching
-   * logger level so fields aren't double-encoded (cf.
-   * {@link forwardStructuredLine}).
+   * warn lines reach the user's filtered view.
    */
   private drainStderr(proc: BunProcess, label: string, tail?: string[]): void {
     const stderr = proc.stderr;
@@ -492,7 +483,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     let buf = "";
 
     const append = (line: string) => {
-      this.forwardStructuredLine(label, "stderr", line, "warn");
+      logger.warn(`[process:${label}:stderr] ${line}`);
       if (tail) {
         tail.push(line);
         if (tail.length > 50) tail.shift();
@@ -520,105 +511,4 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     };
     drain().catch(() => {});
   }
-
-  /**
-   * Drain stdout from a subprocess at info level. Used for sidecar
-   * subprocesses whose logger emits info/debug lines on stdout. Without
-   * this, the pipe fills silently and structured logs (e.g. per-call LLM
-   * stream telemetry) are invisible. Subject to the same Bun ≤1.3.9
-   * `stdout: "pipe"` premature-EOF bug described at the top of this file;
-   * we accept the partial-loss risk because total invisibility is worse.
-   */
-  private drainStdout(proc: BunProcess, label: string): void {
-    const stdout = proc.stdout;
-    if (!stdout || typeof stdout === "number") return;
-
-    const reader = (stdout as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    const drain = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.trim()) this.forwardStructuredLine(label, "stdout", line, "info");
-          }
-        }
-        if (buf.trim()) this.forwardStructuredLine(label, "stdout", buf, "info");
-      } catch {
-        // Stream closed
-      } finally {
-        reader.releaseLock();
-      }
-    };
-    drain().catch(() => {});
-  }
-
-  /**
-   * Forward a single subprocess output line through this process's
-   * structured logger. When the line is parseable as a pino-style JSON
-   * object with `level` and `msg` fields, the structured fields are
-   * preserved (`level` routes the call, `msg` becomes the message,
-   * remaining keys are merged as `data`). Non-JSON lines fall back to
-   * the original behaviour: wrap the raw text in a label-prefixed string
-   * at the supplied default level.
-   *
-   * Without this, every subprocess JSON log gets double-encoded
-   * (`{level:"info", msg:"[process:X:stdout] {\"level\":\"info\",...}"}`)
-   * which breaks downstream auto-parsing collectors.
-   */
-  private forwardStructuredLine(
-    label: string,
-    stream: "stdout" | "stderr",
-    line: string,
-    defaultLevel: "info" | "warn",
-  ): void {
-    const parsed = tryParseStructured(line);
-    if (parsed) {
-      const { level, msg, time: _time, ...rest } = parsed;
-      logger[level](`[process:${label}:${stream}] ${msg}`, rest);
-      return;
-    }
-    logger[defaultLevel](`[process:${label}:${stream}] ${line}`);
-  }
-}
-
-export interface StructuredLine {
-  level: "debug" | "info" | "warn" | "error";
-  msg: string;
-  time?: unknown;
-  [key: string]: unknown;
-}
-
-/**
- * Parse a subprocess output line as a structured pino-style log entry.
- * Returns `null` unless the line is a JSON object carrying a recognised
- * `level` string and a `msg` string — anything else (plain text, JSON
- * arrays, log lines from libraries that emit a different shape) falls
- * through to the raw-string fallback in {@link ProcessOrchestrator}'s
- * `forwardStructuredLine`. Exported for unit tests.
- */
-export function tryParseStructured(line: string): StructuredLine | null {
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
-    return null;
-  }
-  const obj = candidate as Record<string, unknown>;
-  const level = obj.level;
-  const msg = obj.msg;
-  if (level !== "debug" && level !== "info" && level !== "warn" && level !== "error") {
-    return null;
-  }
-  if (typeof msg !== "string") return null;
-  return obj as StructuredLine;
 }
