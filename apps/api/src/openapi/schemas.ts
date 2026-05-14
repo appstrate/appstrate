@@ -14,7 +14,7 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
 
 const providerAuthModeEnum = {
   type: "string",
-  enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
+  enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "password"],
 } as const;
 
 const providerTokenContentTypeProperty = {
@@ -90,6 +90,15 @@ const providerInputSharedProperties = {
   docsUrl: { type: "string" },
   authorizedUris: { type: "array", items: { type: "string" } },
   allowAllUris: { type: "boolean" },
+  passwordTokenUrl: {
+    type: "string",
+    description:
+      "OAuth2 Resource Owner Password Credentials (RFC 6749 §4.3) token endpoint. Required when authMode === 'password'.",
+  },
+  passwordScope: {
+    type: "string",
+    description: "Optional space-separated scope string sent in the ROPC token request body.",
+  },
 } as const;
 
 /**

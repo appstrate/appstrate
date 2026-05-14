@@ -116,12 +116,22 @@ export type ToolManifest = z.infer<typeof toolManifestSchema>;
 // ─────────────────────────────────────────────
 
 /**
- * Provider auth-mode Zod enum, re-exported from `@afps-spec/schema` so
- * appstrate route validators can reference the canonical AFPS values
- * without redeclaring the literal array. AFPS v1: `oauth2 | oauth1 |
- * api_key | basic | custom`.
+ * Provider auth-mode Zod enum.
+ *
+ * Extends the canonical AFPS v1 enum (`oauth2 | oauth1 | api_key | basic |
+ * custom`) with `password` — OAuth 2.0 Resource Owner Password Credentials
+ * grant (RFC 6749 §4.3). ROPC is **deprecated in OAuth 2.1** and discouraged
+ * for new integrations, but several real-world providers (Amisgest, Fizz, …)
+ * only expose this grant. The platform supports it as a clearly-flagged
+ * escape hatch; operators opt in by declaring `authMode: "password"` on the
+ * provider manifest.
+ *
+ * The `password` value is a platform extension pending an AFPS spec release.
+ * The AFPS v1 enum stays the source of truth for the other modes — only the
+ * extra value is added here, so the platform tracks any future spec changes
+ * by re-deriving from `afpsAuthModeEnum.options`.
  */
-export const authModeEnum = afpsAuthModeEnum;
+export const authModeEnum = z.enum([...afpsAuthModeEnum.options, "password"]);
 
 /** Closed list of valid auth-mode strings — derived from {@link authModeEnum}. */
 export const AUTH_MODES = authModeEnum.options;
@@ -293,6 +303,24 @@ export type CredentialTransform = Pick<
   "template" | "encoding"
 >;
 
+/**
+ * Resolved password-grant (ROPC, RFC 6749 §4.3) configuration block.
+ * Populated when the manifest declares `definition.password = { tokenUrl, … }`.
+ * Mirrors the {@link ResolvedProviderDefinition.tokenUrl} shape used by
+ * oauth2 so downstream code can pull a single context object.
+ */
+export interface ResolvedPasswordConfig {
+  tokenUrl: string;
+  /** Optional OAuth2 client_id (some ROPC upstreams require one, many don't). */
+  clientId?: string;
+  /** Optional OAuth2 client_secret (paired with `clientId`). */
+  clientSecret?: string;
+  tokenAuthMethod?: OAuthTokenAuthMethod;
+  tokenContentType?: OAuthTokenContentType;
+  /** Optional space-separated scope string sent in the token request. */
+  scope?: string;
+}
+
 /** Resolved provider definition built from a raw manifest JSONB object. */
 export interface ResolvedProviderDefinition {
   id: string;
@@ -318,6 +346,12 @@ export interface ResolvedProviderDefinition {
   availableScopes?: AvailableScope[];
   requestTokenUrl?: string;
   accessTokenUrl?: string;
+  /**
+   * Password grant (ROPC) configuration — populated when
+   * `authMode === "password"`. Optional even for password providers so a
+   * partially-edited draft manifest doesn't crash the resolver.
+   */
+  password?: ResolvedPasswordConfig;
   iconUrl?: string;
   categories: string[];
   docsUrl?: string;
@@ -341,6 +375,18 @@ export function buildProviderDefinitionFromManifest(
   const oauth2 = rawDef.oauth2 as Record<string, unknown> | undefined;
   const oauth1 = rawDef.oauth1 as Record<string, unknown> | undefined;
   const credentials = rawDef.credentials as Record<string, unknown> | undefined;
+  const password = rawDef.password as Record<string, unknown> | undefined;
+  const resolvedPassword: ResolvedPasswordConfig | undefined =
+    authMode === "password" && password && typeof password.tokenUrl === "string"
+      ? {
+          tokenUrl: password.tokenUrl,
+          clientId: (password.clientId as string) || undefined,
+          clientSecret: (password.clientSecret as string) || undefined,
+          tokenAuthMethod: password.tokenAuthMethod as OAuthTokenAuthMethod | undefined,
+          tokenContentType: password.tokenContentType as OAuthTokenContentType | undefined,
+          scope: (password.scope as string) || undefined,
+        }
+      : undefined;
 
   return {
     id,
@@ -360,6 +406,8 @@ export function buildProviderDefinitionFromManifest(
     // OAuth1 fields (from definition.oauth1)
     requestTokenUrl: oauth1?.requestTokenUrl as string | undefined,
     accessTokenUrl: oauth1?.accessTokenUrl as string | undefined,
+    // Password grant (ROPC) — populated only when authMode === "password"
+    password: resolvedPassword,
     // OAuth1 also uses authorizationUrl and authorizationParams (for user redirect)
     ...(authMode === "oauth1"
       ? {

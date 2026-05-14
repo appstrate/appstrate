@@ -72,7 +72,7 @@ interface ProviderEditorState extends EditorStateBase {
 
 // ─── Credential modes ──────────────────────────────────────
 
-const CREDENTIAL_MODES = ["api_key", "basic", "custom"] as const;
+const CREDENTIAL_MODES = ["api_key", "basic", "password", "custom"] as const;
 type CredentialMode = (typeof CREDENTIAL_MODES)[number];
 
 function isCredentialMode(mode: string): mode is CredentialMode {
@@ -92,6 +92,7 @@ function makeDefaultCredentialFields(mode: CredentialMode): SchemaField[] {
     case "api_key":
       return [make("api_key")];
     case "basic":
+    case "password":
       return [make("username"), make("password", "password")];
     case "custom":
       return [];
@@ -167,7 +168,12 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
         if (!sOauth1.requestTokenUrl || !sOauth1.accessTokenUrl) {
           return { error: t("providers.form.errorOAuth1Required"), tab: "auth" };
         }
-      } else if (sAuthMode === "api_key" || sAuthMode === "basic" || sAuthMode === "custom") {
+      } else if (
+        sAuthMode === "api_key" ||
+        sAuthMode === "basic" ||
+        sAuthMode === "password" ||
+        sAuthMode === "custom"
+      ) {
         if (credentialFields.length === 0) {
           return { error: t("providers.form.errorCredentialsRequired"), tab: "auth" };
         }
@@ -290,6 +296,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                   <SelectItem value="oauth1">{t("providers.authMode.oauth1")}</SelectItem>
                   <SelectItem value="api_key">{t("providers.authMode.apiKey")}</SelectItem>
                   <SelectItem value="basic">{t("providers.authMode.basic")}</SelectItem>
+                  <SelectItem value="password">{t("providers.authMode.password")}</SelectItem>
                   <SelectItem value="custom">{t("providers.authMode.custom")}</SelectItem>
                 </SelectContent>
               </Select>

@@ -59,6 +59,23 @@ export function ProviderConnectButton({
         name: provider.displayName,
         schema: provider.credentialSchema as unknown as JSONSchemaObject,
       });
+    } else if (provider.authMode === "password" || provider.authMode === "basic") {
+      // ROPC + HTTP Basic both collect the same two fields. The
+      // server-side handler dispatches on the provider's declared
+      // authMode (so `password` triggers the ROPC token exchange,
+      // `basic` just stores the credentials).
+      setCustomCredProvider({
+        id: provider.id,
+        name: provider.displayName,
+        schema: (provider.credentialSchema as unknown as JSONSchemaObject) ?? {
+          type: "object",
+          properties: {
+            username: { type: "string", description: "Username" },
+            password: { type: "string", description: "Password", format: "password" },
+          },
+          required: ["username", "password"],
+        },
+      });
     } else {
       connectMutation.mutate({
         provider: provider.id,

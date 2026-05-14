@@ -174,7 +174,8 @@ export function createConnectionsRouter() {
 
         // Resolve the auth mode from the provider
         const authMode = await getProviderAuthMode(scope, provider);
-        const mode = authMode === "basic" ? "basic" : "custom";
+        const mode: "basic" | "custom" | "password" =
+          authMode === "basic" ? "basic" : authMode === "password" ? "password" : "custom";
 
         const connectionProfileId = data.connectionProfileId ?? (await getDefaultProfileId(actor));
 

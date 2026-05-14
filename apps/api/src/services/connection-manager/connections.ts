@@ -46,12 +46,20 @@ export async function saveApiKeyConnection(
 export async function saveCredentialsConnection(
   scope: AppScope,
   provider: string,
-  authMode: "basic" | "custom",
+  authMode: "basic" | "custom" | "password",
   credentials: Record<string, string>,
   connectionProfileId: string,
 ): Promise<void> {
   const providerCredentialId = await resolveProviderCredentialId(scope.applicationId, provider);
 
+  // For password (ROPC) connections the platform stores username +
+  // password as-is; the first `getCredentials()` call lazily bootstraps
+  // an access_token via the upstream token endpoint and persists the
+  // result. We deliberately don't bootstrap synchronously at connect
+  // time — the dashboard "Connect" button stays fast and a wrong token
+  // endpoint surfaces as a clear "couldn't fetch a token" error the
+  // next time the agent runs instead of swallowing the first call's
+  // latency or partial-failing the connection row.
   await saveConnection(db, connectionProfileId, provider, scope.orgId, credentials, {
     providerCredentialId,
   });

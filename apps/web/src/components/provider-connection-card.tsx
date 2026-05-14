@@ -98,6 +98,11 @@ export function ProviderConnectionCard({
       setApiKeyOpen(true);
     } else if (authMode === "custom" && credentialSchema) {
       setCustomCredOpen(true);
+    } else if (authMode === "password" || authMode === "basic") {
+      // ROPC (password) + HTTP Basic both collect username + password
+      // in a free-form credentials modal. The server-side handler
+      // dispatches on the provider's declared authMode.
+      setCustomCredOpen(true);
     } else {
       connectMutation.mutate({
         provider: providerId,

@@ -10,6 +10,12 @@ import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
+import {
+  exchangePasswordGrant,
+  refreshPasswordGrantToken,
+  PasswordGrantError,
+  type PasswordGrantContext,
+} from "./password-grant.ts";
 import type {
   AuthMode,
   CredentialTransform,
@@ -84,9 +90,175 @@ async function getProviderDefinition(db: Db, providerId: string): Promise<Record
 }
 
 /**
+ * Build the password-grant token-endpoint context from the provider
+ * definition. Returns `undefined` when the provider is not in password
+ * mode or the `tokenUrl` is missing — callers must handle absence.
+ */
+function buildPasswordContext(
+  def: Record<string, unknown>,
+  providerId: string,
+): PasswordGrantContext | undefined {
+  const password = def.password as Record<string, unknown> | undefined;
+  if (!password || typeof password.tokenUrl !== "string") return undefined;
+  return {
+    tokenUrl: password.tokenUrl,
+    clientId: (password.clientId as string) || undefined,
+    clientSecret: (password.clientSecret as string) || undefined,
+    tokenAuthMethod: (password.tokenAuthMethod as OAuthTokenAuthMethod) ?? undefined,
+    tokenContentType: (password.tokenContentType as OAuthTokenContentType) ?? undefined,
+    scope: (password.scope as string) || undefined,
+    providerId,
+  };
+}
+
+/**
+ * Persist a fresh password-grant token set into the connection row.
+ * Preserves the stored username/password so re-bootstrap stays possible
+ * when the refresh_token expires.
+ */
+async function savePasswordGrantTokens(
+  db: Db,
+  connectionId: string,
+  username: string,
+  password: string,
+  accessToken: string,
+  refreshToken: string | undefined,
+  expiresAt: string | null,
+): Promise<DecryptedCredentials> {
+  const newCreds: DecryptedCredentials = {
+    username,
+    password,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  };
+  const encrypted = encryptCredentials(newCreds);
+  await db
+    .update(userProviderConnections)
+    .set({
+      credentialsEncrypted: encrypted,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      needsReconnection: false,
+      updatedAt: new Date(),
+    })
+    .where(eq(userProviderConnections.id, connectionId));
+  return newCreds;
+}
+
+/**
+ * Bootstrap a password-grant connection: exchange the stored username +
+ * password for an access token (RFC 6749 §4.3) and persist the result.
+ *
+ * Throws {@link PasswordGrantError} on token-endpoint failure — caller
+ * MUST inspect `kind` to decide whether to flag the connection
+ * (`"revoked"`) or surface a transient error.
+ */
+async function bootstrapPasswordGrantConnection(
+  db: Db,
+  connection: ConnectionRecord,
+  decrypted: DecryptedCredentials,
+  def: Record<string, unknown>,
+): Promise<DecryptedCredentials> {
+  if (!decrypted.username || !decrypted.password) {
+    throw new Error(
+      `Password connection '${connection.id}' is missing stored username or password — cannot bootstrap`,
+    );
+  }
+  const ctx = buildPasswordContext(def, connection.providerId);
+  if (!ctx) {
+    throw new Error(
+      `Provider '${connection.providerId}' is in password mode but has no tokenUrl configured`,
+    );
+  }
+  const parsed = await exchangePasswordGrant(ctx, decrypted.username, decrypted.password);
+  return savePasswordGrantTokens(
+    db,
+    connection.id,
+    decrypted.username,
+    decrypted.password,
+    parsed.accessToken,
+    parsed.refreshToken,
+    parsed.expiresAt,
+  );
+}
+
+/**
+ * Refresh a password-grant access token. If a refresh_token is present,
+ * try the standard `grant_type=refresh_token` flow first. On revocation
+ * (RFC 6749 §5.2 `invalid_grant`) or a missing refresh_token, fall back
+ * to re-bootstrapping from the stored username/password.
+ *
+ * Mirrors the behaviour the issue calls out — "on refresh failure,
+ * re-bootstrap with the stored username/password" — and preserves the
+ * RefreshError-style "transient vs revoked" semantics so the public
+ * credential-proxy code path treats a network blip the same way it does
+ * for oauth2.
+ */
+async function refreshOrBootstrapPasswordGrant(
+  db: Db,
+  connection: ConnectionRecord,
+  def: Record<string, unknown>,
+): Promise<DecryptedCredentials> {
+  const decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
+  const ctx = buildPasswordContext(def, connection.providerId);
+  if (!ctx) {
+    // Misconfigured provider — surface as-is, no auto-recovery.
+    return decrypted;
+  }
+
+  // Refresh path: try refresh_token first when available.
+  if (decrypted.refresh_token) {
+    try {
+      const parsed = await refreshPasswordGrantToken(ctx, decrypted.refresh_token);
+      return savePasswordGrantTokens(
+        db,
+        connection.id,
+        decrypted.username ?? "",
+        decrypted.password ?? "",
+        parsed.accessToken,
+        parsed.refreshToken ?? decrypted.refresh_token,
+        parsed.expiresAt,
+      );
+    } catch (err) {
+      // Transient (network, 5xx, …): don't re-bootstrap — the user's
+      // password is intact and re-using it under the assumption of a
+      // transient failure could trigger upstream account lockout.
+      // Surface the original failure unchanged.
+      if (err instanceof PasswordGrantError && err.kind !== "revoked") {
+        throw err;
+      }
+      // Revoked refresh_token: fall through to re-bootstrap below.
+    }
+  }
+
+  // Re-bootstrap path: stored username/password drive a fresh grant.
+  if (!decrypted.username || !decrypted.password) {
+    // No refresh_token and no stored credentials — connection must be
+    // re-created from scratch. Mark for reconnection and bubble up the
+    // original revocation signal.
+    await db
+      .update(userProviderConnections)
+      .set({ needsReconnection: true, updatedAt: new Date() })
+      .where(eq(userProviderConnections.id, connection.id));
+    throw new PasswordGrantError(
+      `Password connection '${connection.id}' has no refresh_token and no stored credentials — user must reconnect`,
+      "revoked",
+      connection.providerId,
+    );
+  }
+
+  return bootstrapPasswordGrantConnection(db, connection, decrypted, def);
+}
+
+/**
  * Get decrypted credentials for a provider.
  * Handles token refresh for OAuth2 connections by looking up provider
  * definition and credentials from the DB.
+ *
+ * For `password` providers, if the stored credentials are still raw
+ * (username + password only — no access_token yet), this triggers a
+ * one-shot ROPC bootstrap and persists the resulting tokens before
+ * returning. The agent runtime therefore never sees username/password
+ * in the resolved credential map.
  */
 export async function getCredentials(
   db: Db,
@@ -109,10 +281,21 @@ export async function getCredentials(
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
+  const authMode = def.authMode as AuthMode | undefined;
+
+  let decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
+
+  // Bootstrap password-grant connections lazily on first use so the
+  // dashboard can store username/password without making a synchronous
+  // upstream call at connection-creation time. Bootstrap errors are
+  // not silenced — a wrong username/password (PasswordGrantError with
+  // kind: "revoked") MUST surface to the caller so the connection is
+  // flagged correctly.
+  if (authMode === "password" && !decrypted.access_token) {
+    decrypted = await bootstrapPasswordGrantConnection(db, connection, decrypted, def);
+  }
 
   // Return current credentials as-is. The sidecar handles 401 → refresh → retry.
-  const decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
-
   const credentials: Record<string, string> = {};
   for (const [key, value] of Object.entries(decrypted)) {
     if (value !== undefined) {
@@ -195,6 +378,8 @@ export async function forceRefreshCredentials(
       connection.credentialsEncrypted,
       refreshContext,
     );
+  } else if (authMode === "password") {
+    decrypted = await refreshOrBootstrapPasswordGrant(db, connection, def);
   } else {
     decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
   }
@@ -463,12 +648,25 @@ export function buildSidecarCredentials(
     }
   }
 
-  if (authMode === "oauth2" || authMode === "api_key") {
+  if (authMode === "oauth2" || authMode === "api_key" || authMode === "password") {
     const creds = (def.credentials as Record<string, unknown>) ?? {};
     const fieldName = creds.fieldName as string | undefined;
     const value = credentials.access_token ?? credentials.api_key;
     if (fieldName && value) {
       return { [fieldName]: value };
+    }
+    // For password mode without an explicit fieldName, scrub the raw
+    // username/password from the resolved map so the agent runtime can
+    // never see them. Only the bootstrapped access_token (and refresh
+    // token, kept for server-side refresh paths) crosses the wall.
+    if (authMode === "password") {
+      const scrubbed: Record<string, string> = {};
+      for (const [k, v] of Object.entries(credentials)) {
+        if (k !== "username" && k !== "password") {
+          scrubbed[k] = v;
+        }
+      }
+      return scrubbed;
     }
   }
   return credentials;
@@ -520,7 +718,8 @@ function extractInjection(
       ? explicitField
       : authMode === "api_key"
         ? "api_key"
-        : "access_token";
+        : // oauth2 + password both surface a bearer token under "access_token"
+          "access_token";
   return {
     credentialHeaderName:
       typeof headerName === "string" && headerName.length > 0 ? headerName : undefined,

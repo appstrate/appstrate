@@ -290,6 +290,7 @@
   "providers.authMode.basic": "Basic",
   "providers.authMode.custom": "Custom",
   "providers.authMode.oauth1": "OAuth1",
+  "providers.authMode.password": "Password (OAuth2 ROPC)",
   "providers.form.title": "Add a provider",
   "providers.form.searchPlaceholder": "Search for an integration...",
   "providers.form.custom": "Custom provider",

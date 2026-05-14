@@ -37,6 +37,14 @@ export type { InitiateOAuthResult, OAuthCallbackResult } from "./oauth.ts";
 export { initiateOAuth1, handleOAuth1Callback } from "./oauth1.ts";
 export type { OAuth1CallbackResult } from "./oauth1.ts";
 
+// OAuth2 ROPC (password grant) — RFC 6749 §4.3
+export {
+  exchangePasswordGrant,
+  refreshPasswordGrantToken,
+  PasswordGrantError,
+} from "./password-grant.ts";
+export type { PasswordGrantContext } from "./password-grant.ts";
+
 // Token refresh
 export { RefreshError } from "./token-refresh.ts";
 

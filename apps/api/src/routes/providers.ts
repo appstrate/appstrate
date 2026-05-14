@@ -67,6 +67,10 @@ function buildProviderDefinition(data: {
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
   credentialTransform?: { template: string; encoding: "base64" };
+  passwordTokenUrl?: string;
+  passwordScope?: string;
+  clientId?: string;
+  clientSecret?: string;
 }): Record<string, unknown> {
   const definition: Record<string, unknown> = {
     authMode: data.authMode,
@@ -101,6 +105,32 @@ function buildProviderDefinition(data: {
     definition.credentials = {
       schema: data.credentialSchema,
       fieldName: data.credentialFieldName,
+    };
+  }
+
+  if (data.authMode === "password") {
+    // Operators MUST provide `passwordTokenUrl`; the rest is optional and
+    // mirrors the oauth2 sub-object so the same client_secret_basic /
+    // JSON content-type knobs work for ROPC.
+    definition.password = {
+      tokenUrl: data.passwordTokenUrl,
+      ...(data.clientId !== undefined ? { clientId: data.clientId } : {}),
+      ...(data.clientSecret !== undefined ? { clientSecret: data.clientSecret } : {}),
+      ...(data.tokenAuthMethod !== undefined ? { tokenAuthMethod: data.tokenAuthMethod } : {}),
+      ...(data.tokenContentType !== undefined ? { tokenContentType: data.tokenContentType } : {}),
+      ...(data.passwordScope !== undefined ? { scope: data.passwordScope } : {}),
+    };
+    // Password providers store username + password as user-supplied
+    // credentials; the schema is fixed (username + password fields).
+    definition.credentials = {
+      schema: {
+        type: "object",
+        properties: {
+          username: { type: "string", description: "Username" },
+          password: { type: "string", description: "Password" },
+        },
+        required: ["username", "password"],
+      },
     };
   }
 
@@ -161,6 +191,9 @@ const baseProviderSchema = z.object({
       }),
     )
     .optional(),
+  // Password grant (ROPC, RFC 6749 §4.3) — required when authMode === "password"
+  passwordTokenUrl: z.string().optional(),
+  passwordScope: z.string().optional(),
 });
 
 /**
@@ -196,11 +229,35 @@ const credentialRefinement = (data: CredentialRefinementInput, ctx: z.Refinement
   }
 };
 
-export const createProviderSchema = baseProviderSchema.superRefine(credentialRefinement);
+/**
+ * For ROPC providers, `passwordTokenUrl` is the only mandatory upstream
+ * pointer — modeled on the oauth2 case where `tokenUrl` is required. The
+ * dashboard provider editor has its own user-facing validation; this is
+ * the API-level safety net.
+ */
+interface PasswordRefinementInput {
+  authMode: string;
+  passwordTokenUrl?: string;
+}
+
+const passwordRefinement = (data: PasswordRefinementInput, ctx: z.RefinementCtx) => {
+  if (data.authMode === "password" && !data.passwordTokenUrl) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["passwordTokenUrl"],
+      message: "passwordTokenUrl is required for password authMode",
+    });
+  }
+};
+
+export const createProviderSchema = baseProviderSchema
+  .superRefine(credentialRefinement)
+  .superRefine(passwordRefinement);
 
 export const updateProviderSchema = baseProviderSchema
   .omit({ id: true })
-  .superRefine(credentialRefinement);
+  .superRefine(credentialRefinement)
+  .superRefine(passwordRefinement);
 
 export const configureCredentialsSchema = z.object({
   credentials: z.record(z.string(), z.string().min(1)).optional(),
