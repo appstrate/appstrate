@@ -1,0 +1,116 @@
+{
+  "gemma-7b-it": {
+    "label": "Gemma 7b It",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.05,
+      "output": 0.08
+    }
+  },
+  "gpt-oss-120b": {
+    "label": "Gpt Oss 120b",
+    "contextWindow": 131072,
+    "maxTokens": 32766,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.15,
+      "output": 0.6,
+      "cacheRead": 0.075
+    }
+  },
+  "gpt-oss-20b": {
+    "label": "Gpt Oss 20b",
+    "contextWindow": 131072,
+    "maxTokens": 32768,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.075,
+      "output": 0.3,
+      "cacheRead": 0.0375
+    }
+  },
+  "gpt-oss-safeguard-20b": {
+    "label": "Gpt Oss Safeguard 20b",
+    "contextWindow": 131072,
+    "maxTokens": 65536,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.075,
+      "output": 0.3,
+      "cacheRead": 0.037
+    }
+  },
+  "kimi-k2-instruct-0905": {
+    "label": "Kimi K2 Instruct 0905",
+    "contextWindow": 262144,
+    "maxTokens": 16384,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 1,
+      "output": 3,
+      "cacheRead": 0.5
+    }
+  },
+  "llama-3.1-8b-instant": {
+    "label": "Llama 3.1 8b Instant",
+    "contextWindow": 128000,
+    "maxTokens": 8192,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.05,
+      "output": 0.08
+    }
+  },
+  "llama-3.3-70b-versatile": {
+    "label": "Llama 3.3 70b Versatile",
+    "contextWindow": 128000,
+    "maxTokens": 32768,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.59,
+      "output": 0.79
+    }
+  },
+  "llama-4-maverick-17b-128e-instruct": {
+    "label": "Llama 4 Maverick 17b 128e Instruct",
+    "contextWindow": 131072,
+    "maxTokens": 8192,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.2,
+      "output": 0.6
+    }
+  },
+  "llama-4-scout-17b-16e-instruct": {
+    "label": "Llama 4 Scout 17b 16e Instruct",
+    "contextWindow": 131072,
+    "maxTokens": 8192,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.11,
+      "output": 0.34
+    }
+  },
+  "llama-guard-4-12b": {
+    "label": "Llama Guard 4 12b",
+    "contextWindow": 8192,
+    "maxTokens": 8192,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.2,
+      "output": 0.2
+    }
+  },
+  "qwen3-32b": {
+    "label": "Qwen3 32b",
+    "contextWindow": 131000,
+    "maxTokens": 131000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.29,
+      "output": 0.59
+    }
+  }
+}

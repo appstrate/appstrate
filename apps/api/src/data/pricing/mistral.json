@@ -1,0 +1,462 @@
+{
+  "codestral-2405": {
+    "label": "Codestral 2405",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "codestral-2508": {
+    "label": "Codestral 2508",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.3,
+      "output": 0.9
+    }
+  },
+  "codestral-latest": {
+    "label": "Codestral Latest",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 1,
+      "output": 3
+    }
+  },
+  "codestral-mamba-latest": {
+    "label": "Codestral Mamba Latest",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.25,
+      "output": 0.25
+    }
+  },
+  "devstral-2512": {
+    "label": "Devstral 2512",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "devstral-latest": {
+    "label": "Devstral Latest",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "devstral-medium-2507": {
+    "label": "Devstral Medium 2507",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "devstral-medium-latest": {
+    "label": "Devstral Medium Latest",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "devstral-small-2505": {
+    "label": "Devstral Small 2505",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
+  "devstral-small-2507": {
+    "label": "Devstral Small 2507",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
+  "devstral-small-latest": {
+    "label": "Devstral Small Latest",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
+  "labs-devstral-small-2512": {
+    "label": "Labs Devstral Small 2512",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
+  "magistral-medium-1-2-2509": {
+    "label": "Magistral Medium 1 2 2509",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "magistral-medium-2506": {
+    "label": "Magistral Medium 2506",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "magistral-medium-2509": {
+    "label": "Magistral Medium 2509",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "magistral-medium-latest": {
+    "label": "Magistral Medium Latest",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 2,
+      "output": 5
+    }
+  },
+  "magistral-small-1-2-2509": {
+    "label": "Magistral Small 1 2 2509",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "magistral-small-2506": {
+    "label": "Magistral Small 2506",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "magistral-small-latest": {
+    "label": "Magistral Small Latest",
+    "contextWindow": 40000,
+    "maxTokens": 40000,
+    "capabilities": ["text", "reasoning"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "ministral-3-14b-2512": {
+    "label": "Ministral 3 14b 2512",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.2,
+      "output": 0.2
+    }
+  },
+  "ministral-3-3b-2512": {
+    "label": "Ministral 3 3b 2512",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.1
+    }
+  },
+  "ministral-3-8b-2512": {
+    "label": "Ministral 3 8b 2512",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.15,
+      "output": 0.15
+    }
+  },
+  "mistral-large-2402": {
+    "label": "Mistral Large 2402",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 4,
+      "output": 12
+    }
+  },
+  "mistral-large-2407": {
+    "label": "Mistral Large 2407",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 3,
+      "output": 9
+    }
+  },
+  "mistral-large-2411": {
+    "label": "Mistral Large 2411",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 2,
+      "output": 6
+    }
+  },
+  "mistral-large-2512": {
+    "label": "Mistral Large 2512",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "mistral-large-3": {
+    "label": "Mistral Large 3",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "mistral-large-latest": {
+    "label": "Mistral Large Latest",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "mistral-medium": {
+    "label": "Mistral Medium",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 2.7,
+      "output": 8.1
+    }
+  },
+  "mistral-medium-2312": {
+    "label": "Mistral Medium 2312",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 2.7,
+      "output": 8.1
+    }
+  },
+  "mistral-medium-2505": {
+    "label": "Mistral Medium 2505",
+    "contextWindow": 131072,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "mistral-medium-3-1-2508": {
+    "label": "Mistral Medium 3 1 2508",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "mistral-medium-latest": {
+    "label": "Mistral Medium Latest",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "mistral-small": {
+    "label": "Mistral Small",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
+  "mistral-small-3-2-2506": {
+    "label": "Mistral Small 3 2 2506",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.06,
+      "output": 0.18
+    }
+  },
+  "mistral-small-latest": {
+    "label": "Mistral Small Latest",
+    "contextWindow": 131072,
+    "maxTokens": 131072,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.06,
+      "output": 0.18
+    }
+  },
+  "mistral-tiny": {
+    "label": "Mistral Tiny",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.25,
+      "output": 0.25
+    }
+  },
+  "open-codestral-mamba": {
+    "label": "Open Codestral Mamba",
+    "contextWindow": 256000,
+    "maxTokens": 256000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.25,
+      "output": 0.25
+    }
+  },
+  "open-mistral-7b": {
+    "label": "Open Mistral 7b",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.25,
+      "output": 0.25
+    }
+  },
+  "open-mistral-nemo": {
+    "label": "Open Mistral Nemo",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.3,
+      "output": 0.3
+    }
+  },
+  "open-mistral-nemo-2407": {
+    "label": "Open Mistral Nemo 2407",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.3,
+      "output": 0.3
+    }
+  },
+  "open-mixtral-8x22b": {
+    "label": "Open Mixtral 8x22b",
+    "contextWindow": 65336,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 2,
+      "output": 6
+    }
+  },
+  "open-mixtral-8x7b": {
+    "label": "Open Mixtral 8x7b",
+    "contextWindow": 32000,
+    "maxTokens": 8191,
+    "capabilities": ["text"],
+    "cost": {
+      "input": 0.7,
+      "output": 0.7
+    }
+  },
+  "pixtral-12b-2409": {
+    "label": "Pixtral 12b 2409",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 0.15,
+      "output": 0.15
+    }
+  },
+  "pixtral-large-2411": {
+    "label": "Pixtral Large 2411",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 2,
+      "output": 6
+    }
+  },
+  "pixtral-large-latest": {
+    "label": "Pixtral Large Latest",
+    "contextWindow": 128000,
+    "maxTokens": 128000,
+    "capabilities": ["text", "image"],
+    "cost": {
+      "input": 2,
+      "output": 6
+    }
+  }
+}

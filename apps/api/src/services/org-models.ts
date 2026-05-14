@@ -344,7 +344,12 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     // operator's `SYSTEM_PROVIDER_KEYS` JSON doesn't supply per-model
     // pricing. The explicit per-model `cost` still wins — same semantic
     // as DB rows below.
-    cost: def.cost ?? lookupModelCost(def.apiShape, def.modelId),
+    // System model PK id is the providerId here — operators who name their
+    // SYSTEM_PROVIDER_KEYS entry after a canonical providerId (`anthropic`,
+    // `openai`, `mistral`, `google-ai`, `cerebras`, `groq`, `xai`) get
+    // catalog fallback for free; others (e.g. `id: "my-anthropic-prod"`)
+    // skip the fallback and stay on the explicit per-model `cost`.
+    cost: def.cost ?? lookupModelCost(def.credentialId, def.modelId),
     isSystemModel: true,
   };
 }
@@ -383,7 +388,7 @@ function dbRowToResolved(
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: override ?? lookupModelCost(row.apiShape, row.modelId),
+    cost: override ?? (creds.providerId ? lookupModelCost(creds.providerId, row.modelId) : null),
     isSystemModel: false,
     providerId: creds.providerId,
     accountId: creds.accountId,

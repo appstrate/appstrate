@@ -1,50 +1,63 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pricing catalog — phase 2 of #437. Vendored from
- * [Portkey-AI/models](https://github.com/Portkey-AI/models) (MIT, weekly
- * upstream refresh).
+ * Vendored model catalog — phase 2 + phase 6 of #437. Sourced from
+ * [BerriAI/litellm](https://github.com/BerriAI/litellm) (MIT, weekly
+ * upstream refresh by `scripts/refresh-pricing-catalog.ts`).
  *
- * Purpose: replace ad-hoc `org_models.cost` maintenance with an
- * always-available default. Manual `cost` JSONB on the row stays as an
- * **override** — when set, it wins; when null, we fall back to the
- * catalog. Same semantics for system models loaded from
- * `SYSTEM_PROVIDER_KEYS`.
+ * Carries both **pricing** and **metadata** (context window, max output
+ * tokens, capabilities, mode) per model — what Portkey-AI/models lacks.
+ * The Portkey gateway still routes; this catalog feeds:
+ *
+ *   - **The picker UI** (`/api/model-provider-credentials/registry` →
+ *     {@link listCatalogModels}): every model the user can select.
+ *     Editorial curation surfaces via `featuredModelIds` on the provider
+ *     definition (small whitelist) — the rest live under "All models".
+ *   - **The cost ledger** (`org-models.ts` → {@link lookupModelCost}):
+ *     fills `cost` on any `org_models` row whose explicit `cost`
+ *     override is null. Same semantics for system models loaded from
+ *     `SYSTEM_PROVIDER_KEYS`.
  *
  * Why vendor (vs runtime fetch):
  *   - Boot must not depend on a remote URL — Tier 0 self-hosting works
  *     offline.
  *   - Pricing changes are infrequent enough that a weekly CI bump beats
  *     a 99.9% network dependency every container boot.
- *   - Vendoring also pins the data to the deployed code revision —
+ *   - Vendoring also pins data to the deployed code revision —
  *     mid-quarter price drops can't silently change historical cost
  *     attribution.
  *
- * Refresh: re-run `bun run scripts/refresh-pricing-catalog.ts` (added in
- * a follow-up commit); diffs land as a PR.
+ * Refresh: `bun run scripts/refresh-pricing-catalog.ts --apply`.
  *
- * Currency conversion: Portkey stores prices in **cents per token**.
- * Appstrate stores `ModelCost` in **USD per million tokens**:
- *
- *   usdPerMillion = centsPerToken × 1_000_000 / 100  // × 10_000
- *
- * The conversion is centralized in `convertPortkeyEntry()` below so the
- * vendored JSON stays in its native (Portkey) shape — diffing a new
- * upstream snapshot is a textual comparison.
+ * The lookup is keyed on **providerId** (not `apiShape`): cerebras,
+ * groq, and xai all share `openai-completions` apiShape with different
+ * upstreams + different pricing, so the wire format alone can't
+ * disambiguate. `providerId` is the natural fan-out key — it matches a
+ * single `ModelProviderDefinition` and a single vendored JSON file.
  */
 
 import type { ModelCost } from "@appstrate/core/module";
 import openaiPricing from "../data/pricing/openai.json" with { type: "json" };
 import anthropicPricing from "../data/pricing/anthropic.json" with { type: "json" };
-import mistralPricing from "../data/pricing/mistral-ai.json" with { type: "json" };
-import googlePricing from "../data/pricing/google.json" with { type: "json" };
+import mistralPricing from "../data/pricing/mistral.json" with { type: "json" };
+import googlePricing from "../data/pricing/google-ai.json" with { type: "json" };
+import cerebrasPricing from "../data/pricing/cerebras.json" with { type: "json" };
+import groqPricing from "../data/pricing/groq.json" with { type: "json" };
+import xaiPricing from "../data/pricing/xai.json" with { type: "json" };
 
 /**
- * Appstrate canonical `apiShape` → Portkey provider slug. This is the
- * authoritative mapping for both pricing lookup AND Portkey routing
- * (`apps/api/src/modules/portkey/config.ts` re-exports + reuses it).
+ * Wire-format mapping for the Portkey gateway (`x-portkey-config.provider`).
+ *
+ * Kept here for backward-compat — the portkey module imports it. It is
+ * **NOT** used by this file's catalog lookups anymore (phase 6 keyed
+ * those on `providerId`). The portkey module retains this map because
+ * the gateway expects its own provider slug, distinct from our
+ * `providerId`s (e.g. our `google-ai` → Portkey's `google`, multiple
+ * Appstrate providers with `openai-completions` apiShape → Portkey's
+ * `openai` slug + custom_host).
+ *
  * The subscription-OAuth shape `openai-codex-responses` is intentionally
- * absent — those calls bypass both the catalog and Portkey.
+ * absent — those calls bypass Portkey entirely.
  */
 export const API_SHAPE_TO_PORTKEY_PROVIDER: Record<string, string> = {
   "anthropic-messages": "anthropic",
@@ -59,78 +72,70 @@ export const API_SHAPE_TO_PORTKEY_PROVIDER: Record<string, string> = {
 };
 
 /**
- * Portkey-side entry shape — narrowed to the fields we read. The
- * upstream JSON carries additional fields (`batch_config`,
- * `additional_units`, …) that we ignore today; surface them later if
- * batch pricing is exposed at the org level.
+ * Compact model entry — the projection emitted by the refresh script.
+ * Mirrors the JSON shape exactly. Read-only at runtime.
  */
-interface PortkeyPricingEntry {
-  pricing_config?: {
-    pay_as_you_go?: {
-      request_token?: { price: number };
-      response_token?: { price: number };
-      cache_read_input_token?: { price: number };
-      cache_write_input_token?: { price: number };
-    };
-  };
+export interface CatalogModel {
+  /** Display label derived from the id at vendoring time (title-cased). */
+  label: string;
+  /** Maximum input context window in tokens. */
+  contextWindow: number;
+  /** Maximum response tokens (provider-defined ceiling). May be null. */
+  maxTokens: number | null;
+  /** Capabilities surfaced for selection UIs. */
+  capabilities: readonly string[];
+  /** Per-1M-token cost (USD). Always present — entries without pricing are dropped at vendoring. */
+  cost: ModelCost;
 }
 
-type PortkeyProviderFile = Record<string, PortkeyPricingEntry>;
-
-/** Index keyed on the Portkey provider slug. */
-const PROVIDER_INDEX: Record<string, PortkeyProviderFile> = {
-  openai: openaiPricing as PortkeyProviderFile,
-  anthropic: anthropicPricing as PortkeyProviderFile,
-  "mistral-ai": mistralPricing as PortkeyProviderFile,
-  google: googlePricing as PortkeyProviderFile,
+/**
+ * Catalog index keyed on `providerId`. Adding a JSON under
+ * `apps/api/src/data/pricing/<providerId>.json` requires wiring it
+ * here AND ensuring the `ModelProviderDefinition.providerId` matches
+ * the filename — otherwise the lookup silently misses.
+ */
+const PROVIDER_INDEX: Record<string, Record<string, CatalogModel>> = {
+  openai: openaiPricing as Record<string, CatalogModel>,
+  anthropic: anthropicPricing as Record<string, CatalogModel>,
+  mistral: mistralPricing as Record<string, CatalogModel>,
+  "google-ai": googlePricing as Record<string, CatalogModel>,
+  cerebras: cerebrasPricing as Record<string, CatalogModel>,
+  groq: groqPricing as Record<string, CatalogModel>,
+  xai: xaiPricing as Record<string, CatalogModel>,
 };
 
 /**
- * Convert one Portkey entry to Appstrate `ModelCost`. Returns null when
- * the `pay_as_you_go` block is missing or has no `request_token` price
- * — happens for some models in the upstream catalog (e.g. embeddings
- * with token-free units, or placeholder entries).
+ * Return every catalogued model for a `providerId`. Callers wrap each
+ * entry with provider context (apiShape, baseUrl, featured flag) before
+ * exposing via the `/registry` endpoint.
+ *
+ * Returns an empty array when the provider is not vendored
+ * (`openai-compatible`, `openrouter`, `codex`, …). Inline `models[]`
+ * on the provider definition covers those cases.
  */
-function convertPortkeyEntry(entry: PortkeyPricingEntry): ModelCost | null {
-  const pay = entry.pricing_config?.pay_as_you_go;
-  if (!pay?.request_token || !pay.response_token) return null;
-  const cents2usd = 10_000;
-  const out: ModelCost = {
-    input: pay.request_token.price * cents2usd,
-    output: pay.response_token.price * cents2usd,
-  };
-  if (pay.cache_read_input_token) {
-    out.cacheRead = pay.cache_read_input_token.price * cents2usd;
-  }
-  if (pay.cache_write_input_token) {
-    out.cacheWrite = pay.cache_write_input_token.price * cents2usd;
-  }
-  return out;
+export function listCatalogModels(providerId: string): Array<CatalogModel & { id: string }> {
+  const file = PROVIDER_INDEX[providerId];
+  if (!file) return [];
+  return Object.entries(file).map(([id, entry]) => ({ id, ...entry }));
 }
 
 /**
- * Resolve `(apiShape, modelId)` → `ModelCost | null`. Returns null when
- * any of:
- *
- *   - `apiShape` has no Portkey provider mapping (e.g. exotic shapes,
- *     subscription-OAuth shapes that bypass billing)
- *   - the catalog has no entry for this `modelId` under the resolved
- *     provider (custom fine-tunes, brand-new releases not yet vendored)
- *   - the entry exists but lacks `pay_as_you_go.request_token` /
- *     `response_token`
- *
- * Callers (`org-models.ts`, `system providers`) treat null as
- * "no override AND no catalog hit → cost stays null on the resolved
- * model"; downstream `computeCostUsd()` then short-circuits to 0.
+ * Resolve a single `(providerId, modelId)` to its catalog entry.
+ * Returns null on any miss — unmapped provider, unknown model id, or
+ * entry stripped at vendoring time.
  */
-export function lookupModelCost(apiShape: string, modelId: string): ModelCost | null {
-  const provider = API_SHAPE_TO_PORTKEY_PROVIDER[apiShape];
-  if (!provider) return null;
-  const providerFile = PROVIDER_INDEX[provider];
-  if (!providerFile) return null;
-  const entry = providerFile[modelId];
-  if (!entry) return null;
-  return convertPortkeyEntry(entry);
+export function lookupCatalogModel(providerId: string, modelId: string): CatalogModel | null {
+  const file = PROVIDER_INDEX[providerId];
+  if (!file) return null;
+  return file[modelId] ?? null;
+}
+
+/**
+ * Thin wrapper preserved for callers (`org-models.ts`, `model-provider-credentials.ts`)
+ * that only care about cost. Equivalent to `lookupCatalogModel(...)?.cost ?? null`.
+ */
+export function lookupModelCost(providerId: string, modelId: string): ModelCost | null {
+  return lookupCatalogModel(providerId, modelId)?.cost ?? null;
 }
 
 /** @internal test helper — total models indexed across all providers. */

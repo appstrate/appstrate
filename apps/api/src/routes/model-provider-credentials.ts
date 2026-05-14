@@ -105,7 +105,7 @@ export function createModelProviderCredentialsRouter() {
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens ?? null,
         capabilities: m.capabilities,
-        cost: m.cost ?? lookupModelCost(p.apiShape, m.id),
+        cost: m.cost ?? lookupModelCost(p.providerId, m.id),
         recommended: m.recommended ?? false,
       })),
     }));

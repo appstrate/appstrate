@@ -1,90 +1,116 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the vendored Portkey pricing catalog (phase 2 of #437).
+ * Unit tests for the vendored LiteLLM model catalog (#437 phases 2 + 6).
  *
- * These tests pin the contract callers in `org-models.ts` and the
- * Portkey routing rely on. They don't validate every model's price
- * (the upstream JSON is the source of truth) — instead they check the
- * three things that drift independently:
+ * The catalog is keyed on `providerId` — one JSON file per provider.
+ * These tests pin the contract callers rely on:
  *
- *   1. Conversion arithmetic (cents/token → USD/M) — single canonical
- *      sample.
- *   2. apiShape → provider mapping coverage — every Portkey-routable
- *      shape returns a non-null lookup for at least one model.
- *   3. Unmapped / missing inputs return null cleanly (no throws, no NaN).
+ *   1. `lookupModelCost(providerId, modelId)` — cost-only thin wrapper.
+ *   2. `lookupCatalogModel(providerId, modelId)` — full metadata block.
+ *   3. `listCatalogModels(providerId)` — every catalogued model for a
+ *      provider (drives the picker's "All models" group).
+ *   4. `API_SHAPE_TO_PORTKEY_PROVIDER` — kept for Portkey routing only.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  lookupModelCost,
   API_SHAPE_TO_PORTKEY_PROVIDER,
   _catalogSize,
+  listCatalogModels,
+  lookupCatalogModel,
+  lookupModelCost,
 } from "../../src/services/pricing-catalog.ts";
 
 describe("lookupModelCost", () => {
-  it("returns null for an unmapped apiShape", () => {
-    expect(lookupModelCost("openai-codex-responses", "gpt-5")).toBeNull();
-    expect(lookupModelCost("not-a-real-shape", "anything")).toBeNull();
-  });
-
-  it("returns null when the apiShape maps to a provider we haven't vendored yet", () => {
-    // `bedrock` is in the routing map (Portkey supports it) but we
-    // haven't vendored the pricing file — should null cleanly, not throw.
-    expect(lookupModelCost("bedrock-converse-stream", "anthropic.claude-v2")).toBeNull();
+  it("returns null for an unknown providerId", () => {
+    expect(lookupModelCost("not-a-real-provider", "anything")).toBeNull();
   });
 
   it("returns null when the model is unknown under a vendored provider", () => {
-    expect(lookupModelCost("openai-completions", "definitely-not-a-real-model-xyz")).toBeNull();
+    expect(lookupModelCost("openai", "definitely-not-a-real-model-xyz")).toBeNull();
   });
 
-  it("converts cents/token → USD/million for a known OpenAI model", () => {
-    // gpt-4o input: 0.00025 cents/token × 10_000 = $2.50/M (well-known
-    // OpenAI list price as of the vendored snapshot)
-    const cost = lookupModelCost("openai-completions", "gpt-4o");
-    expect(cost).not.toBeNull();
-    expect(cost!.input).toBeCloseTo(2.5, 4);
-    expect(cost!.output).toBeCloseTo(10, 4);
-    // gpt-4o has prompt-cache pricing at half input ($1.25/M)
-    expect(cost!.cacheRead).toBeCloseTo(1.25, 4);
+  it("returns null for subscription-OAuth providers (codex bypass)", () => {
+    // Codex / Claude Pro are flat-fee subscriptions — no per-token cost
+    // attribution. The catalog must not vendor them.
+    expect(lookupModelCost("codex", "gpt-5.5")).toBeNull();
   });
 
-  it("works for anthropic claude-haiku-4-5 (catalogued)", () => {
-    const cost = lookupModelCost("anthropic-messages", "claude-haiku-4-5-20251001");
+  it("returns canonical pricing for anthropic claude-haiku-4-5", () => {
+    const cost = lookupModelCost("anthropic", "claude-haiku-4-5-20251001");
     expect(cost).not.toBeNull();
-    // Haiku 4.5 is $1.00/M input, $5.00/M output at the vendored snapshot.
     expect(cost!.input).toBeCloseTo(1, 4);
     expect(cost!.output).toBeCloseTo(5, 4);
+    expect(cost!.cacheRead).toBeCloseTo(0.1, 4);
+    expect(cost!.cacheWrite).toBeCloseTo(1.25, 4);
+  });
+});
+
+describe("lookupCatalogModel", () => {
+  it("returns the full metadata block (not just cost)", () => {
+    const entry = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001");
+    expect(entry).not.toBeNull();
+    expect(entry!.contextWindow).toBe(200_000);
+    expect(entry!.maxTokens).toBe(64_000);
+    expect(entry!.capabilities).toEqual(expect.arrayContaining(["text", "image", "reasoning"]));
+    expect(entry!.label).toBeString();
   });
 
-  it("resolves the same model across all three OpenAI api-shapes", () => {
-    const a = lookupModelCost("openai-chat", "gpt-4o");
-    const b = lookupModelCost("openai-completions", "gpt-4o");
-    const c = lookupModelCost("openai-responses", "gpt-4o");
-    expect(a).toEqual(b);
-    expect(b).toEqual(c);
+  it("returns null on miss without throwing", () => {
+    expect(lookupCatalogModel("anthropic", "claude-2-fictional")).toBeNull();
+    expect(lookupCatalogModel("nonexistent", "anything")).toBeNull();
+  });
+});
+
+describe("listCatalogModels", () => {
+  it("returns every catalogued model for a provider", () => {
+    const all = listCatalogModels("anthropic");
+    expect(all.length).toBeGreaterThan(15);
+    // Each entry shape matches CatalogModel + id.
+    for (const m of all) {
+      expect(m.id).toBeString();
+      expect(m.contextWindow).toBeNumber();
+      expect(m.cost.input).toBeNumber();
+    }
   });
 
-  it("indexes at least 200 models across the 4 vendored providers", () => {
-    // Sanity threshold — the upstream catalog grows over time. If this
-    // ever drops below ~200, something has gone wrong with the JSON
-    // imports (e.g. a hard-coded refresh that wiped a file).
+  it("covers the 7 providers we vendor", () => {
+    // Pin the providerId surface — adding/removing a vendored JSON
+    // without updating PROVIDER_INDEX silently drops coverage.
+    for (const providerId of [
+      "openai",
+      "anthropic",
+      "mistral",
+      "google-ai",
+      "cerebras",
+      "groq",
+      "xai",
+    ]) {
+      const models = listCatalogModels(providerId);
+      expect(models.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns empty for non-catalogued providers (openrouter, openai-compatible, codex)", () => {
+    expect(listCatalogModels("openrouter")).toEqual([]);
+    expect(listCatalogModels("openai-compatible")).toEqual([]);
+    expect(listCatalogModels("codex")).toEqual([]);
+  });
+});
+
+describe("_catalogSize", () => {
+  it("indexes at least 200 chat models across the 7 vendored providers", () => {
     expect(_catalogSize()).toBeGreaterThan(200);
   });
 });
 
 describe("API_SHAPE_TO_PORTKEY_PROVIDER", () => {
   it("does NOT include subscription-OAuth shapes (bypass-billing invariant)", () => {
-    // Codex / Claude Pro subscription credentials must NEVER hit the
-    // pricing catalog — the user already paid the upstream subscription
-    // and there's no per-token attribution on those calls.
     expect(API_SHAPE_TO_PORTKEY_PROVIDER["openai-codex-responses"]).toBeUndefined();
   });
 
   it("covers the 9 Portkey-routable shapes we promised in the README", () => {
-    // Locks the public contract. If a shape is removed from this list,
-    // the Portkey module's routing AND the pricing catalog both lose
-    // coverage simultaneously — flag the breaking change loudly.
     const expected = [
       "anthropic-messages",
       "openai-chat",
