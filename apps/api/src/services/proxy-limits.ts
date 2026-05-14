@@ -20,6 +20,25 @@ import { logger } from "../lib/logger.ts";
 // Schemas
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-bucket configuration for `LLM_PROXY_LIMITS.tpm_buckets`.
+ *
+ *   - `tpm`   — total token throughput per 60s window for this bucket.
+ *   - `burst` — maximum tokens consumable in a single `consume()` call.
+ *               Defaults to `tpm` (full window = burst). `burst` is a clamp,
+ *               not a separate refill rate — `rate-limiter-flexible` Redis
+ *               backend is a fixed-window counter (atomic Lua incr+pttl).
+ *
+ * Setting `tpm: 0` would disable the bucket; positive only here to keep
+ * the configuration intent unambiguous (omit the bucket to disable).
+ */
+const tpmBucketSchema = z
+  .object({
+    tpm: z.number().int().positive(),
+    burst: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const llmProxyLimitsSchema = z
   .object({
     rate_per_min: z.number().int().positive().default(60),
@@ -28,6 +47,24 @@ const llmProxyLimitsSchema = z
       .int()
       .positive()
       .default(10 * 1024 * 1024),
+    /**
+     * Per-org, per-modelLabel token-throughput buckets. Closes #431.
+     *
+     * Key shape:
+     *   - `"default"`            — capacity used for any modelLabel that
+     *                              does not have a specific entry.
+     *   - `"<modelLabel>"`       — specific capacity for the matching
+     *                              `ResolvedModel.label`. Exact match wins
+     *                              over the default.
+     *
+     * The Redis bucket state itself is always keyed on
+     * `tpm:${orgId}:${modelLabel}` so distinct models never share state,
+     * even when they fall back to the same `default` capacity.
+     *
+     * Empty map (or unset) disables the limiter entirely — the limiter is
+     * a no-op and `drawTpm()` returns allow with zero draw.
+     */
+    tpm_buckets: z.record(z.string(), tpmBucketSchema).default({}),
   })
   .strict();
 
