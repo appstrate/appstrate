@@ -289,6 +289,26 @@ const envSchema = z
      * or via the platform-container hostname on a Compose network.
      */
     PORTKEY_PORT: z.coerce.number().int().positive().default(8787),
+    /**
+     * Portkey response cache mode injected into every `x-portkey-config`
+     * payload. Opt-in — default `off` keeps cache disabled and matches
+     * the historical behavior of every API-key call hitting upstream.
+     *
+     *   - `off`       — no `cache` field emitted (gateway default).
+     *   - `simple`    — exact-match request hashing; cache hit on byte-
+     *                   identical body + headers. Works out of the box on
+     *                   1.15.2 OSS (in-memory cache, process-local).
+     *   - `semantic`  — embedding-based similarity match. Requires a
+     *                   vector store; not validated end-to-end in OSS
+     *                   yet — set at your own risk.
+     */
+    PORTKEY_CACHE_MODE: z.enum(["off", "simple", "semantic"]).default("off"),
+    /**
+     * Per-entry max-age (seconds) attached to the inline cache config
+     * when `PORTKEY_CACHE_MODE !== "off"`. Default 3600 (1h). Ignored
+     * when cache is off.
+     */
+    PORTKEY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce

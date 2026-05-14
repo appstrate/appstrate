@@ -24,7 +24,7 @@ import {
   setPortkeyRouter,
   type PortkeyRouter,
 } from "../../services/portkey-router.ts";
-import { buildPortkeyRouting } from "./config.ts";
+import { buildPortkeyRouting, type PortkeyRoutingOptions } from "./config.ts";
 import { getPortkeyPort, startPortkey, stopPortkey } from "./lifecycle.ts";
 
 /**
@@ -54,18 +54,33 @@ const portkeyModule: AppstrateModule = {
   manifest: { id: "portkey", name: "Portkey Gateway", version: "1.0.0" },
 
   async init() {
-    const port = getEnv().PORTKEY_PORT;
+    const env = getEnv();
+    const port = env.PORTKEY_PORT;
     await startPortkey({ port });
 
     const sidecarUrl = portkeyUrlForSidecar(port);
     const inprocessUrl = portkeyUrlForInprocess(port);
 
-    const sidecarRouter: PortkeyRouter = (model) => buildPortkeyRouting(model, sidecarUrl);
-    const inprocessRouter: PortkeyRouter = (model) => buildPortkeyRouting(model, inprocessUrl);
+    // Cache config is read once at init — operators flip the env vars
+    // and restart. Keeps the per-request path free of env-getter calls.
+    const routingOptions: PortkeyRoutingOptions =
+      env.PORTKEY_CACHE_MODE === "off"
+        ? {}
+        : { cache: { mode: env.PORTKEY_CACHE_MODE, maxAge: env.PORTKEY_CACHE_MAX_AGE } };
+
+    const sidecarRouter: PortkeyRouter = (model) =>
+      buildPortkeyRouting(model, sidecarUrl, routingOptions);
+    const inprocessRouter: PortkeyRouter = (model) =>
+      buildPortkeyRouting(model, inprocessUrl, routingOptions);
     setPortkeyRouter(sidecarRouter);
     setPortkeyInprocessRouter(inprocessRouter);
 
-    logger.info("Portkey module ready", { port, sidecarUrl, inprocessUrl });
+    logger.info("Portkey module ready", {
+      port,
+      sidecarUrl,
+      inprocessUrl,
+      cacheMode: env.PORTKEY_CACHE_MODE,
+    });
   },
 
   async shutdown() {

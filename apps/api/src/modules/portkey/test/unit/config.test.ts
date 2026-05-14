@@ -89,4 +89,26 @@ describe("buildPortkeyRouting", () => {
     const r = buildPortkeyRouting(makeModel(), "http://pk:8787/");
     expect(r!.baseUrl).toBe("http://pk:8787/v1");
   });
+
+  it("omits cache field by default", () => {
+    const r = buildPortkeyRouting(makeModel(), "http://pk:8787");
+    const config = JSON.parse(r!.portkeyConfig);
+    expect(config.cache).toBeUndefined();
+  });
+
+  it("emits cache { mode, max_age } when options.cache is provided", () => {
+    const r = buildPortkeyRouting(makeModel(), "http://pk:8787", {
+      cache: { mode: "simple", maxAge: 1800 },
+    });
+    const config = JSON.parse(r!.portkeyConfig);
+    expect(config.cache).toEqual({ mode: "simple", max_age: 1800 });
+  });
+
+  it("supports semantic cache mode", () => {
+    const r = buildPortkeyRouting(makeModel(), "http://pk:8787", {
+      cache: { mode: "semantic", maxAge: 600 },
+    });
+    const config = JSON.parse(r!.portkeyConfig);
+    expect(config.cache).toEqual({ mode: "semantic", max_age: 600 });
+  });
 });

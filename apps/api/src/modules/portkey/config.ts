@@ -45,6 +45,19 @@ const API_SHAPE_PORTKEY_PATH_PREFIX: Record<string, string> = {
 const RETRY_ON_STATUS = [429, 500, 502, 503, 504] as const;
 
 /**
+ * Optional per-build extras. Set by the module's `init()` based on env
+ * vars; tests pass them inline. Keeping the env read out of `config.ts`
+ * keeps it pure and easy to unit-test.
+ */
+export interface PortkeyRoutingOptions {
+  /** When non-"off", emits `cache: { mode, maxAge }` in the inline payload. */
+  cache?: {
+    mode: "simple" | "semantic";
+    maxAge: number;
+  };
+}
+
+/**
  * Build the routing tuple the sidecar consumes. Returns `null` when the
  * model's `apiShape` is not yet wired (e.g. exotic OpenAI-compatible
  * endpoints under `openai-compatible`); the run launcher then falls
@@ -55,6 +68,7 @@ const RETRY_ON_STATUS = [429, 500, 502, 503, 504] as const;
 export function buildPortkeyRouting(
   model: PortkeyModelInput,
   baseUrl: string,
+  options: PortkeyRoutingOptions = {},
 ): PortkeyRouting | null {
   const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
   if (!provider) return null;
@@ -75,6 +89,17 @@ export function buildPortkeyRouting(
   // Portkey's own provider defaults are more authoritative than ours.
   if (model.baseUrl && !isDefaultUpstream(model.apiShape, model.baseUrl)) {
     config.custom_host = model.baseUrl;
+  }
+
+  // Cache is opt-in via `PORTKEY_CACHE_MODE`. The bundle ships `simple`
+  // (exact-hash) and `semantic` (embedding similarity) — the gateway
+  // resolves the cache hit server-side and emits `x-portkey-cache-status`
+  // on the response. We surface that header up to callers untouched.
+  if (options.cache) {
+    config.cache = {
+      mode: options.cache.mode,
+      max_age: options.cache.maxAge,
+    };
   }
 
   const prefix = API_SHAPE_PORTKEY_PATH_PREFIX[model.apiShape] ?? "";
