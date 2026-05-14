@@ -5,6 +5,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
+import { getModelProvider } from "./model-providers/registry.ts";
 
 // --- Types ---
 
@@ -13,7 +14,9 @@ export interface SystemModelProviderKeyDefinition {
   label: string;
   /** Registered ModelProviderDefinition id this env entry binds to (e.g. "anthropic", "openai"). */
   providerId: string;
+  /** Resolved from registry at boot — never persisted. */
   apiShape: string;
+  /** Resolved from registry at boot (with override if `baseUrlOverridable`) — never persisted. */
   baseUrl: string;
   apiKey: string;
 }
@@ -23,7 +26,9 @@ export interface ModelDefinition {
   label: string;
   /** Registered ModelProviderDefinition id — propagated from the parent system key. */
   providerId: string;
+  /** Resolved from registry at boot — never persisted. */
   apiShape: string;
+  /** Resolved from registry at boot — never persisted. */
   baseUrl: string;
   modelId: string;
   apiKey: string;
@@ -61,14 +66,18 @@ const rawModelProviderKeySchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   /**
-   * Binds this env entry to a registered ModelProviderDefinition. Required
-   * because `apiShape` alone can't disambiguate (cerebras / groq / xai
-   * all share `openai-completions`), and the registry resolves identity
-   * hooks, OAuth wire format, and pricing catalog by `providerId`.
+   * Binds this env entry to a registered ModelProviderDefinition. The
+   * registry is the single source of truth for `apiShape` and the default
+   * base URL — both are resolved from `providerId` at boot.
    */
   providerId: z.string().min(1),
-  apiShape: z.string().min(1),
-  baseUrl: z.string().min(1),
+  /**
+   * Override the registry's `defaultBaseUrl`. Honored ONLY when the
+   * provider declares `baseUrlOverridable: true` (today: `openai-compatible`).
+   * For any other provider, supplying this is a configuration error and
+   * the env entry is rejected at boot.
+   */
+  baseUrlOverride: z.string().min(1).optional(),
   apiKey: z.string().min(1),
   models: z.array(rawModelSchema).optional(),
 });
@@ -77,7 +86,8 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
 
 /**
  * Initialize system model provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
- * Call once at boot before any model lookups.
+ * Call once at boot AFTER `registerModelProviders()` — the env entries
+ * resolve their `apiShape` + `baseUrl` from the registry by `providerId`.
  *
  * NOTE: The env var name is preserved for backward compatibility with self-hosted
  * deployments. The TypeScript identifiers are renamed to disambiguate from OAuth
@@ -89,14 +99,15 @@ type RawModelProviderKey = z.infer<typeof rawModelProviderKeySchema>;
  *   "id": "anthropic-prod",
  *   "label": "Anthropic",
  *   "providerId": "anthropic",
- *   "apiShape": "anthropic-messages",
- *   "baseUrl": "https://api.anthropic.com",
  *   "apiKey": "sk-ant-...",
  *   "models": [
  *     { "modelId": "claude-opus-4-6", "label": "Claude Opus 4.6", "isDefault": true }
  *   ]
  * }]
  * ```
+ *
+ * For `openai-compatible` (the only `baseUrlOverridable: true` provider),
+ * add `"baseUrlOverride": "https://my-endpoint/v1"`.
  */
 export function initSystemModelProviderKeys(): void {
   const pkMap = new Map<string, SystemModelProviderKeyDefinition>();
@@ -115,12 +126,36 @@ export function initSystemModelProviderKeys(): void {
     }
     const validPk = pkResult.data;
 
+    const provider = getModelProvider(validPk.providerId);
+    if (!provider) {
+      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
+        modelProviderKeyId: validPk.id,
+        providerId: validPk.providerId,
+      });
+      continue;
+    }
+
+    if (validPk.baseUrlOverride && !provider.baseUrlOverridable) {
+      logger.error(
+        "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
+          "but provider does not allow it",
+        {
+          modelProviderKeyId: validPk.id,
+          providerId: validPk.providerId,
+        },
+      );
+      continue;
+    }
+
+    const apiShape = provider.apiShape;
+    const baseUrl = validPk.baseUrlOverride ?? provider.defaultBaseUrl;
+
     pkMap.set(validPk.id, {
       id: validPk.id,
       label: validPk.label,
       providerId: validPk.providerId,
-      apiShape: validPk.apiShape,
-      baseUrl: validPk.baseUrl,
+      apiShape,
+      baseUrl,
       apiKey: validPk.apiKey,
     });
 
@@ -143,8 +178,8 @@ export function initSystemModelProviderKeys(): void {
           id: modelId,
           label: validM.label,
           providerId: validPk.providerId,
-          apiShape: validPk.apiShape,
-          baseUrl: validPk.baseUrl,
+          apiShape,
+          baseUrl,
           modelId: validM.modelId,
           apiKey: validPk.apiKey,
           credentialId: validPk.id,

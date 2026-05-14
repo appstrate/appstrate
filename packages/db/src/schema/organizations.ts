@@ -262,13 +262,16 @@ export const orgModels = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
-    apiShape: text("api_shape").notNull(),
-    baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
     /**
      * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
      * deleting a credential while any model still references it is rejected
      * at the DB level so the API can surface a clear error.
+     *
+     * The credential's `providerId` is the single source of truth for
+     * `apiShape` and the default `baseUrl` — both are resolved from the
+     * runtime registry (`getModelProvider`) at read time. `baseUrlOverride`
+     * (on the credential row) is honored when `baseUrlOverridable: true`.
      */
     credentialId: uuid("credential_id")
       .notNull()

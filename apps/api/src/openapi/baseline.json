@@ -5155,23 +5155,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
+                "required": ["label", "modelId", "credentialId"],
                 "properties": {
                   "label": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Display name for the model"
-                  },
-                  "apiShape": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Wire format / API shape (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)"
-                  },
-                  "baseUrl": {
-                    "type": "string",
-                    "format": "uri",
-                    "minLength": 1,
-                    "description": "Provider API base URL"
                   },
                   "modelId": {
                     "type": "string",
@@ -5181,7 +5170,7 @@
                   "credentialId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Provider key ID for API key credentials"
+                    "description": "Provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId."
                   },
                   "input": {
                     "type": "array",
@@ -5575,17 +5564,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["apiShape", "baseUrl", "modelId"],
+                "required": ["credentialId", "modelId"],
                 "properties": {
-                  "apiShape": {
+                  "credentialId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Wire format / API shape"
-                  },
-                  "baseUrl": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Provider API base URL"
+                    "description": "Provider credential ID. apiShape and baseUrl are resolved from the credential's providerId."
                   },
                   "modelId": {
                     "type": "string",
@@ -5594,7 +5578,7 @@
                   },
                   "apiKey": {
                     "type": "string",
-                    "description": "API key (required for new models)"
+                    "description": "Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key."
                   },
                   "existingModelId": {
                     "type": "string",
@@ -5668,14 +5652,6 @@
                   "label": {
                     "type": "string",
                     "minLength": 1
-                  },
-                  "apiShape": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "baseUrl": {
-                    "type": "string",
-                    "format": "uri"
                   },
                   "modelId": {
                     "type": "string",

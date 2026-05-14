@@ -37,8 +37,6 @@ import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
-  apiShape: z.string().min(1, "apiShape is required"),
-  baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
   credentialId: z.string().min(1, "credentialId is required"),
   input: z.array(z.string()).optional(),
@@ -50,8 +48,6 @@ export const createModelSchema = z.object({
 
 export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
-  apiShape: z.string().min(1).optional(),
-  baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
   credentialId: z.string().optional(),
   enabled: z.boolean().optional(),
@@ -71,9 +67,11 @@ export const seedModelsSchema = z.object({
   modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
 });
 
+// The inline test endpoint validates a model config before the user saves it.
+// Callers identify the provider via `credentialId` — the registry resolves
+// `apiShape` and `baseUrl` server-side, so the wire payload doesn't carry them.
 export const testInlineSchema = z.object({
-  apiShape: z.string().min(1),
-  baseUrl: z.url(),
+  credentialId: z.string().min(1, "credentialId is required"),
   modelId: z.string().min(1),
   apiKey: z.string().optional(),
   existingModelId: z.string().optional(),
@@ -97,39 +95,20 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const {
-        label,
-        apiShape,
-        baseUrl,
-        modelId,
-        credentialId,
+      const { label, modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } =
+        data;
+      const id = await createOrgModel(orgId, label, modelId, user.id, credentialId, {
         input,
         contextWindow,
         maxTokens,
         reasoning,
         cost,
-      } = data;
-      const id = await createOrgModel(
-        orgId,
-        label,
-        apiShape,
-        baseUrl,
-        modelId,
-        user.id,
-        credentialId,
-        {
-          input,
-          contextWindow,
-          maxTokens,
-          reasoning,
-          cost,
-        },
-      );
+      });
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
         resourceId: id,
-        after: { label, apiShape, baseUrl, modelId, credentialId },
+        after: { label, modelId, credentialId },
       });
       return c.json({ id }, 201);
     } catch (err) {
@@ -180,8 +159,6 @@ export function createModelsRouter() {
 
     try {
       const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, {
-        apiShape: registry.apiShape,
-        baseUrl: creds.baseUrl,
         models,
       });
       await recordAuditFromContext(c, {
@@ -326,24 +303,34 @@ export function createModelsRouter() {
     const body = await c.req.json();
     const data = parseBody(testInlineSchema, body);
 
-    let { apiKey } = data;
+    // Resolve the provider via the credential's providerId — the registry
+    // owns apiShape and the default baseUrl. The user-supplied apiKey (if
+    // any) overrides the stored credential for "verify before save" flows.
+    const creds = await loadInferenceCredentials(orgId, data.credentialId);
+    if (!creds) {
+      throw notFound("Credential not found");
+    }
 
-    // In edit mode, if no apiKey provided, fall back to the stored key
+    let apiKey = data.apiKey;
     if (!apiKey && data.existingModelId) {
       const existing = await loadModel(orgId, data.existingModelId);
       if (existing) apiKey = existing.apiKey;
     }
-
+    if (!apiKey) {
+      apiKey = creds.apiKey;
+    }
     if (!apiKey) {
       throw invalidRequest("API key is required");
     }
 
     try {
       const result = await testModelConfig({
-        apiShape: data.apiShape,
-        baseUrl: data.baseUrl,
+        apiShape: creds.apiShape,
+        baseUrl: creds.baseUrl,
         modelId: data.modelId,
         apiKey,
+        providerId: creds.providerId,
+        accountId: creds.accountId,
       });
       return c.json(result);
     } catch (err) {

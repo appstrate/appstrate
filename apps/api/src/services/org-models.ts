@@ -10,7 +10,10 @@ import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials } from "./model-providers/credentials.ts";
+import {
+  loadInferenceCredentials,
+  type DecryptedModelProviderCredentials,
+} from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
@@ -25,10 +28,24 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const orgHasDefault = rows.some((r) => r.isDefault);
   const now = toISORequired(new Date());
 
-  return mergeSystemAndDb({
+  // Resolve apiShape/baseUrl from the registry via the credential's providerId.
+  // The DB row no longer stores these — they're derivatives of `providerId`.
+  // Rows whose credential is unreachable (deleted upstream, decryption failed,
+  // dead OAuth) are skipped silently — they can't be loaded for inference
+  // anyway, so surfacing them in the list would only confuse the UI.
+  const credByRow = new Map<string, DecryptedModelProviderCredentials>();
+  await Promise.all(
+    rows.map(async (r) => {
+      const creds = await loadInferenceCredentials(orgId, r.credentialId);
+      if (creds) credByRow.set(r.id, creds);
+    }),
+  );
+  const reachableRows = rows.filter((r) => credByRow.has(r.id));
+
+  return mergeSystemAndDb<ModelDefinition, (typeof reachableRows)[number], OrgModelInfo>({
     system,
-    rows,
-    mapSystem: (id, def) => ({
+    rows: reachableRows,
+    mapSystem: (id, def): OrgModelInfo => ({
       id,
       label: def.label,
       apiShape: def.apiShape,
@@ -41,31 +58,34 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       cost: def.cost ?? null,
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in" as const,
+      source: "built-in",
       credentialId: def.credentialId,
       createdBy: null,
       createdAt: now,
       updatedAt: now,
     }),
-    mapRow: (row) => ({
-      id: row.id,
-      label: row.label,
-      apiShape: row.apiShape,
-      baseUrl: row.baseUrl,
-      modelId: row.modelId,
-      input: row.input as string[] | null,
-      contextWindow: row.contextWindow,
-      maxTokens: row.maxTokens,
-      reasoning: row.reasoning,
-      cost: row.cost as ModelCost | null,
-      enabled: row.enabled,
-      isDefault: row.isDefault,
-      source: row.source as "custom" | "built-in",
-      credentialId: row.credentialId,
-      createdBy: row.createdBy,
-      createdAt: toISORequired(row.createdAt),
-      updatedAt: toISORequired(row.updatedAt),
-    }),
+    mapRow: (row): OrgModelInfo => {
+      const creds = credByRow.get(row.id)!;
+      return {
+        id: row.id,
+        label: row.label,
+        apiShape: creds.apiShape,
+        baseUrl: creds.baseUrl,
+        modelId: row.modelId,
+        input: row.input as string[] | null,
+        contextWindow: row.contextWindow,
+        maxTokens: row.maxTokens,
+        reasoning: row.reasoning,
+        cost: row.cost as ModelCost | null,
+        enabled: row.enabled,
+        isDefault: row.isDefault,
+        source: row.source as "custom" | "built-in",
+        credentialId: row.credentialId,
+        createdBy: row.createdBy,
+        createdAt: toISORequired(row.createdAt),
+        updatedAt: toISORequired(row.updatedAt),
+      };
+    },
   }).sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -74,8 +94,6 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
 export async function createOrgModel(
   orgId: string,
   label: string,
-  apiShape: string,
-  baseUrl: string,
   modelId: string,
   userId: string,
   credentialId: string,
@@ -100,8 +118,6 @@ export async function createOrgModel(
     .values({
       orgId,
       label,
-      apiShape,
-      baseUrl,
       modelId,
       credentialId,
       input: capabilities?.input ?? null,
@@ -122,8 +138,6 @@ export async function updateOrgModel(
   modelDbId: string,
   data: {
     label?: string;
-    apiShape?: string;
-    baseUrl?: string;
     modelId?: string;
     enabled?: boolean;
     input?: string[] | null;
@@ -164,10 +178,9 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
  * (idempotent for re-connect flows). Promotes the first newly-created row to
  * default when the org has no default yet.
  *
- * Models are taken verbatim from {@link CatalogModelEntry}. The caller validates
- * membership against the catalog and resolves the provider's `apiShape` +
- * `baseUrl` (from the credential), so the service stays pure DB — no registry
- * or catalog lookup here.
+ * Models are taken verbatim from {@link CatalogModelEntry}. The provider's
+ * `apiShape` and `baseUrl` are resolved from the registry by the credential's
+ * `providerId` at read time — no need to pass them through here.
  */
 export interface SeedModelsResult {
   created: number;
@@ -176,8 +189,6 @@ export interface SeedModelsResult {
 }
 
 export interface SeedModelsInput {
-  apiShape: string;
-  baseUrl: string;
   models: ReadonlyArray<CatalogModelEntry & { id: string }>;
 }
 
@@ -213,8 +224,6 @@ export async function seedOrgModelsForCredential(
         input.models.map((m, idx) => ({
           orgId,
           label: m.label,
-          apiShape: input.apiShape,
-          baseUrl: input.baseUrl,
           modelId: m.id,
           credentialId,
           input: m.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
@@ -297,8 +306,6 @@ export interface ResolvedModel extends Pick<
 }
 
 interface DbOrgModelRow {
-  apiShape: string;
-  baseUrl: string;
   modelId: string;
   credentialId: string;
   label: string;
@@ -312,6 +319,8 @@ interface DbOrgModelRow {
 interface DbModelCredentials {
   apiKey: string;
   providerId: string;
+  apiShape: string;
+  baseUrl: string;
   accountId?: string;
 }
 
@@ -347,12 +356,17 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   };
 }
 
-/** Build a `ResolvedModel` from a DB `org_models` row + its credentials. */
+/** Build a `ResolvedModel` from a DB `org_models` row + its credentials.
+ *
+ * `apiShape` and `baseUrl` come straight from the credential — the credential
+ * service resolves them from the registry by `providerId` (with the per-row
+ * `baseUrlOverride` honored when `baseUrlOverridable: true`).
+ */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   return {
     providerId: creds.providerId,
-    apiShape: row.apiShape,
-    baseUrl: row.baseUrl,
+    apiShape: creds.apiShape,
+    baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
     label: row.label,
@@ -422,8 +436,6 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   // Check DB
   const [row] = await db
     .select({
-      apiShape: orgModels.apiShape,
-      baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
       credentialId: orgModels.credentialId,
       enabled: orgModels.enabled,

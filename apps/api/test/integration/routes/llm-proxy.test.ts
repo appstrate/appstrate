@@ -70,8 +70,6 @@ async function buildHarness(overrides?: {
     orgId: ctx.orgId,
     credentialId: providerKey.id,
     label: "Preset",
-    apiShape: overrides?.apiShape ?? "openai-completions",
-    baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
     cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },

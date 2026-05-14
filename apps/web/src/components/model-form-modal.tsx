@@ -49,11 +49,9 @@ import { getProviderIcon } from "./icons";
 
 export interface ModelFormData {
   label: string;
-  apiShape: string;
-  baseUrl: string;
   modelId: string;
   credentialId: string;
-  newCredential?: { apiKey: string };
+  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -423,11 +421,22 @@ function ModelFormBody({
 
     onSubmit({
       label: data.label.trim(),
-      apiShape: data.apiShape.trim(),
-      baseUrl: data.baseUrl.trim(),
       modelId: data.modelId.trim(),
       credentialId: willCreateNewKey ? "" : data.credentialId,
-      ...(willCreateNewKey ? { newCredential: { apiKey: data.inlineApiKey.trim() } } : {}),
+      // Inline credential creation needs the providerId (and optionally a
+      // baseUrlOverride for `openai-compatible`) — the caller wires this up
+      // through POST /api/model-provider-credentials before saving the model.
+      ...(willCreateNewKey
+        ? {
+            newCredential: {
+              apiKey: data.inlineApiKey.trim(),
+              providerId,
+              ...(isCustomProvider && data.baseUrl.trim()
+                ? { baseUrlOverride: data.baseUrl.trim() }
+                : {}),
+            },
+          }
+        : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),

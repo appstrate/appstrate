@@ -66,8 +66,6 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "GPT-4o",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
           credentialId,
         }),
@@ -90,8 +88,6 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "To Delete",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
           modelId: "gpt-4o-mini",
           credentialId,
         }),
@@ -119,8 +115,6 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Default Model",
-          apiShape: "openai",
-          baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",
           credentialId,
         }),
@@ -257,8 +251,6 @@ describe("Models API", () => {
       await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: existingKey.id,
-        apiShape: "openai",
-        baseUrl: "https://api.openai.com",
         modelId: "gpt-4o",
         label: "Existing default",
         isDefault: true,

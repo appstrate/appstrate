@@ -13,7 +13,6 @@ import {
   useProvidersRegistry,
   deduplicateLabel,
 } from "./use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -29,8 +28,6 @@ export function useCreateModel() {
   return useMutation({
     mutationFn: async (data: {
       label: string;
-      apiShape: string;
-      baseUrl: string;
       modelId: string;
       credentialId: string;
       input?: string[];
@@ -60,8 +57,6 @@ export function useUpdateModel() {
       id: string;
       data: {
         label?: string;
-        apiShape?: string;
-        baseUrl?: string;
         modelId?: string;
         credentialId?: string;
         enabled?: boolean;
@@ -183,16 +178,20 @@ export function useModelFormHandler(opts: {
 
   const onSubmit = (data: ModelFormData) => {
     const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
-      const matched = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl, registry ?? []);
+      // The form supplies the canonical providerId directly. We dedupe the
+      // label against existing credentials, then forward apiKey + optional
+      // baseUrlOverride untouched — `model-provider-credentials` rejects an
+      // override on a non-overridable provider so we don't gate it here.
+      const matched = (registry ?? []).find((p) => p.providerId === data.newCredential!.providerId);
       const label = deduplicateLabel(matched?.displayName ?? "Custom", credentials ?? []);
-      const providerId = matched?.providerId ?? "openai-compatible";
-      const baseUrlOverride = matched ? null : data.baseUrl;
       createCredential.mutate(
         {
           label,
-          providerId,
+          providerId: data.newCredential!.providerId,
           apiKey: data.newCredential!.apiKey,
-          ...(baseUrlOverride ? { baseUrlOverride } : {}),
+          ...(data.newCredential!.baseUrlOverride
+            ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
+            : {}),
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );
