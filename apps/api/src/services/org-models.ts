@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { lookupCatalogModel } from "./pricing-catalog.ts";
+import { lookupCatalogModel, type CatalogModel } from "./pricing-catalog.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -155,43 +155,38 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
 }
 
 /**
- * Atomically seed multiple models from the registry for a single OAuth-connected
- * credential. Called by the onboarding quick-connect flow right after a
- * pairing succeeds — replaces N client-side POST /models calls.
+ * Atomically seed multiple catalog models for a single credential. Called by
+ * the onboarding quick-connect flow right after a pairing succeeds — replaces
+ * N client-side POST /models calls.
  *
  * Skips entirely if the org already has any model bound to the credential
  * (idempotent for re-connect flows). Promotes the first newly-created row to
  * default when the org has no default yet.
  *
- * Each entry in `models` is taken verbatim — the caller (typically the registry
- * for that provider) is responsible for matching modelId to its
- * apiShape/baseUrl/capabilities. We do NOT re-resolve via the registry here so
- * the service stays pure DB.
+ * Models are taken verbatim from {@link CatalogModel}. The caller validates
+ * membership against the catalog and resolves the provider's `apiShape` +
+ * `baseUrl` (from the credential), so the service stays pure DB — no registry
+ * or catalog lookup here.
  */
-export interface SeedModelEntry {
-  modelId: string;
-  label: string;
-  apiShape: string;
-  baseUrl: string;
-  input?: string[];
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
-}
-
 export interface SeedModelsResult {
   created: number;
   ids: string[];
   promotedDefault: boolean;
 }
 
+export interface SeedModelsInput {
+  apiShape: string;
+  baseUrl: string;
+  models: ReadonlyArray<CatalogModel & { id: string }>;
+}
+
 export async function seedOrgModelsForCredential(
   orgId: string,
   userId: string,
   credentialId: string,
-  entries: SeedModelEntry[],
+  input: SeedModelsInput,
 ): Promise<SeedModelsResult> {
-  if (entries.length === 0) return { created: 0, ids: [], promotedDefault: false };
+  if (input.models.length === 0) return { created: 0, ids: [], promotedDefault: false };
 
   return db.transaction(async (tx) => {
     // Dedup: skip if any model already references this credential.
@@ -214,17 +209,17 @@ export async function seedOrgModelsForCredential(
     const inserted = await tx
       .insert(orgModels)
       .values(
-        entries.map((entry, idx) => ({
+        input.models.map((m, idx) => ({
           orgId,
-          label: entry.label,
-          apiShape: entry.apiShape,
-          baseUrl: entry.baseUrl,
-          modelId: entry.modelId,
+          label: m.label,
+          apiShape: input.apiShape,
+          baseUrl: input.baseUrl,
+          modelId: m.id,
           credentialId,
-          input: entry.input ?? null,
-          contextWindow: entry.contextWindow ?? null,
-          maxTokens: entry.maxTokens ?? null,
-          reasoning: entry.reasoning ?? null,
+          input: m.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+          reasoning: m.capabilities.includes("reasoning"),
           cost: null,
           // First inserted row becomes default when the org had none.
           isDefault: needsDefault && idx === 0,

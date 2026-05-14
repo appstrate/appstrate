@@ -19,6 +19,7 @@
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { registerModelProvider } from "../../src/services/model-providers/registry.ts";
+import { registerCatalog } from "../../src/services/pricing-catalog.ts";
 
 export const TEST_OAUTH_PROVIDER_ID = "test-oauth";
 
@@ -109,10 +110,24 @@ let hooksRegistered = false;
  * Idempotent — safe to call from `beforeEach` / `beforeAll`. The runtime
  * registry de-dupes by providerId, but the second call would throw "duplicate
  * registration" if we called the underlying `registerModelProvider` twice.
+ *
+ * Also registers a synthetic catalog under `test-oauth` containing one
+ * model id (`test-model`) so the `/api/models/seed` route — which
+ * validates every requested id against the resolved catalog — accepts
+ * the standard test fixture.
  */
 export function registerTestOAuthProvider(): void {
   if (registered) return;
   registerModelProvider(testOAuthProvider);
+  registerCatalog("test-oauth", {
+    "test-model": {
+      label: "Test Model",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      capabilities: ["text"],
+      cost: { input: 0, output: 0 },
+    },
+  });
   registered = true;
 }
 

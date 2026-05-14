@@ -18,10 +18,9 @@ import {
   testModelConnection,
   testModelConfig,
   loadModel,
-  type SeedModelEntry,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
-import { listCatalogModels } from "../services/pricing-catalog.ts";
+import { listCatalogModels, type CatalogModel } from "../services/pricing-catalog.ts";
 import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -166,7 +165,7 @@ export function createModelsRouter() {
     const catalogKey = registry.catalogProviderId ?? creds.providerId;
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
     const featuredSet = new Set(registry.featuredModels);
-    const entries: SeedModelEntry[] = [];
+    const models: Array<CatalogModel & { id: string }> = [];
     for (const modelId of data.modelIds) {
       const cat = catalogById.get(modelId);
       if (!cat) {
@@ -175,20 +174,15 @@ export function createModelsRouter() {
       if (registry.catalogProviderId && !featuredSet.has(modelId)) {
         throw invalidRequest(`Model ${modelId} is not featured for provider ${creds.providerId}`);
       }
-      entries.push({
-        modelId,
-        label: cat.label,
-        apiShape: registry.apiShape,
-        baseUrl: creds.baseUrl,
-        input: cat.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
-        contextWindow: cat.contextWindow,
-        maxTokens: cat.maxTokens ?? undefined,
-        reasoning: cat.capabilities.includes("reasoning"),
-      });
+      models.push(cat);
     }
 
     try {
-      const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, entries);
+      const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, {
+        apiShape: registry.apiShape,
+        baseUrl: creds.baseUrl,
+        models,
+      });
       await recordAuditFromContext(c, {
         action: "model.seeded",
         resourceType: "model",

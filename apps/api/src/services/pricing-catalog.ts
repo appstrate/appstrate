@@ -66,6 +66,11 @@ export interface CatalogModel {
  * `apps/api/src/data/pricing/<providerId>.json` requires wiring it
  * here AND ensuring the `ModelProviderDefinition.providerId` matches
  * the filename — otherwise the lookup silently misses.
+ *
+ * Mutable to allow {@link registerCatalog} — used exclusively by tests
+ * (and any out-of-tree integration shipping a synthetic provider) to
+ * declare a catalog without bundling a JSON into the production data
+ * directory. Production providers register at import-time above.
  */
 const PROVIDER_INDEX: Record<string, Record<string, CatalogModel>> = {
   openai: openaiPricing as Record<string, CatalogModel>,
@@ -76,6 +81,17 @@ const PROVIDER_INDEX: Record<string, Record<string, CatalogModel>> = {
   groq: groqPricing as Record<string, CatalogModel>,
   xai: xaiPricing as Record<string, CatalogModel>,
 };
+
+/**
+ * Register a catalog for `providerId` at runtime. Mirrors the
+ * `registerModelProvider()` pattern — used by test fixtures (and any
+ * out-of-tree synthetic provider) to declare a catalog without
+ * bundling a JSON into `apps/api/src/data/pricing/`. Idempotent
+ * overwrites are allowed so test setup can re-register on each run.
+ */
+export function registerCatalog(providerId: string, catalog: Record<string, CatalogModel>): void {
+  PROVIDER_INDEX[providerId] = catalog;
+}
 
 /**
  * Return every catalogued model for a `providerId`. Callers wrap each

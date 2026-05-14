@@ -13,9 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -500,34 +498,16 @@ function ModelFormBody({
                 <SelectValue placeholder={t("models.form.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                {(() => {
-                  const featured = selectedProvider.models.filter((m) => m.featured);
-                  const others = selectedProvider.models.filter((m) => !m.featured);
-                  return (
-                    <>
-                      {featured.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel>{t("models.form.modelGroupFeatured")}</SelectLabel>
-                          {featured.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.label ?? m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                      {others.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel>{t("models.form.modelGroupAll")}</SelectLabel>
-                          {others.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.label ?? m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                    </>
-                  );
-                })()}
+                <ProviderPickerGroups
+                  items={selectedProvider.models}
+                  featuredLabel={t("models.form.modelGroupFeatured")}
+                  otherLabel={t("models.form.modelGroupAll")}
+                  renderItem={(m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label ?? m.id}
+                    </SelectItem>
+                  )}
+                />
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
               </SelectContent>
             </Select>
