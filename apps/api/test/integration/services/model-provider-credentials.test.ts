@@ -38,6 +38,11 @@ import {
   updateOAuthCredentialTokens,
 } from "../../../src/services/model-providers/credentials.ts";
 import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
+import {
+  registerModelProvider,
+  resetModelProviders,
+} from "../../../src/services/model-providers/registry.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 
@@ -112,35 +117,69 @@ describe("model-provider-credentials service — api_key path", () => {
   });
 
   it("honors baseUrlOverride only for openai-compatible", async () => {
-    const ctx = await createTestContext({ orgSlug: "mpc-svc-override" });
-    // openai-compatible: override is honored.
-    const compatId = await createApiKeyCredential({
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      label: "Local Ollama",
-      providerId: "openai-compatible",
-      apiKey: "ollama-fake-key",
-      baseUrlOverride: "http://localhost:11434",
-    });
-    const compatLoad = await loadInferenceCredentials(ctx.orgId, compatId);
-    expect(compatLoad!.baseUrl).toBe("http://localhost:11434");
-
-    // openai: override is silently ignored (not overridable).
-    const openaiId = await createApiKeyCredential({
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      label: "OpenAI",
+    // This test pins the prod-strict semantics: only providers declaring
+    // `baseUrlOverridable: true` accept a baseUrlOverride. The shared test
+    // fixture flips that flag globally for harness convenience, so we
+    // restore prod registration just for this case and reseed the baseline
+    // afterwards.
+    resetModelProviders();
+    registerModelProvider({
       providerId: "openai",
-      apiKey: "sk-foo",
-      baseUrlOverride: "http://attacker.example/openai",
+      displayName: "OpenAI",
+      iconUrl: "openai",
+      description: "",
+      docsUrl: "",
+      apiShape: "openai-responses",
+      defaultBaseUrl: "https://api.openai.com/v1",
+      baseUrlOverridable: false,
+      authMode: "api_key",
+      featuredModels: [],
     });
-    const openaiLoad = await loadInferenceCredentials(ctx.orgId, openaiId);
-    expect(openaiLoad!.baseUrl).toBe("https://api.openai.com/v1");
-    const [row] = await db
-      .select({ baseUrlOverride: modelProviderCredentials.baseUrlOverride })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, openaiId));
-    expect(row!.baseUrlOverride).toBeNull();
+    registerModelProvider({
+      providerId: "openai-compatible",
+      displayName: "OpenAI-compatible",
+      iconUrl: "openai",
+      description: "",
+      docsUrl: "",
+      apiShape: "openai-chat",
+      defaultBaseUrl: "http://localhost:11434",
+      baseUrlOverridable: true,
+      authMode: "api_key",
+      featuredModels: [],
+    });
+    try {
+      const ctx = await createTestContext({ orgSlug: "mpc-svc-override" });
+      // openai-compatible: override is honored.
+      const compatId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "Local Ollama",
+        providerId: "openai-compatible",
+        apiKey: "ollama-fake-key",
+        baseUrlOverride: "http://localhost:11434",
+      });
+      const compatLoad = await loadInferenceCredentials(ctx.orgId, compatId);
+      expect(compatLoad!.baseUrl).toBe("http://localhost:11434");
+
+      // openai: override is silently ignored (not overridable).
+      const openaiId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "OpenAI",
+        providerId: "openai",
+        apiKey: "sk-foo",
+        baseUrlOverride: "http://attacker.example/openai",
+      });
+      const openaiLoad = await loadInferenceCredentials(ctx.orgId, openaiId);
+      expect(openaiLoad!.baseUrl).toBe("https://api.openai.com/v1");
+      const [row] = await db
+        .select({ baseUrlOverride: modelProviderCredentials.baseUrlOverride })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, openaiId));
+      expect(row!.baseUrlOverride).toBeNull();
+    } finally {
+      seedTestModelProviders();
+    }
   });
 
   it("listModelProviderCredentials never exposes plaintext", async () => {

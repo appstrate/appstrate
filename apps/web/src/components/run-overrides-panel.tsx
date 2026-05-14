@@ -19,7 +19,7 @@ import { useProxies } from "../hooks/use-proxies";
 import { usePackageVersions } from "../hooks/use-packages";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
-import { PROVIDER_ICONS } from "./icons";
+import { getProviderIcon } from "./icons";
 
 const INHERIT = "__inherit__";
 const NONE = "__none__";
@@ -164,7 +164,7 @@ export function RunOverridesPanel({
               </SelectItem>
               {orgModels.map((m) => {
                 const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
-                const MIcon = mp ? PROVIDER_ICONS[mp.providerId] : undefined;
+                const MIcon = getProviderIcon(mp);
                 return (
                   <SelectItem key={m.id} value={m.id}>
                     <span className="inline-flex items-center gap-1.5">

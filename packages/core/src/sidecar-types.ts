@@ -50,6 +50,7 @@ export type ModelApiShape =
 
 export interface LlmProxyApiKeyConfig {
   authMode: "api_key";
+  /** Upstream provider base URL the sidecar forwards to. */
   baseUrl: string;
   apiKey: string;
   placeholder: string;

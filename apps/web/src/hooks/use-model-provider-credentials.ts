@@ -34,7 +34,8 @@ export function useCreateModelProviderCredential() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
-      label: string;
+      /** Optional — server derives from registry `displayName` + org dedup when absent. */
+      label?: string;
       providerId: string;
       apiKey: string;
       baseUrlOverride?: string | null;

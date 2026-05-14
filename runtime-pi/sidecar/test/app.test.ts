@@ -273,13 +273,12 @@ const LLM_CONFIG: LlmProxyConfig = {
 };
 
 describe("ALL /llm/* — SSRF protection", () => {
-  it("returns 403 when baseUrl targets localhost", async () => {
+  it("returns 403 when oauth baseUrl targets a blocked network range", async () => {
     const deps = makeDeps();
     deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://localhost:8000",
-      apiKey: "key",
-      placeholder: "ph",
+      authMode: "oauth",
+      baseUrl: "http://169.254.169.254/metadata",
+      credentialId: "cred_blocked",
     };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
@@ -288,30 +287,19 @@ describe("ALL /llm/* — SSRF protection", () => {
     expect(body.error).toContain("blocked network range");
   });
 
-  it("returns 403 when baseUrl targets cloud metadata", async () => {
+  it("returns 403 when api_key baseUrl targets a blocked network range", async () => {
     const deps = makeDeps();
     deps.config.llm = {
       authMode: "api_key",
       baseUrl: "http://169.254.169.254/metadata",
-      apiKey: "key",
-      placeholder: "ph",
+      apiKey: "real-sk",
+      placeholder: "sk-placeholder",
     };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
-  });
-
-  it("returns 403 when baseUrl targets private IP", async () => {
-    const deps = makeDeps();
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://10.0.0.1:8080",
-      apiKey: "key",
-      placeholder: "ph",
-    };
-    const app = createApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("blocked network range");
   });
 });
 

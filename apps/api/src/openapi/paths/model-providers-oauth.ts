@@ -160,7 +160,7 @@ export const modelProvidersOAuthPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "label", "accessToken", "refreshToken"],
+              required: ["providerId", "accessToken", "refreshToken"],
               properties: {
                 providerId: {
                   type: "string",
@@ -168,7 +168,13 @@ export const modelProvidersOAuthPaths = {
                   description:
                     "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400.",
                 },
-                label: { type: "string", minLength: 1, maxLength: 120 },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 120,
+                  description:
+                    "Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side).",
+                },
                 accessToken: { type: "string", minLength: 1 },
                 refreshToken: { type: "string", minLength: 1 },
                 expiresAt: {
@@ -240,7 +246,7 @@ export const modelProvidersOAuthPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "label", "accessToken", "refreshToken"],
+              required: ["providerId", "accessToken", "refreshToken"],
               properties: {
                 providerId: {
                   type: "string",
@@ -248,7 +254,13 @@ export const modelProvidersOAuthPaths = {
                   description:
                     "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400.",
                 },
-                label: { type: "string", minLength: 1, maxLength: 120 },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 120,
+                  description:
+                    "Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side).",
+                },
                 accessToken: { type: "string", minLength: 1 },
                 refreshToken: { type: "string", minLength: 1 },
                 expiresAt: {

@@ -18,9 +18,11 @@ import {
   testModelConnection,
   testModelConfig,
   loadModel,
-  type SeedModelEntry,
+  deriveModelLabel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
+import { listCatalogModels } from "../services/pricing-catalog.ts";
+import type { CatalogModelEntry } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -35,11 +37,19 @@ import {
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
-  label: z.string().min(1, "label is required"),
-  apiShape: z.string().min(1, "apiShape is required"),
-  baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
+  /**
+   * Optional. When omitted, the server derives the label from the catalog
+   * (`<catalog>.label`) and dedupes against existing org rows. See
+   * {@link deriveModelLabel}.
+   */
+  label: z.string().min(1).optional(),
   modelId: z.string().min(1, "modelId is required"),
   credentialId: z.string().min(1, "credentialId is required"),
+  /**
+   * Catalog-derivable overrides. Omit (or send null on update) to let the
+   * read path fall back to the live catalog — keeps existing rows in sync
+   * with the weekly `refresh-pricing-catalog.ts` bump.
+   */
   input: z.array(z.string()).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -49,8 +59,6 @@ export const createModelSchema = z.object({
 
 export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
-  apiShape: z.string().min(1).optional(),
-  baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
   credentialId: z.string().optional(),
   enabled: z.boolean().optional(),
@@ -70,9 +78,11 @@ export const seedModelsSchema = z.object({
   modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
 });
 
+// The inline test endpoint validates a model config before the user saves it.
+// Callers identify the provider via `credentialId` — the registry resolves
+// `apiShape` and `baseUrl` server-side, so the wire payload doesn't carry them.
 export const testInlineSchema = z.object({
-  apiShape: z.string().min(1),
-  baseUrl: z.url(),
+  credentialId: z.string().min(1, "credentialId is required"),
   modelId: z.string().min(1),
   apiKey: z.string().optional(),
   existingModelId: z.string().optional(),
@@ -96,42 +106,32 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const {
-        label,
-        apiShape,
-        baseUrl,
-        modelId,
-        credentialId,
+      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      // Label is optional on the wire — derive from the catalog when the
+      // caller omits it. Needs the credential's providerId to pick the
+      // right catalog (handles `catalogProviderId` for OAuth wrappers).
+      let label = data.label;
+      if (!label) {
+        const creds = await loadInferenceCredentials(orgId, credentialId);
+        if (!creds) throw invalidRequest("credentialId is unreachable", "credentialId");
+        label = await deriveModelLabel(orgId, creds.providerId, modelId);
+      }
+      const id = await createOrgModel(orgId, label, modelId, user.id, credentialId, {
         input,
         contextWindow,
         maxTokens,
         reasoning,
         cost,
-      } = data;
-      const id = await createOrgModel(
-        orgId,
-        label,
-        apiShape,
-        baseUrl,
-        modelId,
-        user.id,
-        credentialId,
-        {
-          input,
-          contextWindow,
-          maxTokens,
-          reasoning,
-          cost,
-        },
-      );
+      });
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
         resourceId: id,
-        after: { label, apiShape, baseUrl, modelId, credentialId },
+        after: { label, modelId, credentialId },
       });
       return c.json({ id }, 201);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Model create failed", {
         error: getErrorMessage(err),
       });
@@ -158,29 +158,29 @@ export function createModelsRouter() {
       throw notFound(`Provider ${creds.providerId} not registered`);
     }
 
-    const knownIds = new Map(registry.models.map((m) => [m.id, m]));
-    const entries: SeedModelEntry[] = [];
+    // The vendored pricing catalog is the single source of truth for
+    // per-model metadata. The picker surfaces ids from this catalog
+    // (filtered by `featuredModels` when `catalogProviderId` is set), so
+    // we accept any id that lives in the resolved catalog.
+    const catalogKey = registry.catalogProviderId ?? creds.providerId;
+    const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
+    const featuredSet = new Set(registry.featuredModels);
+    const models: Array<CatalogModelEntry & { id: string }> = [];
     for (const modelId of data.modelIds) {
-      const model = knownIds.get(modelId);
-      if (!model) {
-        throw invalidRequest(`Model ${modelId} is not part of provider ${creds.providerId}`);
+      const cat = catalogById.get(modelId);
+      if (!cat) {
+        throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
       }
-      entries.push({
-        modelId: model.id,
-        label: model.id,
-        apiShape: registry.apiShape,
-        baseUrl: creds.baseUrl,
-        input: model.capabilities.filter(
-          (c): c is "text" | "image" => c === "text" || c === "image",
-        ),
-        contextWindow: model.contextWindow,
-        maxTokens: model.maxTokens ?? undefined,
-        reasoning: model.capabilities.includes("reasoning"),
-      });
+      if (registry.catalogProviderId && !featuredSet.has(modelId)) {
+        throw invalidRequest(`Model ${modelId} is not featured for provider ${creds.providerId}`);
+      }
+      models.push(cat);
     }
 
     try {
-      const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, entries);
+      const result = await seedOrgModelsForCredential(orgId, user.id, data.credentialId, {
+        models,
+      });
       await recordAuditFromContext(c, {
         action: "model.seeded",
         resourceType: "model",
@@ -323,24 +323,34 @@ export function createModelsRouter() {
     const body = await c.req.json();
     const data = parseBody(testInlineSchema, body);
 
-    let { apiKey } = data;
+    // Resolve the provider via the credential's providerId — the registry
+    // owns apiShape and the default baseUrl. The user-supplied apiKey (if
+    // any) overrides the stored credential for "verify before save" flows.
+    const creds = await loadInferenceCredentials(orgId, data.credentialId);
+    if (!creds) {
+      throw notFound("Credential not found");
+    }
 
-    // In edit mode, if no apiKey provided, fall back to the stored key
+    let apiKey = data.apiKey;
     if (!apiKey && data.existingModelId) {
       const existing = await loadModel(orgId, data.existingModelId);
       if (existing) apiKey = existing.apiKey;
     }
-
+    if (!apiKey) {
+      apiKey = creds.apiKey;
+    }
     if (!apiKey) {
       throw invalidRequest("API key is required");
     }
 
     try {
       const result = await testModelConfig({
-        apiShape: data.apiShape,
-        baseUrl: data.baseUrl,
+        apiShape: creds.apiShape,
+        baseUrl: creds.baseUrl,
         modelId: data.modelId,
         apiKey,
+        providerId: creds.providerId,
+        accountId: creds.accountId,
       });
       return c.json(result);
     } catch (err) {

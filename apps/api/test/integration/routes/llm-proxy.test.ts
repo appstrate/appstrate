@@ -37,6 +37,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { seedApiKey, seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import {
+  resetResponseCacheConfigForTesting,
+  setResponseCacheConfig,
+} from "../../../src/lib/llm-proxy-cache-config.ts";
 
 const app = getTestApp();
 
@@ -66,8 +70,6 @@ async function buildHarness(overrides?: {
     orgId: ctx.orgId,
     credentialId: providerKey.id,
     label: "Preset",
-    apiShape: overrides?.apiShape ?? "openai-completions",
-    baseUrl: overrides?.baseUrl ?? "https://api.openai.test/v1",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
     cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },
@@ -155,6 +157,8 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(json.usage?.prompt_tokens).toBe(100);
 
     expect(captured).not.toBeNull();
+    // The proxy forwards directly to the preset's upstream baseUrl —
+    // `joinUpstreamUrl(resolved.baseUrl, upstreamPath)`.
     expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
     const forwardedHeaders = new Headers(captured!.init?.headers as Record<string, string>);
     expect(forwardedHeaders.get("authorization")).toBe("Bearer sk-upstream-42");
@@ -432,6 +436,9 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
+    // Direct upstream — the Mistral SDK convention appends
+    // `/v1/chat/completions` to its serverURL, mirrored by the proxy's
+    // `upstreamPath` ("/v1/chat/completions"). Preset `baseUrl` is bare.
     expect(captured!.url).toBe("https://api.mistral.test/v1/chat/completions");
     expect(captured!.headers.get("Authorization")).toBe("Bearer mistral-upstream-99");
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
@@ -456,5 +463,227 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
       }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * Response-level cache — `services/llm-proxy/response-cache.ts`. Opt-in
+ * via `LLM_PROXY_CACHE_MODE`. Tests assert the cache contract
+ * independent of the upstream transport: identical (orgId, presetId,
+ * apiShape, model, body) → HIT on the second call; differences anywhere
+ * in the key → MISS.
+ */
+describe("POST /api/llm-proxy/* — response cache", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    setResponseCacheConfig({ enabled: true, ttlSeconds: 120 });
+  });
+
+  afterEach(() => {
+    restoreFetch();
+    resetResponseCacheConfigForTesting();
+  });
+
+  it("returns x-llm-proxy-cache-status: MISS on first call and HIT on identical second call", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "cache me" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    const firstJson = (await first.json()) as { id: string };
+    expect(firstJson.id).toBe("chatcmpl_1");
+
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-llm-proxy-cache-status")).toBe("HIT");
+    const secondJson = (await second.json()) as { id: string };
+    // Replayed verbatim — same id as the first call, no upstream re-hit.
+    expect(secondJson.id).toBe("chatcmpl_1");
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("misses when the request body changes (key includes request payload)", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const callWith = (prompt: string) =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+    const a = await callWith("first prompt");
+    expect(a.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    const b = await callWith("second prompt");
+    expect(b.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("skips the cache entirely for streaming requests", async () => {
+    const h = await buildHarness({
+      apiShape: "anthropic-messages",
+      baseUrl: "https://api.anthropic.test",
+      modelId: "claude-sonnet-4-5-20250929",
+      upstreamKey: "sk-ant-42",
+    });
+
+    const sseBody =
+      `event: message_start\n` +
+      `data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}\n\n` +
+      `event: message_delta\n` +
+      `data: {"type":"message_delta","usage":{"output_tokens":3}}\n\n` +
+      `event: message_stop\n` +
+      `data: {"type":"message_stop"}\n\n`;
+
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(sseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      max_tokens: 32,
+      messages: [{ role: "user", content: "hi" }],
+      stream: true,
+    });
+
+    const first = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
+      method: "POST",
+      headers: authHeaders(h, { "anthropic-version": "2024-10-01" }),
+      body,
+    });
+    expect(first.status).toBe(200);
+    // Streaming responses are not tagged with cache status — they bypass
+    // the cache layer entirely.
+    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    await first.text(); // drain
+
+    const second = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
+      method: "POST",
+      headers: authHeaders(h, { "anthropic-version": "2024-10-01" }),
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    await second.text();
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("does not cache upstream error responses (4xx/5xx)", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.status).toBe(429);
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.status).toBe(429);
+    // Both requests hit upstream — 4xx bodies must never be cached.
+    expect(upstreamCalls).toBe(2);
+  });
+
+  it("is fully disabled when setResponseCacheConfig({ enabled: false }) — no header, no replay", async () => {
+    setResponseCacheConfig({ enabled: false, ttlSeconds: 0 });
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamCalls}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const body = JSON.stringify({
+      model: h.presetId,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const first = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+
+    const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body,
+    });
+    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(upstreamCalls).toBe(2);
   });
 });

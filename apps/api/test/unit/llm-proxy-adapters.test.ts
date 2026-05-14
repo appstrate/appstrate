@@ -16,13 +16,18 @@ import { describe, it, expect } from "bun:test";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
+import { parseProxyRequest } from "../../src/services/llm-proxy/helpers.ts";
+
+function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
+  return parseProxyRequest(rawBody).rewriteModel(upstreamModelId);
+}
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 describe("openaiCompletionsAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
-    expect(openaiCompletionsAdapter.api).toBe("openai-completions");
+  it("apiShape discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
+    expect(openaiCompletionsAdapter.apiShape).toBe("openai-completions");
   });
 
   it("rewrites body.model while preserving the rest of the payload verbatim", () => {
@@ -33,10 +38,7 @@ describe("openaiCompletionsAdapter", () => {
       response_format: { type: "json_object" },
       tools: [{ type: "function", function: { name: "echo", parameters: {} } }],
     };
-    const rewritten = openaiCompletionsAdapter.substituteModel(
-      enc.encode(JSON.stringify(original)),
-      "gpt-4o-2024-08-06",
-    );
+    const rewritten = rewriteModel(enc.encode(JSON.stringify(original)), "gpt-4o-2024-08-06");
     const parsed = JSON.parse(dec.decode(rewritten));
     expect(parsed.model).toBe("gpt-4o-2024-08-06");
     expect(parsed.messages).toEqual(original.messages);
@@ -45,7 +47,7 @@ describe("openaiCompletionsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <upstreamApiKey>", () => {
+  it("injects Authorization: Bearer <apiKey>", () => {
     const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
       new Headers({ "x-something": "ignored" }),
       "sk-upstream",
@@ -94,8 +96,8 @@ describe("openaiCompletionsAdapter", () => {
 });
 
 describe("anthropicMessagesAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/anthropic-messages/ route", () => {
-    expect(anthropicMessagesAdapter.api).toBe("anthropic-messages");
+  it("apiShape discriminator matches the /api/llm-proxy/anthropic-messages/ route", () => {
+    expect(anthropicMessagesAdapter.apiShape).toBe("anthropic-messages");
   });
 
   it("rewrites body.model and leaves cache_control / system / tools untouched", () => {
@@ -115,7 +117,7 @@ describe("anthropicMessagesAdapter", () => {
       tools: [{ name: "search", input_schema: {} }],
       stream: true,
     };
-    const rewritten = anthropicMessagesAdapter.substituteModel(
+    const rewritten = rewriteModel(
       enc.encode(JSON.stringify(original)),
       "claude-sonnet-4-5-20250929",
     );
@@ -213,8 +215,8 @@ describe("anthropicMessagesAdapter", () => {
 });
 
 describe("mistralConversationsAdapter", () => {
-  it("api discriminator matches the /api/llm-proxy/mistral-conversations/ route", () => {
-    expect(mistralConversationsAdapter.api).toBe("mistral-conversations");
+  it("apiShape discriminator matches the /api/llm-proxy/mistral-conversations/ route", () => {
+    expect(mistralConversationsAdapter.apiShape).toBe("mistral-conversations");
   });
 
   it("rewrites body.model while preserving the rest of the payload verbatim", () => {
@@ -226,10 +228,7 @@ describe("mistralConversationsAdapter", () => {
       max_tokens: 512,
       tools: [{ type: "function", function: { name: "echo", parameters: {} } }],
     };
-    const rewritten = mistralConversationsAdapter.substituteModel(
-      enc.encode(JSON.stringify(original)),
-      "mistral-large-latest",
-    );
+    const rewritten = rewriteModel(enc.encode(JSON.stringify(original)), "mistral-large-latest");
     const parsed = JSON.parse(dec.decode(rewritten));
     expect(parsed.model).toBe("mistral-large-latest");
     expect(parsed.messages).toEqual(original.messages);
@@ -239,7 +238,7 @@ describe("mistralConversationsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <upstreamApiKey> and forwards no extra headers", () => {
+  it("injects Authorization: Bearer <apiKey> and forwards no extra headers", () => {
     const headers = mistralConversationsAdapter.buildUpstreamHeaders(
       new Headers({
         "x-affinity": "session-123",

@@ -46,6 +46,7 @@ import {
 import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
+import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 
 /**
@@ -76,14 +77,6 @@ interface CredentialFormFields {
   baseUrlOverride: string;
 }
 
-function detectProviderFromCredential(
-  credential: ModelProviderCredentialInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!credential) return "";
-  return resolveProviderId(credential, registry);
-}
-
 /**
  * Unified pick-list option model. Built entirely from the registry —
  * api-key entries surface as plain `providerId` options, OAuth entries
@@ -96,6 +89,8 @@ interface PickerOption {
   label: string;
   authMode: "api_key" | "oauth2";
   providerId: string;
+  iconUrl: string;
+  featured: boolean;
 }
 
 function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[] {
@@ -106,6 +101,8 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
       label: p.displayName,
       authMode: p.authMode,
       providerId: p.providerId,
+      iconUrl: p.iconUrl,
+      featured: p.featured,
     }));
 }
 
@@ -129,7 +126,7 @@ function CredentialFormBody({
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
-    return detectProviderFromCredential(credential, registry);
+    return credential ? resolveProviderId(credential, registry) : "";
   });
 
   const isEditing = !!credential;
@@ -252,7 +249,16 @@ function CredentialFormBody({
                 <SelectTrigger id="pk-provider">
                   <SelectValue placeholder={t("models.form.providerPlaceholder")} />
                 </SelectTrigger>
-                <SelectContent>{renderOptions(options, t)}</SelectContent>
+                <SelectContent>
+                  <ProviderPickerGroups
+                    items={options}
+                    featuredLabel={t("models.form.providerGroupFeatured")}
+                    otherLabel={t("models.form.providerGroupOther")}
+                    renderItem={(option) => (
+                      <PickerOptionItem key={option.id} option={option} t={t} />
+                    )}
+                  />
+                </SelectContent>
               </Select>
             </div>
           )}
@@ -306,7 +312,14 @@ function CredentialFormBody({
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
-            <SelectContent>{renderOptions(options, t)}</SelectContent>
+            <SelectContent>
+              <ProviderPickerGroups
+                items={options}
+                featuredLabel={t("models.form.providerGroupFeatured")}
+                otherLabel={t("models.form.providerGroupOther")}
+                renderItem={(option) => <PickerOptionItem key={option.id} option={option} t={t} />}
+              />
+            </SelectContent>
           </Select>
         </div>
 
@@ -385,23 +398,30 @@ function CredentialFormBody({
   );
 }
 
-function renderOptions(options: PickerOption[], t: (key: string) => string): React.ReactNode {
-  return options.map((opt) => {
-    const Icon = PROVIDER_ICONS[opt.providerId];
-    return (
-      <SelectItem key={opt.id} value={opt.id}>
-        <span className="flex items-center gap-2">
-          {Icon && <Icon className="size-4" />}
-          {opt.label}
-          {opt.authMode === "oauth2" && (
-            <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
-              {t("credentials.oauth.badgeOauth")}
-            </span>
-          )}
-        </span>
-      </SelectItem>
-    );
-  });
+function PickerOptionItem({
+  option,
+  t,
+}: {
+  option: PickerOption;
+  t: (key: string) => string;
+}): React.ReactNode {
+  // Inline lookup to satisfy `react-hooks/static-components` — the rule
+  // flags PascalCase consts assigned from helper calls at the top of a
+  // component body. Equivalent to `getProviderIcon(option)`.
+  const Icon = PROVIDER_ICONS[option.iconUrl];
+  return (
+    <SelectItem key={option.id} value={option.id}>
+      <span className="flex items-center gap-2">
+        {Icon && <Icon className="size-4" />}
+        {option.label}
+        {option.authMode === "oauth2" && (
+          <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
+            {t("credentials.oauth.badgeOauth")}
+          </span>
+        )}
+      </span>
+    </SelectItem>
+  );
 }
 
 export function CredentialFormModal({

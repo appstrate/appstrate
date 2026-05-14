@@ -40,6 +40,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 data/
 storage/
 
+# Vendored static data (committed). The `data/` rule above catches every
+# such directory globally; whitelist the paths we ship in the repo.
+!apps/api/src/data/
+!apps/api/src/data/**
+
 docs/*
 !docs/adr/
 !docs/cli/

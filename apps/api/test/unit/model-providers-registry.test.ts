@@ -24,7 +24,7 @@ function fakeDef(
     defaultBaseUrl: "https://api.example.com",
     baseUrlOverridable: false,
     authMode: "api_key",
-    models: [],
+    featuredModels: [],
     ...overrides,
   };
 }

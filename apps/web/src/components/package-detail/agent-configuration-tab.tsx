@@ -14,7 +14,7 @@ import {
 import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { uploadClient } from "../../api";
-import { PROVIDER_ICONS } from "../icons";
+import { getProviderIcon } from "../icons";
 import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helpers";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
@@ -102,7 +102,7 @@ function ModelSection({ packageId }: { packageId: string }) {
           </SelectItem>
           {orgModels.map((m) => {
             const mp = findProviderByApiShapeAndBaseUrl(m.apiShape, m.baseUrl, registry ?? []);
-            const MIcon = mp ? PROVIDER_ICONS[mp.providerId] : undefined;
+            const MIcon = getProviderIcon(mp);
             return (
               <SelectItem key={m.id} value={m.id}>
                 <span className="inline-flex items-center gap-1.5">

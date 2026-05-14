@@ -88,7 +88,7 @@ describe("runtime registry composition", () => {
 
   it("model ids are unique within each provider", () => {
     for (const cfg of listModelProviders()) {
-      const ids = cfg.models.map((m) => m.id);
+      const ids = [...cfg.featuredModels];
       expect(new Set(ids).size).toBe(ids.length);
     }
   });

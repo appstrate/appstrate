@@ -201,6 +201,7 @@ const codexProvider: ModelProviderDefinition = {
   defaultBaseUrl: "https://chatgpt.com/backend-api",
   baseUrlOverridable: false,
   authMode: "oauth2",
+  featured: true,
   oauth: {
     clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
     authorizationUrl: "https://auth.openai.com/oauth/authorize",
@@ -209,23 +210,12 @@ const codexProvider: ModelProviderDefinition = {
     scopes: ["openid", "profile", "email"],
     pkce: "S256",
   },
-  models: [
-    {
-      id: "gpt-5.5",
-      contextWindow: 200000,
-      capabilities: ["text", "image", "reasoning"],
-      recommended: true,
-    },
-    {
-      id: "gpt-5.4-mini",
-      contextWindow: 200000,
-      capabilities: ["text", "reasoning"],
-      recommended: true,
-    },
-    { id: "gpt-5.4", contextWindow: 200000, capabilities: ["text", "reasoning"] },
-    { id: "gpt-5.3-codex", contextWindow: 200000, capabilities: ["text", "reasoning"] },
-    { id: "gpt-5.2", contextWindow: 200000, capabilities: ["text", "reasoning"] },
-  ],
+  // ChatGPT Codex tokens authenticate against the OpenAI catalog —
+  // metadata (cost, context, capabilities) flows through openai.json.
+  // `gpt-5.3-codex` is intentionally absent: not vendored by LiteLLM,
+  // operators add it manually via the UI if needed.
+  catalogProviderId: "openai",
+  featuredModels: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a
   // `chatgpt-account-id` header. The platform refuses to persist a

@@ -180,6 +180,7 @@ function buildRunPlan(): AppstrateRunPlan {
     bundle: buildTestBundle(),
     rawPrompt: "Do the thing.",
     llmConfig: {
+      providerId: "anthropic",
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-3-5-sonnet-latest",

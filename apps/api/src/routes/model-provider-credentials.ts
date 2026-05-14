@@ -10,13 +10,16 @@ import { isSystemModelProviderKey } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
   deleteModelProviderCredential,
+  deriveCredentialLabel,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
+import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ProviderRegistryEntry } from "@appstrate/shared-types";
+import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -31,7 +34,12 @@ import {
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
-  label: z.string().min(1, "label is required"),
+  /**
+   * Optional. When omitted, the server derives the label from the provider's
+   * `displayName` and dedupes against existing org credentials. See
+   * {@link deriveCredentialLabel}.
+   */
+  label: z.string().min(1).optional(),
   providerId: z.string().min(1, "providerId is required"),
   apiKey: z.string().min(1, "apiKey is required"),
   /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
@@ -73,6 +81,37 @@ export const testInlineSchema = z.object({
   existingKeyId: z.string().optional(),
 });
 
+/**
+ * Build the picker-facing model list for one provider. The vendored
+ * pricing catalog is the single source of truth for per-model metadata
+ * — provider definitions just point at catalog ids via `featuredModels`.
+ *
+ *   - **Own catalog, no `catalogProviderId`** (openai/anthropic/mistral/
+ *     google-ai/cerebras/groq/xai): expose every catalog entry; ids in
+ *     `featuredModels` get `featured: true`.
+ *   - **Foreign catalog** (`catalogProviderId` set — codex → openai,
+ *     claude-code → anthropic): expose ONLY `featuredModels`, all
+ *     marked `featured: true`. The underlying catalog has more models
+ *     than the OAuth product exposes.
+ *   - **No catalog** (`featuredModels` empty — openrouter live-search,
+ *     openai-compatible Custom): empty list. The picker falls back to
+ *     "Custom" or its own live-search UI.
+ */
+function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
+  const catalogKey = p.catalogProviderId ?? p.providerId;
+  const catalog = listCatalogModels(catalogKey);
+  if (catalog.length === 0) return [];
+
+  const featuredSet = new Set(p.featuredModels);
+
+  // Foreign-catalog providers expose featuredModels only (the underlying
+  // catalog is wider than the OAuth surface). Own-catalog providers
+  // expose everything.
+  const surfaced = p.catalogProviderId ? catalog.filter((m) => featuredSet.has(m.id)) : catalog;
+
+  return surfaced.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
+}
+
 export function createModelProviderCredentialsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -93,15 +132,8 @@ export function createModelProviderCredentialsRouter() {
       defaultBaseUrl: p.defaultBaseUrl,
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
-      models: p.models.map((m) => ({
-        id: m.id,
-        label: m.label ?? null,
-        contextWindow: m.contextWindow,
-        maxTokens: m.maxTokens ?? null,
-        capabilities: m.capabilities,
-        cost: m.cost ?? null,
-        recommended: m.recommended ?? false,
-      })),
+      featured: p.featured ?? false,
+      models: serializeProviderModels(p),
     }));
     return c.json(listResponse(data));
   });
@@ -119,7 +151,7 @@ export function createModelProviderCredentialsRouter() {
     const user = c.get("user");
     const body = await c.req.json();
     const data = parseBody(createSchema, body);
-    const { label, providerId, apiKey, baseUrlOverride } = data;
+    const { providerId, apiKey, baseUrlOverride } = data;
 
     const cfg = getModelProvider(providerId);
     if (!cfg) {
@@ -131,6 +163,8 @@ export function createModelProviderCredentialsRouter() {
         "providerId",
       );
     }
+
+    const label = data.label ?? (await deriveCredentialLabel(orgId, providerId));
 
     try {
       const id = await createApiKeyCredential({
@@ -209,7 +243,7 @@ export function createModelProviderCredentialsRouter() {
         let modelId = "_test";
         if (creds.providerId) {
           const cfg = getModelProvider(creds.providerId);
-          if (cfg && cfg.models.length > 0) modelId = cfg.models[0]!.id;
+          if (cfg && cfg.featuredModels.length > 0) modelId = cfg.featuredModels[0]!;
         }
         const result = await testModelConfig({ ...creds, modelId });
         return c.json(result);

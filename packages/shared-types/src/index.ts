@@ -369,15 +369,6 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
  * zero on both sides — `undefined` on `addition` is a no-op, and the
  * cache-creation / cache-read totals are coerced to a numeric zero on
  * `total` so subsequent reads always yield a number.
- *
- * Shared helper for the runner-event ingestion path
- * (`apps/api/src/services/run-launcher/appstrate-event-sink.ts`). The
- * older inline accumulator in `packages/runner-pi/src/pi-runner.ts` uses
- * the legacy `{ input, output, cacheRead, cacheWrite }` shape; rather
- * than translate at the inline call site (and risk drift in the cost
- * computation), that site is left untouched as a follow-up — the helper
- * here exists so the canonical Anthropic-shape accumulator has one
- * implementation and one test target.
  */
 export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens ?? 0;
@@ -486,21 +477,6 @@ export interface OrgModelInfo {
   isDefault: boolean;
   source: "built-in" | "custom";
   credentialId: string;
-  /**
-   * Anthropic-only: shape of the upstream credential, exposed so the CLI
-   * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`
-   * tokens (Anthropic gates these at the body level — system prompt +
-   * tool-name renaming — which pi-ai injects locally only when its
-   * prefix-based detection fires); `api-key` for regular `sk-ant-…` keys;
-   * null for non-Anthropic protocols and for Anthropic models whose
-   * credentials cannot be loaded (treat as api-key). The CLI mirrors
-   * the kind by passing `sk-ant-oat-placeholder` as the `apiKey` to pi-ai
-   * when `keyKind === "oauth"`, so pi-ai reshapes the body before the
-   * proxy ever sees it. OSS ships no Anthropic OAuth provider — this
-   * field stays as a contribution point for external operator-installed
-   * modules.
-   */
-  keyKind?: "oauth" | "api-key" | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -550,24 +526,48 @@ export interface ProviderRegistryEntry {
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";
+  /** Surface in the picker's "Featured" group. Module-supplied metadata. */
+  featured: boolean;
   models: ProviderRegistryModelEntry[];
 }
 
-export interface ProviderRegistryModelEntry {
-  id: string;
-  /** Human-readable label; falls back to `id` when null. */
-  label: string | null;
+/**
+ * Single curated-catalog entry — used both runtime-side (vendored LiteLLM
+ * pricing files in `apps/api/src/data/pricing/*.json` consumed by
+ * `pricing-catalog.ts`) and wire-side (the registry endpoint splices `id`
+ * back in and tags `featured` per provider).
+ *
+ * `label` and `cost` are non-nullable: the vendoring script drops entries
+ * without usable pricing, and labels are title-cased from the id at
+ * vendoring time.
+ */
+export interface CatalogModelEntry {
+  /** Human-readable label, derived from the id at vendoring time. */
+  label: string;
   contextWindow: number;
+  /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
-  /** Per-1M-token pricing; null when the provider doesn't publish it. */
-  cost: ModelCost | null;
+  /** Per-1M-token pricing in USD. */
+  cost: ModelCost;
+}
+
+/**
+ * Wire shape of a single model in
+ * `GET /api/model-provider-credentials/registry`. Surfaces the catalog
+ * entry verbatim plus the provider-scoped `featured` flag (driven by
+ * the provider's `featuredModels` whitelist) and the catalog id.
+ */
+export interface ProviderRegistryModelEntry extends CatalogModelEntry {
+  id: string;
   /**
-   * Curated default for first-connection auto-seed (onboarding
-   * quick-connect). When at least one model carries the flag, the seeder
-   * inserts only those; otherwise it seeds every entry.
+   * Surface in the picker's "Featured" group for this provider AND
+   * auto-seed in `org_models` on first connection. Set when the model
+   * id appears in the provider's `featuredModels` (see
+   * `core-providers/index.ts` or any module's `modelProviders()`
+   * contribution); the rest of the catalog falls under "All models".
    */
-  recommended: boolean;
+  featured: boolean;
 }
 
 // --- Connection Test Types ---

@@ -4,17 +4,34 @@
  * Core Providers module — the canonical API-key model provider catalog
  * shipped with every Appstrate deployment.
  *
- * Each entry is a `ModelProviderDefinition` carrying its own apiShape,
- * default base URL, and a curated model catalog (id, label, context
- * window, capabilities, per-token cost). The UI consumes this catalog
- * exclusively via `GET /api/model-provider-credentials/registry` — no
- * client-side hardcoding. Adding a new provider is a single entry here.
+ * Each entry is a `ModelProviderDefinition` carrying wire format, auth
+ * metadata, and a curated featured list (just catalog ids). All per-
+ * model metadata (label, contextWindow, maxTokens, capabilities, cost)
+ * comes from the vendored LiteLLM catalog
+ * (`apps/api/src/services/pricing-catalog.ts`). A boot-time check fails
+ * loudly if any featured id is absent from the catalog — there are no
+ * inline overrides.
+ *
+ * Featured semantics: any id present in `featuredModels` is marked
+ * `featured: true` in the registry response. For catalog-covered
+ * providers, the picker also exposes every other catalog model under
+ * "All models". The same `featuredModels` set also drives the
+ * onboarding auto-seed (`use-auto-seed-models.ts`).
+ *
+ * The UI consumes this catalog exclusively via
+ * `GET /api/model-provider-credentials/registry` — no client-side
+ * hardcoding. Adding a new provider is a single entry here.
  *
  * OAuth-flavoured providers live in their own opt-in workspace modules
  * (`@appstrate/module-codex`, `@appstrate/module-claude-code`, …). The
  * `openai-compatible` entry stays as the escape hatch for self-hosted
  * or third-party OpenAI-compatible endpoints not covered by a named
  * preset (vLLM, Ollama, LiteLLM, etc.).
+ *
+ * Routing: api_key flows fetch the provider's `defaultBaseUrl` (or the
+ * per-credential override when `baseUrlOverridable: true`) directly.
+ * Retries are handled by the Pi SDK natively for both OpenAI and
+ * Anthropic SDKs (Retry-After honoring + jitter, `maxRetries: 2`).
  */
 
 import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
@@ -29,32 +46,8 @@ const anthropic: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.anthropic.com",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "claude-haiku-4-5-20251001",
-      label: "Claude Haiku 4.5",
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-    },
-    {
-      id: "claude-opus-4-6",
-      label: "Claude Opus 4.6",
-      contextWindow: 200_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-    },
-    {
-      id: "claude-sonnet-4-6",
-      label: "Claude Sonnet 4.6",
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-    },
-  ],
+  featured: true,
+  featuredModels: ["claude-haiku-4-5-20251001", "claude-opus-4-6", "claude-sonnet-4-6"],
 };
 
 const cerebras: ModelProviderDefinition = {
@@ -67,22 +60,7 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "llama3.3-70b",
-      label: "Llama 3.3 70B",
-      contextWindow: 131_072,
-      maxTokens: 16_384,
-      capabilities: ["text"],
-    },
-    {
-      id: "llama-4-scout-17b-16e-instruct",
-      label: "Llama 4 Scout",
-      contextWindow: 131_072,
-      maxTokens: 16_384,
-      capabilities: ["text", "image"],
-    },
-  ],
+  featuredModels: ["llama-3.3-70b", "gpt-oss-120b"],
 };
 
 const googleAi: ModelProviderDefinition = {
@@ -95,32 +73,8 @@ const googleAi: ModelProviderDefinition = {
   defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "gemini-2.5-flash",
-      label: "Gemini 2.5 Flash",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.3, output: 2.5 },
-    },
-    {
-      id: "gemini-2.5-pro",
-      label: "Gemini 2.5 Pro",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1.25, output: 10 },
-    },
-    {
-      id: "gemini-3.1-pro-preview",
-      label: "Gemini 3.1 Pro",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2, output: 12 },
-    },
-  ],
+  featured: true,
+  featuredModels: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
 };
 
 const groq: ModelProviderDefinition = {
@@ -133,29 +87,7 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "gemma2-9b-it",
-      label: "Gemma 2 9B",
-      contextWindow: 8_192,
-      maxTokens: 8_192,
-      capabilities: ["text"],
-    },
-    {
-      id: "llama-3.3-70b-versatile",
-      label: "Llama 3.3 70B",
-      contextWindow: 131_072,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-    },
-    {
-      id: "mixtral-8x7b-32768",
-      label: "Mixtral 8x7B",
-      contextWindow: 32_768,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-    },
-  ],
+  featuredModels: ["llama-3.3-70b-versatile", "kimi-k2-instruct-0905"],
 };
 
 const mistral: ModelProviderDefinition = {
@@ -168,47 +100,13 @@ const mistral: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.mistral.ai",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "codestral-latest",
-      label: "Codestral",
-      contextWindow: 256_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-      cost: { input: 0.3, output: 0.9 },
-    },
-    {
-      id: "devstral-2512",
-      label: "Devstral 2",
-      contextWindow: 256_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-      cost: { input: 0.4, output: 2 },
-    },
-    {
-      id: "mistral-large-latest",
-      label: "Mistral Large",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-      cost: { input: 2, output: 6 },
-    },
-    {
-      id: "mistral-medium-latest",
-      label: "Mistral Medium",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-      cost: { input: 0.4, output: 2 },
-    },
-    {
-      id: "mistral-small-latest",
-      label: "Mistral Small",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-      cost: { input: 0.15, output: 0.6 },
-    },
+  featured: true,
+  featuredModels: [
+    "codestral-latest",
+    "devstral-2512",
+    "mistral-large-latest",
+    "mistral-medium-latest",
+    "mistral-small-latest",
   ],
 };
 
@@ -222,32 +120,8 @@ const openai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "gpt-5-mini",
-      label: "GPT-5 mini",
-      contextWindow: 400_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.75, output: 4.5 },
-    },
-    {
-      id: "gpt-5.4",
-      label: "GPT-5.4",
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2.5, output: 15 },
-    },
-    {
-      id: "o4-mini",
-      label: "o4-mini",
-      contextWindow: 200_000,
-      maxTokens: 100_000,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1.1, output: 4.4 },
-    },
-  ],
+  featured: true,
+  featuredModels: ["gpt-5-mini", "gpt-5.4", "o4-mini"],
 };
 
 const openrouter: ModelProviderDefinition = {
@@ -261,7 +135,7 @@ const openrouter: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   // Empty catalog — the UI fetches models live via the OpenRouter search combobox.
-  models: [],
+  featuredModels: [],
 };
 
 const xai: ModelProviderDefinition = {
@@ -274,32 +148,7 @@ const xai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.x.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  models: [
-    {
-      id: "grok-3",
-      label: "Grok 3",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image"],
-      cost: { input: 3, output: 15 },
-    },
-    {
-      id: "grok-3-mini",
-      label: "Grok 3 Mini",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.3, output: 0.5 },
-    },
-    {
-      id: "grok-4",
-      label: "Grok 4",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2, output: 6 },
-    },
-  ],
+  featuredModels: ["grok-3", "grok-3-mini", "grok-4"],
 };
 
 const openaiCompatible: ModelProviderDefinition = {
@@ -312,7 +161,7 @@ const openaiCompatible: ModelProviderDefinition = {
   defaultBaseUrl: "http://localhost:11434",
   baseUrlOverridable: true,
   authMode: "api_key",
-  models: [],
+  featuredModels: [],
 };
 
 const coreProvidersModule: AppstrateModule = {

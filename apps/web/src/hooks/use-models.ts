@@ -10,10 +10,7 @@ import type { ModelFormData } from "../components/model-form-modal";
 import {
   useCreateModelProviderCredential,
   useModelProviderCredentials,
-  useProvidersRegistry,
-  deduplicateLabel,
 } from "./use-model-provider-credentials";
-import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -28,9 +25,7 @@ export function useCreateModel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
-      label: string;
-      apiShape: string;
-      baseUrl: string;
+      label?: string;
       modelId: string;
       credentialId: string;
       input?: string[];
@@ -60,8 +55,6 @@ export function useUpdateModel() {
       id: string;
       data: {
         label?: string;
-        apiShape?: string;
-        baseUrl?: string;
         modelId?: string;
         credentialId?: string;
         enabled?: boolean;
@@ -176,23 +169,25 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createCredential = useCreateModelProviderCredential();
-  const { data: credentials } = useModelProviderCredentials();
-  const { data: registry } = useProvidersRegistry();
+  // Kept warm so the modal's credential picker has data ready, but no
+  // longer used here — the server now derives the credential's label
+  // from the registry's `displayName` and dedupes against existing rows.
+  useModelProviderCredentials();
 
   const isPending = createModel.isPending || updateModel.isPending || createCredential.isPending;
 
   const onSubmit = (data: ModelFormData) => {
     const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
-      const matched = findProviderByApiShapeAndBaseUrl(data.apiShape, data.baseUrl, registry ?? []);
-      const label = deduplicateLabel(matched?.displayName ?? "Custom", credentials ?? []);
-      const providerId = matched?.providerId ?? "openai-compatible";
-      const baseUrlOverride = matched ? null : data.baseUrl;
+      // Omit `label` — the server derives it from the provider's `displayName`
+      // and dedupes against existing org credentials. Operator-side scripts
+      // can pass `label` explicitly to override.
       createCredential.mutate(
         {
-          label,
-          providerId,
+          providerId: data.newCredential!.providerId,
           apiKey: data.newCredential!.apiKey,
-          ...(baseUrlOverride ? { baseUrlOverride } : {}),
+          ...(data.newCredential!.baseUrlOverride
+            ? { baseUrlOverride: data.newCredential!.baseUrlOverride }
+            : {}),
         },
         { onSuccess: (result) => onKeyCreated(result.id) },
       );

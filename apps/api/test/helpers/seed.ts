@@ -261,12 +261,38 @@ interface ModelProviderCredentialSeed {
  * uses. Real production code uses the registry directly — this stays in
  * the helper so existing tests calling `seedOrgModelProviderKey({ apiShape: "openai" })`
  * keep working without each one knowing about providerIds.
+ *
+ * Returns a registered providerId whose `apiShape` matches. Test-time
+ * `seedTestModelProviders` flips `baseUrlOverridable: true` on every
+ * registered provider so the credential's `baseUrlOverride` is always
+ * honored — pointing any provider at a mock endpoint is trivial.
  */
 function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
-  if (apiShape === "anthropic-messages") return "anthropic";
-  if (apiShape === "openai" || apiShape === "openai-chat") return "openai";
+  // baseUrl host wins over apiShape when both are supplied — pricing-catalog
+  // tests pin against the canonical provider (`openai` for gpt-4o cost
+  // lookup) regardless of which wire format the harness happens to use.
   if (baseUrl && /openai\.com/i.test(baseUrl)) return "openai";
   if (baseUrl && /anthropic\.com/i.test(baseUrl)) return "anthropic";
+  if (baseUrl && /mistral\.ai/i.test(baseUrl)) return "mistral";
+
+  // Otherwise route by wire format. `openai-completions` is served by the
+  // `cerebras` registry entry (apiShape match); the canonical `openai`
+  // provider uses `openai-responses` natively.
+  switch (apiShape) {
+    case "anthropic-messages":
+      return "anthropic";
+    case "openai-responses":
+      return "openai";
+    case "openai":
+    case "openai-chat":
+      return "openai-compatible";
+    case "openai-completions":
+      return "cerebras";
+    case "mistral-conversations":
+      return "mistral";
+    case "google-generative-ai":
+      return "google-ai";
+  }
   return "openai-compatible";
 }
 
@@ -276,12 +302,14 @@ export async function seedOrgModelProviderKey(
   const apiKey = overrides.apiKey ?? "sk-test-placeholder";
   const providerId =
     overrides.providerId ?? defaultProviderId(overrides.apiShape, overrides.baseUrl);
+  // Test-time providers are registered with `baseUrlOverridable: true`
+  // (see `test/helpers/model-providers.ts`), so any `baseUrl` the test passes
+  // through propagates to the credential row as `baseUrlOverride` regardless
+  // of the underlying providerId. The prod registry remains strict.
   const baseUrlOverride =
     overrides.baseUrlOverride !== undefined
       ? overrides.baseUrlOverride
-      : providerId === "openai-compatible" && overrides.baseUrl
-        ? overrides.baseUrl
-        : null;
+      : (overrides.baseUrl ?? null);
 
   const [row] = await db
     .insert(modelProviderCredentials)
@@ -353,8 +381,6 @@ export async function seedOrgModel(
     .insert(orgModels)
     .values({
       label: "Test Model",
-      apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,
     })

@@ -23,31 +23,55 @@
  * duplicates.
  */
 
-import { logger } from "../../lib/logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { invalidRequest } from "../../lib/errors.ts";
 
 /**
- * Rewrite `body.model` to `realModelId` without parsing-then-reserialising
- * the whole payload when it isn't shaped like a JSON object. A non-JSON
- * or non-object body is forwarded as-is — the upstream is in a better
- * position to reject it than the proxy is to second-guess it.
+ * Parsed shape of an inbound `/api/llm-proxy/*` request body. Built
+ * once at the start of the pipeline so the preset extraction, the
+ * streaming detection, and the upstream model rewrite all share a
+ * single `JSON.parse` over the raw bytes.
  */
-export function substituteModelJson(rawBody: Uint8Array, realModelId: string): Uint8Array {
+export interface ParsedProxyRequest {
+  /** Caller-supplied preset id (the value of `body.model`). */
+  presetId: string;
+  /** True iff `body.stream === true`. */
+  stream: boolean;
+  /**
+   * Produce a fresh body byte sequence with `model` swapped for
+   * `upstreamModelId`. The rest of the payload is preserved verbatim.
+   */
+  rewriteModel(upstreamModelId: string): Uint8Array;
+}
+
+/**
+ * Parse a `/api/llm-proxy/*` request body once. Throws `invalidRequest`
+ * if the payload isn't a JSON object with a non-empty `model` field —
+ * the proxy can't route a request without a preset id.
+ */
+export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
   const text = new TextDecoder().decode(rawBody);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (err) {
-    logger.warn("llm-proxy: request body is not JSON — forwarding as-is", {
-      error: getErrorMessage(err),
-    });
-    return rawBody;
+  } catch {
+    throw invalidRequest("Request body must be valid JSON");
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return rawBody;
+    throw invalidRequest("Request body must be a JSON object");
   }
-  (parsed as Record<string, unknown>)["model"] = realModelId;
-  return new TextEncoder().encode(JSON.stringify(parsed));
+  const obj = parsed as Record<string, unknown>;
+  const model = obj["model"];
+  if (typeof model !== "string" || model.length === 0) {
+    throw invalidRequest("Request body must include a non-empty `model` field");
+  }
+  return {
+    presetId: model,
+    stream: obj["stream"] === true,
+    rewriteModel(upstreamModelId: string): Uint8Array {
+      obj["model"] = upstreamModelId;
+      return new TextEncoder().encode(JSON.stringify(obj));
+    },
+  };
 }
 
 /** Pull `body.usage` out of a parsed JSON response. Returns null if absent or malformed. */

@@ -245,7 +245,14 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: { enabled: false },
-        retry: { enabled: true, maxRetries: 2 },
+        // Pi SDK's built-in retry (Retry-After honoring + jitter, max 2
+        // attempts) covers transient 429/5xx upstream. Operators can
+        // opt out by setting `MODEL_RETRY_ENABLED=false` on the runtime
+        // env when stacking external retry middleware.
+        retry:
+          process.env.MODEL_RETRY_ENABLED === "false"
+            ? { enabled: false }
+            : { enabled: true, maxRetries: 2 },
       }),
     });
 
@@ -445,8 +452,15 @@ export function installSessionBridge(
   sink: InternalSink,
   runId: string,
 ): SessionBridgeHandle {
-  // Token usage accumulator across all assistant turns.
-  const totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  // Token usage accumulator across all assistant turns. Snake-case to
+  // match the canonical `TokenUsage` shape — no remap at emit time.
+  const totalUsage: TokenUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  };
+  let totalCost = 0;
 
   // Fire-and-forget emit. Rejections are swallowed so a transient sink
   // failure never propagates as an unhandled rejection out of the
@@ -465,14 +479,21 @@ export function installSessionBridge(
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
 
-        // Accumulate token usage
+        // Accumulate token usage. Pi SDK exposes the legacy
+        // `{ input, output, cacheRead, cacheWrite }` shape on
+        // `message.usage`; map once into the canonical snake_case
+        // total so every downstream emit reads the same fields.
         const u = last.usage;
         if (u) {
-          totalUsage.input += u.input ?? 0;
-          totalUsage.output += u.output ?? 0;
-          totalUsage.cacheRead += u.cacheRead ?? 0;
-          totalUsage.cacheWrite += u.cacheWrite ?? 0;
-          totalUsage.cost += u.cost?.total ?? 0;
+          const inputDelta = u.input ?? 0;
+          const outputDelta = u.output ?? 0;
+          totalUsage.input_tokens += inputDelta;
+          totalUsage.output_tokens += outputDelta;
+          totalUsage.cache_creation_input_tokens =
+            (totalUsage.cache_creation_input_tokens ?? 0) + (u.cacheWrite ?? 0);
+          totalUsage.cache_read_input_tokens =
+            (totalUsage.cache_read_input_tokens ?? 0) + (u.cacheRead ?? 0);
+          totalCost += u.cost?.total ?? 0;
 
           // Mid-run cumulative snapshot — fires after every assistant
           // turn so the platform can stream live cost to the UI. The
@@ -483,19 +504,13 @@ export function installSessionBridge(
           // (e.g. an empty-usage object or a tool-only step) — the
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
-          const hadTokens = (u.input ?? 0) > 0 || (u.output ?? 0) > 0;
-          if (hadTokens) {
+          if (inputDelta > 0 || outputDelta > 0) {
             fire({
               type: "appstrate.metric",
               timestamp: Date.now(),
               runId,
-              usage: {
-                input_tokens: totalUsage.input,
-                output_tokens: totalUsage.output,
-                cache_creation_input_tokens: totalUsage.cacheWrite,
-                cache_read_input_tokens: totalUsage.cacheRead,
-              },
-              cost: totalUsage.cost,
+              usage: { ...totalUsage },
+              cost: totalCost,
             });
           }
         }
@@ -583,13 +598,8 @@ export function installSessionBridge(
           type: "appstrate.metric",
           timestamp: Date.now(),
           runId,
-          usage: {
-            input_tokens: totalUsage.input,
-            output_tokens: totalUsage.output,
-            cache_creation_input_tokens: totalUsage.cacheWrite,
-            cache_read_input_tokens: totalUsage.cacheRead,
-          },
-          cost: totalUsage.cost,
+          usage: { ...totalUsage },
+          cost: totalCost,
         });
         break;
       }
@@ -601,15 +611,10 @@ export function installSessionBridge(
 
   return {
     getUsage(): TokenUsage {
-      return {
-        input_tokens: totalUsage.input,
-        output_tokens: totalUsage.output,
-        cache_creation_input_tokens: totalUsage.cacheWrite,
-        cache_read_input_tokens: totalUsage.cacheRead,
-      };
+      return { ...totalUsage };
     },
     getCost(): number {
-      return totalUsage.cost;
+      return totalCost;
     },
   };
 }

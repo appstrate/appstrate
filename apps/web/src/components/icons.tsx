@@ -106,3 +106,17 @@ export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement
   cerebras: CerebrasIcon,
   openrouter: OpenRouterIcon,
 };
+
+/**
+ * Resolve a provider's icon component. `iconUrl` is the single source of
+ * truth — mandatory on `ModelProviderDefinition`. OAuth-flavoured providers
+ * (codex, claude-code, …) set it to the upstream vendor's key
+ * ("openai", "anthropic") so they share the catalog vendor's icon.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function getProviderIcon(
+  p: { iconUrl: string } | null | undefined,
+): ComponentType<SVGProps<SVGSVGElement>> | undefined {
+  if (!p) return undefined;
+  return PROVIDER_ICONS[p.iconUrl];
+}

@@ -40,7 +40,12 @@ const importBody = z.object({
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
-  label: z.string().min(1, "label is required").max(120),
+  /**
+   * Optional. When omitted, the server derives the label from the provider's
+   * `displayName` and dedupes against existing org credentials.
+   * `@appstrate/connect-helper` no longer invents one client-side.
+   */
+  label: z.string().min(1).max(120).optional(),
   accessToken: z.string().min(1, "accessToken is required"),
   refreshToken: z.string().min(1, "refreshToken is required"),
   /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */

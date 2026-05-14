@@ -15,7 +15,6 @@ import {
   isBlockedUrl,
   type SidecarConfig,
   type CredentialsResponse,
-  type LlmProxyConfig,
   type LlmProxyOauthConfig,
 } from "./helpers.ts";
 import {
@@ -254,6 +253,8 @@ export function createApp(deps: AppDeps): Hono {
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
     if (body.llm !== undefined) {
+      // SSRF guard on user-reachable LLM base URLs. `body.llm` can be
+      // `null` (clear), in which case there's nothing to guard.
       if (body.llm && isBlockedUrl(body.llm.baseUrl)) {
         return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
       }
@@ -269,10 +270,11 @@ export function createApp(deps: AppDeps): Hono {
 
   // LLM reverse proxy. Two modes:
   //
-  //   - api_key (legacy): the Pi SDK formats every header (auth, beta,
-  //     identity) using the platform-supplied placeholder; we swap the
-  //     placeholder for the real key. Request/response bodies stream
-  //     through zero-copy.
+  //   - api_key: the Pi SDK formats every header (auth, beta, identity)
+  //     using the platform-supplied placeholder; we swap the placeholder
+  //     for the real key and forward directly to the upstream provider.
+  //     Request/response bodies stream through zero-copy. The Pi SDK
+  //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
   //   - oauth: the sidecar resolves a fresh access token from the
   //     platform (`/internal/oauth-token/:id`), injects bearer +
   //     provider identity headers, applies the declarative body
@@ -320,7 +322,7 @@ export function createApp(deps: AppDeps): Hono {
         body,
         signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
-      } as RequestInit);
+      });
     } catch (err) {
       return llmFetchErrorResponse(c, targetUrl, err);
     }

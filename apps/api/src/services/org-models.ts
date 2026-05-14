@@ -4,11 +4,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
+import { lookupCatalogModel } from "./pricing-catalog.ts";
+import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials } from "./model-providers/credentials.ts";
+import {
+  loadInferenceCredentials,
+  type DecryptedModelProviderCredentials,
+} from "./model-providers/credentials.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
@@ -17,88 +22,99 @@ import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- List (system + DB) ---
 
-/**
- * Anthropic gates `sk-ant-oat-*` tokens to a specific identity shape at
- * the body level (system prompt + tool-name renaming) — pi-ai injects
- * that locally only when its prefix-based detection fires (see
- * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
- * the LLM proxy path the upstream key never leaves the platform, so we
- * surface its kind to the CLI; the CLI then mirrors the prefix in the
- * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
- * protocols and for Anthropic models whose creds are unavailable. OSS
- * ships no Anthropic OAuth provider; this stays as a contribution point
- * for external operator-installed modules.
- */
-function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
-  if (apiShape !== "anthropic-messages") return null;
-  return apiKey.includes("sk-ant-oat") ? "oauth" : "api-key";
-}
-
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   const orgHasDefault = rows.some((r) => r.isDefault);
   const now = toISORequired(new Date());
 
-  // Resolve keyKind for Anthropic DB models — needs a credentials lookup
-  // per distinct credentialId. System models carry `apiKey` inline, so
-  // detection there is free. Other protocols don't expose keyKind at all.
-  const anthropicProviderKeyIds = new Set(
-    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.credentialId),
-  );
-  const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
+  // Resolve apiShape/baseUrl from the registry via the credential's providerId.
+  // The DB row no longer stores these — they're derivatives of `providerId`.
+  // Rows whose credential is unreachable (deleted upstream, decryption failed,
+  // dead OAuth) are skipped silently — they can't be loaded for inference
+  // anyway, so surfacing them in the list would only confuse the UI.
+  const credByRow = new Map<string, DecryptedModelProviderCredentials>();
   await Promise.all(
-    Array.from(anthropicProviderKeyIds).map(async (id) => {
-      const creds = await loadInferenceCredentials(orgId, id);
-      dbKeyKinds.set(id, creds ? detectKeyKind("anthropic-messages", creds.apiKey) : null);
+    rows.map(async (r) => {
+      const creds = await loadInferenceCredentials(orgId, r.credentialId);
+      if (creds) credByRow.set(r.id, creds);
     }),
   );
+  const reachableRows = rows.filter((r) => credByRow.has(r.id));
 
-  return mergeSystemAndDb({
+  return mergeSystemAndDb<ModelDefinition, (typeof reachableRows)[number], OrgModelInfo>({
     system,
-    rows,
-    mapSystem: (id, def) => ({
-      id,
-      label: def.label,
-      apiShape: def.apiShape,
-      baseUrl: def.baseUrl,
-      modelId: def.modelId,
-      input: def.input ?? null,
-      contextWindow: def.contextWindow ?? null,
-      maxTokens: def.maxTokens ?? null,
-      reasoning: def.reasoning ?? null,
-      cost: def.cost ?? null,
-      enabled: def.enabled !== false,
-      isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in" as const,
-      credentialId: def.credentialId,
-      keyKind: detectKeyKind(def.apiShape, def.apiKey),
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    }),
-    mapRow: (row) => ({
-      id: row.id,
-      label: row.label,
-      apiShape: row.apiShape,
-      baseUrl: row.baseUrl,
-      modelId: row.modelId,
-      input: row.input as string[] | null,
-      contextWindow: row.contextWindow,
-      maxTokens: row.maxTokens,
-      reasoning: row.reasoning,
-      cost: row.cost as ModelCost | null,
-      enabled: row.enabled,
-      isDefault: row.isDefault,
-      source: row.source as "custom" | "built-in",
-      credentialId: row.credentialId,
-      keyKind:
-        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.credentialId) ?? null) : null,
-      createdBy: row.createdBy,
-      createdAt: toISORequired(row.createdAt),
-      updatedAt: toISORequired(row.updatedAt),
-    }),
+    rows: reachableRows,
+    mapSystem: (id, def): OrgModelInfo => {
+      const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+      return {
+        id,
+        label: def.label ?? defaults.label ?? def.modelId,
+        apiShape: def.apiShape,
+        baseUrl: def.baseUrl,
+        modelId: def.modelId,
+        input: def.input ?? defaults.input ?? null,
+        contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
+        maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
+        reasoning: def.reasoning ?? defaults.reasoning ?? null,
+        cost: def.cost ?? defaults.cost ?? null,
+        enabled: def.enabled !== false,
+        isDefault: !orgHasDefault && def.isDefault === true,
+        source: "built-in",
+        credentialId: def.credentialId,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+    mapRow: (row): OrgModelInfo => {
+      const creds = credByRow.get(row.id)!;
+      const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+      return {
+        id: row.id,
+        label: row.label ?? defaults.label ?? row.modelId,
+        apiShape: creds.apiShape,
+        baseUrl: creds.baseUrl,
+        modelId: row.modelId,
+        input: (row.input as string[] | null) ?? defaults.input ?? null,
+        contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
+        maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+        reasoning: row.reasoning ?? defaults.reasoning ?? null,
+        cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
+        enabled: row.enabled,
+        isDefault: row.isDefault,
+        source: row.source as "custom" | "built-in",
+        credentialId: row.credentialId,
+        createdBy: row.createdBy,
+        createdAt: toISORequired(row.createdAt),
+        updatedAt: toISORequired(row.updatedAt),
+      };
+    },
   }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Derive a model label when the caller doesn't supply one. Picks the catalog
+ * label (`(catalogProviderId ?? providerId, modelId)`) and dedupes against
+ * existing org rows by appending ` (2)`, ` (3)`, …  Unknown models fall back
+ * to `modelId` so the column (`NOT NULL`) always gets a value.
+ */
+export async function deriveModelLabel(
+  orgId: string,
+  providerId: string,
+  modelId: string,
+): Promise<string> {
+  const defaults = resolveCatalogDefaults(providerId, modelId);
+  const base = defaults.label ?? modelId;
+  const rows = await db
+    .select({ label: orgModels.label })
+    .from(orgModels)
+    .where(scopedWhere(orgModels, { orgId }));
+  const existing = new Set(rows.map((r) => r.label));
+  if (!existing.has(base)) return base;
+  let counter = 2;
+  while (existing.has(`${base} (${counter})`)) counter++;
+  return `${base} (${counter})`;
 }
 
 // --- CRUD (DB models only) ---
@@ -106,8 +122,6 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
 export async function createOrgModel(
   orgId: string,
   label: string,
-  apiShape: string,
-  baseUrl: string,
   modelId: string,
   userId: string,
   credentialId: string,
@@ -132,8 +146,6 @@ export async function createOrgModel(
     .values({
       orgId,
       label,
-      apiShape,
-      baseUrl,
       modelId,
       credentialId,
       input: capabilities?.input ?? null,
@@ -154,8 +166,6 @@ export async function updateOrgModel(
   modelDbId: string,
   data: {
     label?: string;
-    apiShape?: string;
-    baseUrl?: string;
     modelId?: string;
     enabled?: boolean;
     input?: string[] | null;
@@ -188,43 +198,35 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
 }
 
 /**
- * Atomically seed multiple models from the registry for a single OAuth-connected
- * credential. Called by the onboarding quick-connect flow right after a
- * pairing succeeds — replaces N client-side POST /models calls.
+ * Atomically seed multiple catalog models for a single credential. Called by
+ * the onboarding quick-connect flow right after a pairing succeeds — replaces
+ * N client-side POST /models calls.
  *
  * Skips entirely if the org already has any model bound to the credential
  * (idempotent for re-connect flows). Promotes the first newly-created row to
  * default when the org has no default yet.
  *
- * Each entry in `models` is taken verbatim — the caller (typically the registry
- * for that provider) is responsible for matching modelId to its
- * apiShape/baseUrl/capabilities. We do NOT re-resolve via the registry here so
- * the service stays pure DB.
+ * Models are taken verbatim from {@link CatalogModelEntry}. The provider's
+ * `apiShape` and `baseUrl` are resolved from the registry by the credential's
+ * `providerId` at read time — no need to pass them through here.
  */
-export interface SeedModelEntry {
-  modelId: string;
-  label: string;
-  apiShape: string;
-  baseUrl: string;
-  input?: string[];
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
-}
-
 export interface SeedModelsResult {
   created: number;
   ids: string[];
   promotedDefault: boolean;
 }
 
+export interface SeedModelsInput {
+  models: ReadonlyArray<CatalogModelEntry & { id: string }>;
+}
+
 export async function seedOrgModelsForCredential(
   orgId: string,
   userId: string,
   credentialId: string,
-  entries: SeedModelEntry[],
+  input: SeedModelsInput,
 ): Promise<SeedModelsResult> {
-  if (entries.length === 0) return { created: 0, ids: [], promotedDefault: false };
+  if (input.models.length === 0) return { created: 0, ids: [], promotedDefault: false };
 
   return db.transaction(async (tx) => {
     // Dedup: skip if any model already references this credential.
@@ -244,22 +246,24 @@ export async function seedOrgModelsForCredential(
       .limit(1);
     const needsDefault = orgHasDefault.length === 0;
 
+    // Store catalog-derivable columns as null — read path falls back to
+    // the live catalog via `resolveCatalogDefaults`, so a weekly catalog
+    // refresh propagates to these rows without a backfill migration.
+    // Only `label` is materialised (DB column is NOT NULL); explicit
+    // user-side renames remain stable across catalog bumps.
     const inserted = await tx
       .insert(orgModels)
       .values(
-        entries.map((entry, idx) => ({
+        input.models.map((m, idx) => ({
           orgId,
-          label: entry.label,
-          apiShape: entry.apiShape,
-          baseUrl: entry.baseUrl,
-          modelId: entry.modelId,
+          label: m.label,
+          modelId: m.id,
           credentialId,
-          input: entry.input ?? null,
-          contextWindow: entry.contextWindow ?? null,
-          maxTokens: entry.maxTokens ?? null,
-          reasoning: entry.reasoning ?? null,
+          input: null,
+          contextWindow: null,
+          maxTokens: null,
+          reasoning: null,
           cost: null,
-          // First inserted row becomes default when the org had none.
           isDefault: needsDefault && idx === 0,
           source: "custom",
           createdBy: userId,
@@ -302,22 +306,33 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
  * only reads inference fields. `accountId` is set for OAuth credentials
  * whose provider hook surfaced an identity claim — the sidecar re-reads
  * it from the credential row on each request, so the executor ignores it.
+ *
+ * Inference fields (providerId, apiShape, …, cost) mirror
+ * {@link ModelDefinition} so the env-driven and DB-driven paths feed the
+ * run executor the same shape.
  */
-export interface ResolvedModel {
-  apiShape: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
+export interface ResolvedModel extends Pick<
+  ModelDefinition,
+  | "providerId"
+  | "apiShape"
+  | "baseUrl"
+  | "modelId"
+  | "apiKey"
+  | "input"
+  | "contextWindow"
+  | "maxTokens"
+  | "reasoning"
+  | "cost"
+> {
+  /**
+   * Always set — the builders fall back to the catalog and finally `modelId`
+   * so callers can read it as a plain string even when the env entry or DB
+   * row omitted it. `ModelDefinition.label` stays optional on purpose
+   * (storage-side) — `ResolvedModel.label` is its post-resolution view.
+   */
   label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
-  /** Set for OAuth-backed model provider keys; gates provider-specific request shape. */
-  providerId?: string;
   /**
    * Abstract account/tenant identifier surfaced by the credential's
    * `extractTokenIdentity` hook — passed to the provider's
@@ -328,25 +343,7 @@ export interface ResolvedModel {
   credentialId?: string;
 }
 
-function systemDefToResolved(def: ModelDefinition): ResolvedModel {
-  return {
-    apiShape: def.apiShape,
-    baseUrl: def.baseUrl,
-    modelId: def.modelId,
-    apiKey: def.apiKey,
-    label: def.label,
-    input: def.input ?? null,
-    contextWindow: def.contextWindow ?? null,
-    maxTokens: def.maxTokens ?? null,
-    reasoning: def.reasoning ?? null,
-    cost: def.cost ?? null,
-    isSystemModel: true,
-  };
-}
-
-interface OrgModelRow {
-  apiShape: string;
-  baseUrl: string;
+interface DbOrgModelRow {
   modelId: string;
   credentialId: string;
   label: string;
@@ -357,23 +354,92 @@ interface OrgModelRow {
   cost: unknown;
 }
 
-function dbRowToResolved(
-  row: OrgModelRow,
-  creds: { apiKey: string; providerId?: string; accountId?: string },
-): ResolvedModel {
+interface DbModelCredentials {
+  apiKey: string;
+  providerId: string;
+  apiShape: string;
+  baseUrl: string;
+  accountId?: string;
+}
+
+/**
+ * Catalog-derived defaults for `(providerId, modelId)`. Each `org_models`
+ * column is an *optional override* — when the row stores null, the catalog
+ * value flows through here. Storing nulls instead of frozen catalog values
+ * lets the weekly `refresh-pricing-catalog.ts` bump propagate to existing
+ * rows. Honors `catalogProviderId` so OAuth wrappers (codex → openai,
+ * claude-code → anthropic) hit the right catalog file.
+ *
+ * Returns `{}` on any miss (unmapped provider, unknown model id, dropped
+ * entry). Callers fall through to row values or final defaults.
+ */
+interface CatalogDefaults {
+  label?: string;
+  input?: ("text" | "image")[];
+  contextWindow?: number;
+  maxTokens?: number | null;
+  reasoning?: boolean;
+  cost?: ModelCost;
+}
+
+function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+  const provider = getModelProvider(providerId);
+  const catalogKey = provider?.catalogProviderId ?? providerId;
+  const entry = lookupCatalogModel(catalogKey, modelId);
+  if (!entry) return {};
   return {
-    apiShape: row.apiShape,
-    baseUrl: row.baseUrl,
+    label: entry.label,
+    input: entry.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+    contextWindow: entry.contextWindow,
+    maxTokens: entry.maxTokens,
+    reasoning: entry.capabilities.includes("reasoning"),
+    cost: entry.cost,
+  };
+}
+
+/** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
+function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+  return {
+    providerId: def.providerId,
+    apiShape: def.apiShape,
+    baseUrl: def.baseUrl,
+    modelId: def.modelId,
+    apiKey: def.apiKey,
+    label: def.label ?? defaults.label ?? def.modelId,
+    input: def.input ?? defaults.input ?? null,
+    contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: def.reasoning ?? defaults.reasoning ?? null,
+    cost: def.cost ?? defaults.cost ?? null,
+    isSystemModel: true,
+  };
+}
+
+/** Build a `ResolvedModel` from a DB `org_models` row + its credentials.
+ *
+ * `apiShape` and `baseUrl` come straight from the credential — the credential
+ * service resolves them from the registry by `providerId` (with the per-row
+ * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
+ * derivable column on `org_models` is an optional override that defers to
+ * {@link resolveCatalogDefaults} on null — so a weekly catalog refresh
+ * propagates to existing rows.
+ */
+function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
+  const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+  return {
+    providerId: creds.providerId,
+    apiShape: creds.apiShape,
+    baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    label: row.label,
-    input: row.input as string[] | null,
-    contextWindow: row.contextWindow,
-    maxTokens: row.maxTokens,
-    reasoning: row.reasoning,
-    cost: row.cost as ModelCost | null,
+    label: row.label ?? defaults.label ?? row.modelId,
+    input: (row.input as string[] | null) ?? defaults.input ?? null,
+    contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: row.reasoning ?? defaults.reasoning ?? null,
+    cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
     isSystemModel: false,
-    providerId: creds.providerId,
     accountId: creds.accountId,
     credentialId: row.credentialId,
   };
@@ -408,14 +474,14 @@ export async function resolveModel(
 
   if (dbDefault) {
     const creds = await loadInferenceCredentials(orgId, dbDefault.credentialId);
-    if (creds) return dbRowToResolved(dbDefault, creds);
+    if (creds) return buildDbResolvedModel(dbDefault, creds);
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return systemDefToResolved(def);
+      return buildSystemResolvedModel(def);
     }
   }
 
@@ -428,14 +494,12 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
-    return systemDefToResolved(systemDef);
+    return buildSystemResolvedModel(systemDef);
   }
 
   // Check DB
   const [row] = await db
     .select({
-      apiShape: orgModels.apiShape,
-      baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
       credentialId: orgModels.credentialId,
       enabled: orgModels.enabled,
@@ -455,7 +519,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  return dbRowToResolved(row, creds);
+  return buildDbResolvedModel(row, creds);
 }
 
 // --- Connection test ---

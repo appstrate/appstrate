@@ -65,14 +65,10 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * `getModelProvider`. The declarative `oauthWireFormat` quirks are NOT
  * ferried here — consumers (pi.ts) read them straight from the registry
  * by `providerId` at the sidecar-config boundary.
- *
- * `providerId` is optional because env-driven `SYSTEM_PROVIDER_KEYS`
- * entries have no registry providerId — they are flat wire-format
- * descriptors. OAuth + DB rows always carry one.
  */
 export interface DecryptedModelProviderCredentials {
-  /** Canonical registry id ("anthropic", "openai", …). Absent for env-driven system keys. */
-  providerId?: string;
+  /** Canonical registry id ("anthropic", "openai", …). */
+  providerId: string;
   apiShape: ModelApiShape;
   baseUrl: string;
   /** Either the API key OR the current OAuth access token. */
@@ -334,6 +330,33 @@ export async function updateModelProviderCredential(
     );
 }
 
+// ─── Label derivation ──────────────────────────────────────────────────────
+
+/**
+ * Derive a credential label when the caller doesn't supply one. Picks the
+ * provider's `displayName` (registry) and dedupes against existing labels
+ * in the same org by appending ` (2)`, ` (3)`, … on collision — mirrors
+ * the frontend's `deduplicateLabel()` helper, but resolved server-side so
+ * automation (CLI, connect-helper, OAuth import) doesn't have to invent a
+ * name.
+ *
+ * Unknown providerIds fall back to the literal id — defensive only;
+ * upstream callers reject unknown ids before we get here.
+ */
+export async function deriveCredentialLabel(orgId: string, providerId: string): Promise<string> {
+  const provider = getModelProvider(providerId);
+  const base = provider?.displayName ?? providerId;
+  const rows = await db
+    .select({ label: modelProviderCredentials.label })
+    .from(modelProviderCredentials)
+    .where(scopedWhere(modelProviderCredentials, { orgId }));
+  const existing = new Set(rows.map((r) => r.label));
+  if (!existing.has(base)) return base;
+  let counter = 2;
+  while (existing.has(`${base} (${counter})`)) counter++;
+  return `${base} (${counter})`;
+}
+
 /**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
@@ -459,17 +482,20 @@ export async function listOrgModelProviderCredentials(
   return mergeSystemAndDb({
     system,
     rows,
-    mapSystem: (id, def): ModelProviderCredentialInfo => ({
-      id,
-      label: def.label,
-      apiShape: def.apiShape,
-      baseUrl: def.baseUrl,
-      source: "built-in",
-      authMode: "api_key",
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    mapSystem: (id, def): ModelProviderCredentialInfo => {
+      const provider = getModelProvider(def.providerId);
+      return {
+        id,
+        label: def.label ?? provider?.displayName ?? def.providerId,
+        apiShape: def.apiShape,
+        baseUrl: def.baseUrl,
+        source: "built-in",
+        authMode: "api_key",
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     mapRow: (r): ModelProviderCredentialInfo => {
       const cfg = getModelProvider(r.providerId);
       const blob = decryptBlob(r.credentialsEncrypted);
@@ -510,10 +536,14 @@ export async function loadInferenceCredentials(
   orgId: string,
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
-  // 1) System (env-driven) keys — no registry providerId, just wire format.
+  // 1) System (env-driven) keys — providerId is declared on the env
+  // entry so downstream code (refresh worker, hooks) resolves the same
+  // registered ModelProviderDefinition it would for a DB-stored
+  // credential.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return {
+      providerId: systemKey.providerId,
       apiShape: systemKey.apiShape as ModelApiShape,
       baseUrl: systemKey.baseUrl,
       apiKey: systemKey.apiKey,

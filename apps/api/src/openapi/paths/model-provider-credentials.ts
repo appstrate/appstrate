@@ -35,6 +35,7 @@ export const modelProviderCredentialsPaths = {
                         "defaultBaseUrl",
                         "baseUrlOverridable",
                         "authMode",
+                        "featured",
                         "models",
                       ],
                       properties: {
@@ -61,25 +62,36 @@ export const modelProviderCredentialsPaths = {
                         defaultBaseUrl: { type: "string" },
                         baseUrlOverridable: { type: "boolean" },
                         authMode: { type: "string", enum: ["api_key", "oauth2"] },
+                        featured: {
+                          type: "boolean",
+                          description:
+                            "Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable.",
+                        },
                         models: {
                           type: "array",
                           items: {
                             type: "object",
-                            required: ["id", "contextWindow", "capabilities", "recommended"],
+                            required: [
+                              "id",
+                              "label",
+                              "contextWindow",
+                              "capabilities",
+                              "cost",
+                              "featured",
+                            ],
                             properties: {
                               id: { type: "string" },
                               label: {
-                                type: ["string", "null"],
+                                type: "string",
                                 description:
-                                  "Human-readable label for picker UIs; falls back to `id` when null.",
+                                  "Human-readable label, derived from the id at vendoring time.",
                               },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
                               cost: {
-                                type: ["object", "null"],
-                                description:
-                                  "Per-1M-token cost (USD). Null when the provider doesn't publish pricing.",
+                                type: "object",
+                                description: "Per-1M-token cost (USD).",
                                 properties: {
                                   input: { type: "number" },
                                   output: { type: "number" },
@@ -87,10 +99,10 @@ export const modelProviderCredentialsPaths = {
                                   cacheWrite: { type: "number" },
                                 },
                               },
-                              recommended: {
+                              featured: {
                                 type: "boolean",
                                 description:
-                                  "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all.",
+                                  "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's curated `featuredModels` whitelist; the rest of the catalog falls under 'All models'.",
                               },
                             },
                           },
@@ -174,12 +186,13 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "providerId", "apiKey"],
+              required: ["providerId", "apiKey"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
-                  description: "Display name for the model provider credential",
+                  description:
+                    "Display name for the model provider credential. Optional — the server derives one from the provider's `displayName` when omitted, deduping against existing org credentials.",
                 },
                 providerId: {
                   type: "string",

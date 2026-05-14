@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProviderPickerGroups } from "./provider-picker-groups";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -34,27 +35,33 @@ import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
-  type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PI_ADAPTER_TYPES,
-  findRegistryModel,
   getProviderById,
-  findProviderByApiShapeAndBaseUrl,
+  resolveModelEntryId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
-import { PROVIDER_ICONS } from "./icons";
+import { getProviderIcon } from "./icons";
 
 export interface ModelFormData {
-  label: string;
-  apiShape: string;
-  baseUrl: string;
+  /**
+   * Optional — server derives from the catalog label (`<catalog>.label`)
+   * and dedupes against existing org rows when absent. Sent only when the
+   * user explicitly customized it.
+   */
+  label?: string;
   modelId: string;
   credentialId: string;
-  newCredential?: { apiKey: string };
+  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
+  /**
+   * Catalog-derivable overrides. Sent only when the user edited them after
+   * picking a preset (RHF `dirtyFields`) — keeps existing rows in sync with
+   * the weekly `refresh-pricing-catalog.ts` bump.
+   */
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -82,30 +89,6 @@ interface ModelFormFields {
   contextWindow: string;
   maxTokens: string;
   reasoning: boolean;
-}
-
-function detectProvider(
-  model: OrgModelInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!model) return "";
-  return resolveProviderId(model, registry);
-}
-
-function detectModel(
-  model: OrgModelInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!model) return "";
-  const match = findRegistryModel(model.apiShape, model.modelId, registry);
-  if (match) return match.model.id;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
-  if (byApiAndUrl) {
-    // Providers with no curated catalog (e.g. OpenRouter) use dynamic model IDs
-    if (byApiAndUrl.models.length === 0) return model.modelId;
-    return CUSTOM_ID;
-  }
-  return CUSTOM_ID;
 }
 
 function OpenRouterCombobox({
@@ -230,6 +213,11 @@ function ModelFormBody({
   // catalog) and surfaces as the "Custom" option instead of a picker entry.
   // OpenRouter has no curated catalog — its row stays so users can pick it
   // and search models via the dedicated combobox.
+  //
+  // The picker is split into two visual sections — "Featured" (the
+  // module-declared canonical providers operators usually want) and
+  // "Other" (everything else). The flag is metadata only; no write path
+  // gates on it, so any entry remains selectable from either group.
   const pickerEntries = useMemo(
     () => registry.filter((p) => p.providerId !== "openai-compatible"),
     [registry],
@@ -239,9 +227,16 @@ function ModelFormBody({
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [cost, setCost] = useState<ModelCost | null>(null);
+  /**
+   * True once the user explicitly edits cost (or imports an OpenRouter cost
+   * different from the catalog). Cost lives outside RHF, so we track its
+   * dirty state separately — on submit, we only send `cost` when the user
+   * really overrode it, otherwise the server's catalog fallback applies.
+   */
+  const [costEdited, setCostEdited] = useState(false);
 
-  const providerId = providerOverride ?? detectProvider(model, registry);
-  const selectedModelId = modelOverride ?? detectModel(model, registry);
+  const providerId = providerOverride ?? (model ? resolveProviderId(model, registry) : "");
+  const selectedModelId = modelOverride ?? resolveModelEntryId(model, registry);
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);
 
@@ -253,7 +248,7 @@ function ModelFormBody({
     setError,
     clearErrors,
     showError,
-    formState: { errors },
+    formState: { errors, dirtyFields },
   } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
@@ -361,6 +356,7 @@ function ModelFormBody({
     setValue("maxTokens", "");
     setValue("reasoning", false);
     setCost(null);
+    setCostEdited(false);
   };
 
   const handleProviderChange = (id: string) => {
@@ -403,6 +399,9 @@ function ModelFormBody({
     setValue("contextWindow", preset.contextWindow.toString());
     setValue("maxTokens", (preset.maxTokens ?? 0).toString());
     setValue("reasoning", caps.includes("reasoning"));
+    // Display the catalog cost in the UI without flagging it as "edited".
+    // Server-side `resolveCatalogDefaults` will resolve it on read, so we
+    // intentionally omit it from the POST payload.
     setCost(
       preset.cost
         ? {
@@ -413,6 +412,7 @@ function ModelFormBody({
           }
         : null,
     );
+    setCostEdited(false);
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -441,18 +441,44 @@ function ModelFormBody({
       return;
     }
 
+    // Per-field dirty tracking: handleModelChange uses raw setValue (no
+    // shouldDirty) so preset-derived values never mark fields dirty. Only
+    // values the user actually edited after the preset (or that came from
+    // OpenRouter live-search) are flagged. Catalog-derivable fields that
+    // stayed at their preset values are omitted from the payload — the
+    // server's `resolveCatalogDefaults` resolves them on read so weekly
+    // catalog refreshes propagate. Same rationale for `label` (custom
+    // input only) and `cost` (tracked separately because it lives outside
+    // RHF).
+    const labelDirty = dirtyFields.label === true;
+    const inputDirty = dirtyFields.inputText === true || dirtyFields.inputImage === true;
+    const cwDirty = dirtyFields.contextWindow === true;
+    const mtDirty = dirtyFields.maxTokens === true;
+    const reasoningDirty = dirtyFields.reasoning === true;
+
     onSubmit({
-      label: data.label.trim(),
-      apiShape: data.apiShape.trim(),
-      baseUrl: data.baseUrl.trim(),
+      ...(labelDirty && data.label.trim() ? { label: data.label.trim() } : {}),
       modelId: data.modelId.trim(),
       credentialId: willCreateNewKey ? "" : data.credentialId,
-      ...(willCreateNewKey ? { newCredential: { apiKey: data.inlineApiKey.trim() } } : {}),
-      ...(inputArr.length > 0 ? { input: inputArr } : {}),
-      ...(cw ? { contextWindow: cw } : {}),
-      ...(mt ? { maxTokens: mt } : {}),
-      ...(data.reasoning ? { reasoning: true } : {}),
-      ...(cost ? { cost } : {}),
+      // Inline credential creation needs the providerId (and optionally a
+      // baseUrlOverride for `openai-compatible`) — the caller wires this up
+      // through POST /api/model-provider-credentials before saving the model.
+      ...(willCreateNewKey
+        ? {
+            newCredential: {
+              apiKey: data.inlineApiKey.trim(),
+              providerId,
+              ...(isCustomProvider && data.baseUrl.trim()
+                ? { baseUrlOverride: data.baseUrl.trim() }
+                : {}),
+            },
+          }
+        : {}),
+      ...(inputDirty && inputArr.length > 0 ? { input: inputArr } : {}),
+      ...(cwDirty && cw ? { contextWindow: cw } : {}),
+      ...(mtDirty && mt ? { maxTokens: mt } : {}),
+      ...(reasoningDirty ? { reasoning: data.reasoning } : {}),
+      ...(costEdited && cost ? { cost } : {}),
     });
   });
 
@@ -483,23 +509,33 @@ function ModelFormBody({
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {pickerEntries.map((p) => {
-                const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
-                return (
-                  <SelectItem key={p.providerId} value={p.providerId}>
-                    <span className="flex items-center gap-2">
-                      {Icon && <Icon className="size-4" />}
-                      {p.displayName}
-                    </span>
-                  </SelectItem>
-                );
-              })}
+              <ProviderPickerGroups
+                items={pickerEntries}
+                featuredLabel={t("models.form.providerGroupFeatured")}
+                otherLabel={t("models.form.providerGroupOther")}
+                renderItem={(p) => {
+                  const Icon = getProviderIcon(p);
+                  return (
+                    <SelectItem key={p.providerId} value={p.providerId}>
+                      <span className="flex items-center gap-2">
+                        {Icon && <Icon className="size-4" />}
+                        {p.displayName}
+                      </span>
+                    </SelectItem>
+                  );
+                }}
+              />
               <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {/* Model select (only for known providers, except OpenRouter) */}
+        {/* Model select (only for known providers, except OpenRouter).
+            Catalog-covered providers expose 50-100+ models — split
+            "Featured" (curated whitelist) from "All models" (the rest of
+            the LiteLLM catalog). Non-catalog providers (codex, openai-
+            compatible) only return their inline list with featured=false,
+            so the All-models group collects everything in that case. */}
         {selectedProvider && !isOpenRouter && selectedProvider.models.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
@@ -508,11 +544,16 @@ function ModelFormBody({
                 <SelectValue placeholder={t("models.form.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                {selectedProvider.models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label ?? m.id}
-                  </SelectItem>
-                ))}
+                <ProviderPickerGroups
+                  items={selectedProvider.models}
+                  featuredLabel={t("models.form.modelGroupFeatured")}
+                  otherLabel={t("models.form.modelGroupAll")}
+                  renderItem={(m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label ?? m.id}
+                    </SelectItem>
+                  )}
+                />
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
               </SelectContent>
             </Select>
@@ -533,15 +574,22 @@ function ModelFormBody({
               emptyText={t("models.form.openRouterNoResults")}
               searchingText={t("models.form.openRouterSearching")}
               onSelect={(m) => {
+                // OpenRouter has no vendored catalog, so every field comes
+                // from the live API and must be persisted as an explicit
+                // override — including cost. We mark each setValue as dirty
+                // so the submit handler ships them.
                 setSelectedModelId(m.id);
-                setValue("modelId", m.id);
-                setValue("label", m.name);
-                if (m.contextWindow) setValue("contextWindow", m.contextWindow.toString());
-                if (m.maxTokens) setValue("maxTokens", m.maxTokens.toString());
-                setValue("inputText", m.input?.includes("text") !== false);
-                setValue("inputImage", m.input?.includes("image") ?? false);
-                setValue("reasoning", m.reasoning ?? false);
+                setValue("modelId", m.id, { shouldDirty: true });
+                setValue("label", m.name, { shouldDirty: true });
+                if (m.contextWindow)
+                  setValue("contextWindow", m.contextWindow.toString(), { shouldDirty: true });
+                if (m.maxTokens)
+                  setValue("maxTokens", m.maxTokens.toString(), { shouldDirty: true });
+                setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
+                setValue("inputImage", m.input?.includes("image") ?? false, { shouldDirty: true });
+                setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
                 setCost(m.cost ?? null);
+                setCostEdited(m.cost != null);
               }}
             />
           </div>

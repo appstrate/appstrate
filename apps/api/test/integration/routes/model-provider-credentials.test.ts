@@ -15,6 +15,60 @@ describe("Model Provider Keys API", () => {
     ctx = await createTestContext();
   });
 
+  describe("GET /api/model-provider-credentials/registry", () => {
+    it("fills cost from the pricing catalog when the inline definition omits it", async () => {
+      // Catalog invariant: openai/anthropic/mistral are covered by the
+      // vendored LiteLLM catalog, so `core-providers/index.ts` no longer
+      // duplicates `cost` inline — the registry serializer must derive
+      // it via `lookupCatalogModel(providerId, modelId)?.cost`. If this regresses,
+      // the form UI and the run cost would diverge again.
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { providerId: string; models: { id: string; cost: unknown }[] }[];
+      };
+      const anthropic = body.data.find((p) => p.providerId === "anthropic");
+      expect(anthropic).toBeDefined();
+      const haiku = anthropic!.models.find((m) => m.id === "claude-haiku-4-5-20251001");
+      expect(haiku).toBeDefined();
+      expect(haiku!.cost).toEqual({
+        input: expect.closeTo(1, 4),
+        output: expect.closeTo(5, 4),
+        cacheRead: expect.closeTo(0.1, 4),
+        cacheWrite: expect.closeTo(1.25, 4),
+      });
+    });
+
+    it("marks featured catalog models with featured: true (xai grok-4)", async () => {
+      // Post phase 6: xAI is now in the LiteLLM catalog. `grok-4` is a
+      // featured id in core-providers, so it appears in the picker with
+      // catalog-derived cost AND `featured: true`. Non-featured xai
+      // models (grok-2, grok-2-latest, …) also surface but with
+      // `featured: false`.
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as {
+        data: {
+          providerId: string;
+          models: { id: string; cost: unknown; featured: boolean }[];
+        }[];
+      };
+      const xai = body.data.find((p) => p.providerId === "xai");
+      expect(xai).toBeDefined();
+      // The catalog ships 30+ xai models — the picker now exposes them all.
+      expect(xai!.models.length).toBeGreaterThan(5);
+      const grok4 = xai!.models.find((m) => m.id === "grok-4");
+      expect(grok4?.featured).toBe(true);
+      expect(grok4?.cost).toEqual({ input: 3, output: 15 });
+      // A non-featured xai model surfaces too.
+      const grok2 = xai!.models.find((m) => m.id === "grok-2");
+      expect(grok2?.featured).toBe(false);
+    });
+  });
+
   describe("GET /api/model-provider-credentials", () => {
     it("returns list of model provider keys", async () => {
       const res = await app.request("/api/model-provider-credentials", {

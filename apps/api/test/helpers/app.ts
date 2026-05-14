@@ -90,15 +90,17 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
-initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 initProxyLimits(); // LLM_PROXY_LIMITS / CREDENTIAL_PROXY_LIMITS — defaults when unset
 // Seed the runtime model-provider registry to the canonical test
 // baseline. Tests bypass boot.ts so the usual module-contribution
 // aggregation has to happen here. The helper lives in
 // `./model-providers.ts` so unit tests that only need the reseed don't
-// have to import the full Hono app builder.
+// have to import the full Hono app builder. MUST run before
+// initSystemModelProviderKeys() because env entries resolve their
+// apiShape/baseUrl from the registry by providerId.
 seedTestModelProviders();
+initSystemModelProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**

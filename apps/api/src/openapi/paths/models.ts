@@ -70,20 +70,13 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "apiShape", "baseUrl", "modelId", "credentialId"],
+              required: ["modelId", "credentialId"],
               properties: {
-                label: { type: "string", minLength: 1, description: "Display name for the model" },
-                apiShape: {
+                label: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Wire format / API shape (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
-                },
-                baseUrl: {
-                  type: "string",
-                  format: "uri",
-                  minLength: 1,
-                  description: "Provider API base URL",
+                    "Display name for the model. Optional — the server derives one from the catalog (or `modelId` on miss) when omitted, deduping against existing org rows.",
                 },
                 modelId: {
                   type: "string",
@@ -93,7 +86,8 @@ export const modelsPaths = {
                 credentialId: {
                   type: "string",
                   minLength: 1,
-                  description: "Provider key ID for API key credentials",
+                  description:
+                    "Provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId.",
                 },
                 input: {
                   type: "array",
@@ -372,16 +366,20 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["apiShape", "baseUrl", "modelId"],
+              required: ["credentialId", "modelId"],
               properties: {
-                apiShape: {
+                credentialId: {
                   type: "string",
                   minLength: 1,
-                  description: "Wire format / API shape",
+                  description:
+                    "Provider credential ID. apiShape and baseUrl are resolved from the credential's providerId.",
                 },
-                baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
                 modelId: { type: "string", minLength: 1, description: "Model identifier" },
-                apiKey: { type: "string", description: "API key (required for new models)" },
+                apiKey: {
+                  type: "string",
+                  description:
+                    "Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key.",
+                },
                 existingModelId: {
                   type: "string",
                   description: "Existing model ID to fall back to for stored API key",
@@ -429,8 +427,6 @@ export const modelsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                apiShape: { type: "string", minLength: 1 },
-                baseUrl: { type: "string", format: "uri" },
                 modelId: { type: "string", minLength: 1 },
                 credentialId: {
                   type: "string",

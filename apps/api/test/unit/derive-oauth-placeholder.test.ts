@@ -41,7 +41,10 @@ const synthProvider: ModelProviderDefinition = {
     scopes: ["openid"],
     pkce: "S256",
   },
-  models: [{ id: "test-model", contextWindow: 8000, capabilities: ["text"] }],
+  // No catalog for the synthetic providerId — featured stays empty so
+  // boot validation doesn't reject it. The placeholder hooks under test
+  // don't depend on a populated featured list.
+  featuredModels: [],
   hooks: {
     /**
      * Returns a fixed synthetic placeholder when the token looks "structured"

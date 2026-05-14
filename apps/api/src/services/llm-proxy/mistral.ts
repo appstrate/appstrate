@@ -1,79 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mistral-conversations adapter for `/api/llm-proxy/mistral-conversations/*`.
+ * Mistral-conversations adapter — an OpenAI-compatible wire shape.
  *
- * The protocol family name is inherited from `pi-ai`'s registry, but the
- * underlying wire format is plain `POST /v1/chat/completions` against
- * `https://api.mistral.ai` — pi-ai dispatches Mistral models through the
- * official `@mistralai/mistralai` SDK's `chat.stream(...)`, which targets
- * the chat-completions endpoint, NOT Mistral's Beta `/v1/conversations`
- * agentic API.
+ * The pi-ai registry tags Mistral models as `mistral-conversations`, but
+ * the underlying request flow is plain `POST /v1/chat/completions`
+ * against `https://api.mistral.ai` (the `@mistralai/mistralai` SDK's
+ * `chat.stream(...)` targets the chat-completions endpoint, NOT Mistral's
+ * Beta `/v1/conversations` agentic API). Wire format is the snake_case
+ * OpenAI shape — `{ prompt_tokens, completion_tokens, total_tokens }` on
+ * usage, SSE usage on the terminal frame.
  *
- * Protocol specifics:
- *   - Auth: `Authorization: Bearer <key>`
- *   - Body shape: snake_case OpenAI-compatible
- *     (`{ model, messages, temperature, max_tokens, stream, tools, … }`)
- *   - Non-streaming usage: `body.usage.{prompt_tokens,completion_tokens,
- *     total_tokens}` — identical field names to OpenAI.
- *   - Streaming usage: same convention as OpenAI — usage lands on the
- *     terminal `data: {…}` frame when the caller opts in. If the SDK
- *     does not request usage on the stream (default behaviour today),
- *     `parseSseUsage` returns null and the metering row is skipped, same
- *     fallback as the OpenAI adapter.
+ * No inbound headers are forwarded (Mistral has no equivalent of
+ * `openai-organization` / `openai-beta`; the SDK's `x-affinity` sticky
+ * header has no effect once the platform terminates auth).
  *
- * No request headers are forwarded (Mistral has no equivalent of
- * `openai-organization` / `openai-beta`). The Mistral SDK ships an
- * `x-affinity` header for sticky sessions; we intentionally do NOT
- * forward it because preset routing is server-side and that header has
- * no effect once the platform terminates auth.
+ * No prompt cache details — Mistral doesn't surface a `cached_tokens`
+ * field, so the cache-token branch stays off.
  */
 
-import type { LlmProxyAdapter } from "./types.ts";
-import {
-  extractUsageObject,
-  numberOrUndefined,
-  parseSseDataFrame,
-  substituteModelJson,
-} from "./helpers.ts";
+import { createOpenAICompatibleAdapter } from "./openai.ts";
 
-export const mistralConversationsAdapter: LlmProxyAdapter = {
-  api: "mistral-conversations",
-
-  substituteModel(rawBody, realModelId) {
-    return substituteModelJson(rawBody, realModelId);
-  },
-
-  buildUpstreamHeaders(_incoming, upstreamApiKey) {
-    return {
-      Authorization: `Bearer ${upstreamApiKey}`,
-      "Content-Type": "application/json",
-    };
-  },
-
-  parseJsonUsage(body) {
-    const u = extractUsageObject(body);
-    if (!u) return null;
-    const input = numberOrUndefined(u["prompt_tokens"]);
-    const output = numberOrUndefined(u["completion_tokens"]);
-    if (input === undefined && output === undefined) return null;
-    return {
-      inputTokens: input ?? 0,
-      outputTokens: output ?? 0,
-    };
-  },
-
-  parseSseUsage(events) {
-    // Mirror the OpenAI strategy — usage rides on the terminal frame
-    // when the client opted in. Iterate newest-to-oldest so we pick the
-    // canonical final tally rather than any zeroed seed earlier in the
-    // stream.
-    for (let i = events.length - 1; i >= 0; i--) {
-      const frame = parseSseDataFrame(events[i]!);
-      if (!frame) continue;
-      const parsed = mistralConversationsAdapter.parseJsonUsage(frame);
-      if (parsed) return parsed;
-    }
-    return null;
-  },
-};
+export const mistralConversationsAdapter = createOpenAICompatibleAdapter({
+  apiShape: "mistral-conversations",
+});

@@ -41,8 +41,16 @@ export function seedTestModelProviders(): void {
   _resetTestOAuthProviderRegistration();
   registerTestOAuthProvider();
   registerTestOAuthHooksProvider();
+  // Module-contributed providers are registered with `baseUrlOverridable: true`
+  // so the integration harness can point any provider at a mock endpoint
+  // (`api.openai.test`, `api.anthropic.test`, …) without each test having to
+  // monkey-patch the registry. In production, `core-providers` ships these
+  // entries with `baseUrlOverridable: false` (only the explicit
+  // `openai-compatible` entry is overridable) — flipping the flag in tests is
+  // strictly a fixture flexibility, the prod registry is untouched.
   const moduleContributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
-    .flat();
+    .flat()
+    .map((p) => ({ ...p, baseUrlOverridable: true }));
   registerModelProviders(moduleContributions);
 }

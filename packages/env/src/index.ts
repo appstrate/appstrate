@@ -259,10 +259,11 @@ const envSchema = z
       .default("false")
       .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
-    // Modules (comma-separated specifiers).
-    // Default loads the built-in OSS modules plus @appstrate/module-codex
-    // (ChatGPT/Codex OAuth). Remove module-codex to drop that provider
-    // surface. Append further external specifiers to extend.
+    // Modules (comma-separated specifiers). API-key LLM calls are routed
+    // directly to the upstream provider — retry is handled by the Pi SDK
+    // natively (Retry-After honoring + jitter). The defaults are the
+    // built-in OSS modules plus `@appstrate/module-codex` (ChatGPT/Codex
+    // OAuth — remove to drop that provider surface).
     MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
 
     // App
@@ -277,6 +278,22 @@ const envSchema = z
           .filter(Boolean),
       ),
     PORT: z.coerce.number().int().positive().default(3000),
+    /**
+     * `/api/llm-proxy/*` response cache mode. Opt-in — default `off` keeps
+     * every API-key call hitting upstream verbatim.
+     *
+     *   - `off`     — cache layer skipped entirely.
+     *   - `simple`  — exact-match request hashing; cache hit on byte-
+     *                 identical body. Backed by Redis when `REDIS_URL` is
+     *                 set, in-memory per-process otherwise.
+     */
+    LLM_PROXY_CACHE_MODE: z.enum(["off", "simple"]).default("off"),
+    /**
+     * Per-entry TTL (seconds) for cached `/api/llm-proxy/*` responses
+     * when `LLM_PROXY_CACHE_MODE !== "off"`. Default 3600 (1h). Ignored
+     * when cache is off.
+     */
+    LLM_PROXY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce
