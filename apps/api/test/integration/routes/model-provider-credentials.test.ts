@@ -41,19 +41,31 @@ describe("Model Provider Keys API", () => {
       });
     });
 
-    it("keeps inline cost for providers absent from the catalog (xai)", async () => {
-      // xAI has no pricing JSON shipped under `apps/api/src/data/pricing/`
-      // — the inline `cost` on `core-providers/index.ts` stays the only
-      // source. Pin that the registry surfaces it unchanged.
+    it("marks featured catalog models with featured: true (xai grok-4)", async () => {
+      // Post phase 6: xAI is now in the LiteLLM catalog. `grok-4` is a
+      // featured id in core-providers, so it appears in the picker with
+      // catalog-derived cost AND `featured: true`. Non-featured xai
+      // models (grok-2, grok-2-latest, …) also surface but with
+      // `featured: false`.
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
       });
       const body = (await res.json()) as {
-        data: { providerId: string; models: { id: string; cost: unknown }[] }[];
+        data: {
+          providerId: string;
+          models: { id: string; cost: unknown; featured: boolean }[];
+        }[];
       };
       const xai = body.data.find((p) => p.providerId === "xai");
-      const grok4 = xai?.models.find((m) => m.id === "grok-4");
-      expect(grok4?.cost).toEqual({ input: 2, output: 6 });
+      expect(xai).toBeDefined();
+      // The catalog ships 30+ xai models — the picker now exposes them all.
+      expect(xai!.models.length).toBeGreaterThan(5);
+      const grok4 = xai!.models.find((m) => m.id === "grok-4");
+      expect(grok4?.featured).toBe(true);
+      expect(grok4?.cost).toEqual({ input: 3, output: 15 });
+      // A non-featured xai model surfaces too.
+      const grok2 = xai!.models.find((m) => m.id === "grok-2");
+      expect(grok2?.featured).toBe(false);
     });
   });
 

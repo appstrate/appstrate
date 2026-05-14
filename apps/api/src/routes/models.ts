@@ -21,6 +21,7 @@ import {
   type SeedModelEntry,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
+import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -158,24 +159,30 @@ export function createModelsRouter() {
       throw notFound(`Provider ${creds.providerId} not registered`);
     }
 
-    const knownIds = new Map(registry.models.map((m) => [m.id, m]));
+    // Inline `registry.models[]` only carries the featured whitelist for
+    // catalog-covered providers. Merge with the vendored catalog so the
+    // seed route can accept any model id surfaced through the picker.
+    const inlineById = new Map(registry.models.map((m) => [m.id, m]));
+    const catalogById = new Map(listCatalogModels(creds.providerId).map((m) => [m.id, m]));
     const entries: SeedModelEntry[] = [];
     for (const modelId of data.modelIds) {
-      const model = knownIds.get(modelId);
-      if (!model) {
+      const inline = inlineById.get(modelId);
+      const cat = catalogById.get(modelId);
+      if (!inline && !cat) {
         throw invalidRequest(`Model ${modelId} is not part of provider ${creds.providerId}`);
       }
+      const capabilities = inline?.capabilities ?? cat?.capabilities ?? [];
+      const contextWindow = inline?.contextWindow ?? cat?.contextWindow ?? 0;
+      const maxTokens = inline?.maxTokens ?? cat?.maxTokens ?? undefined;
       entries.push({
-        modelId: model.id,
-        label: model.id,
+        modelId,
+        label: inline?.label ?? modelId,
         apiShape: registry.apiShape,
         baseUrl: creds.baseUrl,
-        input: model.capabilities.filter(
-          (c): c is "text" | "image" => c === "text" || c === "image",
-        ),
-        contextWindow: model.contextWindow,
-        maxTokens: model.maxTokens ?? undefined,
-        reasoning: model.capabilities.includes("reasoning"),
+        input: capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+        contextWindow,
+        maxTokens: maxTokens === null ? undefined : maxTokens,
+        reasoning: capabilities.includes("reasoning"),
       });
     }
 

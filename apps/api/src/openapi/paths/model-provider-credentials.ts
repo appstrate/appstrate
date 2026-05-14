@@ -71,7 +71,13 @@ export const modelProviderCredentialsPaths = {
                           type: "array",
                           items: {
                             type: "object",
-                            required: ["id", "contextWindow", "capabilities", "recommended"],
+                            required: [
+                              "id",
+                              "contextWindow",
+                              "capabilities",
+                              "recommended",
+                              "featured",
+                            ],
                             properties: {
                               id: { type: "string" },
                               label: {
@@ -97,6 +103,11 @@ export const modelProviderCredentialsPaths = {
                                 type: "boolean",
                                 description:
                                   "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all.",
+                              },
+                              featured: {
+                                type: "boolean",
+                                description:
+                                  "Surface in the picker's 'Featured' group for this provider. True when the model id appears in the provider's curated `models[]` whitelist; the rest of the catalog falls under 'All models'.",
                               },
                             },
                           },

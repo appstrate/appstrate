@@ -15,9 +15,10 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
-import { lookupModelCost } from "../services/pricing-catalog.ts";
+import { listCatalogModels, lookupModelCost } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ProviderRegistryEntry } from "@appstrate/shared-types";
+import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -74,6 +75,49 @@ export const testInlineSchema = z.object({
   existingKeyId: z.string().optional(),
 });
 
+/**
+ * Build the picker-facing model list for one provider.
+ *
+ * - **Catalog-covered providers** (the LiteLLM vendored 7): expose every
+ *   catalog entry. Inline `p.models[]` ids carry the `featured: true`
+ *   flag + override `label`/`recommended` (better than the auto-derived
+ *   catalog label). The "catalog wins for metadata" merge matches the
+ *   doc on `ModelProviderModelEntry`.
+ * - **Non-catalog providers** (codex, openai-compatible, openrouter):
+ *   serialize `p.models[]` as-is with `featured: false`. Inline entries
+ *   carry their own `contextWindow`/`capabilities` here — required by
+ *   the type — so the runtime contract stays the same on either path.
+ */
+function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
+  const catalog = listCatalogModels(p.providerId);
+  if (catalog.length === 0) {
+    return p.models.map((m) => ({
+      id: m.id,
+      label: m.label ?? null,
+      contextWindow: m.contextWindow ?? 0,
+      maxTokens: m.maxTokens ?? null,
+      capabilities: m.capabilities ?? [],
+      cost: m.cost ?? null,
+      recommended: m.recommended ?? false,
+      featured: false,
+    }));
+  }
+  const inlineById = new Map(p.models.map((m) => [m.id, m] as const));
+  return catalog.map((m) => {
+    const inline = inlineById.get(m.id);
+    return {
+      id: m.id,
+      label: inline?.label ?? m.label,
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxTokens,
+      capabilities: m.capabilities,
+      cost: inline?.cost ?? m.cost ?? lookupModelCost(p.providerId, m.id),
+      recommended: inline?.recommended ?? false,
+      featured: inlineById.has(m.id),
+    };
+  });
+}
+
 export function createModelProviderCredentialsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -95,19 +139,7 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
-      // Cost: inline value wins (for catalog-absent providers or
-      // intentional overrides), then the vendored Portkey pricing catalog,
-      // then null. Single source-of-truth pattern — see
-      // `pricing-catalog.ts` doc for why we vendor.
-      models: p.models.map((m) => ({
-        id: m.id,
-        label: m.label ?? null,
-        contextWindow: m.contextWindow,
-        maxTokens: m.maxTokens ?? null,
-        capabilities: m.capabilities,
-        cost: m.cost ?? lookupModelCost(p.providerId, m.id),
-        recommended: m.recommended ?? false,
-      })),
+      models: serializeProviderModels(p),
     }));
     return c.json(listResponse(data));
   });

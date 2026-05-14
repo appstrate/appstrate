@@ -528,25 +528,33 @@ export interface ModelCost {
   cacheWrite?: number;
 }
 
-/** A single selectable model exposed by a provider. */
+/**
+ * A single selectable model exposed by a provider.
+ *
+ * For providers covered by the vendored LiteLLM catalog
+ * (`apps/api/src/services/pricing-catalog.ts`), only `id`, optional
+ * `label` (for a prettier display), and optional `recommended` are
+ * read — the registry endpoint pulls `contextWindow`, `maxTokens`,
+ * `capabilities`, and `cost` from the catalog. The inline metadata
+ * fields below remain for non-catalog providers (Codex subscription,
+ * `openai-compatible`).
+ */
 export interface ModelProviderModelEntry {
   /** Canonical model identifier accepted by the provider's API. */
   id: string;
   /** Human-readable label for picker UIs. Falls back to `id` when absent. */
   label?: string;
-  /** Maximum input context window in tokens. */
-  contextWindow: number;
+  /** Maximum input context window in tokens. Required for non-catalog providers. */
+  contextWindow?: number;
   /** Maximum response tokens (provider-defined ceiling). */
   maxTokens?: number;
   /** Surfaced capabilities for selection UIs. */
-  capabilities: readonly ModelProviderCapability[];
+  capabilities?: readonly ModelProviderCapability[];
   /**
-   * Per-token cost override. The platform's vendored pricing catalog
-   * (`apps/api/src/services/pricing-catalog.ts`) is the primary source —
-   * the registry endpoint fills `cost` from `lookupModelCost(apiShape, id)`
-   * when this field is unset. Set it inline only for providers absent
-   * from the catalog (currently cerebras / groq / xai / codex) or to
-   * pin a value that diverges from upstream.
+   * Per-token cost override. The vendored LiteLLM catalog is the primary
+   * source for catalog-covered providers; set inline only for non-catalog
+   * providers (codex/`openai-compatible`) or to pin a value diverging from
+   * upstream.
    */
   cost?: ModelCost;
   /**
@@ -772,7 +780,26 @@ export interface ModelProviderDefinition {
   oauthWireFormat?: OAuthWireFormat;
 
   // — Catalog —
-  /** Selectable models. May be empty for providers whose model list is user-supplied. */
+  /**
+   * Curated model whitelist. Has two roles depending on catalog coverage:
+   *
+   *   - **Catalog-covered providers** (openai/anthropic/mistral/google-ai/
+   *     cerebras/groq/xai): the entries here mark the picker's "Featured"
+   *     group — typically 3-5 pretty-labelled ids. The registry endpoint
+   *     unions them with `listCatalogModels(providerId)` so every catalog
+   *     model still appears (under "All models"); the inline entries
+   *     contribute their (better) label and the `featured: true` marker.
+   *     Inline metadata fields beyond `id`/`label`/`recommended` are
+   *     ignored — context window, capabilities, and cost come from the
+   *     catalog.
+   *   - **Non-catalog providers** (codex/Claude OAuth, openai-compatible,
+   *     openrouter's live-search shape): the entries here are the
+   *     ENTIRE picker for that provider. The registry endpoint surfaces
+   *     them as-is, with full inline metadata.
+   *
+   * May be empty when the picker should show only "Custom" for this
+   * provider (openrouter, openai-compatible).
+   */
   models: readonly ModelProviderModelEntry[];
 
   // — Behavior —

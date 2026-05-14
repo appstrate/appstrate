@@ -570,6 +570,14 @@ export interface ProviderRegistryModelEntry {
    * inserts only those; otherwise it seeds every entry.
    */
   recommended: boolean;
+  /**
+   * Surface in the picker's "Featured" group for this provider. Set when
+   * the model id appears in the provider's curated `models[]` (see
+   * `core-providers/index.ts`); the rest of the catalog falls under
+   * "All models". Always `false` for non-catalog providers (their inline
+   * models are the entire picker, no two-tier grouping).
+   */
+  featured: boolean;
 }
 
 // --- Connection Test Types ---

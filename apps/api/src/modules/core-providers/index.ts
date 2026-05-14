@@ -4,15 +4,23 @@
  * Core Providers module — the canonical API-key model provider catalog
  * shipped with every Appstrate deployment.
  *
- * Each entry is a `ModelProviderDefinition` carrying its own apiShape,
- * default base URL, and a curated model whitelist (id, label, context
- * window, capabilities). Per-token cost is **not** stored inline when
- * the model is covered by the vendored Portkey pricing catalog
- * (openai / anthropic / mistral / google) — the registry endpoint
- * derives `cost` from `lookupModelCost(apiShape, id)` at serialization,
- * keeping a single source of truth. Inline `cost` is reserved for
- * catalog-absent providers (cerebras, groq, xai, codex) or intentional
- * overrides. The UI consumes this catalog exclusively via
+ * Each entry is a `ModelProviderDefinition` carrying wire format, auth
+ * metadata, and a *curated featured list* (3-5 ids per provider). For
+ * providers covered by the vendored LiteLLM catalog (openai / anthropic
+ * / mistral / google-ai / cerebras / groq / xai), the inline `models[]`
+ * carries only `{ id, label?, recommended? }` — `contextWindow`,
+ * `maxTokens`, `capabilities`, and `cost` come from
+ * `apps/api/src/services/pricing-catalog.ts`. Inline metadata stays
+ * full only for non-catalog providers (codex subscription,
+ * `openai-compatible`, `openrouter`'s live-search shape).
+ *
+ * Featured semantics: any id present in this inline `models[]` is
+ * marked `featured: true` in the registry response. The picker also
+ * exposes every other catalog model under "All models" — so the
+ * platform stays a marketplace of the full Portkey-routable surface
+ * without losing editorial curation up top.
+ *
+ * The UI consumes this catalog exclusively via
  * `GET /api/model-provider-credentials/registry` — no client-side
  * hardcoding. Adding a new provider is a single entry here.
  *
@@ -37,27 +45,9 @@ const anthropic: ModelProviderDefinition = {
   authMode: "api_key",
   featured: true,
   models: [
-    {
-      id: "claude-haiku-4-5-20251001",
-      label: "Claude Haiku 4.5",
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
-    {
-      id: "claude-opus-4-6",
-      label: "Claude Opus 4.6",
-      contextWindow: 200_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
-    {
-      id: "claude-sonnet-4-6",
-      label: "Claude Sonnet 4.6",
-      contextWindow: 200_000,
-      maxTokens: 64_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
+    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   ],
 };
 
@@ -71,21 +61,12 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  // `llama-3.3-70b` (with dash, LiteLLM canonical) — note the catalog
+  // doesn't carry `llama-4-scout-17b-16e-instruct`; users who need it
+  // pick "Custom".
   models: [
-    {
-      id: "llama3.3-70b",
-      label: "Llama 3.3 70B",
-      contextWindow: 131_072,
-      maxTokens: 16_384,
-      capabilities: ["text"],
-    },
-    {
-      id: "llama-4-scout-17b-16e-instruct",
-      label: "Llama 4 Scout",
-      contextWindow: 131_072,
-      maxTokens: 16_384,
-      capabilities: ["text", "image"],
-    },
+    { id: "llama-3.3-70b", label: "Llama 3.3 70B" },
+    { id: "gpt-oss-120b", label: "GPT-OSS 120B" },
   ],
 };
 
@@ -101,30 +82,9 @@ const googleAi: ModelProviderDefinition = {
   authMode: "api_key",
   featured: true,
   models: [
-    {
-      id: "gemini-2.5-flash",
-      label: "Gemini 2.5 Flash",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.3, output: 2.5 },
-    },
-    {
-      id: "gemini-2.5-pro",
-      label: "Gemini 2.5 Pro",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 1.25, output: 10 },
-    },
-    {
-      id: "gemini-3.1-pro-preview",
-      label: "Gemini 3.1 Pro",
-      contextWindow: 1_048_576,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2, output: 12 },
-    },
+    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
   ],
 };
 
@@ -138,28 +98,11 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  // `gemma2-9b-it` / `mixtral-8x7b-32768` aren't in LiteLLM's groq
+  // index; users still pick them via "Custom" if needed.
   models: [
-    {
-      id: "gemma2-9b-it",
-      label: "Gemma 2 9B",
-      contextWindow: 8_192,
-      maxTokens: 8_192,
-      capabilities: ["text"],
-    },
-    {
-      id: "llama-3.3-70b-versatile",
-      label: "Llama 3.3 70B",
-      contextWindow: 131_072,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-    },
-    {
-      id: "mixtral-8x7b-32768",
-      label: "Mixtral 8x7B",
-      contextWindow: 32_768,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-    },
+    { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
+    { id: "kimi-k2-instruct-0905", label: "Kimi K2 Instruct" },
   ],
 };
 
@@ -175,41 +118,11 @@ const mistral: ModelProviderDefinition = {
   authMode: "api_key",
   featured: true,
   models: [
-    {
-      id: "codestral-latest",
-      label: "Codestral",
-      contextWindow: 256_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-    },
-    {
-      id: "devstral-2512",
-      label: "Devstral 2",
-      contextWindow: 256_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-    },
-    {
-      id: "mistral-large-latest",
-      label: "Mistral Large",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-    },
-    {
-      id: "mistral-medium-latest",
-      label: "Mistral Medium",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text"],
-    },
-    {
-      id: "mistral-small-latest",
-      label: "Mistral Small",
-      contextWindow: 128_000,
-      maxTokens: 32_768,
-      capabilities: ["text", "image"],
-    },
+    { id: "codestral-latest", label: "Codestral" },
+    { id: "devstral-2512", label: "Devstral 2" },
+    { id: "mistral-large-latest", label: "Mistral Large" },
+    { id: "mistral-medium-latest", label: "Mistral Medium" },
+    { id: "mistral-small-latest", label: "Mistral Small" },
   ],
 };
 
@@ -225,27 +138,9 @@ const openai: ModelProviderDefinition = {
   authMode: "api_key",
   featured: true,
   models: [
-    {
-      id: "gpt-5-mini",
-      label: "GPT-5 mini",
-      contextWindow: 400_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
-    {
-      id: "gpt-5.4",
-      label: "GPT-5.4",
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
-    {
-      id: "o4-mini",
-      label: "o4-mini",
-      contextWindow: 200_000,
-      maxTokens: 100_000,
-      capabilities: ["text", "image", "reasoning"],
-    },
+    { id: "gpt-5-mini", label: "GPT-5 mini" },
+    { id: "gpt-5.4", label: "GPT-5.4" },
+    { id: "o4-mini", label: "o4-mini" },
   ],
 };
 
@@ -274,30 +169,9 @@ const xai: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   models: [
-    {
-      id: "grok-3",
-      label: "Grok 3",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image"],
-      cost: { input: 3, output: 15 },
-    },
-    {
-      id: "grok-3-mini",
-      label: "Grok 3 Mini",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 0.3, output: 0.5 },
-    },
-    {
-      id: "grok-4",
-      label: "Grok 4",
-      contextWindow: 131_072,
-      maxTokens: 65_536,
-      capabilities: ["text", "image", "reasoning"],
-      cost: { input: 2, output: 6 },
-    },
+    { id: "grok-3", label: "Grok 3" },
+    { id: "grok-3-mini", label: "Grok 3 Mini" },
+    { id: "grok-4", label: "Grok 4" },
   ],
 };
 
