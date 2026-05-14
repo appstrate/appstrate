@@ -586,6 +586,8 @@
   "models.form.providerPlaceholder": "Sélectionnez un provider",
   "models.form.providerGroupFeatured": "Recommandés",
   "models.form.providerGroupOther": "Autres providers",
+  "models.form.modelGroupFeatured": "Recommandés",
+  "models.form.modelGroupAll": "Tous les modèles",
   "models.form.custom": "Personnalisé",
   "models.form.modelPlaceholder": "Sélectionnez un modèle",
   "models.form.capabilitiesHint": "Optionnel : ces valeurs remplacent la détection automatique du SDK.",

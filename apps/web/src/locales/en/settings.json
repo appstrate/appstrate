@@ -586,6 +586,8 @@
   "models.form.providerPlaceholder": "Select a provider",
   "models.form.providerGroupFeatured": "Featured",
   "models.form.providerGroupOther": "Other providers",
+  "models.form.modelGroupFeatured": "Featured",
+  "models.form.modelGroupAll": "All models",
   "models.form.custom": "Custom",
   "models.form.modelPlaceholder": "Select a model",
   "models.form.capabilitiesHint": "Optional: these values override automatic SDK detection.",

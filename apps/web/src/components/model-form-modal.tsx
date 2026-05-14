@@ -529,7 +529,12 @@ function ModelFormBody({
           </Select>
         </div>
 
-        {/* Model select (only for known providers, except OpenRouter) */}
+        {/* Model select (only for known providers, except OpenRouter).
+            Catalog-covered providers expose 50-100+ models — split
+            "Featured" (curated whitelist) from "All models" (the rest of
+            the LiteLLM catalog). Non-catalog providers (codex, openai-
+            compatible) only return their inline list with featured=false,
+            so the All-models group collects everything in that case. */}
         {selectedProvider && !isOpenRouter && selectedProvider.models.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
@@ -538,11 +543,34 @@ function ModelFormBody({
                 <SelectValue placeholder={t("models.form.modelPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                {selectedProvider.models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label ?? m.id}
-                  </SelectItem>
-                ))}
+                {(() => {
+                  const featured = selectedProvider.models.filter((m) => m.featured);
+                  const others = selectedProvider.models.filter((m) => !m.featured);
+                  return (
+                    <>
+                      {featured.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>{t("models.form.modelGroupFeatured")}</SelectLabel>
+                          {featured.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.label ?? m.id}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                      {others.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>{t("models.form.modelGroupAll")}</SelectLabel>
+                          {others.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.label ?? m.id}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                    </>
+                  );
+                })()}
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
               </SelectContent>
             </Select>
