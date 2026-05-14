@@ -227,6 +227,15 @@ for (const { dir: moduleDir } of moduleEntries) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
+// `portkey` is mandatory in production: `boot.ts` aborts if the router
+// slots are empty. Tests don't run module `init()` (no real gateway
+// sub-process), so install harmless `() => null` stubs as the baseline.
+// Individual tests that exercise the Portkey path override these.
+const { setPortkeyRouter, setPortkeyInprocessRouter } =
+  await import("../../apps/api/src/services/portkey-router.ts");
+setPortkeyRouter(() => null);
+setPortkeyInprocessRouter(() => null);
+
 // Phase 1: discover modules and register them. We collect imported modules
 // into a local list, then use the shared `collectModuleContributions()`
 // helper from module-loader.ts to aggregate Better Auth plugins + Drizzle

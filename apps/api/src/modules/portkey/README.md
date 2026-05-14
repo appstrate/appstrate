@@ -1,10 +1,12 @@
-# `portkey` — built-in module
+# `portkey` — built-in module (**mandatory**)
 
-Phase 1 integration of the open-source [Portkey AI Gateway](https://github.com/Portkey-AI/gateway) as Appstrate's LLM gateway. See issue [#437](https://github.com/appstrate/appstrate/issues/437) for the full epic.
+Integration of the open-source [Portkey AI Gateway](https://github.com/Portkey-AI/gateway) as Appstrate's LLM gateway. See issue [#437](https://github.com/appstrate/appstrate/issues/437) for the full epic.
+
+`portkey` is a **required** built-in. The default `MODULES` env var includes it, and `boot.ts` aborts startup via `assertPortkeyRoutersInstalled()` if the slot is empty after `loadModules()`. To run without it, remove it from `MODULES` **and** be aware that every API-key LLM request will fail.
 
 ## What it does
 
-When `MODULES=portkey,…` is set, the module:
+The module:
 
 1. Spawns `@portkey-ai/gateway/build/start-server.js` as a Bun sub-process at `init()`, bound to `127.0.0.1:${PORTKEY_PORT}` (default `8787`).
 2. Installs **two** routers on `apps/api/src/services/portkey-router.ts`:
@@ -28,9 +30,17 @@ The routing baseUrl bakes the `/v1` segment per shape so the caller's relative p
 
 Anthropic's SDK already includes `/v1` in the request path, so the baseUrl stays bare. OpenAI / Mistral SDKs append `/chat/completions` to a `/v1`-baked baseUrl. The path-prefix map is centralized in `config.ts:API_SHAPE_PORTKEY_PATH_PREFIX`.
 
-## Why a module (and not a default)
+## Subscription-OAuth bypass (explicit non-scope)
 
-Phase 1 ships **opt-in**. The default `MODULES` list does NOT include `portkey`. Operators dogfood locally first, then we flip the default once the integration has been stable in prod. When the module is absent, `getPortkeyRouter()` returns `null` and the run launcher falls through to the legacy direct-upstream path — zero footprint.
+Personal-subscription OAuth providers — `@appstrate/module-codex` (ChatGPT/Codex), the external `@appstrate/module-claude-code` (Claude Pro/Max/Team), and any future flat-fee identity provider — **bypass Portkey entirely**. Reason: Portkey 1.15.2 OSS exposes no mechanism to register a custom provider with a non-standard auth wireFormat (verified by spike on the 471 KB bundle — no `customProviders` flag, no env, no plugin API). Forking Portkey to add three providers would create a long-tail maintenance burden disproportionate to the gain — these flows are flat-fee, so there's no per-request cost to attribute through the gateway anyway.
+
+The bypass is implemented in the call sites, not here: `run-launcher/pi.ts` switches on `isOauthCredential` before consulting `getPortkeyRouter()`. The sidecar's existing OAuth wireFormat path remains the active route for these credentials.
+
+## Cost tracking — why the vendored catalog stays
+
+The OSS Portkey gateway does NOT compute price in USD. Static analysis of the 471 KB bundle: zero occurrences of `cost`/`price`/`pricing` and zero `x-portkey-cost-*` response headers. Token usage (`prompt_tokens`/`completion_tokens` / `input_tokens`/`output_tokens`) is passed through verbatim from upstream, but the multiplication by per-token price is a Portkey **Cloud** feature, not bundled in the open-source gateway.
+
+Consequence: the vendored `apps/api/src/data/pricing/*.json` catalog and `services/pricing-catalog.ts` are the **only** source of cost truth platform-side. Refresh weekly via a CI script (planned — `scripts/refresh-pricing-catalog.ts`) that diffs against `Portkey-AI/models`.
 
 ## Shutdown ordering
 
@@ -62,5 +72,6 @@ None to opt out of. Static analysis of the 471 KB build found zero telemetry SDK
 ## Open follow-ups
 
 - ✅ **Phase 2 — pricing catalog** shipped. Vendored from [`Portkey-AI/models`](https://github.com/Portkey-AI/models) (MIT, weekly upstream refresh) under `apps/api/src/data/pricing/`. `apps/api/src/services/pricing-catalog.ts` exposes `lookupModelCost(apiShape, modelId)`. `org_models.cost` becomes an **override**: when set it wins, when null we fall back to the catalog. ~200 models across openai / anthropic / mistral-ai / google.
+- ✅ **Phase 2.5 — Portkey mandatory** shipped. Module added to default `MODULES`, fail-fast at boot via `assertPortkeyRoutersInstalled()`, fallback branches removed from `run-launcher/pi.ts` and `llm-proxy/core.ts`. `accept-encoding: identity` injected on Portkey-routed proxy requests (works around Bun fetch ZlibError on Anthropic SSE — discovered in real-key smoke).
 - **Phase 3 — open model catalog UX** (next) — featured/advanced split, drop hardcoded registry, migrate `providerId` enum → free-text.
-- **Phase 4 — refinements** — semantic cache, multi-provider fallback chains, OTel metrics. (In-process mount is blocked upstream — `@portkey-ai/gateway` doesn't export a mountable Hono app.)
+- **Phase 4 — refinements** — semantic cache, multi-provider fallback chains, OTel metrics. (In-process mount blocked upstream — `@portkey-ai/gateway` doesn't export a mountable Hono app. Custom provider injection also blocked — would require fork; we keep the subscription-OAuth bypass instead.)

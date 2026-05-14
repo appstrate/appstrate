@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Portkey router — process-level handoff between the optional
+ * Portkey router — process-level handoff between the **mandatory**
  * `apps/api/src/modules/portkey/` module and Portkey's two consumers.
  *
  * Two parallel router slots exist because Portkey has two callers that
@@ -15,9 +15,17 @@
  *     reaches the gateway via `127.0.0.1:<port>`.
  *
  * Same inline `x-portkey-config` payload, different `baseUrl`. The module
- * installs both slots at init; the legacy direct-upstream path stays the
- * fall-through when either getter returns null. Zero footprint when the
- * module is absent.
+ * installs both slots at init. `assertPortkeyRoutersInstalled()` is called
+ * by `boot.ts` right after `loadModules()` and aborts startup with a clear
+ * "MODULES must include portkey" error if either slot is empty.
+ *
+ * **Subscription-OAuth exception**: model presets whose `apiShape` is in
+ * `SUBSCRIPTION_OAUTH_SHAPES` (codex, claude-code, …) never call these
+ * routers — Portkey 1.15.2 OSS has no custom-provider injection mechanism,
+ * so we bypass the gateway entirely for those flows. Their auth wireFormat
+ * stays on the legacy sidecar path. The call sites (`run-launcher/pi.ts`,
+ * `llm-proxy/core.ts`) gate on `authMode === "oauth"` already; no extra
+ * branch needed here.
  */
 
 /**
@@ -53,8 +61,17 @@ export function setPortkeyRouter(router: PortkeyRouter | null): void {
   _sidecarRouter = router;
 }
 
-/** Read the sidecar-facing router. Null when the module is not loaded. */
-export function getPortkeyRouter(): PortkeyRouter | null {
+/**
+ * Read the sidecar-facing router. Throws if the `portkey` module did not
+ * install its slot — call sites assume `boot.ts` has already validated
+ * this via `assertPortkeyRoutersInstalled()`.
+ */
+export function getPortkeyRouter(): PortkeyRouter {
+  if (!_sidecarRouter) {
+    throw new Error(
+      "portkey-router: sidecar router not installed — MODULES must include 'portkey'",
+    );
+  }
   return _sidecarRouter;
 }
 
@@ -63,7 +80,30 @@ export function setPortkeyInprocessRouter(router: PortkeyRouter | null): void {
   _inprocessRouter = router;
 }
 
-/** Read the in-process router. Null when the module is not loaded. */
-export function getPortkeyInprocessRouter(): PortkeyRouter | null {
+/**
+ * Read the in-process router. Throws if the `portkey` module did not
+ * install its slot — call sites assume `boot.ts` has already validated
+ * this via `assertPortkeyRoutersInstalled()`.
+ */
+export function getPortkeyInprocessRouter(): PortkeyRouter {
+  if (!_inprocessRouter) {
+    throw new Error(
+      "portkey-router: in-process router not installed — MODULES must include 'portkey'",
+    );
+  }
   return _inprocessRouter;
+}
+
+/**
+ * Boot-time invariant check. Aborts startup with a clear error if either
+ * router slot is empty after `loadModules()` — guarantees that
+ * `getPortkey*Router()` will never throw at request time.
+ */
+export function assertPortkeyRoutersInstalled(): void {
+  if (!_sidecarRouter || !_inprocessRouter) {
+    throw new Error(
+      "portkey-router: both router slots must be installed by the `portkey` module. " +
+        "Ensure MODULES includes 'portkey'.",
+    );
+  }
 }

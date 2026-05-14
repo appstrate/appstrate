@@ -83,20 +83,18 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const rewrittenBody = inputs.adapter.substituteModel(inputs.rawBody, resolved.realModelId);
 
-  // Consult the Portkey in-process router (installed by the `portkey`
-  // module when `MODULES=portkey,…`). When present, swap the upstream
-  // URL to the local Portkey gateway and inject `x-portkey-config` so
-  // Portkey routes + retries + honors `Retry-After` server-side. Cost
-  // tracking is unaffected: Portkey passes the upstream response
-  // (including the SSE `usage` frame / JSON `usage` block) verbatim, so
-  // the existing adapter-driven metering still applies. When the module
-  // is absent (default OSS), this is a no-op — direct upstream path.
-  const portkeyRouting =
-    getPortkeyInprocessRouter()?.({
-      apiShape: resolved.api,
-      baseUrl: resolved.baseUrl,
-      apiKey: resolved.upstreamApiKey,
-    }) ?? null;
+  // Route every API-key LLM request through the Portkey in-process
+  // gateway. `boot.ts` guarantees the router slot is installed via
+  // `assertPortkeyRoutersInstalled()`. The router itself can still return
+  // null for an `apiShape` outside `API_SHAPE_TO_PORTKEY_PROVIDER` (exotic
+  // providers not yet mapped); in that narrow case we fall through to the
+  // direct upstream path. Cost tracking is unaffected — Portkey passes
+  // the SSE `usage` frame / JSON `usage` block verbatim.
+  const portkeyRouting = getPortkeyInprocessRouter()({
+    apiShape: resolved.api,
+    baseUrl: resolved.baseUrl,
+    apiKey: resolved.upstreamApiKey,
+  });
 
   const upstreamUrl = portkeyRouting
     ? joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath)
@@ -107,6 +105,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   );
   if (portkeyRouting) {
     upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
+    // Portkey 1.15.2 re-emits Anthropic's streamed responses with a gzip
+    // content-encoding that Bun's fetch decompressor occasionally rejects
+    // (ZlibError on mid-stream chunked frames). Force identity encoding —
+    // the SSE payload is small relative to the network/inference cost,
+    // and direct upstream calls work fine because they don't go through
+    // Portkey's compression rewrite. Discovered during real-key Anthropic
+    // smoke (#437 phase 1).
+    upstreamHeaders["accept-encoding"] = "identity";
   }
 
   const started = Date.now();

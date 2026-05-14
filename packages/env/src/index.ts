@@ -260,10 +260,15 @@ const envSchema = z
       .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
     // Modules (comma-separated specifiers).
-    // Default loads the built-in OSS modules plus @appstrate/module-codex
-    // (ChatGPT/Codex OAuth). Remove module-codex to drop that provider
-    // surface. Append further external specifiers to extend.
-    MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
+    // `portkey` is **mandatory** — every API-key LLM request flows through
+    // the Portkey AI Gateway sub-process for unified retry / rate-limiting /
+    // observability. The platform fails to boot if the slot it installs on
+    // `services/portkey-router.ts` is empty after `loadModules()`. The other
+    // defaults are the built-in OSS modules plus `@appstrate/module-codex`
+    // (ChatGPT/Codex OAuth — remove to drop that provider surface).
+    // Subscription-OAuth providers (codex, claude-code) bypass Portkey by
+    // design: their OAuth wireFormat isn't expressible to Portkey 1.15.2.
+    MODULES: z.string().default("portkey,oidc,webhooks,core-providers,@appstrate/module-codex"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

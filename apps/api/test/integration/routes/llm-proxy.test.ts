@@ -481,7 +481,11 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
 
   afterEach(() => {
     restoreFetch();
-    setPortkeyInprocessRouter(null);
+    // Reset to the preload baseline (`() => null`) — `null` would trip the
+    // boot-time invariant and crash other tests because Portkey is now
+    // mandatory in production. The unmapped-shape branch is exercised
+    // explicitly by the "falls through to direct upstream" case below.
+    setPortkeyInprocessRouter(() => null);
   });
 
   it("swaps upstream to Portkey and injects x-portkey-config when the router is installed", async () => {
@@ -537,6 +541,10 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     const parsed = JSON.parse(cfg!) as { provider: string; api_key: string };
     expect(parsed.provider).toBe("openai");
     expect(parsed.api_key).toBe("sk-upstream-42");
+    // `accept-encoding: identity` is force-injected when Portkey is in
+    // the path — works around Bun fetch ZlibError on Anthropic SSE
+    // through the gateway (discovered in #437 real-key smoke).
+    expect(captured!.headers.get("accept-encoding")).toBe("identity");
     // Body still has the substituted real-model id (adapter ran).
     const body = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
     expect(body.model).toBe("gpt-4o-2024-08-06");
@@ -581,5 +589,8 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     expect(res.status).toBe(200);
     expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
     expect(captured!.headers.get("x-portkey-config")).toBeNull();
+    // Direct upstream — no encoding override; we don't need to fight
+    // Bun's decompressor when Portkey isn't rewriting the response.
+    expect(captured!.headers.get("accept-encoding")).toBeNull();
   });
 });

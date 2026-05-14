@@ -132,7 +132,12 @@ export async function runPlatformContainer(
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
-      const portkey = getPortkeyRouter()?.(llmConfig) ?? null;
+      // API-key LLM requests are mandatorily routed through Portkey — the
+      // boot-time `assertPortkeyRoutersInstalled()` guarantees the router
+      // is non-null here. The router itself returns null only for shapes
+      // outside `API_SHAPE_TO_PORTKEY_PROVIDER` (e.g. future exotic
+      // providers); fall back to direct upstream in that narrow case.
+      const portkey = getPortkeyRouter()(llmConfig);
       portkeyActive = portkey !== null;
       sidecarLlm = portkey
         ? {
