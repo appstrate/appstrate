@@ -12,22 +12,13 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import {
-  extractUsageObject,
-  numberOrUndefined,
-  parseSseDataFrame,
-  substituteModelJson,
-} from "./helpers.ts";
+import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./helpers.ts";
 
 /** Forwarded untouched. We never manipulate cache-control / prompt caching hints. */
 const HEADERS_TO_FORWARD = new Set(["openai-organization", "openai-beta"]);
 
 export const openaiCompletionsAdapter: LlmProxyAdapter = {
   api: "openai-completions",
-
-  substituteModel(rawBody, realModelId) {
-    return substituteModelJson(rawBody, realModelId);
-  },
 
   buildUpstreamHeaders(incoming, upstreamApiKey) {
     const headers: Record<string, string> = {

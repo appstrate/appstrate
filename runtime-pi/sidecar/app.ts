@@ -13,6 +13,7 @@ import {
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
   isBlockedUrl,
+  isPortkeyManaged,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
@@ -253,15 +254,11 @@ export function createApp(deps: AppDeps): Hono {
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
     if (body.llm !== undefined) {
-      // SSRF guard on user-reachable LLM base URLs. When `portkeyConfig`
-      // is set the baseUrl is the platform-managed Portkey gateway
-      // (e.g. `host.docker.internal:8787` for containers, `127.0.0.1:8787`
-      // in process mode) — both literals the generic SSRF guard rejects.
-      // The platform vouches for these URLs; user input is the inline
-      // `portkeyConfig` JSON, not the baseUrl. Skip the loopback check
-      // exclusively when Portkey routing is active.
-      const portkeyManaged = body.llm?.authMode === "api_key" && Boolean(body.llm.portkeyConfig);
-      if (body.llm && !portkeyManaged && isBlockedUrl(body.llm.baseUrl)) {
+      // SSRF guard on user-reachable LLM base URLs. Portkey-managed URLs
+      // are platform-controlled loopback / Docker-host literals — see
+      // `isPortkeyManaged()` for the carve-out rationale. `body.llm`
+      // can be `null` (clear), in which case there's nothing to guard.
+      if (body.llm && !isPortkeyManaged(body.llm) && isBlockedUrl(body.llm.baseUrl)) {
         return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
       }
       config.llm = body.llm;
@@ -293,11 +290,10 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "LLM proxy not configured" }, 503);
     }
 
-    // Mirror the `/configure` rule: Portkey-managed URLs are platform-
-    // controlled and intentionally land on loopback / `host.docker.internal`.
-    // Direct-upstream and OAuth paths keep the strict SSRF guard.
-    const portkeyManaged = config.llm.authMode === "api_key" && Boolean(config.llm.portkeyConfig);
-    if (!portkeyManaged && isBlockedUrl(config.llm.baseUrl)) {
+    // Mirror the `/configure` rule via the shared `isPortkeyManaged()`
+    // carve-out — direct-upstream and OAuth paths keep the strict SSRF
+    // guard.
+    if (!isPortkeyManaged(config.llm) && isBlockedUrl(config.llm.baseUrl)) {
       return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
     }
 

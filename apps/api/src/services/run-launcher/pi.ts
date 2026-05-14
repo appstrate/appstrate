@@ -115,7 +115,6 @@ export async function runPlatformContainer(
       : deriveKeyPlaceholder(llmApiKey);
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    let portkeyActive = false;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
       // config boundary — the provider definition is the source of truth.
@@ -132,29 +131,27 @@ export async function runPlatformContainer(
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
-      // API-key LLM requests are mandatorily routed through Portkey — the
+      // API-key LLM requests are mandatorily routed through Portkey. The
       // boot-time `assertPortkeyRoutersInstalled()` guarantees the router
-      // is non-null here. The router itself returns null only for shapes
-      // outside `API_SHAPE_TO_PORTKEY_PROVIDER` (e.g. future exotic
-      // providers); fall back to direct upstream in that narrow case.
+      // is non-null here; if the router can't route the model's apiShape
+      // it returns null, which is a config bug — fail fast so the bad
+      // preset can't silently bypass the gateway.
       const portkey = getPortkeyRouter()(llmConfig);
-      portkeyActive = portkey !== null;
-      sidecarLlm = portkey
-        ? {
-            authMode: "api_key",
-            // Re-point the sidecar at the local Portkey gateway. Portkey
-            // routes to the real upstream using the inline config.
-            baseUrl: portkey.baseUrl,
-            apiKey: llmApiKey,
-            placeholder: llmPlaceholder,
-            portkeyConfig: portkey.portkeyConfig,
-          }
-        : {
-            authMode: "api_key",
-            baseUrl: llmConfig.baseUrl,
-            apiKey: llmApiKey,
-            placeholder: llmPlaceholder,
-          };
+      if (!portkey) {
+        throw new Error(
+          `Model apiShape "${llmConfig.apiShape}" has no Portkey provider mapping. ` +
+            `Add an entry to API_SHAPE_TO_PORTKEY_PROVIDER in services/pricing-catalog.ts.`,
+        );
+      }
+      sidecarLlm = {
+        authMode: "api_key",
+        // Re-point the sidecar at the local Portkey gateway. Portkey
+        // routes to the real upstream using the inline config.
+        baseUrl: portkey.baseUrl,
+        apiKey: llmApiKey,
+        placeholder: llmPlaceholder,
+        portkeyConfig: portkey.portkeyConfig,
+      };
     }
 
     const sidecarConfig: SidecarConfig = {
@@ -189,7 +186,10 @@ export async function runPlatformContainer(
       connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: "http://sidecar:8081",
-      disableModelRetry: portkeyActive,
+      // Disable Pi SDK's internal retry whenever Portkey is in the path —
+      // that's every api_key request. OAuth subscription credentials bypass
+      // Portkey, so they keep client-side retry for transparent 401 refresh.
+      disableModelRetry: !isOauthCredential,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalizeUrl,

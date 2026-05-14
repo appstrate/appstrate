@@ -28,12 +28,7 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import {
-  extractUsageObject,
-  numberOrUndefined,
-  parseSseDataFrame,
-  substituteModelJson,
-} from "./helpers.ts";
+import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./helpers.ts";
 
 function readForwardedHeader(incoming: Headers, name: string): string | null {
   for (const [k, v] of incoming) {
@@ -44,10 +39,6 @@ function readForwardedHeader(incoming: Headers, name: string): string | null {
 
 export const anthropicMessagesAdapter: LlmProxyAdapter = {
   api: "anthropic-messages",
-
-  substituteModel(rawBody, realModelId) {
-    return substituteModelJson(rawBody, realModelId);
-  },
 
   buildUpstreamHeaders(incoming, upstreamApiKey) {
     const headers: Record<string, string> = {

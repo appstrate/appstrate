@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Portkey gateway module — phase 1 stateless proxy integration (#437).
+ * Portkey gateway module — mandatory stateless proxy integration (#437).
  *
- * When loaded (`MODULES=portkey,…`), spawns the open-source Portkey AI
- * Gateway as a local sub-process and re-points every API-key LLM call
- * through it via the sidecar's `/llm/*` reverse proxy. Phase 1 keeps
- * everything stateless — credential decryption + provider catalog stay
- * in `apps/api`; Portkey just routes, retries (with `Retry-After`
- * honoring + backoff), and emits OTel metrics. Subscription-OAuth
- * providers (Codex, Claude Pro) bypass Portkey — see
- * `services/run-launcher/pi.ts` and the epic's non-scope section.
+ * Spawns the open-source Portkey AI Gateway as a local sub-process and
+ * re-points every API-key LLM call through it (sidecar `/llm/*` for
+ * agent containers, in-process for remote runners). Stays stateless —
+ * credential decryption + provider catalog stay in `apps/api`; Portkey
+ * routes and retries (with `Retry-After` honoring + backoff). The OSS
+ * bundle does NOT emit OTel/Prometheus metrics (Cloud-only feature) and
+ * does NOT compute USD cost — see `services/pricing-catalog.ts` for the
+ * vendored catalog. Subscription-OAuth providers (Codex, Claude Pro)
+ * bypass Portkey — see `services/run-launcher/pi.ts` and the epic's
+ * non-scope section.
  *
- * When absent (default OSS), `setPortkeyRouter(null)` stays null and
- * the legacy direct-upstream path is unchanged. Zero footprint.
+ * Module is required: `boot.ts` calls `assertPortkeyRoutersInstalled()`
+ * after `loadModules()` and aborts startup if either router slot is empty.
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";

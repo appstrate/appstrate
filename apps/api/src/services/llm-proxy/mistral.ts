@@ -30,19 +30,10 @@
  */
 
 import type { LlmProxyAdapter } from "./types.ts";
-import {
-  extractUsageObject,
-  numberOrUndefined,
-  parseSseDataFrame,
-  substituteModelJson,
-} from "./helpers.ts";
+import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./helpers.ts";
 
 export const mistralConversationsAdapter: LlmProxyAdapter = {
   api: "mistral-conversations",
-
-  substituteModel(rawBody, realModelId) {
-    return substituteModelJson(rawBody, realModelId);
-  },
 
   buildUpstreamHeaders(_incoming, upstreamApiKey) {
     return {

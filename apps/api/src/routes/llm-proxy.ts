@@ -40,8 +40,10 @@ import { forbidden, invalidRequest } from "../lib/errors.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
+  LlmProxyUnroutableModelError,
   LlmProxyUnsupportedModelError,
 } from "../services/llm-proxy/core.ts";
+import { ApiError } from "@appstrate/core/api-errors";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
@@ -88,7 +90,7 @@ export function createLlmProxyRouter() {
     // (`https://api.mistral.ai/v1`), same convention as OpenAI.
     {
       urlPath: "/mistral-conversations/v1/chat/completions",
-      upstreamPath: "/v1/chat/completions",
+      upstreamPath: "/chat/completions",
       adapter: mistralConversationsAdapter,
     },
   ];
@@ -165,6 +167,17 @@ async function handleProxy(
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");
+    }
+    if (err instanceof LlmProxyUnroutableModelError) {
+      // Server-side config bug: a preset's apiShape has no Portkey
+      // provider mapping. Surface the detail so operators can fix it
+      // without grepping logs.
+      throw new ApiError({
+        status: 500,
+        code: "model_not_routable",
+        title: "Model Not Routable",
+        detail: err.message,
+      });
     }
     throw err;
   }

@@ -26,6 +26,7 @@ import { invalidRequest } from "../../lib/errors.ts";
 import { getPortkeyInprocessRouter } from "../portkey-router.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
+import { substituteModelJson } from "./helpers.ts";
 import type {
   LlmProxyAdapter,
   LlmProxyPrincipal,
@@ -73,6 +74,20 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
+/** Raised when a preset's `apiShape` has no Portkey provider mapping. */
+export class LlmProxyUnroutableModelError extends Error {
+  constructor(
+    public readonly presetId: string,
+    public readonly apiShape: string,
+  ) {
+    super(
+      `Model "${presetId}" uses apiShape "${apiShape}" which has no Portkey provider mapping. ` +
+        `Add an entry to API_SHAPE_TO_PORTKEY_PROVIDER in services/pricing-catalog.ts.`,
+    );
+    this.name = "LlmProxyUnroutableModelError";
+  }
+}
+
 export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
@@ -83,7 +98,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const presetId = extractPresetId(inputs.rawBody);
   const resolved = await resolvePresetForOrg(presetId, inputs.principal.orgId, inputs.adapter.api);
 
-  const rewrittenBody = inputs.adapter.substituteModel(inputs.rawBody, resolved.realModelId);
+  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.realModelId);
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
   // apiShape, realModel, requestBody)` so cross-org / cross-preset
@@ -112,39 +127,36 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     cacheKeyForWrite = probe.cacheKey;
   }
 
-  // Route every API-key LLM request through the Portkey in-process
-  // gateway. `boot.ts` guarantees the router slot is installed via
-  // `assertPortkeyRoutersInstalled()`. The router itself can still return
-  // null for an `apiShape` outside `API_SHAPE_TO_PORTKEY_PROVIDER` (exotic
-  // providers not yet mapped); in that narrow case we fall through to the
-  // direct upstream path. Cost tracking is unaffected — Portkey passes
-  // the SSE `usage` frame / JSON `usage` block verbatim.
+  // Portkey is mandatory for the proxy path. `boot.ts` asserts the router
+  // slot is installed via `assertPortkeyRoutersInstalled()`. The router
+  // returns null only for an `apiShape` outside `API_SHAPE_TO_PORTKEY_PROVIDER`
+  // — that's a config bug (a preset whose protocol we can't route), so we
+  // fail fast with a clear error instead of silently bypassing the gateway.
   const portkeyRouting = getPortkeyInprocessRouter()({
     apiShape: resolved.api,
     baseUrl: resolved.baseUrl,
     apiKey: resolved.upstreamApiKey,
   });
+  if (!portkeyRouting) {
+    throw new LlmProxyUnroutableModelError(presetId, resolved.api);
+  }
 
-  const upstreamUrl = portkeyRouting
-    ? joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath)
-    : joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
+  const upstreamUrl = joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath);
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.upstreamApiKey,
   );
-  if (portkeyRouting) {
-    upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
-    // Belt-and-braces: ask Portkey upstream for identity. Portkey 1.15.2
-    // OSS ignores Accept-Encoding and always copies the upstream's
-    // Content-Encoding header verbatim, but the bytes it forwards have
-    // already been decoded internally (Portkey buffers the upstream for
-    // metrics). Result: header says "br" / "gzip" but body is plain JSON
-    // → every strict decoder (Bun fetch, node:zlib) rejects the stream.
-    // The actual fix is `decompress: false` on the fetch below, which
-    // hands us the raw (already-identity) bytes; we strip the bogus
-    // Content-Encoding via `cloneResponseHeaders` before forwarding.
-    upstreamHeaders["accept-encoding"] = "identity";
-  }
+  upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
+  // Belt-and-braces: ask Portkey upstream for identity. Portkey 1.15.2
+  // OSS ignores Accept-Encoding and always copies the upstream's
+  // Content-Encoding header verbatim, but the bytes it forwards have
+  // already been decoded internally (Portkey buffers the upstream for
+  // metrics). Result: header says "br" / "gzip" but body is plain JSON
+  // → every strict decoder (Bun fetch, node:zlib) rejects the stream.
+  // The actual fix is `decompress: false` on the fetch below, which
+  // hands us the raw (already-identity) bytes; we strip the bogus
+  // Content-Encoding via `cloneResponseHeaders` before forwarding.
+  upstreamHeaders["accept-encoding"] = "identity";
 
   const started = Date.now();
   let upstream: Response;
@@ -158,7 +170,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       // because Portkey lies about Content-Encoding (see note above) and
       // Bun's brotli/zlib decoders crash on the malformed framing it
       // produces. Type cast keeps the option invisible to `RequestInit`.
-      ...(portkeyRouting ? { decompress: false } : {}),
+      decompress: false,
     } as RequestInit & { decompress?: boolean });
   } catch (err) {
     logger.error("llm-proxy: upstream fetch failed", {

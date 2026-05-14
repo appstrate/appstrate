@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Verifies that `runPlatformContainer` re-points the sidecar's LLM
- * config at Portkey when a router is installed, and falls through to
- * the legacy direct-upstream path when none is installed.
+ * Verifies that `runPlatformContainer` routes every API-key LLM config
+ * through Portkey (mandatory since Phase 2.5, #437) and fails fast when
+ * an unmapped `apiShape` would otherwise bypass the gateway.
  *
  * Uses a fake `ContainerOrchestrator` so the test exercises the real
  * config-build code path in `services/run-launcher/pi.ts` without
@@ -27,6 +27,24 @@ import { runs } from "@appstrate/db/schema";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { setPortkeyRouter, type PortkeyRouter } from "../../../src/services/portkey-router.ts";
+import { API_SHAPE_TO_PORTKEY_PROVIDER } from "../../../src/services/pricing-catalog.ts";
+
+/**
+ * Restore the preload-baseline router (passthrough mock pointing at
+ * `host.docker.internal:8787`). Tests that need a different router
+ * install their own, then call this to put the baseline back so the
+ * next test starts from a clean known state.
+ */
+function installBaselineRouter(): void {
+  setPortkeyRouter((model) => {
+    const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
+    if (!provider) return null;
+    return {
+      baseUrl: "http://host.docker.internal:8787",
+      portkeyConfig: JSON.stringify({ provider, api_key: model.apiKey }),
+    };
+  });
+}
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { truncateAll } from "../../helpers/db.ts";
@@ -145,39 +163,42 @@ async function seedRun(ctx: TestContext): Promise<string> {
 describe("runPlatformContainer — Portkey routing integration", () => {
   beforeEach(async () => {
     await truncateAll();
+    // Restore baseline before every test — `setPortkeyRouter(null)` is
+    // never installed in this suite (would crash request-time code that
+    // assumes a non-null router slot).
+    installBaselineRouter();
   });
 
   afterEach(() => {
-    setPortkeyRouter(null);
+    installBaselineRouter();
   });
 
-  it("falls through to direct upstream when no Portkey router is installed", async () => {
-    const ctx = await createTestContext({ orgSlug: "no-portkey" });
+  it("fails fast when the router cannot route an api_key apiShape", async () => {
+    // Router installed but rejects this model — Portkey is mandatory,
+    // so unroutable shapes are a config bug and must surface a clear
+    // error rather than silently bypassing the gateway.
+    setPortkeyRouter(() => null);
+
+    const ctx = await createTestContext({ orgSlug: "unroutable" });
     const runId = await seedRun(ctx);
     const fake = createCapturingOrchestrator();
 
-    await runPlatformContainer({
-      runId,
-      context: buildContext(runId),
-      plan: buildPlan(),
-      sinkCredentials: mintSinkCredentials({
+    await expect(
+      runPlatformContainer({
         runId,
-        appUrl: "http://platform:3000",
-        ttlSeconds: 3600,
+        context: buildContext(runId),
+        plan: buildPlan(),
+        sinkCredentials: mintSinkCredentials({
+          runId,
+          appUrl: "http://platform:3000",
+          ttlSeconds: 3600,
+        }),
+        orchestrator: fake.orchestrator,
       }),
-      orchestrator: fake.orchestrator,
-    });
+    ).rejects.toThrow(/Portkey provider mapping/i);
 
-    expect(fake.capturedSidecarConfig).not.toBeNull();
-    const llm = fake.capturedSidecarConfig!.llm;
-    expect(llm).toBeDefined();
-    expect(llm!.authMode).toBe("api_key");
-    if (llm!.authMode === "api_key") {
-      expect(llm!.baseUrl).toBe("https://api.openai.com/v1");
-      expect(llm!.portkeyConfig).toBeUndefined();
-    }
-    // Pi SDK retry stays on (legacy behavior).
-    expect(fake.capturedAgentEnv!.MODEL_RETRY_ENABLED).toBeUndefined();
+    // No sidecar config captured — we fail before any container is created.
+    expect(fake.capturedSidecarConfig).toBeNull();
   });
 
   it("re-points sidecar baseUrl + injects portkeyConfig when a router is installed", async () => {
@@ -217,26 +238,24 @@ describe("runPlatformContainer — Portkey routing integration", () => {
     expect(fake.capturedAgentEnv!.MODEL_RETRY_ENABLED).toBe("false");
   });
 
-  it("does not invoke Portkey for subscription OAuth credentials (provider bypass)", async () => {
-    // OAuth-credential branch is selected; router must NEVER be consulted.
+  it("consults the router on every api_key plan (Portkey-mandatory)", async () => {
     let routerCalled = false;
-    setPortkeyRouter(() => {
+    setPortkeyRouter((model) => {
       routerCalled = true;
-      return null;
+      return {
+        baseUrl: "http://host.docker.internal:8787",
+        portkeyConfig: JSON.stringify({ provider: "openai", api_key: model.apiKey }),
+      };
     });
 
-    const ctx = await createTestContext({ orgSlug: "oauth-bypass" });
+    const ctx = await createTestContext({ orgSlug: "api-key-mandatory" });
     const runId = await seedRun(ctx);
     const fake = createCapturingOrchestrator();
 
-    const plan = buildPlan();
-    // Simulate an OAuth credential — pi.ts uses isOAuthModelProvider() which
-    // checks the registry; for this codepath test we exercise the API-key
-    // branch and just confirm the router is consulted there.
     await runPlatformContainer({
       runId,
       context: buildContext(runId),
-      plan,
+      plan: buildPlan(),
       sinkCredentials: mintSinkCredentials({
         runId,
         appUrl: "http://platform:3000",
@@ -245,6 +264,6 @@ describe("runPlatformContainer — Portkey routing integration", () => {
       orchestrator: fake.orchestrator,
     });
 
-    expect(routerCalled).toBe(true); // API-key path consults it
+    expect(routerCalled).toBe(true);
   });
 });

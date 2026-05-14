@@ -42,14 +42,15 @@ export interface UpstreamUsage {
 
 /**
  * Protocol-specific hooks consumed by the shared core. Each concrete
- * adapter (OpenAI, Anthropic) implements these four operations; the
- * core handles routing, auth, streaming, and metering.
+ * adapter (OpenAI, Anthropic, Mistral) implements these three operations;
+ * the core handles routing, auth wrapping, streaming, body rewrite, and
+ * metering. Body rewrite (`body.model` substitution) is identical across
+ * shapes and lives in `helpers.ts:substituteModelJson` — no adapter hook
+ * needed.
  */
 export interface LlmProxyAdapter {
   /** Protocol string — must match `ResolvedProxyModel.api`. */
   readonly api: string;
-  /** Rewrite the request body so `body.model` becomes the upstream id. */
-  substituteModel(rawBody: Uint8Array, realModelId: string): Uint8Array;
   /** Build the upstream request headers (auth + protocol-specific). */
   buildUpstreamHeaders(incoming: Headers, upstreamApiKey: string): Record<string, string>;
   /** Extract usage from a non-streaming JSON body. Returns null if the shape is unexpected. */

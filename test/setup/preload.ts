@@ -228,13 +228,33 @@ const { registerTruncationTables } = await import("../../apps/api/test/helpers/d
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
 // `portkey` is mandatory in production: `boot.ts` aborts if the router
-// slots are empty. Tests don't run module `init()` (no real gateway
-// sub-process), so install harmless `() => null` stubs as the baseline.
-// Individual tests that exercise the Portkey path override these.
+// slots are empty AND request-time code requires the router to return a
+// non-null routing tuple for every api_key call. Tests don't run module
+// `init()` (no real gateway sub-process), so install a passthrough mock
+// that mimics the production routing shape — every supported apiShape
+// resolves to a routing pointing at a local loopback gateway with a
+// minimal inline config carrying the upstream `api_key`. Individual
+// tests can override these to exercise specific edge cases.
 const { setPortkeyRouter, setPortkeyInprocessRouter } =
   await import("../../apps/api/src/services/portkey-router.ts");
-setPortkeyRouter(() => null);
-setPortkeyInprocessRouter(() => null);
+const { API_SHAPE_TO_PORTKEY_PROVIDER } =
+  await import("../../apps/api/src/services/pricing-catalog.ts");
+function buildTestRouter(host: string) {
+  return (model: { apiShape: string; apiKey: string }) => {
+    const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
+    if (!provider) return null;
+    // Mirror production: OpenAI/Mistral SDKs append `/chat/completions`
+    // to a `/v1`-baked baseUrl; Anthropic SDK already includes `/v1`
+    // in the request path, so the gateway baseUrl stays bare.
+    const prefix = model.apiShape === "anthropic-messages" ? "" : "/v1";
+    return {
+      baseUrl: `${host}${prefix}`,
+      portkeyConfig: JSON.stringify({ provider, api_key: model.apiKey }),
+    };
+  };
+}
+setPortkeyRouter(buildTestRouter("http://host.docker.internal:8787"));
+setPortkeyInprocessRouter(buildTestRouter("http://127.0.0.1:8787"));
 
 // Phase 1: discover modules and register them. We collect imported modules
 // into a local list, then use the shared `collectModuleContributions()`

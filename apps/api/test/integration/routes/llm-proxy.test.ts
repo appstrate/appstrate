@@ -41,6 +41,29 @@ import {
   setPortkeyInprocessRouter,
   type PortkeyRouter,
 } from "../../../src/services/portkey-router.ts";
+import { API_SHAPE_TO_PORTKEY_PROVIDER } from "../../../src/services/pricing-catalog.ts";
+
+/**
+ * Restore the preload-baseline router (passthrough mock pointing at
+ * `127.0.0.1:8787`). Tests that need a different router install their
+ * own, then call this in `afterEach` so the next test starts from a
+ * clean known state — never `() => null`, which would crash subsequent
+ * tests now that Portkey routing is mandatory.
+ */
+function installBaselineInprocessRouter(): void {
+  setPortkeyInprocessRouter((model) => {
+    const provider = API_SHAPE_TO_PORTKEY_PROVIDER[model.apiShape];
+    if (!provider) return null;
+    // Mirror production: OpenAI/Mistral SDKs append `/chat/completions`
+    // to a `/v1`-baked baseUrl; Anthropic SDK already includes `/v1`
+    // in the request path, so the gateway baseUrl stays bare.
+    const prefix = model.apiShape === "anthropic-messages" ? "" : "/v1";
+    return {
+      baseUrl: `http://127.0.0.1:8787${prefix}`,
+      portkeyConfig: JSON.stringify({ provider, api_key: model.apiKey }),
+    };
+  });
+}
 import {
   resetResponseCacheConfigForTesting,
   setResponseCacheConfig,
@@ -163,9 +186,13 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(json.usage?.prompt_tokens).toBe(100);
 
     expect(captured).not.toBeNull();
-    expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
+    // Portkey is mandatory — every api_key call is routed through the
+    // local gateway; the preload installs a passthrough router pointing
+    // at `127.0.0.1:8787`.
+    expect(captured!.url).toBe("http://127.0.0.1:8787/v1/chat/completions");
     const forwardedHeaders = new Headers(captured!.init?.headers as Record<string, string>);
     expect(forwardedHeaders.get("authorization")).toBe("Bearer sk-upstream-42");
+    expect(forwardedHeaders.get("x-portkey-config")).not.toBeNull();
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.init?.body as Uint8Array));
     expect(forwardedBody.model).toBe("gpt-4o-2024-08-06");
     expect(forwardedBody.messages).toEqual([{ role: "user", content: "hi" }]);
@@ -404,7 +431,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
   it("forwards with Authorization: Bearer and substitutes the model id", async () => {
     const h = await buildHarness({
       apiShape: "mistral-conversations",
-      baseUrl: "https://api.mistral.test",
+      baseUrl: "https://api.mistral.test/v1",
       modelId: "mistral-large-latest",
       upstreamKey: "mistral-upstream-99",
     });
@@ -440,7 +467,8 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
-    expect(captured!.url).toBe("https://api.mistral.test/v1/chat/completions");
+    // Portkey-mandatory: URL is the gateway, Portkey routes upstream.
+    expect(captured!.url).toBe("http://127.0.0.1:8787/v1/chat/completions");
     expect(captured!.headers.get("Authorization")).toBe("Bearer mistral-upstream-99");
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
     expect(forwardedBody.model).toBe("mistral-large-latest");
@@ -485,11 +513,7 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
 
   afterEach(() => {
     restoreFetch();
-    // Reset to the preload baseline (`() => null`) — `null` would trip the
-    // boot-time invariant and crash other tests because Portkey is now
-    // mandatory in production. The unmapped-shape branch is exercised
-    // explicitly by the "falls through to direct upstream" case below.
-    setPortkeyInprocessRouter(() => null);
+    installBaselineInprocessRouter();
   });
 
   it("swaps upstream to Portkey and injects x-portkey-config when the router is installed", async () => {
@@ -572,31 +596,20 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
     expect(row!.outputTokens).toBe(8);
   });
 
-  it("falls through to direct upstream when the router returns null (unmapped apiShape)", async () => {
+  it("fails fast when the router cannot route the apiShape (unmapped)", async () => {
     const h = await buildHarness();
-    // Router installed but rejects this model — proxy must keep its
-    // legacy behavior (direct upstream + no x-portkey-config).
+    // Router installed but rejects this model — Portkey is mandatory,
+    // so unroutable shapes are a config bug and must surface a clear
+    // 5xx rather than silently bypassing the gateway.
     setPortkeyInprocessRouter(() => null);
 
-    let captured: {
-      url: string;
-      headers: Headers;
-      init: RequestInit & { decompress?: boolean };
-    } | null = null;
-    mockUpstream(async (input, init) => {
-      captured = {
-        url: typeof input === "string" ? input : (input as URL).toString(),
-        headers: new Headers(init?.headers as Record<string, string>),
-        init: (init ?? {}) as RequestInit & { decompress?: boolean },
-      };
-      return new Response(
-        JSON.stringify({
-          id: "chatcmpl_direct",
-          choices: [{ message: { role: "assistant", content: "ok" } }],
-          usage: { prompt_tokens: 5, completion_tokens: 3 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
+    let upstreamHit = false;
+    mockUpstream(async () => {
+      upstreamHit = true;
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     });
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
@@ -608,15 +621,11 @@ describe("POST /api/llm-proxy/* — Portkey in-process routing (#437)", () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
-    expect(captured!.headers.get("x-portkey-config")).toBeNull();
-    // Direct upstream — no encoding override; we don't need to fight
-    // Bun's decompressor when Portkey isn't rewriting the response.
-    expect(captured!.headers.get("accept-encoding")).toBeNull();
-    // And no `decompress: false` override either — direct path keeps
-    // Bun's auto-decompression (upstream really is compressed there).
-    expect(captured!.init.decompress).toBeUndefined();
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { detail?: string; title?: string };
+    expect(body.detail ?? body.title ?? "").toMatch(/Portkey provider mapping/i);
+    // Crucially: no upstream call was made — the proxy fails before fetch.
+    expect(upstreamHit).toBe(false);
   });
 
   it("forwards the body unmodified when Portkey lies about Content-Encoding (#437 follow-up)", async () => {
