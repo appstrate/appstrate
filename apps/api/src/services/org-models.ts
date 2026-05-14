@@ -45,38 +45,42 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   return mergeSystemAndDb<ModelDefinition, (typeof reachableRows)[number], OrgModelInfo>({
     system,
     rows: reachableRows,
-    mapSystem: (id, def): OrgModelInfo => ({
-      id,
-      label: def.label,
-      apiShape: def.apiShape,
-      baseUrl: def.baseUrl,
-      modelId: def.modelId,
-      input: def.input ?? null,
-      contextWindow: def.contextWindow ?? null,
-      maxTokens: def.maxTokens ?? null,
-      reasoning: def.reasoning ?? null,
-      cost: def.cost ?? null,
-      enabled: def.enabled !== false,
-      isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in",
-      credentialId: def.credentialId,
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    mapSystem: (id, def): OrgModelInfo => {
+      const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+      return {
+        id,
+        label: def.label ?? defaults.label ?? def.modelId,
+        apiShape: def.apiShape,
+        baseUrl: def.baseUrl,
+        modelId: def.modelId,
+        input: def.input ?? defaults.input ?? null,
+        contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
+        maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
+        reasoning: def.reasoning ?? defaults.reasoning ?? null,
+        cost: def.cost ?? defaults.cost ?? null,
+        enabled: def.enabled !== false,
+        isDefault: !orgHasDefault && def.isDefault === true,
+        source: "built-in",
+        credentialId: def.credentialId,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     mapRow: (row): OrgModelInfo => {
       const creds = credByRow.get(row.id)!;
+      const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
       return {
         id: row.id,
-        label: row.label,
+        label: row.label ?? defaults.label ?? row.modelId,
         apiShape: creds.apiShape,
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
-        input: row.input as string[] | null,
-        contextWindow: row.contextWindow,
-        maxTokens: row.maxTokens,
-        reasoning: row.reasoning,
-        cost: row.cost as ModelCost | null,
+        input: (row.input as string[] | null) ?? defaults.input ?? null,
+        contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
+        maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+        reasoning: row.reasoning ?? defaults.reasoning ?? null,
+        cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
         enabled: row.enabled,
         isDefault: row.isDefault,
         source: row.source as "custom" | "built-in",
@@ -87,6 +91,30 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       };
     },
   }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Derive a model label when the caller doesn't supply one. Picks the catalog
+ * label (`(catalogProviderId ?? providerId, modelId)`) and dedupes against
+ * existing org rows by appending ` (2)`, ` (3)`, …  Unknown models fall back
+ * to `modelId` so the column (`NOT NULL`) always gets a value.
+ */
+export async function deriveModelLabel(
+  orgId: string,
+  providerId: string,
+  modelId: string,
+): Promise<string> {
+  const defaults = resolveCatalogDefaults(providerId, modelId);
+  const base = defaults.label ?? modelId;
+  const rows = await db
+    .select({ label: orgModels.label })
+    .from(orgModels)
+    .where(scopedWhere(orgModels, { orgId }));
+  const existing = new Set(rows.map((r) => r.label));
+  if (!existing.has(base)) return base;
+  let counter = 2;
+  while (existing.has(`${base} (${counter})`)) counter++;
+  return `${base} (${counter})`;
 }
 
 // --- CRUD (DB models only) ---
@@ -218,6 +246,11 @@ export async function seedOrgModelsForCredential(
       .limit(1);
     const needsDefault = orgHasDefault.length === 0;
 
+    // Store catalog-derivable columns as null — read path falls back to
+    // the live catalog via `resolveCatalogDefaults`, so a weekly catalog
+    // refresh propagates to these rows without a backfill migration.
+    // Only `label` is materialised (DB column is NOT NULL); explicit
+    // user-side renames remain stable across catalog bumps.
     const inserted = await tx
       .insert(orgModels)
       .values(
@@ -226,12 +259,11 @@ export async function seedOrgModelsForCredential(
           label: m.label,
           modelId: m.id,
           credentialId,
-          input: m.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
-          contextWindow: m.contextWindow,
-          maxTokens: m.maxTokens,
-          reasoning: m.capabilities.includes("reasoning"),
+          input: null,
+          contextWindow: null,
+          maxTokens: null,
+          reasoning: null,
           cost: null,
-          // First inserted row becomes default when the org had none.
           isDefault: needsDefault && idx === 0,
           source: "custom",
           createdBy: userId,
@@ -286,13 +318,19 @@ export interface ResolvedModel extends Pick<
   | "baseUrl"
   | "modelId"
   | "apiKey"
-  | "label"
   | "input"
   | "contextWindow"
   | "maxTokens"
   | "reasoning"
   | "cost"
 > {
+  /**
+   * Always set — the builders fall back to the catalog and finally `modelId`
+   * so callers can read it as a plain string even when the env entry or DB
+   * row omitted it. `ModelDefinition.label` stays optional on purpose
+   * (storage-side) — `ResolvedModel.label` is its post-resolution view.
+   */
+  label: string;
   /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
   isSystemModel: boolean;
   /**
@@ -325,33 +363,55 @@ interface DbModelCredentials {
 }
 
 /**
- * Pricing fallback: explicit `cost` wins, then the vendored LiteLLM
- * catalog (`apps/api/src/data/pricing/*.json`) keyed by `(providerId,
- * modelId)`. Misses flow through as null and `computeCostUsd()`
- * short-circuits to 0.
+ * Catalog-derived defaults for `(providerId, modelId)`. Each `org_models`
+ * column is an *optional override* — when the row stores null, the catalog
+ * value flows through here. Storing nulls instead of frozen catalog values
+ * lets the weekly `refresh-pricing-catalog.ts` bump propagate to existing
+ * rows. Honors `catalogProviderId` so OAuth wrappers (codex → openai,
+ * claude-code → anthropic) hit the right catalog file.
+ *
+ * Returns `{}` on any miss (unmapped provider, unknown model id, dropped
+ * entry). Callers fall through to row values or final defaults.
  */
-function resolveCost(
-  providerId: string,
-  modelId: string,
-  explicit: ModelCost | null | undefined,
-): ModelCost | null {
-  return explicit ?? lookupCatalogModel(providerId, modelId)?.cost ?? null;
+interface CatalogDefaults {
+  label?: string;
+  input?: ("text" | "image")[];
+  contextWindow?: number;
+  maxTokens?: number | null;
+  reasoning?: boolean;
+  cost?: ModelCost;
+}
+
+function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+  const provider = getModelProvider(providerId);
+  const catalogKey = provider?.catalogProviderId ?? providerId;
+  const entry = lookupCatalogModel(catalogKey, modelId);
+  if (!entry) return {};
+  return {
+    label: entry.label,
+    input: entry.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+    contextWindow: entry.contextWindow,
+    maxTokens: entry.maxTokens,
+    reasoning: entry.capabilities.includes("reasoning"),
+    cost: entry.cost,
+  };
 }
 
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
   return {
     providerId: def.providerId,
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    label: def.label,
-    input: def.input ?? null,
-    contextWindow: def.contextWindow ?? null,
-    maxTokens: def.maxTokens ?? null,
-    reasoning: def.reasoning ?? null,
-    cost: resolveCost(def.providerId, def.modelId, def.cost),
+    label: def.label ?? defaults.label ?? def.modelId,
+    input: def.input ?? defaults.input ?? null,
+    contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: def.reasoning ?? defaults.reasoning ?? null,
+    cost: def.cost ?? defaults.cost ?? null,
     isSystemModel: true,
   };
 }
@@ -360,21 +420,25 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  *
  * `apiShape` and `baseUrl` come straight from the credential — the credential
  * service resolves them from the registry by `providerId` (with the per-row
- * `baseUrlOverride` honored when `baseUrlOverridable: true`).
+ * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
+ * derivable column on `org_models` is an optional override that defers to
+ * {@link resolveCatalogDefaults} on null — so a weekly catalog refresh
+ * propagates to existing rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
+  const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
   return {
     providerId: creds.providerId,
     apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    label: row.label,
-    input: row.input as string[] | null,
-    contextWindow: row.contextWindow,
-    maxTokens: row.maxTokens,
-    reasoning: row.reasoning,
-    cost: resolveCost(creds.providerId, row.modelId, row.cost as ModelCost | null),
+    label: row.label ?? defaults.label ?? row.modelId,
+    input: (row.input as string[] | null) ?? defaults.input ?? null,
+    contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: row.reasoning ?? defaults.reasoning ?? null,
+    cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,

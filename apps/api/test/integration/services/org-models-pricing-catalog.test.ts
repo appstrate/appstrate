@@ -90,4 +90,33 @@ describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () =>
     expect(resolved).not.toBeNull();
     expect(resolved!.cost).toBeNull();
   });
+
+  it("fills contextWindow / maxTokens / input / reasoning from catalog when the org row stores null", async () => {
+    // Same rationale as the cost fallback: storing nulls on `org_models`
+    // means the weekly `refresh-pricing-catalog.ts` bump propagates to
+    // existing rows. `buildDbResolvedModel` resolves all five fields via
+    // the same `resolveCatalogDefaults` path.
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "OpenAI",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-test",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      label: "GPT-4o catalog",
+      modelId: "gpt-4o",
+      enabled: true,
+      cost: null,
+      // Drizzle column is nullable — leave the four catalog-derivable
+      // fields out so the resolver picks them up live from the catalog.
+    });
+    const resolved = await loadModel(ctx.orgId, model.id);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.contextWindow).toBeGreaterThan(0);
+    expect(resolved!.input).toContain("text");
+    expect(resolved!.reasoning === false || resolved!.reasoning === null).toBe(true);
+  });
 });

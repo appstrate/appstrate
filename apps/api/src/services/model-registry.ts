@@ -11,7 +11,13 @@ import { getModelProvider } from "./model-providers/registry.ts";
 
 export interface SystemModelProviderKeyDefinition {
   id: string;
-  label: string;
+  /**
+   * Optional. Resolved at boot from `getModelProvider(providerId).displayName`
+   * when the env entry omits it — the registry is the single source of truth
+   * for human-readable names. `id` is the disambiguator across entries that
+   * share a `providerId`.
+   */
+  label?: string;
   /** Registered ModelProviderDefinition id this env entry binds to (e.g. "anthropic", "openai"). */
   providerId: string;
   /** Resolved from registry at boot — never persisted. */
@@ -23,7 +29,13 @@ export interface SystemModelProviderKeyDefinition {
 
 export interface ModelDefinition {
   id: string;
-  label: string;
+  /**
+   * Optional. The resolver in `org-models.ts` falls back to the vendored
+   * pricing catalog (`<catalogProviderId ?? providerId>.label`) at read time
+   * when this is unset — keeps env entries minimal and lets catalog refreshes
+   * propagate.
+   */
+  label?: string;
   /** Registered ModelProviderDefinition id — propagated from the parent system key. */
   providerId: string;
   /** Resolved from registry at boot — never persisted. */
@@ -52,7 +64,8 @@ let systemModels: Map<string, ModelDefinition> | null = null;
 const rawModelSchema = z.object({
   id: z.string().optional(),
   modelId: z.string().min(1),
-  label: z.string().min(1),
+  /** Optional — falls back to the vendored catalog label at resolve time. */
+  label: z.string().min(1).optional(),
   input: z.array(z.string()).nullable().optional(),
   contextWindow: z.number().positive().nullable().optional(),
   maxTokens: z.number().positive().nullable().optional(),
@@ -64,7 +77,8 @@ const rawModelSchema = z.object({
 
 const rawModelProviderKeySchema = z.object({
   id: z.string().min(1),
-  label: z.string().min(1),
+  /** Optional — falls back to the registry's `displayName` for this providerId. */
+  label: z.string().min(1).optional(),
   /**
    * Binds this env entry to a registered ModelProviderDefinition. The
    * registry is the single source of truth for `apiShape` and the default
@@ -152,7 +166,10 @@ export function initSystemModelProviderKeys(): void {
 
     pkMap.set(validPk.id, {
       id: validPk.id,
-      label: validPk.label,
+      // Pass through the env-supplied label as-is. The read path
+      // (`org-models.ts` resolved-model builders) falls back to
+      // `getModelProvider(providerId).displayName` when unset.
+      ...(validPk.label ? { label: validPk.label } : {}),
       providerId: validPk.providerId,
       apiShape,
       baseUrl,
@@ -176,7 +193,9 @@ export function initSystemModelProviderKeys(): void {
         const modelId = validM.id ?? `${validPk.id}:${validM.modelId}`;
         mdlMap.set(modelId, {
           id: modelId,
-          label: validM.label,
+          // Pass through env-supplied label; read path falls back to the
+          // vendored catalog (`<catalogProviderId ?? providerId>.label`).
+          ...(validM.label ? { label: validM.label } : {}),
           providerId: validPk.providerId,
           apiShape,
           baseUrl,

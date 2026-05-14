@@ -10,6 +10,7 @@ import { isSystemModelProviderKey } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
   deleteModelProviderCredential,
+  deriveCredentialLabel,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   updateModelProviderCredential,
@@ -33,7 +34,12 @@ import {
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
-  label: z.string().min(1, "label is required"),
+  /**
+   * Optional. When omitted, the server derives the label from the provider's
+   * `displayName` and dedupes against existing org credentials. See
+   * {@link deriveCredentialLabel}.
+   */
+  label: z.string().min(1).optional(),
   providerId: z.string().min(1, "providerId is required"),
   apiKey: z.string().min(1, "apiKey is required"),
   /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
@@ -145,7 +151,7 @@ export function createModelProviderCredentialsRouter() {
     const user = c.get("user");
     const body = await c.req.json();
     const data = parseBody(createSchema, body);
-    const { label, providerId, apiKey, baseUrlOverride } = data;
+    const { providerId, apiKey, baseUrlOverride } = data;
 
     const cfg = getModelProvider(providerId);
     if (!cfg) {
@@ -157,6 +163,8 @@ export function createModelProviderCredentialsRouter() {
         "providerId",
       );
     }
+
+    const label = data.label ?? (await deriveCredentialLabel(orgId, providerId));
 
     try {
       const id = await createApiKeyCredential({

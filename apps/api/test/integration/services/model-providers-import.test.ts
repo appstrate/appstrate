@@ -108,17 +108,19 @@ describe("importOAuthModelProviderConnection", () => {
     ).rejects.toMatchObject({ status: 404 } as Partial<ApiError>);
   });
 
-  it("empty label → invalidRequest (400)", async () => {
-    await expect(
-      importOAuthModelProviderConnection({
-        orgId,
-        userId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
-        label: "   ",
-        accessToken: "a",
-        refreshToken: "r",
-      }),
-    ).rejects.toMatchObject({ status: 400 } as Partial<ApiError>);
+  it("empty/whitespace label → server derives from provider displayName", async () => {
+    // After the label-redundancy cleanup, label is optional: a missing or
+    // whitespace-only value falls back to `getModelProvider(providerId)
+    // .displayName` deduped against existing org credentials. No 400.
+    const result = await importOAuthModelProviderConnection({
+      orgId,
+      userId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "   ",
+      accessToken: "a",
+      refreshToken: "r",
+    });
+    expect(result.credentialId).toBeTruthy();
   });
 
   it("missing accessToken → invalidRequest (400)", async () => {

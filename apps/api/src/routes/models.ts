@@ -18,6 +18,7 @@ import {
   testModelConnection,
   testModelConfig,
   loadModel,
+  deriveModelLabel,
 } from "../services/org-models.ts";
 import { getModelProvider } from "../services/model-providers/registry.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
@@ -36,9 +37,19 @@ import {
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z.object({
-  label: z.string().min(1, "label is required"),
+  /**
+   * Optional. When omitted, the server derives the label from the catalog
+   * (`<catalog>.label`) and dedupes against existing org rows. See
+   * {@link deriveModelLabel}.
+   */
+  label: z.string().min(1).optional(),
   modelId: z.string().min(1, "modelId is required"),
   credentialId: z.string().min(1, "credentialId is required"),
+  /**
+   * Catalog-derivable overrides. Omit (or send null on update) to let the
+   * read path fall back to the live catalog — keeps existing rows in sync
+   * with the weekly `refresh-pricing-catalog.ts` bump.
+   */
   input: z.array(z.string()).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -95,8 +106,16 @@ export function createModelsRouter() {
     const data = parseBody(createModelSchema, body);
 
     try {
-      const { label, modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } =
-        data;
+      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      // Label is optional on the wire — derive from the catalog when the
+      // caller omits it. Needs the credential's providerId to pick the
+      // right catalog (handles `catalogProviderId` for OAuth wrappers).
+      let label = data.label;
+      if (!label) {
+        const creds = await loadInferenceCredentials(orgId, credentialId);
+        if (!creds) throw invalidRequest("credentialId is unreachable", "credentialId");
+        label = await deriveModelLabel(orgId, creds.providerId, modelId);
+      }
       const id = await createOrgModel(orgId, label, modelId, user.id, credentialId, {
         input,
         contextWindow,
@@ -112,6 +131,7 @@ export function createModelsRouter() {
       });
       return c.json({ id }, 201);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Model create failed", {
         error: getErrorMessage(err),
       });

@@ -48,10 +48,20 @@ import {
 import { getProviderIcon } from "./icons";
 
 export interface ModelFormData {
-  label: string;
+  /**
+   * Optional — server derives from the catalog label (`<catalog>.label`)
+   * and dedupes against existing org rows when absent. Sent only when the
+   * user explicitly customized it.
+   */
+  label?: string;
   modelId: string;
   credentialId: string;
   newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
+  /**
+   * Catalog-derivable overrides. Sent only when the user edited them after
+   * picking a preset (RHF `dirtyFields`) — keeps existing rows in sync with
+   * the weekly `refresh-pricing-catalog.ts` bump.
+   */
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -217,6 +227,13 @@ function ModelFormBody({
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [cost, setCost] = useState<ModelCost | null>(null);
+  /**
+   * True once the user explicitly edits cost (or imports an OpenRouter cost
+   * different from the catalog). Cost lives outside RHF, so we track its
+   * dirty state separately — on submit, we only send `cost` when the user
+   * really overrode it, otherwise the server's catalog fallback applies.
+   */
+  const [costEdited, setCostEdited] = useState(false);
 
   const providerId = providerOverride ?? (model ? resolveProviderId(model, registry) : "");
   const selectedModelId = modelOverride ?? resolveModelEntryId(model, registry);
@@ -231,7 +248,7 @@ function ModelFormBody({
     setError,
     clearErrors,
     showError,
-    formState: { errors },
+    formState: { errors, dirtyFields },
   } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
@@ -339,6 +356,7 @@ function ModelFormBody({
     setValue("maxTokens", "");
     setValue("reasoning", false);
     setCost(null);
+    setCostEdited(false);
   };
 
   const handleProviderChange = (id: string) => {
@@ -381,6 +399,9 @@ function ModelFormBody({
     setValue("contextWindow", preset.contextWindow.toString());
     setValue("maxTokens", (preset.maxTokens ?? 0).toString());
     setValue("reasoning", caps.includes("reasoning"));
+    // Display the catalog cost in the UI without flagging it as "edited".
+    // Server-side `resolveCatalogDefaults` will resolve it on read, so we
+    // intentionally omit it from the POST payload.
     setCost(
       preset.cost
         ? {
@@ -391,6 +412,7 @@ function ModelFormBody({
           }
         : null,
     );
+    setCostEdited(false);
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -419,8 +441,23 @@ function ModelFormBody({
       return;
     }
 
+    // Per-field dirty tracking: handleModelChange uses raw setValue (no
+    // shouldDirty) so preset-derived values never mark fields dirty. Only
+    // values the user actually edited after the preset (or that came from
+    // OpenRouter live-search) are flagged. Catalog-derivable fields that
+    // stayed at their preset values are omitted from the payload — the
+    // server's `resolveCatalogDefaults` resolves them on read so weekly
+    // catalog refreshes propagate. Same rationale for `label` (custom
+    // input only) and `cost` (tracked separately because it lives outside
+    // RHF).
+    const labelDirty = dirtyFields.label === true;
+    const inputDirty = dirtyFields.inputText === true || dirtyFields.inputImage === true;
+    const cwDirty = dirtyFields.contextWindow === true;
+    const mtDirty = dirtyFields.maxTokens === true;
+    const reasoningDirty = dirtyFields.reasoning === true;
+
     onSubmit({
-      label: data.label.trim(),
+      ...(labelDirty && data.label.trim() ? { label: data.label.trim() } : {}),
       modelId: data.modelId.trim(),
       credentialId: willCreateNewKey ? "" : data.credentialId,
       // Inline credential creation needs the providerId (and optionally a
@@ -437,11 +474,11 @@ function ModelFormBody({
             },
           }
         : {}),
-      ...(inputArr.length > 0 ? { input: inputArr } : {}),
-      ...(cw ? { contextWindow: cw } : {}),
-      ...(mt ? { maxTokens: mt } : {}),
-      ...(data.reasoning ? { reasoning: true } : {}),
-      ...(cost ? { cost } : {}),
+      ...(inputDirty && inputArr.length > 0 ? { input: inputArr } : {}),
+      ...(cwDirty && cw ? { contextWindow: cw } : {}),
+      ...(mtDirty && mt ? { maxTokens: mt } : {}),
+      ...(reasoningDirty ? { reasoning: data.reasoning } : {}),
+      ...(costEdited && cost ? { cost } : {}),
     });
   });
 
@@ -537,15 +574,22 @@ function ModelFormBody({
               emptyText={t("models.form.openRouterNoResults")}
               searchingText={t("models.form.openRouterSearching")}
               onSelect={(m) => {
+                // OpenRouter has no vendored catalog, so every field comes
+                // from the live API and must be persisted as an explicit
+                // override — including cost. We mark each setValue as dirty
+                // so the submit handler ships them.
                 setSelectedModelId(m.id);
-                setValue("modelId", m.id);
-                setValue("label", m.name);
-                if (m.contextWindow) setValue("contextWindow", m.contextWindow.toString());
-                if (m.maxTokens) setValue("maxTokens", m.maxTokens.toString());
-                setValue("inputText", m.input?.includes("text") !== false);
-                setValue("inputImage", m.input?.includes("image") ?? false);
-                setValue("reasoning", m.reasoning ?? false);
+                setValue("modelId", m.id, { shouldDirty: true });
+                setValue("label", m.name, { shouldDirty: true });
+                if (m.contextWindow)
+                  setValue("contextWindow", m.contextWindow.toString(), { shouldDirty: true });
+                if (m.maxTokens)
+                  setValue("maxTokens", m.maxTokens.toString(), { shouldDirty: true });
+                setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
+                setValue("inputImage", m.input?.includes("image") ?? false, { shouldDirty: true });
+                setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
                 setCost(m.cost ?? null);
+                setCostEdited(m.cost != null);
               }}
             />
           </div>

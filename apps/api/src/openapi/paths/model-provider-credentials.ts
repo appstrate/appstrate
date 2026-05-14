@@ -186,12 +186,13 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "providerId", "apiKey"],
+              required: ["providerId", "apiKey"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
-                  description: "Display name for the model provider credential",
+                  description:
+                    "Display name for the model provider credential. Optional — the server derives one from the provider's `displayName` when omitted, deduping against existing org credentials.",
                 },
                 providerId: {
                   type: "string",

@@ -70,9 +70,14 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "modelId", "credentialId"],
+              required: ["modelId", "credentialId"],
               properties: {
-                label: { type: "string", minLength: 1, description: "Display name for the model" },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "Display name for the model. Optional — the server derives one from the catalog (or `modelId` on miss) when omitted, deduping against existing org rows.",
+                },
                 modelId: {
                   type: "string",
                   minLength: 1,

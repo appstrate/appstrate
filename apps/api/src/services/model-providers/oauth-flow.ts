@@ -25,6 +25,7 @@
 
 import {
   createOAuthCredential,
+  deriveCredentialLabel,
   findMissingIdentityClaims,
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
@@ -41,6 +42,16 @@ export interface ImportOAuthModelProviderResult {
 }
 
 /**
+ * Input for {@link importOAuthModelProviderConnection}. Mirrors
+ * {@link CreateOAuthCredentialInput} but with an optional label — the
+ * function derives one from the provider's `displayName` when the helper
+ * doesn't supply it.
+ */
+export type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
+  label?: string;
+};
+
+/**
  * Persist a token bundle the CLI obtained on the user's machine via a
  * loopback OAuth dance against the official provider client_id.
  *
@@ -51,18 +62,18 @@ export interface ImportOAuthModelProviderResult {
  * refuses to persist a credential whose mandatory slots can't be resolved.
  */
 export async function importOAuthModelProviderConnection(
-  input: CreateOAuthCredentialInput,
+  input: ImportOAuthModelProviderInput,
 ): Promise<ImportOAuthModelProviderResult> {
   const config = getModelProvider(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
     throw notFound(`Unknown OAuth model provider: ${input.providerId} (not in registry)`);
   }
-  if (!input.label.trim()) {
-    throw invalidRequest("`label` is required", "label");
-  }
   if (!input.accessToken || !input.refreshToken) {
     throw invalidRequest("`accessToken` and `refreshToken` are required");
   }
+  const label = input.label?.trim()
+    ? input.label.trim()
+    : await deriveCredentialLabel(input.orgId, input.providerId);
 
   // Identity extraction is delegated to the provider's module via the
   // `extractTokenIdentity` hook, which maps provider-specific claims into
@@ -95,6 +106,7 @@ export async function importOAuthModelProviderConnection(
 
   const credentialId = await createOAuthCredential({
     ...input,
+    label,
     ...(accountId ? { accountId } : {}),
     ...(email ? { email } : {}),
   });
