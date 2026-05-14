@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
+import { lookupModelCost } from "./pricing-catalog.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -339,7 +340,11 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     contextWindow: def.contextWindow ?? null,
     maxTokens: def.maxTokens ?? null,
     reasoning: def.reasoning ?? null,
-    cost: def.cost ?? null,
+    // Vendored pricing catalog (#437 phase 2) fills the gap when the
+    // operator's `SYSTEM_PROVIDER_KEYS` JSON doesn't supply per-model
+    // pricing. The explicit per-model `cost` still wins — same semantic
+    // as DB rows below.
+    cost: def.cost ?? lookupModelCost(def.apiShape, def.modelId),
     isSystemModel: true,
   };
 }
@@ -361,6 +366,13 @@ function dbRowToResolved(
   row: OrgModelRow,
   creds: { apiKey: string; providerId?: string; accountId?: string },
 ): ResolvedModel {
+  // `row.cost` is the per-org override (operator manually pinned pricing
+  // for this preset). When null, fall back to the vendored pricing
+  // catalog keyed on `(apiShape, modelId)` — #437 phase 2. The catalog
+  // covers ~400 mainstream models across openai / anthropic / mistral /
+  // google; misses (custom fine-tunes, brand-new releases) flow through
+  // as null and `computeCostUsd()` short-circuits to 0.
+  const override = row.cost as ModelCost | null;
   return {
     apiShape: row.apiShape,
     baseUrl: row.baseUrl,
@@ -371,7 +383,7 @@ function dbRowToResolved(
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: row.cost as ModelCost | null,
+    cost: override ?? lookupModelCost(row.apiShape, row.modelId),
     isSystemModel: false,
     providerId: creds.providerId,
     accountId: creds.accountId,

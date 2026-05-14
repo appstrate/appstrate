@@ -10,25 +10,16 @@
  * single entry here.
  */
 
+import { API_SHAPE_TO_PORTKEY_PROVIDER as CATALOG_MAP } from "../../services/pricing-catalog.ts";
 import type { PortkeyModelInput, PortkeyRouting } from "../../services/portkey-router.ts";
 
 /**
- * `apiShape` (Appstrate canonical) → Portkey provider slug. Slugs are
- * from Portkey's runtime catalog (see `@portkey-ai/gateway` build). The
- * subscription-OAuth shape `openai-codex-responses` is intentionally
- * absent — Codex never reaches Portkey.
+ * `apiShape` → Portkey provider slug. The authoritative map lives in
+ * `services/pricing-catalog.ts` since both the pricing lookup and the
+ * routing config need the same translation; re-exported here under the
+ * local name so the rest of this file reads naturally.
  */
-const API_SHAPE_TO_PORTKEY_PROVIDER: Record<string, string> = {
-  "anthropic-messages": "anthropic",
-  "openai-chat": "openai",
-  "openai-completions": "openai",
-  "openai-responses": "openai",
-  "mistral-conversations": "mistral-ai",
-  "google-generative-ai": "google",
-  "google-vertex": "vertex-ai",
-  "azure-openai-responses": "azure-openai",
-  "bedrock-converse-stream": "bedrock",
-};
+const API_SHAPE_TO_PORTKEY_PROVIDER = CATALOG_MAP;
 
 /**
  * Per-shape path prefix appended to the gateway base URL so the final

@@ -59,8 +59,8 @@ None to opt out of. Static analysis of the 471 KB build found zero telemetry SDK
 | `config.ts`    | `apiShape` → Portkey provider mapping, builds the `x-portkey-config`. |
 | `test/`        | Unit + integration tests, including a real Portkey spawn E2E.         |
 
-## Open follow-ups (phase 2+, not in this module)
+## Open follow-ups
 
-- Pricing catalog adoption (`Portkey-AI/models`) — replaces manual `org_models.cost` JSONB.
-- Open model catalog UX — feature `Custom / Advanced` mode exposing Portkey's 1 600+ providers.
-- Optional refinements: in-process Hono mount, semantic cache, multi-provider fallback chains.
+- ✅ **Phase 2 — pricing catalog** shipped. Vendored from [`Portkey-AI/models`](https://github.com/Portkey-AI/models) (MIT, weekly upstream refresh) under `apps/api/src/data/pricing/`. `apps/api/src/services/pricing-catalog.ts` exposes `lookupModelCost(apiShape, modelId)`. `org_models.cost` becomes an **override**: when set it wins, when null we fall back to the catalog. ~200 models across openai / anthropic / mistral-ai / google.
+- **Phase 3 — open model catalog UX** (next) — featured/advanced split, drop hardcoded registry, migrate `providerId` enum → free-text.
+- **Phase 4 — refinements** — semantic cache, multi-provider fallback chains, OTel metrics. (In-process mount is blocked upstream — `@portkey-ai/gateway` doesn't export a mountable Hono app.)
