@@ -429,6 +429,37 @@ describe("ALL /llm/* — placeholder replacement", () => {
   });
 });
 
+describe("ALL /llm/* — Portkey config forwarding", () => {
+  it("attaches x-portkey-config when present on the LLM config", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const portkeyConfig = JSON.stringify({ provider: "openai", api_key: "real-sk-ant-key" });
+    deps.config.llm = {
+      authMode: "api_key",
+      baseUrl: "https://api.example.com",
+      apiKey: "real-sk-ant-key",
+      placeholder: "sk-placeholder",
+      portkeyConfig,
+    };
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", { method: "POST" });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-portkey-config"]).toBe(portkeyConfig);
+  });
+
+  it("does not attach x-portkey-config when absent (legacy direct-upstream path)", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", { method: "POST" });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-portkey-config"]).toBeUndefined();
+  });
+});
+
 describe("ALL /llm/* — streaming", () => {
   it("streams response body through without buffering", async () => {
     const chunks = ['data: {"type":"content"}\n\n', "data: [DONE]\n\n"];

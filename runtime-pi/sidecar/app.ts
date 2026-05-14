@@ -309,6 +309,17 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
+    // Portkey opt-in: when the platform has the Portkey module loaded, it
+    // points `baseUrl` at the local Portkey gateway and ships an inline
+    // config carrying the real provider routing (`{ provider, api_key,
+    // custom_host?, retry?, … }`). We forward it as `x-portkey-config` so
+    // Portkey can route + rate-limit + retry without a Portkey-side
+    // credential store. Authorization stays substituted but Portkey
+    // ignores it — `api_key` in the inline config wins.
+    if (apiKeyConfig.portkeyConfig) {
+      forwardedHeaders["x-portkey-config"] = apiKeyConfig.portkeyConfig;
+    }
+
     const method = c.req.method;
     const body = method !== "GET" && method !== "HEAD" ? (c.req.raw.body ?? undefined) : undefined;
 
