@@ -103,6 +103,58 @@ export interface PiRunnerOptions {
 }
 
 /**
+ * Default response budget when the model carries no `maxTokens`.
+ * 16384 covers the common "no thinking" Claude / GPT response shape;
+ * models with larger budgets (Claude Sonnet thinking @ 64k) override
+ * via `model.maxTokens` and `reserveTokens` follows.
+ */
+const DEFAULT_RESERVE_TOKENS = 16384;
+/**
+ * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
+ * recent context (a few thousand tokens of recent tool calls + the last
+ * user message) and starts replaying earlier turns. 20k is small enough
+ * to fit even tiny context windows once `reserveTokens` is subtracted.
+ */
+const MIN_KEEP_RECENT_TOKENS = 20_000;
+/**
+ * Fallback context window when the model omits it. Matches the Claude
+ * family's standard 200k window — the most common runtime target.
+ */
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+/** Fraction of the context window to keep verbatim after a compaction pass. */
+const KEEP_RECENT_FRACTION = 0.1;
+
+/**
+ * Derive Pi SDK compaction settings from a resolved model. Pure function
+ * so the env-driven (`SYSTEM_PROVIDER_KEYS`) and DB-driven (`org_models`)
+ * paths get identical compaction sizing for the same `(contextWindow,
+ * maxTokens)` pair.
+ *
+ * | Knob               | Mapping                                | Why                                                                                                                                                                              |
+ * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+ * | `reserveTokens`    | `model.maxTokens ?? 16384`             | Response budget. MUST be ≥ `max_tokens` or the first call post-compaction underflows and the upstream 400 ("prompt is too long") reappears. Critical for Claude Sonnet thinking mode (`maxTokens: 64000`). |
+ * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
+ *
+ * Operators can disable compaction entirely with
+ * `MODEL_COMPACTION_ENABLED=false` (mirrors the existing
+ * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
+ * compaction middleware. See appstrate#445.
+ */
+export function derivePiCompactionSettings(
+  model: { contextWindow?: number | null; maxTokens?: number | null },
+  env: Record<string, string | undefined> = process.env,
+): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
+  if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
+  const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  const reserveTokens = model.maxTokens ?? DEFAULT_RESERVE_TOKENS;
+  const keepRecentTokens = Math.max(
+    MIN_KEEP_RECENT_TOKENS,
+    Math.floor(contextWindow * KEEP_RECENT_FRACTION),
+  );
+  return { enabled: true, reserveTokens, keepRecentTokens };
+}
+
+/**
  * Convert a Pi `MODEL_API` string into the provider key the Pi SDK's
  * {@link AuthStorage} uses to look up API keys.
  */
@@ -244,7 +296,7 @@ export class PiRunner implements Runner {
       resourceLoader,
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
-        compaction: { enabled: false },
+        compaction: derivePiCompactionSettings(model, process.env),
         // Pi SDK's built-in retry (Retry-After honoring + jitter, max 2
         // attempts) covers transient 429/5xx upstream. Operators can
         // opt out by setting `MODEL_RETRY_ENABLED=false` on the runtime
