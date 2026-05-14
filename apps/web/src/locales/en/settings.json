@@ -618,7 +618,7 @@
   "onboarding.summaryPlan": "Plan",
   "onboarding.modelTitle": "Configure an AI model",
   "onboarding.modelSubtitle": "Add an LLM model to run your agents. You can add more later.",
-  "onboarding.modelSeed.connectHint": "OAuth handshake + recommended models added automatically.",
+  "onboarding.modelSeed.connectHint": "OAuth handshake + featured models added automatically.",
   "onboarding.modelSeed.alreadyConnectedHint": "Manage this connection later from settings.",
   "onboarding.modelSeed.success_one": "{{count}} {{provider}} model added",
   "onboarding.modelSeed.success_other": "{{count}} {{provider}} models added",

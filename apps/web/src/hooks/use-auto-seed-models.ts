@@ -32,7 +32,7 @@ interface SeedResponse {
   promotedDefault: boolean;
 }
 
-export function useAutoSeedRecommendedModels() {
+export function useAutoSeedFeaturedModels() {
   const qc = useQueryClient();
   const registryQuery = useProvidersRegistry();
 

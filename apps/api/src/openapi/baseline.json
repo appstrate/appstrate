@@ -5898,6 +5898,7 @@
                           "defaultBaseUrl",
                           "baseUrlOverridable",
                           "authMode",
+                          "featured",
                           "models"
                         ],
                         "properties": {
@@ -5921,8 +5922,14 @@
                             "enum": [
                               "anthropic-messages",
                               "openai-chat",
+                              "openai-completions",
                               "openai-responses",
-                              "openai-codex-responses"
+                              "openai-codex-responses",
+                              "mistral-conversations",
+                              "google-generative-ai",
+                              "google-vertex",
+                              "azure-openai-responses",
+                              "bedrock-converse-stream"
                             ]
                           },
                           "defaultBaseUrl": {
@@ -5935,14 +5942,22 @@
                             "type": "string",
                             "enum": ["api_key", "oauth2"]
                           },
+                          "featured": {
+                            "type": "boolean",
+                            "description": "Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable."
+                          },
                           "models": {
                             "type": "array",
                             "items": {
                               "type": "object",
-                              "required": ["id", "contextWindow", "capabilities", "recommended"],
+                              "required": ["id", "contextWindow", "capabilities", "featured"],
                               "properties": {
                                 "id": {
                                   "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"],
+                                  "description": "Human-readable label for picker UIs; falls back to `id` when null."
                                 },
                                 "contextWindow": {
                                   "type": "integer"
@@ -5956,9 +5971,27 @@
                                     "type": "string"
                                   }
                                 },
-                                "recommended": {
+                                "cost": {
+                                  "type": ["object", "null"],
+                                  "description": "Per-1M-token cost (USD). Null when the provider doesn't publish pricing.",
+                                  "properties": {
+                                    "input": {
+                                      "type": "number"
+                                    },
+                                    "output": {
+                                      "type": "number"
+                                    },
+                                    "cacheRead": {
+                                      "type": "number"
+                                    },
+                                    "cacheWrite": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "featured": {
                                   "type": "boolean",
-                                  "description": "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all."
+                                  "description": "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's curated `featuredModels` whitelist; the rest of the catalog falls under 'All models'."
                                 }
                               }
                             }
@@ -6400,7 +6433,7 @@
         "operationId": "createOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/import` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. (The legacy `/api/model-providers-oauth/import` path remains accepted as a deprecation alias for helper versions already in the wild via `npx`.) The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6440,7 +6473,7 @@
                     },
                     "token": {
                       "type": "string",
-                      "description": "Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /import."
+                      "description": "Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /pair/redeem (or the legacy /import alias)."
                     },
                     "command": {
                       "type": "string",
@@ -6572,12 +6605,12 @@
         }
       }
     },
-    "/api/model-providers-oauth/import": {
+    "/api/model-providers-oauth/pair/redeem": {
       "post": {
-        "operationId": "importOAuthModelProviderConnection",
+        "operationId": "redeemOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
-        "summary": "Import an OAuth model provider token bundle from the connect helper",
-        "description": "Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the import to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.",
+        "summary": "Redeem a pairing token: post the OAuth credential bundle back to the platform",
+        "description": "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the redeem to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6628,6 +6661,113 @@
         "responses": {
           "200": {
             "description": "Connection persisted; matching provider key created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["credentialId", "providerId", "availableModelIds"],
+                  "properties": {
+                    "credentialId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "providerId": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "availableModelIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — caller lacks `model-provider-credentials:write`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/model-providers-oauth/import": {
+      "post": {
+        "operationId": "importOAuthModelProviderConnection",
+        "tags": ["Model Provider Credentials"],
+        "summary": "[Deprecated] Legacy alias of POST /api/model-providers-oauth/pair/redeem",
+        "description": "**Deprecated.** Use `POST /api/model-providers-oauth/pair/redeem` instead. This path is kept indefinitely as a backward-compatibility alias for `@appstrate/connect-helper` versions already in the wild via `npx @appstrate/connect-helper@latest <token>` — behaviour is identical to the canonical route. Responses carry `Deprecation: true` and a `Link: <…/pair/redeem>; rel=\"successor-version\"` header. Same auth contract: `Authorization: Bearer appp_<token>` only.",
+        "deprecated": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["providerId", "label", "accessToken", "refreshToken"],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "description": "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400."
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "accessToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": ["integer", "null"],
+                    "description": "Unix milliseconds since epoch — when the access token expires."
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320,
+                    "description": "Account email — either forwarded from the OAuth response body or re-derived server-side by the provider's `extractTokenIdentity` hook."
+                  },
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection persisted; matching provider key created. Carries `Deprecation: true` and `Link: <…/pair/redeem>; rel=\"successor-version\"`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19757,10 +19897,6 @@
           },
           "oauthEmail": {
             "type": ["string", "null"]
-          },
-          "oauthExpiresAt": {
-            "type": ["string", "null"],
-            "format": "date-time"
           },
           "needsReconnection": {
             "type": "boolean"

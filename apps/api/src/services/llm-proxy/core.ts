@@ -238,13 +238,6 @@ async function resolvePresetForOrg(
   if (loaded.apiShape !== expectedApi) {
     throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
   }
-  if (!loaded.providerId) {
-    // Models routed through the proxy MUST resolve to a registered
-    // provider — env-driven system keys without `providerId` can't
-    // address per-provider routing/identity hooks. Surface this as an
-    // unsupported preset (clean 400).
-    throw new LlmProxyUnsupportedModelError(presetId);
-  }
   return loaded;
 }
 

@@ -61,7 +61,7 @@ export function OnboardingModelStep() {
     >
       <div className="flex flex-col gap-5">
         {/* Primary path — OAuth subscription quick-connect. Single-click
-            seeds the recommended models from the registry. */}
+            seeds the featured models from the registry. */}
         <OnboardingQuickConnect />
 
         {/* Configured models, if any. The seeded rows land here once the

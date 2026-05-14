@@ -618,7 +618,7 @@
   "onboarding.summaryPlan": "Plan",
   "onboarding.modelTitle": "Configurer un modèle IA",
   "onboarding.modelSubtitle": "Ajoutez un modèle LLM pour exécuter vos agents. Vous pourrez en ajouter d'autres plus tard.",
-  "onboarding.modelSeed.connectHint": "Une connexion OAuth et les modèles recommandés ajoutés automatiquement.",
+  "onboarding.modelSeed.connectHint": "Une connexion OAuth et les modèles mis en avant ajoutés automatiquement.",
   "onboarding.modelSeed.alreadyConnectedHint": "Tu peux gérer cette connexion plus tard depuis les paramètres.",
   "onboarding.modelSeed.success_one": "{{count}} modèle {{provider}} ajouté",
   "onboarding.modelSeed.success_other": "{{count}} modèles {{provider}} ajoutés",

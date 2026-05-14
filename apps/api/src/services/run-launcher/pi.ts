@@ -101,23 +101,21 @@ export async function runPlatformContainer(
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.
     const isOauthCredential =
-      !!llmConfig.providerId &&
-      !!llmConfig.credentialId &&
-      isOAuthModelProvider(llmConfig.providerId);
+      !!llmConfig.credentialId && isOAuthModelProvider(llmConfig.providerId);
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
     // built by the module's `buildApiKeyPlaceholder` hook — see
     // `deriveOauthPlaceholder` below.
     const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId!)
+      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
       : deriveKeyPlaceholder(llmApiKey);
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
       // config boundary — the provider definition is the source of truth.
-      const providerCfg = getModelProvider(llmConfig.providerId!);
+      const providerCfg = getModelProvider(llmConfig.providerId);
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
         baseUrl: llmConfig.baseUrl,
@@ -130,13 +128,6 @@ export async function runPlatformContainer(
       // provider. The Pi SDK's native retry (Retry-After honoring +
       // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
       // see `packages/runner-pi/src/pi-runner.ts`.
-      if (!llmConfig.providerId) {
-        throw new Error(
-          `Model "${llmConfig.label}" has no providerId. ` +
-            `API-key models must resolve to a registered ModelProviderDefinition ` +
-            `(SYSTEM_PROVIDER_KEYS entries must declare \`providerId\`).`,
-        );
-      }
       sidecarLlm = {
         authMode: "api_key",
         baseUrl: llmConfig.baseUrl,

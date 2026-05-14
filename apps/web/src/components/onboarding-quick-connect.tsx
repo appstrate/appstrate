@@ -3,7 +3,7 @@
 /**
  * Onboarding-only quick-connect cards for OAuth model providers.
  * One click opens the pairing dialog; on success the helper seeds the
- * org's `org_models` with the registry's recommended models so the user
+ * org's `org_models` with the registry's featured models so the user
  * can hit "Continue" without touching the manual form.
  *
  * The list is module-driven: every OAuth provider the platform loaded
@@ -32,7 +32,7 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { useAutoSeedRecommendedModels } from "../hooks/use-auto-seed-models";
+import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -41,7 +41,7 @@ interface CardProps {
 
 function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const { seed } = useAutoSeedRecommendedModels();
+  const { seed } = useAutoSeedFeaturedModels();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);

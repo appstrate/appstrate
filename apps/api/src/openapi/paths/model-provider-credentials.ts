@@ -71,13 +71,7 @@ export const modelProviderCredentialsPaths = {
                           type: "array",
                           items: {
                             type: "object",
-                            required: [
-                              "id",
-                              "contextWindow",
-                              "capabilities",
-                              "recommended",
-                              "featured",
-                            ],
+                            required: ["id", "contextWindow", "capabilities", "featured"],
                             properties: {
                               id: { type: "string" },
                               label: {
@@ -99,15 +93,10 @@ export const modelProviderCredentialsPaths = {
                                   cacheWrite: { type: "number" },
                                 },
                               },
-                              recommended: {
-                                type: "boolean",
-                                description:
-                                  "Curated default for first-connection auto-seed flows (onboarding quick-connect). Consumers may seed every recommended model in `org_models` right after a fresh OAuth pairing; if no model in a provider's list is recommended, seed all.",
-                              },
                               featured: {
                                 type: "boolean",
                                 description:
-                                  "Surface in the picker's 'Featured' group for this provider. True when the model id appears in the provider's curated `models[]` whitelist; the rest of the catalog falls under 'All models'.",
+                                  "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's curated `featuredModels` whitelist; the rest of the catalog falls under 'All models'.",
                               },
                             },
                           },
