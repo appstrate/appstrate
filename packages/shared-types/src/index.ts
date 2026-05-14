@@ -462,17 +462,36 @@ export interface OrgProxyInfo {
 
 // --- Org Model Types ---
 
-export interface OrgModelInfo {
+/**
+ * Canonical model-metadata fields shared across all three model shapes:
+ * {@link CatalogModelEntry} (catalog defaults), {@link ModelDefinition}
+ * (system-registry entry), and {@link OrgModelInfo} (wire shape).
+ *
+ * Capability surface uses the queryable split (`input` + `reasoning`) rather
+ * than the flat `capabilities: string[]` array stored in the vendored JSON
+ * files. The catalog loader projects from `capabilities` into these two fields
+ * via `resolveCatalogDefaults()` in `org-models.ts` — the JSON files
+ * themselves are not modified.
+ */
+export interface ModelMetadata {
+  label?: string;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  /** Input modalities this model supports (e.g. `["text", "image"]`). */
+  input?: string[] | null;
+  /** Whether the model exposes a reasoning/thinking mode. */
+  reasoning?: boolean | null;
+  /** Per-1M-token pricing in USD. */
+  cost?: ModelCost | null;
+}
+
+export interface OrgModelInfo extends ModelMetadata {
   id: string;
+  /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
   apiShape: string;
   baseUrl: string;
   modelId: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";

@@ -20,6 +20,58 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
 
+// --- Projection ---
+
+/**
+ * Project a DB `org_models` row (plus its resolved credentials and catalog
+ * defaults) into the client-facing {@link OrgModelInfo} wire shape.
+ *
+ * The fallback chain (`row.x ?? defaults.x ?? null`) is the single
+ * authoritative place where DB overrides beat the vendored catalog. Keeping
+ * it here means cost-shape changes touch exactly one function.
+ */
+function pickClientFields(
+  row: {
+    id: string;
+    label: string;
+    modelId: string;
+    input: unknown;
+    contextWindow: number | null;
+    maxTokens: number | null;
+    reasoning: boolean | null;
+    cost: unknown;
+    enabled: boolean;
+    isDefault: boolean;
+    source: string;
+    credentialId: string;
+    createdBy: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  creds: DecryptedModelProviderCredentials,
+  defaults: ReturnType<typeof resolveCatalogDefaults>,
+): OrgModelInfo {
+  return {
+    id: row.id,
+    label: row.label ?? defaults.label ?? row.modelId,
+    apiShape: creds.apiShape,
+    baseUrl: creds.baseUrl,
+    modelId: row.modelId,
+    input: (row.input as string[] | null) ?? defaults.input ?? null,
+    contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: row.reasoning ?? defaults.reasoning ?? null,
+    cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
+    enabled: row.enabled,
+    isDefault: row.isDefault,
+    source: row.source as "custom" | "built-in",
+    credentialId: row.credentialId,
+    createdBy: row.createdBy,
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
+  };
+}
+
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
@@ -70,25 +122,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
     mapRow: (row): OrgModelInfo => {
       const creds = credByRow.get(row.id)!;
       const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
-      return {
-        id: row.id,
-        label: row.label ?? defaults.label ?? row.modelId,
-        apiShape: creds.apiShape,
-        baseUrl: creds.baseUrl,
-        modelId: row.modelId,
-        input: (row.input as string[] | null) ?? defaults.input ?? null,
-        contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
-        maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
-        reasoning: row.reasoning ?? defaults.reasoning ?? null,
-        cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
-        enabled: row.enabled,
-        isDefault: row.isDefault,
-        source: row.source as "custom" | "built-in",
-        credentialId: row.credentialId,
-        createdBy: row.createdBy,
-        createdAt: toISORequired(row.createdAt),
-        updatedAt: toISORequired(row.updatedAt),
-      };
+      return pickClientFields(row, creds, defaults);
     },
   }).sort((a, b) => a.label.localeCompare(b.label));
 }
