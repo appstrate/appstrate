@@ -65,7 +65,7 @@ import {
   PROVIDER_ID_RE,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
-import { Semaphore } from "./semaphore.ts";
+import type { LimitFunction } from "p-limit";
 import { logger } from "./logger.ts";
 
 /**
@@ -284,7 +284,7 @@ interface TokenBudgetMeta {
  * {@link TokenBudget} is wired (tests / embedders).
  */
 function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
-  const { blobStore, proxyDeps, tokenBudget, providerCallSemaphore } = options;
+  const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
     descriptor: {
@@ -360,15 +360,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       // Run-scoped fan-out cap. Without this, an agent that issues N
       // parallel `provider_call`s funnels their full payloads into the
       // next LLM turn, blowing past upstream model TPM windows
-      // (issue #427). The permit is held only for the duration of the
-      // upstream HTTP hop; pre-flight validation errors return inside
-      // the try/finally so the permit is always released.
-      const release = providerCallSemaphore ? await providerCallSemaphore.acquire() : null;
-      try {
-        return await providerCallInner(rawArgs);
-      } finally {
-        release?.();
-      }
+      // (issue #427). p-limit wraps the operation so the slot is held
+      // only for the duration of `providerCallInner` — no acquire/release
+      // pairing to manage.
+      return providerCallLimit
+        ? await providerCallLimit(() => providerCallInner(rawArgs))
+        : await providerCallInner(rawArgs);
     },
   };
 
@@ -1151,9 +1148,9 @@ export interface MountMcpOptions {
    * window. See issue #427 for the reference incident.
    *
    * Optional only so tests / embedders can omit it; production wires a
-   * `Semaphore` unconditionally via `createApp` (see `app.ts`).
+   * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
    */
-  providerCallSemaphore?: Semaphore;
+  providerCallLimit?: LimitFunction;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {

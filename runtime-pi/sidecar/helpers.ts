@@ -32,10 +32,47 @@ export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_0
 export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
 
 /**
+ * Resolve a positive integer from an env var, falling back to
+ * `defaultValue` when unset/empty. Throws on malformed values so
+ * misconfiguration fails loud at sidecar boot rather than silently
+ * masking the problem at runtime.
+ *
+ * Options:
+ *   - `unit`    — label used in the error message (e.g. `"bytes"`, `"tokens"`).
+ *                 Omit for a unit-agnostic message.
+ *   - `ceiling` — hard upper bound; exceeding it throws with a message
+ *                 that references the ceiling value and notes that
+ *                 raising it requires code changes.
+ */
+export function readPositiveIntEnv(
+  name: string,
+  defaultValue: number,
+  opts: { unit?: string; ceiling?: number } = {},
+): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defaultValue;
+  const parsed = Number(raw);
+  const unitSuffix = opts.unit ? ` (${opts.unit})` : "";
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer${unitSuffix}, got ${JSON.stringify(raw)}.`);
+  }
+  if (opts.ceiling !== undefined && parsed > opts.ceiling) {
+    throw new Error(
+      `${name}=${parsed} exceeds the absolute ceiling of ${opts.ceiling} bytes. ` +
+        `Caps above this require code changes (memory pressure on the sidecar).`,
+    );
+  }
+  return parsed;
+}
+
+/**
  * Resolve a positive-integer byte cap from an env var, falling back to
  * `defaultValue` when unset/empty. Throws on malformed values or values
  * above {@link ABSOLUTE_BODY_CEILING} so misconfiguration fails loud at
  * sidecar boot rather than silently masking the problem at runtime.
+ *
+ * Thin wrapper over {@link readPositiveIntEnv} with `unit: "bytes"` and
+ * a default ceiling of {@link ABSOLUTE_BODY_CEILING}.
  *
  * Exported for tests and for the runtime-side mirror in
  * `packages/afps-runtime/src/resolvers/provider-tool.ts`.
@@ -45,19 +82,7 @@ export function readPositiveByteEnv(
   defaultValue: number,
   ceiling = ABSOLUTE_BODY_CEILING,
 ): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer (bytes), got ${JSON.stringify(raw)}.`);
-  }
-  if (parsed > ceiling) {
-    throw new Error(
-      `${name}=${parsed} exceeds the absolute ceiling of ${ceiling} bytes. ` +
-        `Caps above this require code changes (memory pressure on the sidecar).`,
-    );
-  }
-  return parsed;
+  return readPositiveIntEnv(name, defaultValue, { unit: "bytes", ceiling });
 }
 
 /**
