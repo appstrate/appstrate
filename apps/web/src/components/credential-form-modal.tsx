@@ -34,9 +34,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -48,6 +46,7 @@ import {
 import type { ModelProviderCredentialInfo, TestResult } from "@appstrate/shared-types";
 import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
+import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 
 /**
@@ -76,14 +75,6 @@ interface CredentialFormFields {
   label: string;
   apiKey: string;
   baseUrlOverride: string;
-}
-
-function detectProviderFromCredential(
-  credential: ModelProviderCredentialInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!credential) return "";
-  return resolveProviderId(credential, registry);
 }
 
 /**
@@ -133,7 +124,7 @@ function CredentialFormBody({
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
-    return detectProviderFromCredential(credential, registry);
+    return credential ? resolveProviderId(credential, registry) : "";
   });
 
   const isEditing = !!credential;
@@ -256,7 +247,16 @@ function CredentialFormBody({
                 <SelectTrigger id="pk-provider">
                   <SelectValue placeholder={t("models.form.providerPlaceholder")} />
                 </SelectTrigger>
-                <SelectContent>{renderOptions(options, t)}</SelectContent>
+                <SelectContent>
+                  <ProviderPickerGroups
+                    items={options}
+                    featuredLabel={t("models.form.providerGroupFeatured")}
+                    otherLabel={t("models.form.providerGroupOther")}
+                    renderItem={(option) => (
+                      <PickerOptionItem key={option.id} option={option} t={t} />
+                    )}
+                  />
+                </SelectContent>
               </Select>
             </div>
           )}
@@ -310,7 +310,14 @@ function CredentialFormBody({
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
-            <SelectContent>{renderOptions(options, t)}</SelectContent>
+            <SelectContent>
+              <ProviderPickerGroups
+                items={options}
+                featuredLabel={t("models.form.providerGroupFeatured")}
+                otherLabel={t("models.form.providerGroupOther")}
+                renderItem={(option) => <PickerOptionItem key={option.id} option={option} t={t} />}
+              />
+            </SelectContent>
           </Select>
         </div>
 
@@ -389,43 +396,26 @@ function CredentialFormBody({
   );
 }
 
-function renderOptions(options: PickerOption[], t: (key: string) => string): React.ReactNode {
-  // Two-section split: featured first (module-declared canonical
-  // providers), then "Other providers". The flag is metadata only —
-  // every option remains selectable from either group.
-  const featured = options.filter((o) => o.featured);
-  const other = options.filter((o) => !o.featured);
-  const renderItem = (opt: PickerOption) => {
-    const Icon = PROVIDER_ICONS[opt.providerId];
-    return (
-      <SelectItem key={opt.id} value={opt.id}>
-        <span className="flex items-center gap-2">
-          {Icon && <Icon className="size-4" />}
-          {opt.label}
-          {opt.authMode === "oauth2" && (
-            <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
-              {t("credentials.oauth.badgeOauth")}
-            </span>
-          )}
-        </span>
-      </SelectItem>
-    );
-  };
+function PickerOptionItem({
+  option,
+  t,
+}: {
+  option: PickerOption;
+  t: (key: string) => string;
+}): React.ReactNode {
+  const Icon = PROVIDER_ICONS[option.providerId];
   return (
-    <>
-      {featured.length > 0 && (
-        <SelectGroup>
-          <SelectLabel>{t("models.form.providerGroupFeatured")}</SelectLabel>
-          {featured.map(renderItem)}
-        </SelectGroup>
-      )}
-      {other.length > 0 && (
-        <SelectGroup>
-          <SelectLabel>{t("models.form.providerGroupOther")}</SelectLabel>
-          {other.map(renderItem)}
-        </SelectGroup>
-      )}
-    </>
+    <SelectItem key={option.id} value={option.id}>
+      <span className="flex items-center gap-2">
+        {Icon && <Icon className="size-4" />}
+        {option.label}
+        {option.authMode === "oauth2" && (
+          <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
+            {t("credentials.oauth.badgeOauth")}
+          </span>
+        )}
+      </span>
+    </SelectItem>
   );
 }
 

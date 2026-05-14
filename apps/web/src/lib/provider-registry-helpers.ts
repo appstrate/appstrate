@@ -99,3 +99,25 @@ export function resolveProviderId(
   const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
   return byApiAndUrl ? byApiAndUrl.providerId : CUSTOM_ID;
 }
+
+/**
+ * Resolve the model entry id that owns an `(apiShape, baseUrl, modelId)`
+ * row, falling back to {@link CUSTOM_ID} when the row doesn't map to any
+ * curated catalog model. Providers with no curated catalog (e.g.
+ * OpenRouter, codex) keep the raw `modelId` instead of collapsing to
+ * "Custom" — operators set it via the dedicated combobox / inline input.
+ */
+export function resolveModelEntryId(
+  spec: { apiShape: string; baseUrl: string; modelId: string } | null,
+  registry: readonly ProviderRegistryEntry[],
+): string {
+  if (!spec) return "";
+  const match = findRegistryModel(spec.apiShape, spec.modelId, registry);
+  if (match) return match.model.id;
+  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry);
+  if (byApiAndUrl) {
+    if (byApiAndUrl.models.length === 0) return spec.modelId;
+    return CUSTOM_ID;
+  }
+  return CUSTOM_ID;
+}

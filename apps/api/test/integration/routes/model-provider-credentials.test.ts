@@ -20,7 +20,7 @@ describe("Model Provider Keys API", () => {
       // Catalog invariant: openai/anthropic/mistral are covered by the
       // vendored LiteLLM catalog, so `core-providers/index.ts` no longer
       // duplicates `cost` inline — the registry serializer must derive
-      // it via `lookupModelCost(apiShape, modelId)`. If this regresses,
+      // it via `lookupCatalogModel(providerId, modelId)?.cost`. If this regresses,
       // the form UI and the run cost would diverge again.
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),

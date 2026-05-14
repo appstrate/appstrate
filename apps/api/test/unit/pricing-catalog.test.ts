@@ -6,9 +6,9 @@
  * The catalog is keyed on `providerId` — one JSON file per provider.
  * These tests pin the contract callers rely on:
  *
- *   1. `lookupModelCost(providerId, modelId)` — cost-only thin wrapper.
- *   2. `lookupCatalogModel(providerId, modelId)` — full metadata block.
- *   3. `listCatalogModels(providerId)` — every catalogued model for a
+ *   1. `lookupCatalogModel(providerId, modelId)` — full metadata block
+ *      (callers needing only `cost` read `?.cost ?? null`).
+ *   2. `listCatalogModels(providerId)` — every catalogued model for a
  *      provider (drives the picker's "All models" group).
  */
 
@@ -17,35 +17,32 @@ import {
   _catalogSize,
   listCatalogModels,
   lookupCatalogModel,
-  lookupModelCost,
 } from "../../src/services/pricing-catalog.ts";
 
-describe("lookupModelCost", () => {
+describe("lookupCatalogModel", () => {
   it("returns null for an unknown providerId", () => {
-    expect(lookupModelCost("not-a-real-provider", "anything")).toBeNull();
+    expect(lookupCatalogModel("not-a-real-provider", "anything")).toBeNull();
   });
 
   it("returns null when the model is unknown under a vendored provider", () => {
-    expect(lookupModelCost("openai", "definitely-not-a-real-model-xyz")).toBeNull();
+    expect(lookupCatalogModel("openai", "definitely-not-a-real-model-xyz")).toBeNull();
   });
 
   it("returns null for subscription-OAuth providers (codex bypass)", () => {
     // Codex / Claude Pro are flat-fee subscriptions — no per-token cost
     // attribution. The catalog must not vendor them.
-    expect(lookupModelCost("codex", "gpt-5.5")).toBeNull();
+    expect(lookupCatalogModel("codex", "gpt-5.5")).toBeNull();
   });
 
   it("returns canonical pricing for anthropic claude-haiku-4-5", () => {
-    const cost = lookupModelCost("anthropic", "claude-haiku-4-5-20251001");
-    expect(cost).not.toBeNull();
-    expect(cost!.input).toBeCloseTo(1, 4);
-    expect(cost!.output).toBeCloseTo(5, 4);
-    expect(cost!.cacheRead).toBeCloseTo(0.1, 4);
-    expect(cost!.cacheWrite).toBeCloseTo(1.25, 4);
+    const entry = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001");
+    expect(entry).not.toBeNull();
+    expect(entry!.cost.input).toBeCloseTo(1, 4);
+    expect(entry!.cost.output).toBeCloseTo(5, 4);
+    expect(entry!.cost.cacheRead).toBeCloseTo(0.1, 4);
+    expect(entry!.cost.cacheWrite).toBeCloseTo(1.25, 4);
   });
-});
 
-describe("lookupCatalogModel", () => {
   it("returns the full metadata block (not just cost)", () => {
     const entry = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001");
     expect(entry).not.toBeNull();
@@ -53,11 +50,6 @@ describe("lookupCatalogModel", () => {
     expect(entry!.maxTokens).toBe(64_000);
     expect(entry!.capabilities).toEqual(expect.arrayContaining(["text", "image", "reasoning"]));
     expect(entry!.label).toBeString();
-  });
-
-  it("returns null on miss without throwing", () => {
-    expect(lookupCatalogModel("anthropic", "claude-2-fictional")).toBeNull();
-    expect(lookupCatalogModel("nonexistent", "anything")).toBeNull();
   });
 });
 

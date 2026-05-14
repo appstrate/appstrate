@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { lookupModelCost } from "./pricing-catalog.ts";
+import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -18,42 +18,11 @@ import type { InferenceProbeRequest } from "@appstrate/core/module";
 
 // --- List (system + DB) ---
 
-/**
- * Anthropic gates `sk-ant-oat-*` tokens to a specific identity shape at
- * the body level (system prompt + tool-name renaming) — pi-ai injects
- * that locally only when its prefix-based detection fires (see
- * `node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js`). For
- * the LLM proxy path the upstream key never leaves the platform, so we
- * surface its kind to the CLI; the CLI then mirrors the prefix in the
- * placeholder it hands to pi-ai. Returns `null` for non-Anthropic
- * protocols and for Anthropic models whose creds are unavailable. OSS
- * ships no Anthropic OAuth provider; this stays as a contribution point
- * for external operator-installed modules.
- */
-function detectKeyKind(apiShape: string, apiKey: string): "oauth" | "api-key" | null {
-  if (apiShape !== "anthropic-messages") return null;
-  return apiKey.includes("sk-ant-oat") ? "oauth" : "api-key";
-}
-
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   const orgHasDefault = rows.some((r) => r.isDefault);
   const now = toISORequired(new Date());
-
-  // Resolve keyKind for Anthropic DB models — needs a credentials lookup
-  // per distinct credentialId. System models carry `apiKey` inline, so
-  // detection there is free. Other protocols don't expose keyKind at all.
-  const anthropicProviderKeyIds = new Set(
-    rows.filter((r) => r.apiShape === "anthropic-messages").map((r) => r.credentialId),
-  );
-  const dbKeyKinds = new Map<string, "oauth" | "api-key" | null>();
-  await Promise.all(
-    Array.from(anthropicProviderKeyIds).map(async (id) => {
-      const creds = await loadInferenceCredentials(orgId, id);
-      dbKeyKinds.set(id, creds ? detectKeyKind("anthropic-messages", creds.apiKey) : null);
-    }),
-  );
 
   return mergeSystemAndDb({
     system,
@@ -73,7 +42,6 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in" as const,
       credentialId: def.credentialId,
-      keyKind: detectKeyKind(def.apiShape, def.apiKey),
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -93,8 +61,6 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       isDefault: row.isDefault,
       source: row.source as "custom" | "built-in",
       credentialId: row.credentialId,
-      keyKind:
-        row.apiShape === "anthropic-messages" ? (dbKeyKinds.get(row.credentialId) ?? null) : null,
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
@@ -377,7 +343,7 @@ function buildResolvedModel(source: ResolvedSource): ResolvedModel {
       contextWindow: def.contextWindow ?? null,
       maxTokens: def.maxTokens ?? null,
       reasoning: def.reasoning ?? null,
-      cost: def.cost ?? lookupModelCost(def.providerId, def.modelId),
+      cost: def.cost ?? lookupCatalogModel(def.providerId, def.modelId)?.cost ?? null,
       isSystemModel: true,
     };
   }
@@ -393,7 +359,10 @@ function buildResolvedModel(source: ResolvedSource): ResolvedModel {
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: (row.cost as ModelCost | null) ?? lookupModelCost(creds.providerId, row.modelId),
+    cost:
+      (row.cost as ModelCost | null) ??
+      lookupCatalogModel(creds.providerId, row.modelId)?.cost ??
+      null,
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,

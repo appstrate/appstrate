@@ -16,7 +16,11 @@ import { describe, it, expect } from "bun:test";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
-import { substituteModelJson } from "../../src/services/llm-proxy/helpers.ts";
+import { parseProxyRequest } from "../../src/services/llm-proxy/helpers.ts";
+
+function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
+  return parseProxyRequest(rawBody).rewriteModel(upstreamModelId);
+}
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -34,10 +38,7 @@ describe("openaiCompletionsAdapter", () => {
       response_format: { type: "json_object" },
       tools: [{ type: "function", function: { name: "echo", parameters: {} } }],
     };
-    const rewritten = substituteModelJson(
-      enc.encode(JSON.stringify(original)),
-      "gpt-4o-2024-08-06",
-    );
+    const rewritten = rewriteModel(enc.encode(JSON.stringify(original)), "gpt-4o-2024-08-06");
     const parsed = JSON.parse(dec.decode(rewritten));
     expect(parsed.model).toBe("gpt-4o-2024-08-06");
     expect(parsed.messages).toEqual(original.messages);
@@ -116,7 +117,7 @@ describe("anthropicMessagesAdapter", () => {
       tools: [{ name: "search", input_schema: {} }],
       stream: true,
     };
-    const rewritten = substituteModelJson(
+    const rewritten = rewriteModel(
       enc.encode(JSON.stringify(original)),
       "claude-sonnet-4-5-20250929",
     );
@@ -227,10 +228,7 @@ describe("mistralConversationsAdapter", () => {
       max_tokens: 512,
       tools: [{ type: "function", function: { name: "echo", parameters: {} } }],
     };
-    const rewritten = substituteModelJson(
-      enc.encode(JSON.stringify(original)),
-      "mistral-large-latest",
-    );
+    const rewritten = rewriteModel(enc.encode(JSON.stringify(original)), "mistral-large-latest");
     const parsed = JSON.parse(dec.decode(rewritten));
     expect(parsed.model).toBe("mistral-large-latest");
     expect(parsed.messages).toEqual(original.messages);

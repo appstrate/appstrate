@@ -369,15 +369,6 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
  * zero on both sides — `undefined` on `addition` is a no-op, and the
  * cache-creation / cache-read totals are coerced to a numeric zero on
  * `total` so subsequent reads always yield a number.
- *
- * Shared helper for the runner-event ingestion path
- * (`apps/api/src/services/run-launcher/appstrate-event-sink.ts`). The
- * older inline accumulator in `packages/runner-pi/src/pi-runner.ts` uses
- * the legacy `{ input, output, cacheRead, cacheWrite }` shape; rather
- * than translate at the inline call site (and risk drift in the cost
- * computation), that site is left untouched as a follow-up — the helper
- * here exists so the canonical Anthropic-shape accumulator has one
- * implementation and one test target.
  */
 export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens ?? 0;
@@ -486,21 +477,6 @@ export interface OrgModelInfo {
   isDefault: boolean;
   source: "built-in" | "custom";
   credentialId: string;
-  /**
-   * Anthropic-only: shape of the upstream credential, exposed so the CLI
-   * can drive pi-ai's local OAuth detection. `oauth` for `sk-ant-oat-…`
-   * tokens (Anthropic gates these at the body level — system prompt +
-   * tool-name renaming — which pi-ai injects locally only when its
-   * prefix-based detection fires); `api-key` for regular `sk-ant-…` keys;
-   * null for non-Anthropic protocols and for Anthropic models whose
-   * credentials cannot be loaded (treat as api-key). The CLI mirrors
-   * the kind by passing `sk-ant-oat-placeholder` as the `apiKey` to pi-ai
-   * when `keyKind === "oauth"`, so pi-ai reshapes the body before the
-   * proxy ever sees it. OSS ships no Anthropic OAuth provider — this
-   * field stays as a contribution point for external operator-installed
-   * modules.
-   */
-  keyKind?: "oauth" | "api-key" | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

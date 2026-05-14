@@ -12,10 +12,10 @@
  *     {@link listCatalogModels}): every model the user can select.
  *     Editorial curation surfaces via `featuredModelIds` on the provider
  *     definition (small whitelist) — the rest live under "All models".
- *   - **The cost ledger** (`org-models.ts` → {@link lookupModelCost}):
- *     fills `cost` on any `org_models` row whose explicit `cost`
- *     override is null. Same semantics for system models loaded from
- *     `SYSTEM_PROVIDER_KEYS`.
+ *   - **The cost ledger** (`org-models.ts`): fills `cost` on any
+ *     `org_models` row whose explicit `cost` override is null via
+ *     `lookupCatalogModel(...)?.cost`. Same semantics for system models
+ *     loaded from `SYSTEM_PROVIDER_KEYS`.
  *
  * Why vendor (vs runtime fetch):
  *   - Boot must not depend on a remote URL — Tier 0 self-hosting works
@@ -101,14 +101,6 @@ export function lookupCatalogModel(providerId: string, modelId: string): Catalog
   const file = PROVIDER_INDEX[providerId];
   if (!file) return null;
   return file[modelId] ?? null;
-}
-
-/**
- * Thin wrapper preserved for callers (`org-models.ts`, `model-provider-credentials.ts`)
- * that only care about cost. Equivalent to `lookupCatalogModel(...)?.cost ?? null`.
- */
-export function lookupModelCost(providerId: string, modelId: string): ModelCost | null {
-  return lookupCatalogModel(providerId, modelId)?.cost ?? null;
 }
 
 /** @internal test helper — total models indexed across all providers. */

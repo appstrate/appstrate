@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProviderPickerGroups } from "./provider-picker-groups";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -36,16 +37,14 @@ import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
-  type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PI_ADAPTER_TYPES,
-  findRegistryModel,
   getProviderById,
-  findProviderByApiShapeAndBaseUrl,
+  resolveModelEntryId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { PROVIDER_ICONS } from "./icons";
@@ -84,30 +83,6 @@ interface ModelFormFields {
   contextWindow: string;
   maxTokens: string;
   reasoning: boolean;
-}
-
-function detectProvider(
-  model: OrgModelInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!model) return "";
-  return resolveProviderId(model, registry);
-}
-
-function detectModel(
-  model: OrgModelInfo | null,
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (!model) return "";
-  const match = findRegistryModel(model.apiShape, model.modelId, registry);
-  if (match) return match.model.id;
-  const byApiAndUrl = findProviderByApiShapeAndBaseUrl(model.apiShape, model.baseUrl, registry);
-  if (byApiAndUrl) {
-    // Providers with no curated catalog (e.g. OpenRouter) use dynamic model IDs
-    if (byApiAndUrl.models.length === 0) return model.modelId;
-    return CUSTOM_ID;
-  }
-  return CUSTOM_ID;
 }
 
 function OpenRouterCombobox({
@@ -241,16 +216,14 @@ function ModelFormBody({
     () => registry.filter((p) => p.providerId !== "openai-compatible"),
     [registry],
   );
-  const featuredEntries = useMemo(() => pickerEntries.filter((p) => p.featured), [pickerEntries]);
-  const otherEntries = useMemo(() => pickerEntries.filter((p) => !p.featured), [pickerEntries]);
 
   // User-driven provider/model overrides — `null` means "follow auto-detect".
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [cost, setCost] = useState<ModelCost | null>(null);
 
-  const providerId = providerOverride ?? detectProvider(model, registry);
-  const selectedModelId = modelOverride ?? detectModel(model, registry);
+  const providerId = providerOverride ?? (model ? resolveProviderId(model, registry) : "");
+  const selectedModelId = modelOverride ?? resolveModelEntryId(model, registry);
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);
 
@@ -492,38 +465,22 @@ function ModelFormBody({
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {featuredEntries.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>{t("models.form.providerGroupFeatured")}</SelectLabel>
-                  {featuredEntries.map((p) => {
-                    const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
-                    return (
-                      <SelectItem key={p.providerId} value={p.providerId}>
-                        <span className="flex items-center gap-2">
-                          {Icon && <Icon className="size-4" />}
-                          {p.displayName}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-              )}
-              {otherEntries.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>{t("models.form.providerGroupOther")}</SelectLabel>
-                  {otherEntries.map((p) => {
-                    const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
-                    return (
-                      <SelectItem key={p.providerId} value={p.providerId}>
-                        <span className="flex items-center gap-2">
-                          {Icon && <Icon className="size-4" />}
-                          {p.displayName}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-              )}
+              <ProviderPickerGroups
+                items={pickerEntries}
+                featuredLabel={t("models.form.providerGroupFeatured")}
+                otherLabel={t("models.form.providerGroupOther")}
+                renderItem={(p) => {
+                  const Icon = PROVIDER_ICONS[p.providerId] ?? PROVIDER_ICONS[p.iconUrl ?? ""];
+                  return (
+                    <SelectItem key={p.providerId} value={p.providerId}>
+                      <span className="flex items-center gap-2">
+                        {Icon && <Icon className="size-4" />}
+                        {p.displayName}
+                      </span>
+                    </SelectItem>
+                  );
+                }}
+              />
               <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
             </SelectContent>
           </Select>

@@ -15,7 +15,7 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
-import { listCatalogModels, lookupModelCost } from "../services/pricing-catalog.ts";
+import { listCatalogModels, lookupCatalogModel } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
@@ -111,7 +111,7 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
       capabilities: m.capabilities,
-      cost: inline?.cost ?? m.cost ?? lookupModelCost(p.providerId, m.id),
+      cost: inline?.cost ?? m.cost ?? lookupCatalogModel(p.providerId, m.id)?.cost ?? null,
       recommended: inline?.recommended ?? false,
       featured: inlineById.has(m.id),
     };

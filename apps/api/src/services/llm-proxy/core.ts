@@ -25,7 +25,7 @@ import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
-import { substituteModelJson } from "./helpers.ts";
+import { parseProxyRequest } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelCost } from "@appstrate/core/module";
@@ -75,14 +75,15 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw invalidRequest(`Request body exceeds LLM_PROXY_LIMITS.max_request_bytes (${maxBytes})`);
   }
 
-  const presetId = extractPresetId(inputs.rawBody);
+  const request = parseProxyRequest(inputs.rawBody);
+  const presetId = request.presetId;
   const resolved = await resolvePresetForOrg(
     presetId,
     inputs.principal.orgId,
     inputs.adapter.apiShape,
   );
 
-  const rewrittenBody = substituteModelJson(inputs.rawBody, resolved.modelId);
+  const rewrittenBody = request.rewriteModel(resolved.modelId);
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
   // apiShape, modelId, requestBody)` so cross-org / cross-preset
@@ -92,7 +93,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // it so the writer side doesn't have to recompute.
   const cacheConfig = getResponseCacheConfig();
   let cacheKeyForWrite: string | null = null;
-  if (cacheConfig.enabled) {
+  if (cacheConfig.enabled && !request.stream) {
     const probe = await lookupResponse({
       orgId: inputs.principal.orgId,
       presetId,
@@ -214,24 +215,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     headers.set("x-llm-proxy-cache-status", "MISS");
   }
   return new Response(bodyText, { status: upstream.status, headers });
-}
-
-function extractPresetId(rawBody: Uint8Array): string {
-  const text = new TextDecoder().decode(rawBody);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw invalidRequest("Request body must be valid JSON");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw invalidRequest("Request body must be a JSON object");
-  }
-  const model = (parsed as Record<string, unknown>)["model"];
-  if (typeof model !== "string" || model.length === 0) {
-    throw invalidRequest("Request body must include a non-empty `model` field");
-  }
-  return model;
 }
 
 async function resolvePresetForOrg(
