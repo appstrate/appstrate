@@ -15,7 +15,6 @@ import {
   getModuleModelProviders,
 } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
-import { assertPortkeyRoutersInstalled } from "../services/portkey-router.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
   setBeforeSignupHook,
@@ -90,11 +89,6 @@ export async function boot(): Promise<void> {
   // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
-
-  // `portkey` is mandatory: every API-key LLM request flows through the
-  // gateway sub-process. Fail-fast with a clear error if MODULES omits it
-  // rather than crashing later at the first /api/llm-proxy/* call.
-  assertPortkeyRoutersInstalled();
 
   // Aggregate model provider contributions from every loaded module into
   // the runtime registry. The three core API-key providers (openai,

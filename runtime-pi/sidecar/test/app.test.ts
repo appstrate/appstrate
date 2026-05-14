@@ -209,36 +209,6 @@ describe("POST /configure — llm SSRF protection", () => {
     expect(deps.config.llm).toBeUndefined();
   });
 
-  it("accepts a Portkey-managed baseUrl on host.docker.internal (platform-vouched loopback)", async () => {
-    // Regression for the Phase 2.5 (#437) Portkey-mandatory rollout: when
-    // the platform routes API-key LLM calls through the local Portkey
-    // gateway, baseUrl intentionally lands on host.docker.internal or
-    // 127.0.0.1 — both literals the generic SSRF guard rejects. The
-    // platform vouches for these URLs (user input is the inline
-    // portkeyConfig JSON, not the baseUrl), so the guard must let them
-    // through when `portkeyConfig` is present.
-    const deps = makeDeps();
-    const app = createApp(deps);
-    const res = await app.request("/configure", {
-      method: "POST",
-      body: JSON.stringify({
-        llm: {
-          authMode: "api_key",
-          baseUrl: "http://host.docker.internal:8787/v1",
-          apiKey: "real-sk",
-          placeholder: "sk-placeholder",
-          portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk" }),
-        },
-      }),
-      headers: { "Content-Type": "application/json" },
-    });
-    expect(res.status).toBe(200);
-    expect(deps.config.llm).toMatchObject({
-      authMode: "api_key",
-      baseUrl: "http://host.docker.internal:8787/v1",
-    });
-  });
-
   it("allows llm config with null (clear)", async () => {
     const deps = makeDeps();
     deps.config.llm = {
@@ -300,15 +270,10 @@ const LLM_CONFIG: LlmProxyConfig = {
   baseUrl: "https://api.anthropic.com",
   apiKey: "real-sk-ant-key",
   placeholder: "sk-placeholder",
-  portkeyConfig: '{"provider":"anthropic","api_key":"real-sk-ant-key"}',
 };
 
 describe("ALL /llm/* — SSRF protection", () => {
   it("returns 403 when oauth baseUrl targets a blocked network range", async () => {
-    // SSRF protection applies to OAuth mode (which routes direct to the
-    // upstream provider). api_key mode is platform-vouched via the
-    // Portkey-managed carve-out, so its loopback gateway baseUrl is
-    // accepted by design (#437).
     const deps = makeDeps();
     deps.config.llm = {
       authMode: "oauth",
@@ -322,36 +287,19 @@ describe("ALL /llm/* — SSRF protection", () => {
     expect(body.error).toContain("blocked network range");
   });
 
-  it("forwards through to Portkey-managed loopback baseUrl (platform-vouched, #437 follow-up)", async () => {
-    // Same carve-out as `/configure`: when `portkeyConfig` is present the
-    // baseUrl is the local Portkey gateway, intentionally on the loopback
-    // / docker-internal range. The forwarder must NOT short-circuit with
-    // 403 in this case — the request body and the inline `portkeyConfig`
-    // header are how the platform reaches its own gateway.
-    const fetchFn = mock(
-      async () =>
-        new Response('{"ok":true}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+  it("returns 403 when api_key baseUrl targets a blocked network range", async () => {
+    const deps = makeDeps();
     deps.config.llm = {
       authMode: "api_key",
-      baseUrl: "http://host.docker.internal:8787/v1",
+      baseUrl: "http://169.254.169.254/metadata",
       apiKey: "real-sk",
       placeholder: "sk-placeholder",
-      portkeyConfig: JSON.stringify({ provider: "openai", api_key: "real-sk" }),
     };
     const app = createApp(deps);
-    const res = await app.request("/llm/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: '{"model":"gpt-4o-mini"}',
-    });
-    expect(res.status).toBe(200);
-    const url = (fetchFn.mock.calls[0] as [string])[0];
-    expect(url).toBe("http://host.docker.internal:8787/v1/chat/completions");
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("blocked network range");
   });
 });
 
@@ -466,45 +414,6 @@ describe("ALL /llm/* — placeholder replacement", () => {
     expect(headers["x-api-key"]).toBe("real-sk-ant-key");
     expect(headers["content-type"]).toBe("application/json");
     expect(headers["x-custom"]).toBe("untouched");
-  });
-});
-
-describe("ALL /llm/* — Portkey config forwarding", () => {
-  it("attaches x-portkey-config when present on the LLM config", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const portkeyConfig = JSON.stringify({ provider: "openai", api_key: "real-sk-ant-key" });
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "https://api.example.com",
-      apiKey: "real-sk-ant-key",
-      placeholder: "sk-placeholder",
-      portkeyConfig,
-    };
-    const app = createApp(deps);
-    await app.request("/llm/v1/messages", { method: "POST" });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
-    const headers = opts.headers as Record<string, string>;
-    expect(headers["x-portkey-config"]).toBe(portkeyConfig);
-  });
-
-  it("disables Bun fetch auto-decompression (#437 follow-up)", async () => {
-    // Regression for the brotli/gzip decompression crash discovered
-    // during the #437 real-key smoke. Portkey 1.15.2 OSS returns bodies
-    // whose `Content-Encoding` header lies (advertises "br" / "gzip" but
-    // the bytes are already identity because Portkey decoded upstream
-    // for metrics). Bun's auto-decompressor crashes on that framing.
-    // `decompress: false` keeps the bytes raw — the response allow-list
-    // never forwards `content-encoding`, so the agent sees clean
-    // identity bytes. api_key mode is always Portkey-routed so we always
-    // need this disabled.
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
-    await app.request("/llm/v1/messages", { method: "POST" });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit & { decompress?: boolean }])[1];
-    expect(opts.decompress).toBe(false);
   });
 });
 

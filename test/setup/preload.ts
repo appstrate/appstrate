@@ -232,24 +232,6 @@ for (const { dir: moduleDir } of moduleEntries) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
-// `portkey` is mandatory in production: `boot.ts` aborts if the router
-// slots are empty AND request-time code requires the router to return a
-// non-null routing tuple for every api_key call. Tests don't run module
-// `init()` (no real gateway sub-process), so install a passthrough mock
-// that delegates to the production `buildPortkeyRouting()` against a
-// loopback gateway host. This keeps the test routing math in lockstep
-// with prod — there is no second per-shape prefix table to drift.
-// Individual tests can override these to exercise specific edge cases.
-const { setPortkeyRouter, setPortkeyInprocessRouter } =
-  await import("../../apps/api/src/services/portkey-router.ts");
-const { buildPortkeyRouting } = await import("../../apps/api/src/modules/portkey/config.ts");
-function buildTestRouter(host: string) {
-  return (model: { providerId: string; apiShape: string; baseUrl: string; apiKey: string }) =>
-    buildPortkeyRouting(model, host);
-}
-setPortkeyRouter(buildTestRouter("http://host.docker.internal:8787"));
-setPortkeyInprocessRouter(buildTestRouter("http://127.0.0.1:8787"));
-
 // Phase 1: discover modules and register them. We collect imported modules
 // into a local list, then use the shared `collectModuleContributions()`
 // helper from module-loader.ts to aggregate Better Auth plugins + Drizzle

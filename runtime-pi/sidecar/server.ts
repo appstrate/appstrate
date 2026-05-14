@@ -13,17 +13,11 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
   if (oauthJson) return JSON.parse(oauthJson) as LlmProxyConfig;
   if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
-    // When the platform routes through Portkey (mandatory since Phase 2.5,
-    // #437), the launcher emits the inline routing JSON in
-    // `PI_PORTKEY_CONFIG`. Empty means direct upstream; presence flips on
-    // the SSRF carve-out for the platform-managed gateway URL.
-    const portkeyConfig = process.env.PI_PORTKEY_CONFIG;
     return {
       authMode: "api_key",
       baseUrl: process.env.PI_BASE_URL,
       apiKey: process.env.PI_API_KEY,
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      ...(portkeyConfig ? { portkeyConfig } : {}),
     };
   }
   return undefined;

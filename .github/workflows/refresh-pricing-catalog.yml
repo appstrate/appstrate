@@ -47,17 +47,17 @@ jobs:
           delete-branch: true
           base: main
           commit-message: |
-            chore(pricing): refresh portkey pricing catalog
+            chore(pricing): refresh LiteLLM pricing catalog
 
             Weekly refresh of `apps/api/src/data/pricing/*.json` from
-            configs.portkey.ai/pricing — sourced from Portkey-AI/models (MIT).
-          title: "chore(pricing): refresh portkey pricing catalog"
+            BerriAI/litellm (MIT).
+          title: "chore(pricing): refresh LiteLLM pricing catalog"
           body: |
-            Automated weekly refresh of the vendored Portkey pricing catalog
-            (#437 phase 2). Upstream source:
-            https://configs.portkey.ai/pricing/
+            Automated weekly refresh of the vendored LiteLLM pricing
+            catalog. Upstream source:
+            https://github.com/BerriAI/litellm/blob/main/litellm/model_prices_and_context_window_backup.json
 
-            Diff scope is `apps/api/src/data/pricing/{openai,anthropic,mistral-ai,google}.json`.
+            Diff scope is `apps/api/src/data/pricing/*.json`.
             Cost lookup in `apps/api/src/services/pricing-catalog.ts` reads
             these files at module-load time — merging this PR redeploys with
             the new prices on the next release.

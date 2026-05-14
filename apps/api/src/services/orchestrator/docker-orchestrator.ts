@@ -142,11 +142,6 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
         sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
         sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
-        // Phase 2.5 (#437) Portkey-mandatory wiring: forward the inline
-        // routing JSON so the sidecar emits `x-portkey-config` on every
-        // /llm/* request AND so its SSRF guard accepts the platform-managed
-        // gateway baseUrl (host.docker.internal:<PORTKEY_PORT>).
-        sidecarEnv.PI_PORTKEY_CONFIG = resolvedConfig.llm.portkeyConfig;
       }
     }
 

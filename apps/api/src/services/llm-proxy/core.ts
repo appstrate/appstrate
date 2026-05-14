@@ -23,7 +23,6 @@ import { llmUsage } from "@appstrate/db/schema";
 import { loadModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
-import { getPortkeyInprocessRouter } from "../portkey-router.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
 import { substituteModelJson } from "./helpers.ts";
@@ -74,21 +73,6 @@ export class LlmProxyModelApiMismatchError extends Error {
   }
 }
 
-/** Raised when a preset's `providerId` has no Portkey provider slug. */
-export class LlmProxyUnroutableModelError extends Error {
-  constructor(
-    public readonly presetId: string,
-    public readonly providerId: string,
-  ) {
-    super(
-      `Model "${presetId}" providerId "${providerId}" has no Portkey routing. ` +
-        `Declare \`portkeyProvider\` on the matching ModelProviderDefinition, ` +
-        `or remove the model from the org catalog.`,
-    );
-    this.name = "LlmProxyUnroutableModelError";
-  }
-}
-
 export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
@@ -132,34 +116,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     cacheKeyForWrite = probe.cacheKey;
   }
 
-  // Portkey is mandatory for the proxy path. `boot.ts` asserts the router
-  // slot is installed via `assertPortkeyRoutersInstalled()`. The router
-  // returns null only when the resolved `providerId` is unregistered or
-  // its definition omits `portkeyProvider` — that's a config bug (a
-  // preset we can't route), so we fail fast with a clear error instead
-  // of silently bypassing the gateway. `ResolvedProxyModel` structurally
-  // satisfies `PortkeyModelInput`.
-  const portkeyRouting = getPortkeyInprocessRouter()(resolved);
-  if (!portkeyRouting) {
-    throw new LlmProxyUnroutableModelError(presetId, resolved.providerId);
-  }
-
-  const upstreamUrl = joinUpstreamUrl(portkeyRouting.baseUrl, inputs.upstreamPath);
+  const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
     inputs.incomingHeaders,
     resolved.apiKey,
   );
-  upstreamHeaders["x-portkey-config"] = portkeyRouting.portkeyConfig;
-  // Belt-and-braces: ask Portkey upstream for identity. Portkey 1.15.2
-  // OSS ignores Accept-Encoding and always copies the upstream's
-  // Content-Encoding header verbatim, but the bytes it forwards have
-  // already been decoded internally (Portkey buffers the upstream for
-  // metrics). Result: header says "br" / "gzip" but body is plain JSON
-  // → every strict decoder (Bun fetch, node:zlib) rejects the stream.
-  // The actual fix is `decompress: false` on the fetch below, which
-  // hands us the raw (already-identity) bytes; we strip the bogus
-  // Content-Encoding via `cloneResponseHeaders` before forwarding.
-  upstreamHeaders["accept-encoding"] = "identity";
 
   const started = Date.now();
   let upstream: Response;
@@ -168,13 +129,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       method: "POST",
       headers: upstreamHeaders,
       body: rewrittenBody,
-      // Bun-specific (undocumented in 1.3.x). Disables auto-decompression
-      // so we receive whatever bytes the upstream actually wrote. Required
-      // because Portkey lies about Content-Encoding (see note above) and
-      // Bun's brotli/zlib decoders crash on the malformed framing it
-      // produces. Type cast keeps the option invisible to `RequestInit`.
-      decompress: false,
-    } as RequestInit & { decompress?: boolean });
+    });
   } catch (err) {
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
@@ -248,10 +203,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const headers = cloneResponseHeaders(upstream.headers);
-  // Persist 2xx replies for future lookups. Always tag the response we
-  // return with `MISS` so observability (and Portkey-compatible
-  // consumers) see a consistent contract whether the cache is enabled
-  // or off.
+  // Persist 2xx replies for future lookups. Tag the MISS so the caller
+  // sees a consistent `x-llm-proxy-cache-status` contract whether the
+  // cache is enabled or off.
   if (cacheKeyForWrite) {
     void storeResponse({
       cacheKey: cacheKeyForWrite,
@@ -260,7 +214,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       headers,
       body: bodyText,
     });
-    headers.set("x-portkey-cache-status", "MISS");
+    headers.set("x-llm-proxy-cache-status", "MISS");
   }
   return new Response(bodyText, { status: upstream.status, headers });
 }
@@ -307,8 +261,8 @@ async function resolvePresetForOrg(
   if (!loaded.providerId) {
     // Models routed through the proxy MUST resolve to a registered
     // provider — env-driven system keys without `providerId` can't
-    // address a `portkeyProvider` slug. Surface this as an unsupported
-    // preset (clean 400) rather than letting the router return null.
+    // address per-provider routing/identity hooks. Surface this as an
+    // unsupported preset (clean 400).
     throw new LlmProxyUnsupportedModelError(presetId);
   }
   return {

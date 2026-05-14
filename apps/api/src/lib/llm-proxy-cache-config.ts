@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Read-once accessor for the LLM proxy response-cache configuration.
+ * Accessor for the `/api/llm-proxy/*` response-cache configuration.
  *
- * Why this is a dedicated module and not inlined in `core.ts`:
- *   The Portkey module's `init()` resolves `PORTKEY_CACHE_MODE` once at
- *   boot and stashes the effective mode here. Reading from a module
- *   variable keeps the per-request path free of env-getter calls and
- *   lets tests inject overrides without touching `process.env`.
+ * Reads `LLM_PROXY_CACHE_MODE` / `LLM_PROXY_CACHE_MAX_AGE` lazily from
+ * the env (`getEnv()` caches after the first call). Tests inject
+ * overrides via `setResponseCacheConfig` and restore via
+ * `resetResponseCacheConfigForTesting`.
  */
+
+import { getEnv } from "@appstrate/env";
 
 export interface LlmProxyCacheConfig {
   /** When false, the proxy skips the cache layer entirely. */
@@ -17,18 +18,22 @@ export interface LlmProxyCacheConfig {
   ttlSeconds: number;
 }
 
-const DEFAULT_CONFIG: LlmProxyCacheConfig = { enabled: false, ttlSeconds: 0 };
-let _config: LlmProxyCacheConfig = DEFAULT_CONFIG;
+let _override: LlmProxyCacheConfig | null = null;
 
 export function setResponseCacheConfig(cfg: LlmProxyCacheConfig): void {
-  _config = cfg;
+  _override = cfg;
 }
 
 export function getResponseCacheConfig(): LlmProxyCacheConfig {
-  return _config;
+  if (_override) return _override;
+  const env = getEnv();
+  return {
+    enabled: env.LLM_PROXY_CACHE_MODE !== "off",
+    ttlSeconds: env.LLM_PROXY_CACHE_MAX_AGE,
+  };
 }
 
-/** @internal — test helper. Restores the boot-time default. */
+/** @internal — test helper. Restores the env-driven default. */
 export function resetResponseCacheConfigForTesting(): void {
-  _config = DEFAULT_CONFIG;
+  _override = null;
 }

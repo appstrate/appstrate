@@ -18,14 +18,11 @@ export type LlmProxyPrincipal =
 
 /**
  * Preset model resolved against `org_models` + `model_provider_credentials`.
- * Field names align with `PortkeyModelInput` (`providerId`, `apiShape`,
- * `baseUrl`, `apiKey`) so the resolved tuple can be passed to the
- * Portkey router without renaming at the call site.
  */
 export interface ResolvedProxyModel {
   /** The preset id the caller asked for (echoed into usage rows for audit). */
   presetId: string;
-  /** Registered model-provider id used to look up Portkey routing + identity hooks. */
+  /** Registered model-provider id used to look up identity hooks. */
   providerId: string;
   /** Protocol family (must match the route's adapter). */
   apiShape: string;

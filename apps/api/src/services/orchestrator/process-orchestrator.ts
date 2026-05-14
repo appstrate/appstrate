@@ -206,27 +206,9 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
         // boot (no /configure round-trip needed in process mode).
         env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(config.llm);
       } else {
-        // Process mode: the sidecar is a subprocess on the SAME host as
-        // the Portkey gateway. The platform-side `getPortkeyRouter()`
-        // emits `host.docker.internal:<port>` because the production
-        // shape is sidecar-in-container reaching host-side Portkey. In
-        // process mode `host.docker.internal` does not resolve outside
-        // Docker Desktop, so we rewrite to `127.0.0.1` before handing
-        // off. This stays local to process-mode wiring — the docker
-        // orchestrator keeps the host.docker.internal form so the in-
-        // container sidecar can reach the host gateway.
-        const baseUrl = config.llm.baseUrl.replace(
-          /^(https?:\/\/)host\.docker\.internal(:|\/|$)/,
-          "$1127.0.0.1$2",
-        );
-        env.PI_BASE_URL = baseUrl;
+        env.PI_BASE_URL = config.llm.baseUrl;
         env.PI_API_KEY = config.llm.apiKey;
         env.PI_PLACEHOLDER = config.llm.placeholder;
-        // Phase 2.5 (#437) Portkey-mandatory wiring: forward the inline
-        // routing JSON so the sidecar emits `x-portkey-config` on every
-        // /llm/* request AND so the SSRF guard accepts the platform-managed
-        // gateway baseUrl.
-        env.PI_PORTKEY_CONFIG = config.llm.portkeyConfig;
       }
     }
 

@@ -306,10 +306,10 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
  */
 export interface ResolvedModel {
   /**
-   * Registered ModelProviderDefinition id. Drives Portkey routing
-   * (`portkeyProvider`), OAuth identity hooks, and the inference probe.
-   * Always populated — env-driven system keys declare it on their
-   * `SYSTEM_PROVIDER_KEYS` entry, DB credentials store it on the row.
+   * Registered ModelProviderDefinition id. Drives OAuth identity hooks
+   * and the inference probe. Always populated — env-driven system keys
+   * declare it on their `SYSTEM_PROVIDER_KEYS` entry, DB credentials
+   * store it on the row.
    */
   providerId: string;
   apiShape: string;

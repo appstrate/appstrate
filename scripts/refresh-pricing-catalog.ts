@@ -5,9 +5,8 @@
  *
  * Source: `BerriAI/litellm/litellm/model_prices_and_context_window_backup.json`
  * (MIT). Single industry-standard file carrying both pricing AND model
- * metadata (`max_input_tokens`, `supports_vision`, `mode`, …) — what
- * Portkey-AI/models lacks per-model. The Portkey gateway still routes
- * traffic; this catalog only feeds the picker UI and the cost ledger.
+ * metadata (`max_input_tokens`, `supports_vision`, `mode`, …). The
+ * catalog feeds the picker UI and the cost ledger.
  *
  * Output shape (per model, compact):
  *
@@ -110,8 +109,7 @@ interface Summary {
 /**
  * Strip the routing namespace prefix LiteLLM uses for some entries
  * (`mistral/codestral-latest`, `azure/gpt-4o`, …). Our pricing lookup
- * keys on the canonical model id only — the routing decision happens
- * upstream in the Portkey gateway via `apiShape`.
+ * keys on the canonical model id only.
  */
 function canonicalId(rawKey: string): string {
   const slash = rawKey.lastIndexOf("/");

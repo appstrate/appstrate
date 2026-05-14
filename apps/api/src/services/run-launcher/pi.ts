@@ -39,7 +39,6 @@ import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
-import { getPortkeyRouter } from "../portkey-router.ts";
 import type {
   LlmProxyConfig,
   LlmProxyOauthConfig,
@@ -118,10 +117,6 @@ export async function runPlatformContainer(
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
       // config boundary — the provider definition is the source of truth.
-      // Subscription-OAuth providers (Codex, Claude Pro) bypass Portkey
-      // — they use personal OAuth tokens with provider-mandated identity
-      // headers Portkey doesn't model. See the epic's "Subscription OAuth
-      // providers — explicit non-scope" section.
       const providerCfg = getModelProvider(llmConfig.providerId!);
       const oauthCfg: LlmProxyOauthConfig = {
         authMode: "oauth",
@@ -131,12 +126,10 @@ export async function runPlatformContainer(
       };
       sidecarLlm = oauthCfg;
     } else if (llmApiKey) {
-      // API-key LLM requests are mandatorily routed through Portkey. The
-      // boot-time `assertPortkeyRoutersInstalled()` guarantees the router
-      // is non-null here; if the router can't route the model's
-      // `providerId` (unregistered or no `portkeyProvider` slug declared)
-      // it returns null, which is a config bug — fail fast so the bad
-      // preset can't silently bypass the gateway.
+      // API-key flow: the sidecar forwards directly to the upstream
+      // provider. The Pi SDK's native retry (Retry-After honoring +
+      // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
+      // see `packages/runner-pi/src/pi-runner.ts`.
       if (!llmConfig.providerId) {
         throw new Error(
           `Model "${llmConfig.label}" has no providerId. ` +
@@ -144,26 +137,11 @@ export async function runPlatformContainer(
             `(SYSTEM_PROVIDER_KEYS entries must declare \`providerId\`).`,
         );
       }
-      const portkey = getPortkeyRouter()({
-        providerId: llmConfig.providerId,
-        apiShape: llmConfig.apiShape,
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-      });
-      if (!portkey) {
-        throw new Error(
-          `Model providerId "${llmConfig.providerId}" has no Portkey routing. ` +
-            `Declare \`portkeyProvider\` on its ModelProviderDefinition.`,
-        );
-      }
       sidecarLlm = {
         authMode: "api_key",
-        // Re-point the sidecar at the local Portkey gateway. Portkey
-        // routes to the real upstream using the inline config.
-        baseUrl: portkey.baseUrl,
+        baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
         placeholder: llmPlaceholder,
-        portkeyConfig: portkey.portkeyConfig,
       };
     }
 
@@ -199,10 +177,6 @@ export async function runPlatformContainer(
       connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: "http://sidecar:8081",
-      // Disable Pi SDK's internal retry whenever Portkey is in the path —
-      // that's every api_key request. OAuth subscription credentials bypass
-      // Portkey, so they keep client-side retry for transparent 401 refresh.
-      disableModelRetry: !isOauthCredential,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalizeUrl,

@@ -44,10 +44,8 @@ import { forbidden, invalidRequest } from "../lib/errors.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
-  LlmProxyUnroutableModelError,
   LlmProxyUnsupportedModelError,
 } from "../services/llm-proxy/core.ts";
-import { ApiError } from "@appstrate/core/api-errors";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
@@ -92,9 +90,7 @@ export function createLlmProxyRouter() {
     },
     // Mistral SDK (`@mistralai/mistralai` `chat.stream`) appends
     // `/v1/chat/completions` to its `serverURL` — same convention as
-    // Anthropic, NOT OpenAI. So upstreamPath carries `/v1/chat/completions`
-    // and the Portkey routing baseUrl stays bare (no `/v1` prefix in
-    // `apps/api/src/modules/portkey/config.ts:API_SHAPE_PORTKEY_PATH_PREFIX`).
+    // Anthropic, NOT OpenAI.
     {
       urlPath: "/mistral-conversations/v1/chat/completions",
       upstreamPath: "/v1/chat/completions",
@@ -174,17 +170,6 @@ async function handleProxy(
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
       throw invalidRequest(err.message, "model");
-    }
-    if (err instanceof LlmProxyUnroutableModelError) {
-      // Server-side config bug: a preset's apiShape has no Portkey
-      // provider mapping. Surface the detail so operators can fix it
-      // without grepping logs.
-      throw new ApiError({
-        status: 500,
-        code: "model_not_routable",
-        title: "Model Not Routable",
-        detail: err.message,
-      });
     }
     throw err;
   }

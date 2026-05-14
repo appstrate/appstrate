@@ -259,16 +259,12 @@ const envSchema = z
       .default("false")
       .transform((s) => s.toLowerCase() === "true" || s === "1"),
 
-    // Modules (comma-separated specifiers).
-    // `portkey` is **mandatory** — every API-key LLM request flows through
-    // the Portkey AI Gateway sub-process for unified retry / rate-limiting /
-    // observability. The platform fails to boot if the slot it installs on
-    // `services/portkey-router.ts` is empty after `loadModules()`. The other
-    // defaults are the built-in OSS modules plus `@appstrate/module-codex`
-    // (ChatGPT/Codex OAuth — remove to drop that provider surface).
-    // Subscription-OAuth providers (codex, claude-code) bypass Portkey by
-    // design: their OAuth wireFormat isn't expressible to Portkey 1.15.2.
-    MODULES: z.string().default("portkey,oidc,webhooks,core-providers,@appstrate/module-codex"),
+    // Modules (comma-separated specifiers). API-key LLM calls are routed
+    // directly to the upstream provider — retry is handled by the Pi SDK
+    // natively (Retry-After honoring + jitter). The defaults are the
+    // built-in OSS modules plus `@appstrate/module-codex` (ChatGPT/Codex
+    // OAuth — remove to drop that provider surface).
+    MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),
@@ -283,32 +279,21 @@ const envSchema = z
       ),
     PORT: z.coerce.number().int().positive().default(3000),
     /**
-     * Local port the Portkey gateway sub-process binds to when the
-     * `portkey` module is loaded. Reachable from the sidecar via
-     * `http://host.docker.internal:<PORTKEY_PORT>` on a Docker bridge,
-     * or via the platform-container hostname on a Compose network.
-     */
-    PORTKEY_PORT: z.coerce.number().int().positive().default(8787),
-    /**
-     * Portkey response cache mode injected into every `x-portkey-config`
-     * payload. Opt-in — default `off` keeps cache disabled and matches
-     * the historical behavior of every API-key call hitting upstream.
+     * `/api/llm-proxy/*` response cache mode. Opt-in — default `off` keeps
+     * every API-key call hitting upstream verbatim.
      *
-     *   - `off`       — no `cache` field emitted (gateway default).
-     *   - `simple`    — exact-match request hashing; cache hit on byte-
-     *                   identical body + headers. Works out of the box on
-     *                   1.15.2 OSS (in-memory cache, process-local).
-     *   - `semantic`  — embedding-based similarity match. Requires a
-     *                   vector store; not validated end-to-end in OSS
-     *                   yet — set at your own risk.
+     *   - `off`     — cache layer skipped entirely.
+     *   - `simple`  — exact-match request hashing; cache hit on byte-
+     *                 identical body. Backed by Redis when `REDIS_URL` is
+     *                 set, in-memory per-process otherwise.
      */
-    PORTKEY_CACHE_MODE: z.enum(["off", "simple", "semantic"]).default("off"),
+    LLM_PROXY_CACHE_MODE: z.enum(["off", "simple"]).default("off"),
     /**
-     * Per-entry max-age (seconds) attached to the inline cache config
-     * when `PORTKEY_CACHE_MODE !== "off"`. Default 3600 (1h). Ignored
+     * Per-entry TTL (seconds) for cached `/api/llm-proxy/*` responses
+     * when `LLM_PROXY_CACHE_MODE !== "off"`. Default 3600 (1h). Ignored
      * when cache is off.
      */
-    PORTKEY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
+    LLM_PROXY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce

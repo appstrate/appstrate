@@ -17,8 +17,8 @@ describe("Model Provider Keys API", () => {
 
   describe("GET /api/model-provider-credentials/registry", () => {
     it("fills cost from the pricing catalog when the inline definition omits it", async () => {
-      // Phase 5 invariant: openai/anthropic/mistral are covered by the
-      // vendored Portkey catalog, so `core-providers/index.ts` no longer
+      // Catalog invariant: openai/anthropic/mistral are covered by the
+      // vendored LiteLLM catalog, so `core-providers/index.ts` no longer
       // duplicates `cost` inline — the registry serializer must derive
       // it via `lookupModelCost(apiShape, modelId)`. If this regresses,
       // the form UI and the run cost would diverge again.

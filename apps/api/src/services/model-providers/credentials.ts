@@ -507,9 +507,9 @@ export async function loadInferenceCredentials(
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
   // 1) System (env-driven) keys — providerId is declared on the env
-  // entry so downstream code (Portkey routing, refresh worker, hooks)
-  // resolves the same registered ModelProviderDefinition it would for
-  // a DB-stored credential.
+  // entry so downstream code (refresh worker, hooks) resolves the same
+  // registered ModelProviderDefinition it would for a DB-stored
+  // credential.
   const systemKey = getSystemModelProviderKeys().get(id);
   if (systemKey) {
     return {

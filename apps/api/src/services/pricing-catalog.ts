@@ -6,8 +6,7 @@
  * upstream refresh by `scripts/refresh-pricing-catalog.ts`).
  *
  * Carries both **pricing** and **metadata** (context window, max output
- * tokens, capabilities, mode) per model — what Portkey-AI/models lacks.
- * The Portkey gateway still routes; this catalog feeds:
+ * tokens, capabilities, mode) per model. The catalog feeds:
  *
  *   - **The picker UI** (`/api/model-provider-credentials/registry` →
  *     {@link listCatalogModels}): every model the user can select.

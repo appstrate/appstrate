@@ -62,9 +62,9 @@ const rawModelProviderKeySchema = z.object({
   label: z.string().min(1),
   /**
    * Binds this env entry to a registered ModelProviderDefinition. Required
-   * because Portkey routing is keyed on the `portkeyProvider` slug each
-   * provider definition declares — `apiShape` alone can't disambiguate
-   * (cerebras / groq / xai all share `openai-completions`).
+   * because `apiShape` alone can't disambiguate (cerebras / groq / xai
+   * all share `openai-completions`), and the registry resolves identity
+   * hooks, OAuth wire format, and pricing catalog by `providerId`.
    */
   providerId: z.string().min(1),
   apiShape: z.string().min(1),

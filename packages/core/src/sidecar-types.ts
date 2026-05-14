@@ -50,19 +50,10 @@ export type ModelApiShape =
 
 export interface LlmProxyApiKeyConfig {
   authMode: "api_key";
+  /** Upstream provider base URL the sidecar forwards to. */
   baseUrl: string;
   apiKey: string;
   placeholder: string;
-  /**
-   * Opaque JSON string forwarded as `x-portkey-config` on every upstream
-   * call. Carries `{ provider, api_key, custom_host?, retry?, … }` — see
-   * Portkey's gateway docs. The sidecar never inspects it; it only
-   * attaches the header. Portkey is mandatory for `api_key` mode so this
-   * field is always populated by the run launcher (the Portkey module
-   * raises `LlmProxyUnroutableModelError` for unmapped `apiShape`s
-   * rather than falling back to a direct upstream).
-   */
-  portkeyConfig: string;
 }
 
 export interface LlmProxyOauthConfig {
