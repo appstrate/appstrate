@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createApp } from "./app.ts";
+import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
@@ -86,4 +86,8 @@ const app = createApp({
 
 logger.info("Sidecar proxy listening", { port });
 
-export default { port, fetch: app.fetch };
+// `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
+// in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
+// without booting this entry point (which has port-binding side effects).
+// See issue #426.
+export default { port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };

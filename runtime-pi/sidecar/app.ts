@@ -35,6 +35,17 @@ import { filterSensitiveHeaders } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
+/**
+ * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP
+ * surface. Bun's default of 10 s otherwise kills any LLM stream that
+ * goes quiet longer than that (reasoning, parallel tool-call generation,
+ * slow upstream) — see issue #426. 255 s is Bun's maximum allowed value
+ * and sits under the 300 s run-tracker ceiling, so genuinely dead
+ * connections still get reclaimed before the run is forcibly killed.
+ * Imported by `server.ts` for the Bun.serve config.
+ */
+export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
+
 export interface AppDeps {
   config: SidecarConfig;
   fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
@@ -104,7 +115,22 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
   "x-ratelimit-reset": "X-RateLimit-Reset",
 };
 
-function passUpstream(upstream: Response): Response {
+/**
+ * Per-call telemetry attached to `/llm/*` pass-throughs. Each observation
+ * yields one info-level `llm.stream.observed` log on close (with TTFB,
+ * max inter-chunk gap, total bytes) plus warn-level `llm.stream.error` /
+ * `llm.stream.cancelled` on abnormal terminations. Added in #426 after a
+ * silent 10 s Bun.serve idleTimeout was burning the 300 s run timeout in
+ * a retry loop — keeping the closed-loop visibility avoids re-discovering
+ * that class of bug from scratch.
+ */
+interface LlmStreamObservation {
+  targetUrl?: string;
+  credentialId?: string;
+  authMode?: "oauth" | "api_key";
+}
+
+function passUpstream(upstream: Response, observe?: LlmStreamObservation): Response {
   const responseHeaders: Record<string, string> = {};
   for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
@@ -118,10 +144,69 @@ function passUpstream(upstream: Response): Response {
       responseHeaders[canonical] = value;
     }
   }
-  return new Response(upstream.body, {
+
+  if (!upstream.body) {
+    return new Response(null, { status: upstream.status, headers: responseHeaders });
+  }
+
+  const reader = upstream.body.getReader();
+  const start = Date.now();
+  let firstByteAt: number | null = null;
+  let lastByteAt = start;
+  let maxIdleMs = 0;
+  let totalBytes = 0;
+  let chunks = 0;
+
+  const summary = (): Record<string, unknown> => ({
+    ...observe,
     status: upstream.status,
-    headers: responseHeaders,
+    totalMs: Date.now() - start,
+    ttfbMs: firstByteAt === null ? null : firstByteAt - start,
+    maxIdleMs,
+    bytes: totalBytes,
+    chunks,
   });
+
+  // `pull`-based: `reader.read()` is only invoked when the downstream
+  // consumer (pi-ai) pulls a chunk. `maxIdleMs` therefore reflects the
+  // time between consumer pulls — exactly what Bun.serve's idle watchdog
+  // measures, and the reason a `>10 s` upstream pause was killing the
+  // connection before #426. A separate eager reader would isolate raw
+  // upstream byte timing, but we intentionally match what the serve
+  // layer sees so the metric stays comparable to the idle-timeout
+  // threshold.
+  const observed = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        const now = Date.now();
+        const gap = now - lastByteAt;
+        if (gap > maxIdleMs) maxIdleMs = gap;
+        if (done) {
+          logger.info("llm.stream.observed", summary());
+          controller.close();
+          return;
+        }
+        if (firstByteAt === null) firstByteAt = now;
+        lastByteAt = now;
+        totalBytes += value.byteLength;
+        chunks += 1;
+        controller.enqueue(value);
+      } catch (err) {
+        logger.warn("llm.stream.error", {
+          ...summary(),
+          error: err instanceof Error ? err.message : String(err),
+        });
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      logger.warn("llm.stream.cancelled", { ...summary(), reason: String(reason ?? "") });
+      return reader.cancel(reason);
+    },
+  });
+
+  return new Response(observed, { status: upstream.status, headers: responseHeaders });
 }
 
 /**
@@ -327,7 +412,7 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    return passUpstream(upstream);
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" });
   });
 
   async function handleOauthLlmRequest(
@@ -451,7 +536,11 @@ export function createApp(deps: AppDeps): Hono {
           );
         }
         // Fall through with the original 401 — best-effort.
-        return passUpstream(upstream);
+        return passUpstream(upstream, {
+          targetUrl,
+          credentialId: llmConfig.credentialId,
+          authMode: "oauth",
+        });
       }
       forwardedHeaders = {
         ...forwardedHeaders,
@@ -484,7 +573,11 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    return passUpstream(upstream);
+    return passUpstream(upstream, {
+      targetUrl,
+      credentialId: llmConfig.credentialId,
+      authMode: "oauth",
+    });
   }
 
   // MCP exposure — the agent-facing surface for `provider_call`,
