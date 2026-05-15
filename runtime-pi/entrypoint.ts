@@ -31,15 +31,31 @@
  * exit — the CAS in `finalizeRemoteRun` guarantees idempotency.
  */
 
+// Boot ordering note (item H):
+//
+// The static imports below run top-to-bottom before any top-level statement.
+// Anything that can be a `type` import is one — types are erased at parse
+// time and incur zero runtime cost. The heavy modules in this graph are
+// `@appstrate/runner-pi` (transitively pulls `@mariozechner/pi-coding-agent`)
+// and `@appstrate/afps-runtime/bundle`. We keep them static because the
+// rest of the bootloader needs their values within microseconds of the
+// first progress event firing — wrapping them in `await import()` only
+// shifts the cost to a later tick without saving wall-clock time, while
+// hurting readability + making the abort-on-error path harder to reason
+// about. The honest performance win for this file is in Bun's own ESM
+// graph cost; the bundling change in item D (build:runtime) collapses it.
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { type ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { type Api, type Model } from "@mariozechner/pi-ai";
+import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { Api, Model } from "@mariozechner/pi-ai";
 import {
   PiRunner,
   prepareBundleForPi,
   emitRuntimeReady,
   startSinkHeartbeat,
+  readProviderRefs,
+  type AppstrateToolCtx,
+  type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
@@ -52,18 +68,12 @@ import {
   type Bundle,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
-import {
-  readProviderRefs,
-  type AppstrateToolCtx,
-  type AppstrateCtxProvider,
-} from "@appstrate/runner-pi";
-import { attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 
