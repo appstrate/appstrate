@@ -19,9 +19,9 @@
  * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
  */
 
-import type { RuntimeInjectedTool } from "../types.ts";
+import { defineTool } from "../define.ts";
 
-export const recallMemoryTool: RuntimeInjectedTool = {
+export const recallMemoryTool = defineTool(import.meta, {
   id: "recall_memory",
   name: "recall_memory",
   description:
@@ -36,4 +36,4 @@ export const recallMemoryTool: RuntimeInjectedTool = {
       limit: { type: "integer", minimum: 1, maximum: 50 },
     },
   },
-};
+});

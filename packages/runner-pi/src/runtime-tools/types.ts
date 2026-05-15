@@ -20,17 +20,10 @@
  * runtime-pi's bundled entrypoint slim — it never carries doc strings
  * it doesn't use.
  *
- * The three fields below are sufficient for both consumers:
- *   - The platform prompt builder uses `id`/`name`/`description` for
- *     `availableTools` and pairs each tool with its `TOOL.md` via
- *     `loadRuntimeToolDoc` when extending `toolDocs`.
- *   - The runtime container uses `name`/`description`/`parameters` to
- *     register a generic MCP-forwarding Pi tool via
- *     `runtime-tools/mcp-forward.ts:buildRuntimeToolFactories`.
- *
- * Adding a new runtime-injected tool means creating a new directory
- * with `tool.ts` + `TOOL.md` and importing it from `runtime-tools/
- * index.ts`. No edits anywhere else.
+ * Each descriptor self-locates its `TOOL.md` via `docUrl`, captured at
+ * tool-module load time from the tool's own `import.meta.url`. No
+ * naming-convention-based path reconstruction — moving or renaming a
+ * tool directory does not require updating a separate path map.
  */
 export interface RuntimeInjectedTool {
   /** Stable tool id — same string used as `id` and `name` since these tools have no package identity. */
@@ -47,4 +40,15 @@ export interface RuntimeInjectedTool {
    * the runtime wraps it with `Type.Unsafe(schema)` at registration.
    */
   readonly parameters: Readonly<Record<string, unknown>>;
+  /**
+   * Absolute URL of the tool's directory (the unit of co-location —
+   * `tool.ts`, `TOOL.md`, and any future sibling files all sit here).
+   * Captured at tool-module load time via
+   * `new URL(".", import.meta.url)`, so the descriptor self-anchors
+   * without relying on any naming-convention path reconstruction.
+   * The platform reads files under it (currently `TOOL.md` via
+   * `loadRuntimeToolDoc(tool)`); the bundled runtime entrypoint never
+   * reads them — it only consumes name/description/parameters.
+   */
+  readonly dirUrl: URL;
 }

@@ -4,28 +4,26 @@
 /**
  * Platform-side loader for runtime-injected tool docs.
  *
- * Mirrors the bundle-tool contract: `TOOL.md` is a file co-located next
- * to `tool.ts`, resolved by the consumer (the platform prompt builder),
- * never inlined into the descriptor module. This is the runtime
- * equivalent of `pkg.files.get("TOOL.md")` in
+ * Mirrors the bundle-tool contract: `TOOL.md` is a file co-located in
+ * the tool's directory, resolved by the consumer (the platform prompt
+ * builder), never inlined into the descriptor module. This is the
+ * runtime equivalent of `pkg.files.get("TOOL.md")` in
  * `packages/afps-runtime/src/bundle/platform-prompt-inputs.ts`.
+ *
+ * The descriptor carries `dirUrl` (the tool's directory, captured at
+ * tool-module load time via `defineTool(import.meta, …)`), so this
+ * loader is a thin filesystem read with no naming-convention
+ * assumptions.
  *
  * Only imported from `apps/api` (which runs from source) — never from
  * the runtime-pi entrypoint that gets bundled via `bun build`, so the
- * `readFileSync(new URL(...))` pattern is safe here.
+ * `readFileSync` pattern is safe here.
  */
 
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RuntimeInjectedTool } from "./types.ts";
-
-/**
- * Map a tool's `name` (snake_case, MCP convention) to its on-disk
- * directory slug (kebab-case, filesystem convention).
- */
-function toSlug(name: string): string {
-  return name.replace(/_/g, "-");
-}
 
 /**
  * Read the co-located `TOOL.md` for a runtime-injected tool. Throws if
@@ -33,7 +31,5 @@ function toSlug(name: string): string {
  * recoverable runtime condition.
  */
 export function loadRuntimeToolDoc(tool: RuntimeInjectedTool): string {
-  const slug = toSlug(tool.name);
-  const url = new URL(`./${slug}/TOOL.md`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf8");
+  return readFileSync(join(fileURLToPath(tool.dirUrl), "TOOL.md"), "utf8");
 }

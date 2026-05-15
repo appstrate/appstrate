@@ -19,9 +19,9 @@
  * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
  */
 
-import type { RuntimeInjectedTool } from "../types.ts";
+import { defineTool } from "../define.ts";
 
-export const runHistoryTool: RuntimeInjectedTool = {
+export const runHistoryTool = defineTool(import.meta, {
   id: "run_history",
   name: "run_history",
   description:
@@ -38,4 +38,4 @@ export const runHistoryTool: RuntimeInjectedTool = {
       },
     },
   },
-};
+});

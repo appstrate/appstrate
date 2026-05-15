@@ -28,6 +28,7 @@ import {
   loadRuntimeToolDoc,
   type RuntimeInjectedTool,
 } from "../src/runtime-tools/index.ts";
+import { defineTool } from "../src/runtime-tools/define.ts";
 
 const RUNTIME_TOOLS_DIR = fileURLToPath(new URL("../src/runtime-tools/", import.meta.url));
 
@@ -51,6 +52,9 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
       // Required by the MCP-forwarding factory in runtime-pi/mcp/direct.ts.
       expect(typeof tool.parameters).toBe("object");
       expect(tool.parameters).not.toBeNull();
+      // Required by the platform prompt builder to locate the co-located TOOL.md.
+      expect(tool.dirUrl).toBeInstanceOf(URL);
+      expect(tool.dirUrl.pathname.endsWith("/")).toBe(true);
     }
   });
 
@@ -87,13 +91,14 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
     // Compile-time check that the public type exposes what consumers
     // need. If a consumer adds a required field, the build breaks here
     // first instead of in the consumer file.
-    const _exhaustive: RuntimeInjectedTool = {
+    const _exhaustive: RuntimeInjectedTool = defineTool(import.meta, {
       id: "x",
       name: "x",
       description: "x",
       parameters: { type: "object", properties: {} },
-    };
+    });
     expect(_exhaustive.name).toBe("x");
+    expect(_exhaustive.dirUrl).toBeInstanceOf(URL);
   });
 });
 
@@ -119,22 +124,28 @@ describe("runtime-tools directory layout", () => {
       await expect(stat(docFile)).resolves.toBeDefined();
     }
   });
+
+  it("every descriptor's `dirUrl` points at an existing directory under runtime-tools/", () => {
+    // Sanity check that `defineTool(import.meta, …)` captured a real
+    // path. If a tool.ts is moved without updating the directory
+    // structure, this fails before the consumer ever touches TOOL.md.
+    for (const tool of RUNTIME_INJECTED_TOOLS) {
+      const dirPath = fileURLToPath(tool.dirUrl);
+      expect(dirPath.startsWith(RUNTIME_TOOLS_DIR)).toBe(true);
+    }
+  });
 });
 
 describe("loadRuntimeToolDoc", () => {
   // The platform-side loader mirrors bundle tools' `pkg.files.get(
   // "TOOL.md")`: a single resolution point that reads the co-located
-  // file at call time. The descriptor itself stays doc-free.
-  const slugByName = new Map<string, string>([
-    ["run_history", "run-history"],
-    ["recall_memory", "recall-memory"],
-  ]);
+  // file at call time. The descriptor itself stays doc-free; the
+  // loader resolves `TOOL.md` from each tool's `dirUrl`, which was
+  // captured at module load by `defineTool(import.meta, …)`.
 
-  it("returns the exact bytes of the co-located TOOL.md", async () => {
+  it("returns the exact bytes of the TOOL.md sitting in each tool's directory", async () => {
     for (const tool of RUNTIME_INJECTED_TOOLS) {
-      const slug = slugByName.get(tool.name);
-      expect(slug).toBeDefined();
-      const docPath = join(RUNTIME_TOOLS_DIR, slug!, "TOOL.md");
+      const docPath = join(fileURLToPath(tool.dirUrl), "TOOL.md");
       const fileContent = await readFile(docPath, "utf8");
       expect(loadRuntimeToolDoc(tool)).toBe(fileContent);
     }
