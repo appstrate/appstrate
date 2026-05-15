@@ -395,7 +395,7 @@ interface DbModelCredentials {
  * Returns `{}` on any miss (unmapped provider, unknown model id, dropped
  * entry). Callers fall through to row values or final defaults.
  */
-interface CatalogDefaults {
+export interface CatalogDefaults {
   label?: string;
   input?: ("text" | "image")[];
   contextWindow?: number;
@@ -404,7 +404,7 @@ interface CatalogDefaults {
   cost?: ModelCost;
 }
 
-function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
   const provider = getModelProvider(providerId);
   const catalogKey = provider?.catalogProviderId ?? providerId;
   const entry = lookupCatalogModel(catalogKey, modelId);
@@ -438,8 +438,8 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * service resolves them from the registry by `providerId` (with the per-row
  * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
  * derivable column on `org_models` is an optional override that defers to
- * {@link resolveCatalogDefaults} on null — so a weekly catalog refresh
- * propagates to existing rows.
+ * the catalog on null — so a weekly catalog refresh propagates to existing
+ * rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   return {
