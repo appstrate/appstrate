@@ -626,8 +626,36 @@ async function persistEventAndAdvance(
   event: RunEvent,
   sequence: number,
 ): Promise<void> {
-  // Dispatch first; advance the counter only on success so a crashing handler
-  // lets the same event retry (deduped via replay cache if already acked).
+  // Claim the sequence atomically BEFORE dispatching. The CAS on the
+  // previous sequence is the single point of serialisation across
+  // concurrent ingestion paths (fast-path POST + drain races against
+  // a second POST whose drain peeks the same buffered sequence before
+  // the first has removed it). With dispatch-first, both racers would
+  // call `sink.handle(event)` and `appendRunLog` would INSERT two
+  // identical rows for the same sequence — `appendRunLog` has no
+  // idempotency key and the platform-wide replay cache only dedupes
+  // on `(runId, webhookId)`, not `(runId, sequence)`. Reversing the
+  // order means whoever loses the CAS observes zero affected rows
+  // and skips the dispatch entirely.
+  //
+  // We deliberately give up the prior "dispatch crashes → retry next
+  // time" property. It was illusory: `appendRunLog` was never
+  // idempotent, so a partial-write crash followed by retry would have
+  // duplicated rows just like a concurrent drain. Crash recovery for
+  // un-acked events lives in the HttpSink retry layer on the runner
+  // side (4 attempts, exponential backoff), not here.
+  const claimed = await db
+    .update(runs)
+    .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
+    .where(and(eq(runs.id, run.id), eq(runs.lastEventSequence, sequence - 1)))
+    .returning({ id: runs.id });
+  if (claimed.length === 0) {
+    // Another concurrent ingestion path already claimed this sequence.
+    // Skip the dispatch — that path is responsible for inserting the
+    // run_logs row exactly once.
+    return;
+  }
+
   const sink = new PersistingEventSink({
     scope: { orgId: run.orgId, applicationId: run.applicationId },
     runId: run.id,
@@ -649,17 +677,6 @@ async function persistEventAndAdvance(
     });
   }
 
-  // Advance the sequence counter AND bump the liveness marker in a single
-  // UPDATE. Every authenticated event is an implicit heartbeat — the
-  // watchdog uses `last_heartbeat_at` as the single source of truth for
-  // stall detection, regardless of runner topology. The CAS on the
-  // previous sequence keeps the advance no-op if a parallel flush beat us,
-  // but the heartbeat bump is still safe: a concurrent event POST is,
-  // by definition, proof-of-life.
-  await db
-    .update(runs)
-    .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-    .where(and(eq(runs.id, run.id), eq(runs.lastEventSequence, sequence - 1)));
   // Keep the in-memory context fresh for the rest of the request.
   run.lastEventSequence = sequence;
 }

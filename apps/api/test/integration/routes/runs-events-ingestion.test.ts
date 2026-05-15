@@ -271,6 +271,58 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(row?.status).toBe("running");
   });
 
+  // Regression for the persist-vs-CAS race in `persistEventAndAdvance`.
+  //
+  // Before the fix, `sink.handle(event)` ran BEFORE the CAS that
+  // advances `runs.last_event_sequence`. Two concurrent ingestion
+  // paths could both observe `lastSeq === sequence - 1` (the in-memory
+  // snapshot taken at request start), both call `appendRunLog`, and
+  // both insert an identical `run_logs` row for the same sequence —
+  // only the CAS losing the race would no-op, but the row was already
+  // double-written. `appendRunLog` has no idempotency key and the
+  // platform-wide replay cache only dedupes on `(runId, webhookId)`,
+  // not `(runId, sequence)`, so it cannot save us here.
+  //
+  // The race manifested in production as identical paired log rows
+  // (same `data`, same `toolCallId`, `created_at` ~1ms apart) on
+  // tool-heavy turns where the event throughput exposed enough drain
+  // concurrency for two requests to peek the same buffered sequence.
+  //
+  // The fix in `persistEventAndAdvance` reverses the order: CAS first,
+  // then dispatch. The loser observes zero affected rows and skips
+  // the insert entirely — at most one row per sequence, period.
+  it("inserts at most one run_logs row per sequence under concurrent posts", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Two POSTs with the SAME sequence but DIFFERENT webhook-ids (the
+    // replay cache cannot dedupe these). Each `signedHeaders()` call
+    // mints a fresh msg-id, so both pass the replay check and both
+    // reach `persistEventAndAdvance` with `sequence === lastSeq + 1`.
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "racing-event", timestamp: Date.now() },
+      1,
+    );
+    // `Promise.all` is the closest we can get to a true race in a
+    // single-threaded test runner — both POSTs enter the route
+    // handler before either yields back from `await c.req.json()`.
+    const [a, b] = await Promise.all([postEvent(runId, envelope), postEvent(runId, envelope)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+
+    // Exactly one row, regardless of which request won the CAS.
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "racing-event")));
+    expect(logs).toHaveLength(1);
+
+    // Sequence counter advanced exactly once.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(1);
+  });
+
   // End-to-end coverage for the `@appstrate/report` system tool.
   //
   // Why this lives at the route layer and not just in the sink unit test:
