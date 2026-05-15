@@ -12,7 +12,7 @@
 #
 # All paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.11-alpine
+ARG BUN_IMAGE=oven/bun:1.3.14-alpine
 
 # ── Stage 1 — dependency install ──────────────────────────────────
 # Produces a runtime-pi-scoped `node_modules` tree (filter-installed
@@ -33,8 +33,9 @@ COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
 COPY packages/emails/package.json        packages/emails/
 COPY packages/env/package.json           packages/env/
-COPY packages/mcp-transport/package.json packages/mcp-transport/
-COPY packages/module-codex/package.json  packages/module-codex/
+COPY packages/mcp-transport/package.json     packages/mcp-transport/
+COPY packages/module-claude-code/package.json packages/module-claude-code/
+COPY packages/module-codex/package.json      packages/module-codex/
 COPY packages/runner-pi/package.json     packages/runner-pi/
 COPY packages/shared-types/package.json  packages/shared-types/
 COPY packages/ui/package.json            packages/ui/
@@ -57,6 +58,38 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
         --production \
         --filter=appstrate-pi-runtime \
         --no-progress
+
+# Pre-bundle the entrypoint to a single .js file. This collapses the
+# 522-module ESM resolution graph (workspace symlinks + nested
+# node_modules) into a single file that Bun loads in one read — shaving
+# ~100-300 ms off container cold start.
+#
+# The Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent)
+# is kept `--external` deliberately. The SDK is large (~10 MB
+# bundled), uses dynamic provider dispatch, and we have observed
+# bundling it inlines transient modules that hurt rather than help.
+# Symlinks for the SDK pair remain on disk in the runtime stage so the
+# `--external` import resolves at runtime via the same path the
+# unbundled entrypoint used.
+#
+# Workspace sources for `@appstrate/*` packages are bundled inline,
+# which is why those symlinks become optional below (we keep them for
+# safety since other scripts under /runtime/{extensions,mcp}/ still
+# import via the symlinked paths).
+COPY packages/afps-runtime/src    packages/afps-runtime/src
+COPY packages/connect/src         packages/connect/src
+COPY packages/core/src            packages/core/src
+COPY packages/mcp-transport/src   packages/mcp-transport/src
+COPY packages/runner-pi/src       packages/runner-pi/src
+COPY runtime-pi/extensions/       runtime-pi/extensions/
+COPY runtime-pi/mcp/              runtime-pi/mcp/
+COPY runtime-pi/*.ts              runtime-pi/
+
+RUN bun build runtime-pi/entrypoint.ts \
+        --target=bun \
+        --external='@mariozechner/pi-ai' \
+        --external='@mariozechner/pi-coding-agent' \
+        --outfile=runtime-pi/dist/entrypoint.js
 
 # ── Stage 2 — runtime ─────────────────────────────────────────────
 FROM ${BUN_IMAGE} AS runtime
@@ -174,9 +207,16 @@ RUN mkdir -p node_modules/@mariozechner \
 # Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
 # or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked
 # up automatically — no Dockerfile edit required.
+#
+# Both the original `.ts` sources and the pre-bundled `dist/entrypoint.js`
+# are copied — the bundle is the production entrypoint, while the `.ts`
+# sources remain on disk so the MCP / extensions glob imports
+# (`./extensions/*.ts`, `./mcp/*.ts`) still resolve when the bundle
+# delegates to them at runtime.
 COPY --chown=pi:pi runtime-pi/extensions/ ./extensions/
 COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
 COPY --chown=pi:pi runtime-pi/*.ts        ./
+COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
 
 # Agent workspace. AFPS tools ship pre-bundled with their deps inlined
 # (AFPS §3.4, via `@appstrate/core/tool-bundler`), so nothing under
@@ -192,6 +232,6 @@ USER pi:pi
 # the platform's HTTP sink — the container lifecycle reports health,
 # no separate probe endpoint is needed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD test -f /runtime/entrypoint.ts || exit 1
+  CMD test -f /runtime/dist/entrypoint.js || exit 1
 
-ENTRYPOINT ["bun", "run", "/runtime/entrypoint.ts"]
+ENTRYPOINT ["bun", "run", "/runtime/dist/entrypoint.js"]

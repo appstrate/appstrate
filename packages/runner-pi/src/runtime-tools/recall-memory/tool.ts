@@ -13,19 +13,15 @@
  *
  * The sidecar advertises the same `description` so MCP-list output
  * matches the Pi-tool registration verbatim.
+ *
+ * The LLM-facing doc lives in the co-located `TOOL.md` and is resolved
+ * by the platform via `loadRuntimeToolDoc(tool)` — mirroring how bundle
+ * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import type { RuntimeInjectedTool } from "../types.ts";
+import { defineTool } from "../define.ts";
 
-// Co-locate the LLM-facing doc as `TOOL.md` next to this descriptor
-// (mirrors the bundle-tool layout). Loaded synchronously at module-
-// import time so the descriptor is fully populated before any
-// consumer reads `RUNTIME_INJECTED_TOOLS`.
-const doc = readFileSync(fileURLToPath(new URL("./TOOL.md", import.meta.url)), "utf8");
-
-export const recallMemoryTool: RuntimeInjectedTool = {
+export const recallMemoryTool = defineTool(import.meta, {
   id: "recall_memory",
   name: "recall_memory",
   description:
@@ -40,5 +36,4 @@ export const recallMemoryTool: RuntimeInjectedTool = {
       limit: { type: "integer", minimum: 1, maximum: 50 },
     },
   },
-  doc,
-};
+});

@@ -115,9 +115,10 @@ export class HttpSink implements EventSink {
   async handle(event: RunEvent): Promise<void> {
     const id = this.generateId();
     const nowMs = this.now();
+    const seq = this.sequence++;
     const cloudEvent = buildCloudEventEnvelope({
       event,
-      sequence: this.sequence++,
+      sequence: seq,
       id,
       nowMs,
     });

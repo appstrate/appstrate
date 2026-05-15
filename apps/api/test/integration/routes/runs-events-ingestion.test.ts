@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
@@ -226,6 +226,117 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(after?.lastEventSequence).toBe(2);
   });
 
+  // Regression for the buffer-stuck-until-finalize bug.
+  //
+  // Symptom: on a 10-tool parallel turn, the runner's HttpSink fires 10
+  // POSTs near-simultaneously. `verifyRunSignature` middleware loads each
+  // request's snapshot of `lastEventSequence` BEFORE any of them
+  // persists, so all 10 see the same stale value. Only one (whichever
+  // matches `seq === snap + 1`) wins the fast path; the other 9 fall
+  // into the buffer path. Pre-fix, the buffer path did NOT re-attempt a
+  // drain — those 9 events sat in Redis until finalize's gap_fill,
+  // collapsing 30s of real-time event activity into a single visual
+  // burst at run end.
+  //
+  // We simulate the snapshot-staleness window by hand-advancing
+  // `lastEventSequence` between the two POSTs to mimic a fast-path
+  // request that completed between request A's middleware snapshot and
+  // request A's drain attempt.
+  it("buffer path refreshes snapshot and drains when DB has advanced", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Step 1: POST seq=3 with DB.lastSeq=0 → buffered (gap before).
+    const env3 = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "third", timestamp: Date.now() },
+      3,
+    );
+    const res3 = await postEvent(runId, env3);
+    expect(res3.status).toBe(200);
+    expect(((await res3.json()) as { outcome: string }).outcome).toBe("buffered");
+
+    const [mid1] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(mid1?.lastEventSequence).toBe(0);
+
+    // Step 2: simulate a concurrent fast-path that advanced DB to seq=2
+    // without leaving anything in the buffer. Pre-fix, the buffer entry
+    // for seq=3 stays untouched — no contiguous arrival ever wakes the
+    // drain.
+    await db.update(runs).set({ lastEventSequence: 2 }).where(eq(runs.id, runId));
+
+    // Step 3: POST seq=4. Middleware reads fresh snapshot=2; 4 != 3 →
+    // buffer path. With the fix, the buffer path's refresh-and-drain
+    // now sees DB.lastSeq=2 and seq=3 in the buffer (contiguous!),
+    // persists seq=3, then peeks seq=4 (just buffered), persists. Final
+    // lastSeq=4. Without the fix, both 3 and 4 sit in the buffer and
+    // lastSeq stays at 2 until finalize.
+    const env4 = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "fourth", timestamp: Date.now() },
+      4,
+    );
+    const res4 = await postEvent(runId, env4);
+    expect(res4.status).toBe(200);
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.lastEventSequence).toBe(4);
+  });
+
+  // Regression for the silent-event-drop on bursty parallel turns.
+  //
+  // Symptom: on a 10-tool parallel turn, the 10 `tool_execution_end`
+  // rows were missing from `run_logs` even though the runner POSTed
+  // every event. The runner's HttpSink assigns sequence numbers
+  // synchronously but the fetch calls race, so events past the contiguous
+  // prefix land at the platform out of order and get buffered. When
+  // some intermediate sequence's POST never won the fast-path CAS,
+  // every later buffered event sat in the buffer until finalize's
+  // `drainBufferedEvents(allowGaps: true)`. The gap_fill branch called
+  // `persistEventAndAdvance(seq=56)` but the strict CAS predicate
+  // `lastEventSequence = seq - 1` rejected it (`last` was still 32),
+  // the buffer entry was removed regardless, and the row was silently
+  // lost. The fix relaxes the CAS to `lastEventSequence < seq` in
+  // allowGap mode so the jump is honoured.
+  it("finalize drains buffered events past a sequence gap (gap_fill regression)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Plant a 50-event burst entirely past a gap: seq=1 is missing,
+    // seq=2..51 all post out-of-order so they go to buffer.
+    for (const sequence of [3, 5, 4, 7, 6, 2, 9, 8, 11, 10]) {
+      const env = buildEnvelope(
+        runId,
+        "appstrate.progress",
+        { message: `gap-${sequence}`, timestamp: Date.now() },
+        sequence,
+      );
+      const res = await postEvent(runId, env);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { outcome: string }).outcome).toBe("buffered");
+    }
+
+    const [mid] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(mid?.lastEventSequence).toBe(0);
+
+    // Finalize triggers drainBufferedEvents(allowGaps: true). Without the
+    // gap_fill CAS fix, every seq=2..11 buffered event would be removed
+    // from the buffer with no dispatch — run_logs would have zero rows
+    // from this batch.
+    const res = await postFinalize(runId, { status: "success", durationMs: 100 });
+    expect(res.status).toBe(200);
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.lastEventSequence).toBe(11);
+    expect(after?.sinkClosedAt).not.toBeNull();
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const gapLogs = logs.filter(
+      (l) => typeof l.message === "string" && l.message.startsWith("gap-"),
+    );
+    expect(gapLogs.length).toBe(10);
+  });
+
   // Regression for the HttpSink off-by-one: the first event emitted by
   // HttpSink carries sequence=1 (not 0). With `last_event_sequence`
   // defaulting to 0, `sequence === last + 1` must accept 1 on the
@@ -269,6 +380,156 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("running");
+  });
+
+  // Regression for the persist-vs-CAS race in `persistEventAndAdvance`.
+  //
+  // Before the fix, `sink.handle(event)` ran BEFORE the CAS that
+  // advances `runs.last_event_sequence`. Two concurrent ingestion
+  // paths could both observe `lastSeq === sequence - 1` (the in-memory
+  // snapshot taken at request start), both call `appendRunLog`, and
+  // both insert an identical `run_logs` row for the same sequence —
+  // only the CAS losing the race would no-op, but the row was already
+  // double-written. `appendRunLog` has no idempotency key and the
+  // platform-wide replay cache only dedupes on `(runId, webhookId)`,
+  // not `(runId, sequence)`, so it cannot save us here.
+  //
+  // The race manifested in production as identical paired log rows
+  // (same `data`, same `toolCallId`, `created_at` ~1ms apart) on
+  // tool-heavy turns where the event throughput exposed enough drain
+  // concurrency for two requests to peek the same buffered sequence.
+  //
+  // The fix in `persistEventAndAdvance` reverses the order: CAS first,
+  // then dispatch. The loser observes zero affected rows and skips
+  // the insert entirely — at most one row per sequence, period.
+  it("inserts at most one run_logs row per sequence under concurrent posts", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Two POSTs with the SAME sequence but DIFFERENT webhook-ids (the
+    // replay cache cannot dedupe these). Each `signedHeaders()` call
+    // mints a fresh msg-id, so both pass the replay check and both
+    // reach `persistEventAndAdvance` with `sequence === lastSeq + 1`.
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "racing-event", timestamp: Date.now() },
+      1,
+    );
+    // `Promise.all` is the closest we can get to a true race in a
+    // single-threaded test runner — both POSTs enter the route
+    // handler before either yields back from `await c.req.json()`.
+    const [a, b] = await Promise.all([postEvent(runId, envelope), postEvent(runId, envelope)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+
+    // Exactly one row, regardless of which request won the CAS.
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "racing-event")));
+    expect(logs).toHaveLength(1);
+
+    // Sequence counter advanced exactly once.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(1);
+  });
+
+  // Regression: CAS-advance and run_logs INSERT MUST commit or roll back
+  // together. Before the transaction wrap, a transient INSERT failure
+  // (FK violation, check constraint, deadlock, network drop mid-statement)
+  // left `runs.last_event_sequence` advanced with no row in `run_logs` —
+  // the next event's CAS predicate `= seq - 1` matched the advanced
+  // value and silently skipped the missing row. The fix wraps the CAS
+  // and the dispatch in `db.transaction()` so either both apply or
+  // neither does.
+  //
+  // We simulate a transient failure by adding a CHECK constraint that
+  // rejects a marker message. The dispatch INSERT throws inside the tx,
+  // rolling the CAS back.
+  it("rolls back the sequence advance when the run_logs INSERT fails", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    await db.execute(
+      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
+    );
+
+    try {
+      const envelope = buildEnvelope(
+        runId,
+        "appstrate.progress",
+        { message: "__poison__", timestamp: Date.now() },
+        1,
+      );
+      const res = await postEvent(runId, envelope);
+      // The transaction aborts on the CHECK violation; the route surfaces
+      // an unhandled error as a 5xx. Either 500 or a problem+json shape
+      // is acceptable — the contract is the rollback below.
+      expect(res.status).toBeGreaterThanOrEqual(500);
+
+      // CAS was rolled back: counter still 0.
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.lastEventSequence).toBe(0);
+
+      // No log row was inserted.
+      const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+      expect(logs).toHaveLength(0);
+    } finally {
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+    }
+  });
+
+  // Regression: the replay-protection key must be released when ingestion
+  // throws so the runner's retry (same webhook-id, same body, same HMAC
+  // signature) is not silently absorbed as "replay" → 200 OK with the
+  // event never persisted. Models the production case where HttpSink
+  // retries a transient 5xx with the identical envelope.
+  it("releases the replay key when ingestion throws so a retry can succeed", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "__poison__", timestamp: Date.now() },
+      1,
+    );
+    const body = JSON.stringify(envelope);
+    const stickyHeaders = signedHeaders(RUN_SECRET, body);
+
+    await db.execute(
+      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
+    );
+
+    const first = await app.request(`/api/runs/${runId}/events`, {
+      method: "POST",
+      headers: stickyHeaders,
+      body,
+    });
+    expect(first.status).toBeGreaterThanOrEqual(500);
+
+    // Lift the transient failure and retry with the EXACT SAME envelope
+    // (same body, same webhook-id, same HMAC). Before the cleanup the
+    // replay key was sticky for `replayWindow` seconds and this retry
+    // would have been swallowed as "replay" with the event never
+    // persisted.
+    await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+
+    const second = await app.request(`/api/runs/${runId}/events`, {
+      method: "POST",
+      headers: stickyHeaders,
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
+
+    // And the event actually landed in run_logs (proves the retry did
+    // real ingestion, not a stale-key passthrough).
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(1);
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
+    expect(logs).toHaveLength(1);
   });
 
   // End-to-end coverage for the `@appstrate/report` system tool.

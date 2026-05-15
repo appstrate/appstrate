@@ -33,7 +33,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { PersistingEventSink, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
+import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -82,7 +82,6 @@ export interface IngestRunEventInput {
 export interface FinalizeRunInput {
   run: RunSinkContext;
   result: RunResult;
-  webhookId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,25 +153,37 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
     ttlSeconds: getEnv().REMOTE_RUN_REPLAY_WINDOW_SECONDS,
     nx: true,
   });
-  if (!claimed) {
-    return { status: "replay" };
-  }
+  if (!claimed) return { status: "replay" };
 
+  try {
+    return await ingestInner(run, envelope);
+  } catch (err) {
+    // Release the replay key so the runner's retry (same webhook-id, fresh
+    // attempt over the wire) is not silently absorbed by the replay check.
+    // Best-effort: a failed DEL leaves the key sticky for `replayWindow`
+    // seconds — strictly worse than success but no worse than the
+    // pre-cleanup baseline. The original error wins regardless.
+    await cache.del(replayKey).catch(() => {});
+    throw err;
+  }
+}
+
+async function ingestInner(
+  run: RunSinkContext,
+  envelope: CloudEventEnvelope,
+): Promise<IngestOutcome> {
   const event = envelopeToRunEvent(envelope, run.id);
   const sequence = envelope.sequence;
 
   // 2. Fast path: contiguous sequence.
   if (sequence === run.lastEventSequence + 1) {
     await persistEventAndAdvance(run, event, sequence);
-    // Attempt to drain any buffered successors while we're here.
     await drainBufferedEvents(run);
     return { status: "persisted", sequence };
   }
 
   // Already-seen sequence → idempotent ack, no-op.
-  if (sequence <= run.lastEventSequence) {
-    return { status: "replay" };
-  }
+  if (sequence <= run.lastEventSequence) return { status: "replay" };
 
   // 3. Out of order — buffer.
   await bufferEvent(run.id, sequence, event);
@@ -183,7 +194,23 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
     return { status: "persisted", sequence };
   }
 
-  return { status: "buffered", sequence };
+  // Refresh the in-memory snapshot from DB and try a drain. Concurrent
+  // POSTs each load their own snapshot in the verify-signature middleware
+  // before any of them persists, so a parallel burst sees the same stale
+  // value: only one wins the fast path, the others end up here. Without a
+  // refresh + drain attempt, buffered events sit until finalize's gap_fill
+  // — collapsing real-time activity into a single visual burst.
+  const [fresh] = await db
+    .select({ s: runs.lastEventSequence })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+  await drainBufferedEvents(run);
+
+  return run.lastEventSequence >= sequence
+    ? { status: "persisted", sequence }
+    : { status: "buffered", sequence };
 }
 
 /**
@@ -384,15 +411,25 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.
   if (outputValidationErrors) {
-    await appendRunLog(
-      scope,
-      run.id,
-      "system",
-      "output_validation",
-      null,
-      { valid: false, errors: outputValidationErrors },
-      "error",
-    );
+    // Post-CAS best-effort: the run is already terminal, a transient
+    // log INSERT failure must not crash finalize. The validation
+    // failure is also surfaced via `runs.error` (CAS update above).
+    try {
+      await appendRunLog(
+        scope,
+        run.id,
+        "system",
+        "output_validation",
+        null,
+        { valid: false, errors: outputValidationErrors },
+        "error",
+      );
+    } catch (err) {
+      logger.error("finalize: appendRunLog output_validation failed", {
+        runId: run.id,
+        err: getErrorMessage(err),
+      });
+    }
   }
 
   // Resolve the run's actor for the unified persistence scope.
@@ -460,18 +497,28 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       );
     }
   }
-  if (status === "success" && resultToPersist) {
-    await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+  // Post-CAS best-effort: the run is already terminal in `runs`. A
+  // transient log INSERT failure here is logged and swallowed — the UI
+  // shows the run as complete from the row-level state regardless.
+  try {
+    if (status === "success" && resultToPersist) {
+      await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+    }
+    await appendRunLog(
+      scope,
+      run.id,
+      "system",
+      "run_completed",
+      null,
+      { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
+      status === "success" ? "info" : "error",
+    );
+  } catch (err) {
+    logger.error("finalize: appendRunLog terminal row failed", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
   }
-  await appendRunLog(
-    scope,
-    run.id,
-    "system",
-    "run_completed",
-    null,
-    { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
-    status === "success" ? "info" : "error",
-  );
 
   // 8. Status-change broadcast with the enriched params (including
   //    validation-failure errors and any afterRun metadata).
@@ -526,11 +573,7 @@ export async function synthesiseFinalize(
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
-  await finalizeRun({
-    run,
-    result,
-    webhookId: `synthesized-${runId}`,
-  });
+  await finalizeRun({ run, result });
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -625,42 +668,68 @@ async function persistEventAndAdvance(
   run: RunSinkContext,
   event: RunEvent,
   sequence: number,
+  opts: { allowGap?: boolean } = {},
 ): Promise<void> {
-  // Dispatch first; advance the counter only on success so a crashing handler
-  // lets the same event retry (deduped via replay cache if already acked).
-  const sink = new PersistingEventSink({
-    scope: { orgId: run.orgId, applicationId: run.applicationId },
-    runId: run.id,
-    // The metric event handler is one of the two writers of the
-    // runner-source ledger row (the other is the finalize fallback).
-    writeLedger: true,
-  });
-  await sink.handle(event);
+  // Claim the sequence atomically BEFORE dispatching. The CAS is the
+  // single point of serialisation across concurrent ingestion paths
+  // (fast-path POST + drain racing against a second POST whose drain
+  // peeks the same buffered sequence). Dispatch-first would let both
+  // racers INSERT identical run_logs rows for the same sequence —
+  // `appendRunLog` has no idempotency key, and the platform-wide replay
+  // cache only dedupes on `(runId, webhookId)`. Reversing the order
+  // means whoever loses the CAS observes zero affected rows and skips
+  // dispatch entirely.
+  //
+  // `allowGap`: relax the predecessor check to `lastEventSequence <
+  // sequence`. Used by the terminal drain in finalize when a fast-path
+  // POST never arrived for some intermediate sequence — the strict
+  // `= sequence - 1` CAS would otherwise reject every buffered event
+  // past the missing one and they would be silently lost.
+  const predicate = opts.allowGap
+    ? sql`${runs.lastEventSequence} < ${sequence}`
+    : eq(runs.lastEventSequence, sequence - 1);
 
-  // The very first event a runner posts is the "run is live" signal. No
-  // runner currently emits `run.started` (see AppstrateEventSink handlers
-  // and HttpSink — neither produces it), so keying the flip on event type
-  // would leave remote runs stuck at `pending` until finalize. Instead we
-  // flip on the first ingested sequence, whatever its type. Terminal
-  // status remains the exclusive responsibility of finalizeRun.
-  if (run.lastEventSequence === 0) {
-    await updateRun({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-      status: "running",
-    });
+  // Wrap the CAS + dispatch in a single transaction so a transient
+  // INSERT failure inside `persistRunEvent` rolls the sequence advance
+  // back. Otherwise we could leave `runs.last_event_sequence` advanced
+  // with no `run_logs` row to back it — a silent loss that the next
+  // event's CAS would tolerate without retrying the dropped one.
+  const scope = { orgId: run.orgId, applicationId: run.applicationId };
+  const firstEvent = run.lastEventSequence === 0;
+  const claimed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(runs)
+      .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
+      .where(and(eq(runs.id, run.id), predicate))
+      .returning({ id: runs.id });
+    if (rows.length === 0) return false;
+
+    await persistRunEvent(tx, scope, run.id, event, { writeLedger: true });
+
+    // No runner emits `run.started`, so flip status → running on the
+    // first ingested sequence regardless of type. Terminal status is
+    // owned by finalizeRun.
+    if (firstEvent) {
+      await updateRun(scope, run.id, { status: "running" }, tx);
+    }
+    return true;
+  });
+
+  if (!claimed) {
+    // Another concurrent path claimed this sequence. Refresh the
+    // in-memory snapshot so the caller's drain loop recomputes `next`
+    // against the actual DB state — otherwise it bails out on a false
+    // gap-at-head and strands every subsequent buffered event until
+    // finalize's gap_fill.
+    const [fresh] = await db
+      .select({ s: runs.lastEventSequence })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+    return;
   }
 
-  // Advance the sequence counter AND bump the liveness marker in a single
-  // UPDATE. Every authenticated event is an implicit heartbeat — the
-  // watchdog uses `last_heartbeat_at` as the single source of truth for
-  // stall detection, regardless of runner topology. The CAS on the
-  // previous sequence keeps the advance no-op if a parallel flush beat us,
-  // but the heartbeat bump is still safe: a concurrent event POST is,
-  // by definition, proof-of-life.
-  await db
-    .update(runs)
-    .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-    .where(and(eq(runs.id, run.id), eq(runs.lastEventSequence, sequence - 1)));
-  // Keep the in-memory context fresh for the rest of the request.
   run.lastEventSequence = sequence;
 }
 
@@ -689,20 +758,32 @@ async function drainBufferedEvents(
     }
 
     if (opts.allowGaps && head.sequence > next) {
-      // Skip the gap — persist the lowest buffered event as if it were the
-      // next in line. Records a gap-filling log line so operators can spot
-      // dropped events in post-mortems.
       logger.warn("remote run flushed with sequence gap", {
         runId: run.id,
         expectedSequence: next,
         actualSequence: head.sequence,
       });
-      await persistEventAndAdvance(run, head.event, head.sequence);
+      await persistEventAndAdvance(run, head.event, head.sequence, { allowGap: true });
       await buffer.remove(run.id, head.sequence);
       continue;
     }
 
-    return; // Gap at the head and gaps not allowed — wait for the missing event.
+    // Gap at the head and gaps not allowed — could be a real gap, or a
+    // stale view where a concurrent drainer advanced `lastEventSequence`
+    // and removed the buffer's old lowest. Refresh from DB and retry
+    // before giving up; otherwise concurrent buffer-path drainers (one
+    // per bursty parallel-call event) all observe a false gap, exit
+    // early, and the buffer sits until finalize.
+    const [fresh] = await db
+      .select({ s: runs.lastEventSequence })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (fresh && fresh.s > run.lastEventSequence) {
+      run.lastEventSequence = fresh.s;
+      continue;
+    }
+    return;
   }
 }
 

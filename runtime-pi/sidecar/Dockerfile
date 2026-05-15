@@ -12,7 +12,7 @@
 #
 # Paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.11-alpine
+ARG BUN_IMAGE=oven/bun:1.3.14-alpine
 ARG RUNTIME_IMAGE=alpine:3.21.3
 
 # ── Stage 1 — compile to a single-file binary ─────────────────────
@@ -31,8 +31,9 @@ COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
 COPY packages/emails/package.json        packages/emails/
 COPY packages/env/package.json           packages/env/
-COPY packages/mcp-transport/package.json packages/mcp-transport/
-COPY packages/module-codex/package.json  packages/module-codex/
+COPY packages/mcp-transport/package.json     packages/mcp-transport/
+COPY packages/module-claude-code/package.json packages/module-claude-code/
+COPY packages/module-codex/package.json      packages/module-codex/
 COPY packages/runner-pi/package.json     packages/runner-pi/
 COPY packages/shared-types/package.json  packages/shared-types/
 COPY packages/ui/package.json            packages/ui/

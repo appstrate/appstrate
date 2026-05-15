@@ -13,19 +13,15 @@
  * If the sidecar's parameter schema or behaviour changes, update both
  * this descriptor (and the co-located `TOOL.md`) and the sidecar in
  * lockstep.
+ *
+ * The LLM-facing doc lives in the co-located `TOOL.md` and is resolved
+ * by the platform via `loadRuntimeToolDoc(tool)` — mirroring how bundle
+ * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import type { RuntimeInjectedTool } from "../types.ts";
+import { defineTool } from "../define.ts";
 
-// Co-locate the LLM-facing doc as `TOOL.md` next to this descriptor
-// (mirrors the bundle-tool layout). Loaded synchronously at module-
-// import time so the descriptor is fully populated before any
-// consumer reads `RUNTIME_INJECTED_TOOLS`.
-const doc = readFileSync(fileURLToPath(new URL("./TOOL.md", import.meta.url)), "utf8");
-
-export const runHistoryTool: RuntimeInjectedTool = {
+export const runHistoryTool = defineTool(import.meta, {
   id: "run_history",
   name: "run_history",
   description:
@@ -42,5 +38,4 @@ export const runHistoryTool: RuntimeInjectedTool = {
       },
     },
   },
-  doc,
-};
+});
