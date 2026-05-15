@@ -149,6 +149,27 @@ const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
 /**
+ * Fire-and-forget `appstrate.progress` emission used to give the dashboard
+ * a visible breadcrumb at each phase boundary of the bootloader. Boot
+ * keeps progressing regardless of whether the POST lands; HttpSink owns
+ * its own retry/queue so we don't await.
+ */
+function emitProgress(message: string): void {
+  void bridgedSink.handle({
+    type: "appstrate.progress",
+    timestamp: Date.now(),
+    runId: AGENT_RUN_ID!,
+    message,
+  } as RunEvent);
+}
+
+// Earliest possible "we're alive" signal — emitted before any heavy work
+// (git init, bundle parse, MCP handshake). Item G: this replaces an
+// earlier `runtime ready` (which still fires at Phase 6 with bundle +
+// extension counts) without changing the canonical event's semantics.
+emitProgress("agent boot");
+
+/**
  * Emit a best-effort `appstrate.error` event for a bootstrap failure. We
  * swallow sink errors here — the caller is about to `process.exit(1)` and
  * the platform's container-monitor will synthesise a finalize on exit.
@@ -267,6 +288,8 @@ const [, bundle] = await Promise.all([
   hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
+emitProgress("loading bundle");
+
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
 
 if (bundle) {
@@ -290,6 +313,8 @@ if (bundle) {
 }
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
+
+emitProgress("wiring tools");
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
@@ -315,6 +340,7 @@ const providerResolver: ProviderResolver = { resolve: async () => [] };
 // the agent's bundle tools + runtime extensions.
 let mcpClient: AppstrateMcpClient | undefined;
 if (sidecarUrl) {
+  emitProgress("connecting sidecar");
   try {
     // Retry the initial MCP handshake — the platform now starts the agent
     // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
