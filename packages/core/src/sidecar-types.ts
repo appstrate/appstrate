@@ -19,6 +19,23 @@ export interface SidecarConfig {
   platformApiUrl: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
+  /**
+   * Upstream model's total context window (tokens). When set, the sidecar's
+   * {@link TokenBudget} adds a pre-flight guard: a `provider_call` whose
+   * inline emission would push cumulative tool-output tokens past
+   * `modelContextWindow - modelMaxTokens` (reserve for the response) spills
+   * to the blob store instead — preventing a parallel batch of large
+   * tool_results from blowing past the upstream model's hard limit before
+   * Pi SDK's turn-boundary compaction has a chance to fire. See issue #464.
+   */
+  modelContextWindow?: number;
+  /**
+   * Reserve (tokens) the upstream model keeps for its response. Defaults
+   * to a conservative fraction of {@link modelContextWindow} when unset.
+   * Sourced from the resolved model's `maxTokens` — same value the runner
+   * passes to Pi SDK's compaction settings.
+   */
+  modelMaxTokens?: number;
 }
 
 /**
@@ -35,6 +52,10 @@ export interface SidecarLaunchSpec {
   runToken: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
+  /** See {@link SidecarConfig.modelContextWindow}. */
+  modelContextWindow?: number;
+  /** See {@link SidecarConfig.modelMaxTokens}. */
+  modelMaxTokens?: number;
 }
 
 /**

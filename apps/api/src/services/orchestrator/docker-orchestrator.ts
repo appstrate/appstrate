@@ -105,6 +105,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       PLATFORM_API_URL: platformApiUrl,
     };
     if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
+    if (spec.modelContextWindow != null) {
+      sidecarEnv.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
+    }
+    if (spec.modelMaxTokens != null) {
+      sidecarEnv.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
+    }
     if (spec.llm) {
       if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON so

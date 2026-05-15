@@ -329,6 +329,58 @@ export class PiRunner implements Runner {
     } else {
       await promptPromise;
     }
+
+    // #464 — Pi SDK's auto-compaction recovery is fire-and-forget: an
+    // `agent_end` event with overflow status triggers a background
+    // `_runAutoCompaction(...)` that `session.prompt()` does NOT await.
+    // Without this wait, the entrypoint can `process.exit(0)` before
+    // the compaction LLM call has a chance to start, and the next run
+    // turn re-encounters the same prompt-too-long 400. Polling
+    // `isCompacting` here lets that recovery actually drain.
+    await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
+  }
+}
+
+/**
+ * Maximum time to wait for a fire-and-forget Pi SDK compaction pass
+ * before falling through. Compaction is a single LLM call against the
+ * summarisation model — 60 s covers a 200 k-token Anthropic round-trip
+ * with a comfortable margin. Beyond this, the platform's outer run
+ * timeout (#PLATFORM_RUN_LIMITS.timeout_ceiling_seconds, default 1800 s)
+ * remains the authoritative ceiling.
+ */
+const COMPACTION_WAIT_TIMEOUT_MS = 60_000;
+/** Poll cadence for {@link waitForCompactionToSettle}. */
+const COMPACTION_POLL_INTERVAL_MS = 100;
+
+/**
+ * Drain Pi SDK's fire-and-forget compaction pass before the caller
+ * returns. The SDK schedules `_runAutoCompaction` from `_handleAgentEvent`
+ * — a queued promise nobody awaits — so `session.prompt()` resolves
+ * the moment the agent loop yields, leaving compaction (if any) racing
+ * the next `process.exit`. We poll `session.isCompacting` here with a
+ * bounded timeout; the upstream run timeout remains the authoritative
+ * ceiling beyond that.
+ *
+ * Exported for unit testing — production callers go through
+ * `PiRunner.executeSession` which feeds the SDK session in directly.
+ *
+ * @internal
+ */
+export async function waitForCompactionToSettle(
+  session: { isCompacting?: boolean },
+  signal?: AbortSignal,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<void> {
+  if (typeof session.isCompacting !== "boolean") return; // SDK older than 0.70 — best-effort no-op.
+  if (!session.isCompacting) return;
+  const timeoutMs = options.timeoutMs ?? COMPACTION_WAIT_TIMEOUT_MS;
+  const pollMs = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (session.isCompacting) {
+    if (signal?.aborted) return; // Cancellation supersedes the wait — entrypoint will surface the abort.
+    if (Date.now() >= deadline) return; // Timeout — let the caller proceed; outer run timeout still applies.
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
 

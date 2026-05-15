@@ -23,6 +23,21 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   return undefined;
 }
 
+function readPositiveIntFromEnv(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  // Soft-fail at boot: if the launcher passes a garbage value we fall back
+  // to the legacy run-budget-only path rather than refusing to start. The
+  // platform always emits stringified positive ints — anything else is a
+  // launcher bug we want surfaced via logs, not a hard sidecar crash.
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn("Sidecar env: ignoring invalid value", { name, raw });
+    return undefined;
+  }
+  return parsed;
+}
+
 // Config is set once at startup via env vars — sidecars are spawned per-run
 // with credentials already baked in.
 const config = {
@@ -30,6 +45,8 @@ const config = {
   runToken: process.env.RUN_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
   llm: readLlmConfigFromEnv(),
+  modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
+  modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
 };
 
 const cookieJar = new Map<string, string[]>();

@@ -538,7 +538,29 @@ export function createApp(deps: AppDeps): Hono {
     "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
     DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   );
-  const tokenBudget = new TokenBudget({ inlineCapTokens, runBudgetTokens });
+  // Context-window guard (#464): when the launcher forwards the resolved
+  // model's window + reserve, the budget refuses to inline a
+  // `provider_call` output that would push `consumed + estimated` past
+  // `contextWindow - reserve`. Without these the budget falls back to the
+  // legacy inline-cap + run-budget guard, which a parallel fan-out can
+  // collectively defeat (each call fits inline, the sum blows the
+  // upstream model's hard limit).
+  // `reserveTokens` is only forwarded alongside `contextWindowTokens` —
+  // the TokenBudget constructor rejects the lone-reserve case loudly,
+  // and the launcher never emits maxTokens without the window in
+  // practice (both come from the same resolved-model row).
+  const contextWindowOpt =
+    config.modelContextWindow !== undefined
+      ? {
+          contextWindowTokens: config.modelContextWindow,
+          ...(config.modelMaxTokens !== undefined ? { reserveTokens: config.modelMaxTokens } : {}),
+        }
+      : {};
+  const tokenBudget = new TokenBudget({
+    inlineCapTokens,
+    runBudgetTokens,
+    ...contextWindowOpt,
+  });
   // Fan-out cap on `provider_call`. Defaults to
   // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
   // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.

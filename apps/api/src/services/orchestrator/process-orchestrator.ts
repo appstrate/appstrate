@@ -202,6 +202,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       RUN_TOKEN: spec.runToken,
     };
     if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
+    if (spec.modelContextWindow != null) {
+      env.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
+    }
+    if (spec.modelMaxTokens != null) {
+      env.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
+    }
     if (spec.llm) {
       if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
