@@ -221,6 +221,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, or `body: { fromBytes: "<base64>", encoding: "base64" }` to upload inline binary bytes computed in memory (up to 5 MB; standard base64 RFC 4648 §4 only — alphabet `+/`; URL-safe base64 with `-_` is not accepted). ' +
         'Use `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
         'Without `toFile`, responses larger than 64 KB auto-spill to a file under `responses/<toolCallId>.bin`; smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
+        'Large text payloads that would otherwise blow the context window are returned as `body.kind === "link"` with a `uri` (`appstrate://provider-response/<run>/<id>`) — fetch the bytes via MCP `resources/read({ uri })` only when you actually need them, or pass `responseMode: { toFile: "<path>" }` upfront to route the response straight to disk. ' +
         "Inspect `body.kind` on the returned JSON to dispatch.\n",
     );
 

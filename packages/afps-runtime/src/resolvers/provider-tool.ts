@@ -366,6 +366,24 @@ export type ProviderCallResponseBody =
        */
       mimeTypeSniffed?: true;
       sha256: string;
+    }
+  | {
+      /**
+       * Lazy reference to a payload the runtime decided NOT to inline
+       * because it exceeded the LLM-context safe size. The bytes live
+       * in a run-scoped blob store (sidecar `BlobStore` for container
+       * runs); the agent can opt in to fetching them via MCP
+       * `resources/read({ uri })` only when it actually needs the
+       * content. Returning a `link` instead of `inline`/`text` is the
+       * end-to-end half of the sidecar's token-budget spill decision
+       * — without it, the runtime would re-inline the blob immediately
+       * and defeat the budget guard (see issue #464).
+       */
+      kind: "link";
+      uri: string;
+      mimeType: string;
+      /** Size of the spilled payload in bytes, when known. */
+      size?: number;
     };
 
 export interface ProviderCallResponse {

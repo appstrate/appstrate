@@ -51,7 +51,9 @@ interface Captured {
 }
 
 async function makeServer(opts: {
-  responseBlock?: { type: "text"; text: string };
+  responseBlock?:
+    | { type: "text"; text: string }
+    | { type: "resource_link"; uri: string; name?: string; mimeType?: string };
   isError?: boolean;
   /**
    * `_meta` payload surfaced alongside the result. The runtime parser
@@ -628,6 +630,112 @@ describe("McpProviderResolver — upstream meta propagation", () => {
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.status).toBe(429);
       expect(parsed.headers["retry-after"]).toBe("60");
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
+describe("McpProviderResolver — resource_link preservation (#464)", () => {
+  /**
+   * The sidecar's TokenBudget spills oversize text responses to a
+   * blob store and returns a `resource_link`. Honoring that decision
+   * end-to-end is what keeps the LLM context bounded: re-reading the
+   * blob here would inline the full payload into the tool result and
+   * blow past the model's context window (the failure mode of #464).
+   *
+   * `makeServer` does NOT register a `resources/*` provider, so any
+   * `resources/read` invocation would throw `MethodNotFound`. The
+   * resolver completing without an error is itself the assertion that
+   * the resolver did not attempt to read the blob.
+   */
+  it("returns a `link` body without reading the blob when sidecar spills", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ123";
+    const { pair, mcp } = await makeServer({
+      responseBlock: {
+        type: "resource_link",
+        uri,
+        name: "@appstrate/gmail",
+        mimeType: "application/json",
+      },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.status).toBe(200);
+      expect(parsed.body.kind).toBe("link");
+      expect(parsed.body.uri).toBe(uri);
+      expect(parsed.body.mimeType).toBe("application/json");
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("preserves upstream status from _meta when sidecar spills a non-2xx body", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ456";
+    const { pair, mcp } = await makeServer({
+      responseBlock: {
+        type: "resource_link",
+        uri,
+        name: "@appstrate/gmail",
+        mimeType: "application/json",
+      },
+      meta: {
+        "appstrate/upstream": {
+          status: 429,
+          headers: { "retry-after": "120" },
+        },
+      },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.status).toBe(429);
+      expect(parsed.headers["retry-after"]).toBe("120");
+      expect(parsed.body.kind).toBe("link");
+      expect(parsed.body.uri).toBe(uri);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("falls back to application/octet-stream when sidecar omits mimeType", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ789";
+    const { pair, mcp } = await makeServer({
+      responseBlock: { type: "resource_link", uri, name: "blob" },
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.body.kind).toBe("link");
+      expect(parsed.body.mimeType).toBe("application/octet-stream");
     } finally {
       await pair.close();
     }

@@ -228,34 +228,58 @@ export class McpProviderResolver implements ProviderResolver {
     }
 
     if (block.type === "resource_link") {
-      // Binary or oversize text — bytes live in the sidecar's BlobStore.
-      const resource = await this.mcp.readResource({ uri: block.uri }, { signal: ctx.signal });
-      const part = resource.contents[0];
-      if (!part) {
-        return {
-          status: 502,
-          headers: {},
-          body: { kind: "text", text: `provider_call: empty resource ${block.uri}` },
-        };
+      // Binary or oversize text — sidecar decided to spill to its
+      // BlobStore (token-budget threshold or non-text upstream). Honor
+      // that decision end-to-end: return a `link` body so the LLM sees
+      // a small reference, not the full payload. Re-reading the blob
+      // here would defeat the token-budget guard and let the agent
+      // blow past the model context window (the failure mode of #464).
+      // The agent can fetch the bytes via MCP `resources/read({ uri })`
+      // on demand when it actually needs them.
+      //
+      // `responseMode.toFile` is the one case where we DO want to
+      // materialise: the agent explicitly asked for the bytes routed
+      // to disk, so we read the blob and stream it to the path the
+      // canonical serializer would have used.
+      if (typeof req.responseMode?.toFile === "string" && req.responseMode.toFile.length > 0) {
+        const resource = await this.mcp.readResource({ uri: block.uri }, { signal: ctx.signal });
+        const part = resource.contents[0];
+        if (!part) {
+          return {
+            status: 502,
+            headers: {},
+            body: { kind: "text", text: `provider_call: empty resource ${block.uri}` },
+          };
+        }
+        const mimeType = part.mimeType ?? block.mimeType ?? "application/octet-stream";
+        let bytes: Uint8Array;
+        if ("blob" in part && typeof part.blob === "string") {
+          bytes = decodeBase64Loose(part.blob);
+        } else if ("text" in part && typeof part.text === "string") {
+          bytes = new TextEncoder().encode(part.text);
+        } else {
+          return {
+            status: 502,
+            headers: {},
+            body: {
+              kind: "text",
+              text: `provider_call: resource ${block.uri} has no readable content`,
+            },
+          };
+        }
+        const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
+        return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
       }
-      const mimeType = part.mimeType ?? block.mimeType ?? "application/octet-stream";
-      let bytes: Uint8Array;
-      if ("blob" in part && typeof part.blob === "string") {
-        bytes = decodeBase64Loose(part.blob);
-      } else if ("text" in part && typeof part.text === "string") {
-        bytes = new TextEncoder().encode(part.text);
-      } else {
-        return {
-          status: 502,
-          headers: {},
-          body: {
-            kind: "text",
-            text: `provider_call: resource ${block.uri} has no readable content`,
-          },
-        };
-      }
-      const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
-      return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
+      const mimeType = block.mimeType ?? "application/octet-stream";
+      return {
+        status: upstream.status === 0 ? 502 : upstream.status,
+        headers: upstream.headers,
+        body: {
+          kind: "link",
+          uri: block.uri,
+          mimeType,
+        },
+      };
     }
 
     // resource (inline) and image blocks are not produced by the
