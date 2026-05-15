@@ -269,6 +269,18 @@ interface TokenBudgetMeta {
 }
 
 /**
+ * Per-part metadata caps. Each is caller-supplied and ends up in MIME
+ * part headers (`Content-Disposition: name="…"; filename="…"` /
+ * `Content-Type: …`); none are counted by `MAX_REQUEST_BODY_SIZE`
+ * (which sums decoded file bytes). Without these, a 10 MB `filename`
+ * string would pass every existing check.
+ */
+const MAX_MULTIPART_PARTS = 256;
+const MAX_MULTIPART_NAME_LENGTH = 256;
+const MAX_MULTIPART_FILENAME_LENGTH = 1024;
+const MAX_MULTIPART_CONTENT_TYPE_LENGTH = 256;
+
+/**
  * Runtime shape of a single `provider_call.body.multipart[]` entry.
  * Mirrors the JSON Schema on the tool descriptor — kept as an explicit
  * TS type so the handler can narrow without `as` casts. Two variants:
@@ -307,146 +319,122 @@ interface MultipartValidationErr {
   result: CallToolResult;
 }
 
+/** Build a preflight error `CallToolResult` for multipart validation. */
+function multipartError(
+  text: string,
+  structuredContent?: CallToolResult["structuredContent"],
+): MultipartValidationErr {
+  return {
+    ok: false,
+    result: {
+      content: [{ type: "text", text }],
+      ...(structuredContent ? { structuredContent } : {}),
+      isError: true,
+      _meta: PROVIDER_CALL_PREFLIGHT_META,
+    },
+  };
+}
+
 /**
  * Validate + decode every entry in `provider_call.body.multipart[]`.
  * Returns either the fully-decoded parts ready for `FormData` assembly,
  * or a structured `CallToolResult` describing the first failure (mirrors
  * the `{ fromBytes }` error shapes — invalid base64, oversize payload).
+ *
+ * `parts` is typed as `unknown` because the MCP SDK does NOT validate
+ * `tools/call` arguments against the descriptor's `inputSchema` — a
+ * caller could pass a non-array (string/object/null) and the loop would
+ * either no-op or emit a confusing per-char error. The first check
+ * here is the runtime guard.
  */
-function validateMultipartParts(
-  parts: MultipartPartArg[],
-): MultipartValidationOk | MultipartValidationErr {
+function validateMultipartParts(parts: unknown): MultipartValidationOk | MultipartValidationErr {
+  if (!Array.isArray(parts)) {
+    return multipartError("provider_call: body.multipart must be an array of parts.");
+  }
+  if (parts.length === 0) {
+    return multipartError("provider_call: body.multipart must contain at least one part.");
+  }
+  if (parts.length > MAX_MULTIPART_PARTS) {
+    return multipartError(
+      `provider_call: body.multipart has ${parts.length} parts, which exceeds the per-request limit of ${MAX_MULTIPART_PARTS}.`,
+    );
+  }
+
   const files: MultipartValidationOk["files"] = [];
   const fields: MultipartValidationOk["fields"] = [];
   let decodedBytes = 0;
 
   for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
+    const part = parts[i] as MultipartPartArg | undefined;
+    if (!part || typeof part !== "object") {
+      return multipartError(`provider_call: body.multipart[${i}] must be an object.`);
+    }
+    if (typeof (part as { name?: unknown }).name !== "string" || part.name.length === 0) {
+      return multipartError(`provider_call: body.multipart[${i}].name must be a non-empty string.`);
+    }
+    if (part.name.length > MAX_MULTIPART_NAME_LENGTH) {
+      return multipartError(
+        `provider_call: body.multipart[${i}].name length ${part.name.length} exceeds the per-part limit of ${MAX_MULTIPART_NAME_LENGTH}.`,
+      );
+    }
     if ("value" in part) {
-      if (typeof part.name !== "string" || part.name.length === 0) {
-        return {
-          ok: false,
-          result: {
-            content: [
-              {
-                type: "text",
-                text: `provider_call: body.multipart[${i}].name must be a non-empty string.`,
-              },
-            ],
-            isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
-          },
-        };
-      }
       if (typeof part.value !== "string") {
-        return {
-          ok: false,
-          result: {
-            content: [
-              {
-                type: "text",
-                text: `provider_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
-              },
-            ],
-            isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
-          },
-        };
+        return multipartError(
+          `provider_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
+        );
       }
       fields.push({ name: part.name, value: part.value });
       continue;
     }
     // File part: { name, filename, bytes, encoding, contentType? }
     if (part.encoding !== "base64") {
-      return {
-        ok: false,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: `provider_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
-            },
-          ],
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
-        },
-      };
-    }
-    if (typeof part.name !== "string" || part.name.length === 0) {
-      return {
-        ok: false,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: `provider_call: body.multipart[${i}].name must be a non-empty string.`,
-            },
-          ],
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
-        },
-      };
+      return multipartError(
+        `provider_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
+      );
     }
     if (typeof part.filename !== "string" || part.filename.length === 0) {
-      return {
-        ok: false,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: `provider_call: body.multipart[${i}].filename must be a non-empty string.`,
-            },
-          ],
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
-        },
-      };
+      return multipartError(
+        `provider_call: body.multipart[${i}].filename must be a non-empty string.`,
+      );
+    }
+    if (part.filename.length > MAX_MULTIPART_FILENAME_LENGTH) {
+      return multipartError(
+        `provider_call: body.multipart[${i}].filename length ${part.filename.length} exceeds the per-part limit of ${MAX_MULTIPART_FILENAME_LENGTH}.`,
+      );
+    }
+    if (
+      part.contentType !== undefined &&
+      (typeof part.contentType !== "string" ||
+        part.contentType.length > MAX_MULTIPART_CONTENT_TYPE_LENGTH)
+    ) {
+      return multipartError(
+        `provider_call: body.multipart[${i}].contentType must be a string of at most ${MAX_MULTIPART_CONTENT_TYPE_LENGTH} characters.`,
+      );
     }
     const decoded = decodeStrictBase64(part.bytes);
     if (decoded === "invalid") {
-      return {
-        ok: false,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: `provider_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
-            },
-          ],
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
-        },
-      };
+      return multipartError(
+        `provider_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
+      );
     }
     decodedBytes += decoded.byteLength;
     if (decodedBytes > MAX_REQUEST_BODY_SIZE) {
-      return {
-        ok: false,
-        result: {
-          content: [
-            {
-              type: "text",
-              text:
-                `provider_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
-                `(at index ${i}), which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} ` +
-                `bytes. Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
-                `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit the ` +
-                `JSON-RPC envelope).`,
-            },
-          ],
-          structuredContent: {
-            error: {
-              code: "PAYLOAD_TOO_LARGE",
-              scope: "request_body",
-              limit: MAX_REQUEST_BODY_SIZE,
-              actual: decodedBytes,
-              envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-            },
+      return multipartError(
+        `provider_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
+          `(at index ${i}), which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} ` +
+          `bytes. Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
+          `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit the ` +
+          `JSON-RPC envelope).`,
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            scope: "request_body",
+            limit: MAX_REQUEST_BODY_SIZE,
+            actual: decodedBytes,
+            envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
           },
-          isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
         },
-      };
+      );
     }
     files.push({
       name: part.name,
@@ -558,6 +546,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
                   multipart: {
                     type: "array",
                     minItems: 1,
+                    maxItems: MAX_MULTIPART_PARTS,
                     items: {
                       oneOf: [
                         {
@@ -565,7 +554,11 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
                           additionalProperties: false,
                           required: ["name", "value"],
                           properties: {
-                            name: { type: "string", minLength: 1 },
+                            name: {
+                              type: "string",
+                              minLength: 1,
+                              maxLength: MAX_MULTIPART_NAME_LENGTH,
+                            },
                             value: { type: "string" },
                           },
                         },
@@ -574,11 +567,22 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
                           additionalProperties: false,
                           required: ["name", "filename", "bytes", "encoding"],
                           properties: {
-                            name: { type: "string", minLength: 1 },
-                            filename: { type: "string", minLength: 1 },
+                            name: {
+                              type: "string",
+                              minLength: 1,
+                              maxLength: MAX_MULTIPART_NAME_LENGTH,
+                            },
+                            filename: {
+                              type: "string",
+                              minLength: 1,
+                              maxLength: MAX_MULTIPART_FILENAME_LENGTH,
+                            },
                             bytes: { type: "string" },
                             encoding: { const: "base64" },
-                            contentType: { type: "string" },
+                            contentType: {
+                              type: "string",
+                              maxLength: MAX_MULTIPART_CONTENT_TYPE_LENGTH,
+                            },
                           },
                         },
                       ],
@@ -683,7 +687,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       //    Content-Type so the boundary token matches the body bytes.
       let buffered: ArrayBuffer | undefined;
       let bodyText: string | undefined;
-      let multipartBody: { build: (activeCreds: Record<string, string>) => FormData } | undefined;
+      let multipartBody:
+        | {
+            build: (activeCreds: Record<string, string>) => FormData;
+            fieldTemplates: string[];
+          }
+        | undefined;
       if (args.body && typeof args.body === "object" && "multipart" in args.body) {
         const validation = validateMultipartParts(args.body.multipart);
         if (!validation.ok) {
@@ -692,6 +701,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         const { files, fields } = validation;
         const wantsSubstitution = !!args.substituteBody;
         multipartBody = {
+          fieldTemplates: wantsSubstitution ? fields.map((f) => f.value) : [],
           build: (activeCreds: Record<string, string>): FormData => {
             const fd = new FormData();
             // Field parts honour {{var}} substitution when opted in;
@@ -786,7 +796,11 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           method,
           callerHeaders,
           body: multipartBody
-            ? { kind: "formData" as const, build: multipartBody.build }
+            ? {
+                kind: "formData" as const,
+                build: multipartBody.build,
+                fieldTemplates: multipartBody.fieldTemplates,
+              }
             : buffered
               ? {
                   kind: "buffered" as const,

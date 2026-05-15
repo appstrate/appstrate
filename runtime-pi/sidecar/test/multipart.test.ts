@@ -288,6 +288,146 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     expect(capturedContentType!.includes("AAAAAA")).toBe(false);
   });
 
+  it("does NOT strip caller-supplied non-multipart Content-Type headers", async () => {
+    // The strip filter must be scoped to `multipart/*` — a caller that
+    // accidentally sets `Content-Type: application/json` alongside a
+    // multipart body should still have that header pass through (the
+    // FormData body will then override it on the Request, but the
+    // filter regex must not match).
+    let capturedContentType: string | null = null;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      // Read directly off the init.headers map — this lets us observe
+      // whether the sidecar's strip filter touched it, independent of
+      // whatever fetch() does at Request construction time.
+      const rawHeaders = init?.headers as Record<string, string> | undefined;
+      capturedContentType = rawHeaders?.["Content-Type"] ?? rawHeaders?.["content-type"] ?? null;
+      return new Response("{}", { status: 200 });
+    });
+    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+
+    await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/sink",
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: { multipart: [{ name: "f", value: "v" }] },
+        },
+      },
+    });
+    // Non-multipart Content-Type survived the strip filter.
+    expect(capturedContentType).not.toBeNull();
+    expect(capturedContentType!).toBe("application/json");
+  });
+
+  it("fail-closes on unresolved {{placeholders}} in field-part values under substituteBody", async () => {
+    // Mirror of the buffered text path: a typo in a `{{var}}` template
+    // (`access_tokn` vs `access_token`) must surface as a 400-style
+    // preflight error rather than silently shipping the literal
+    // `{{access_tokn}}` to the upstream third party.
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/sink",
+          method: "POST",
+          substituteBody: true,
+          body: {
+            multipart: [{ name: "token", value: "Bearer {{access_tokn}}" }],
+          },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Unresolved placeholders in body");
+    expect(result.content[0]!.text).toContain("access_tokn");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-array body.multipart with a clear runtime guard", async () => {
+    // The MCP SDK does NOT validate tools/call arguments against the
+    // descriptor's inputSchema, so a caller can pass `multipart: "x"`.
+    // The handler must reject it with a structured error instead of
+    // iterating a string char-by-char.
+    const app = createApp(makeMultipartDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/sink",
+          method: "POST",
+          body: { multipart: "oops" as unknown as object[] },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("must be an array");
+  });
+
+  it("rejects body.multipart with more than MAX_MULTIPART_PARTS entries", async () => {
+    // Without this cap, a caller could supply 100k single-byte parts
+    // that fit every other check (envelope cap, decoded-bytes cap) but
+    // allocate 100k Blobs + FormData entries.
+    const tooMany = Array.from({ length: 257 }, (_, i) => ({ name: `f${i}`, value: "v" }));
+    const app = createApp(makeMultipartDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/sink",
+          method: "POST",
+          body: { multipart: tooMany },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("exceeds the per-request limit of 256");
+  });
+
+  it("rejects a part with an oversize filename", async () => {
+    const app = createApp(makeMultipartDeps());
+    const huge = "x".repeat(1025);
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "@appstrate/test",
+          target: "https://api.example.com/sink",
+          method: "POST",
+          body: {
+            multipart: [
+              {
+                name: "f",
+                filename: huge,
+                bytes: Buffer.from("x").toString("base64"),
+                encoding: "base64",
+              },
+            ],
+          },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("filename length");
+  });
+
   it("returns 413 with structured PAYLOAD_TOO_LARGE when summed file bytes exceed the cap", async () => {
     // Two parts that together overflow MAX_REQUEST_BODY_SIZE even
     // though each individually fits — verifies the cap is the SUM, not

@@ -59,7 +59,17 @@ export type ProviderRequestBody =
   | { kind: "none" }
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
   | { kind: "streaming"; stream: ReadableStream }
-  | { kind: "formData"; build: (activeCreds: Record<string, string>) => FormData };
+  | {
+      kind: "formData";
+      build: (activeCreds: Record<string, string>) => FormData;
+      /**
+       * Field-part templates that will undergo `{{var}}` substitution
+       * when `substituteBody: true`. Used by the pre-flight check to
+       * fail-closed on unresolved placeholders — mirrors the buffered
+       * text path. Empty/omitted means no substitution will happen.
+       */
+      fieldTemplates?: string[];
+    };
 
 export interface ProviderCallArgs {
   providerId: string;
@@ -196,7 +206,9 @@ export async function executeProviderCall(
     }
   }
 
-  // 6. Pre-check body placeholder resolution (buffered + substitute path only).
+  // 6. Pre-check body placeholder resolution (buffered text + multipart
+  //    field-parts under substituteBody). Streaming + binary buffered
+  //    bodies are pass-through.
   if (substituteBody && body.kind === "buffered" && body.text !== undefined) {
     const testBody = substituteVars(body.text, creds.credentials);
     const unresolvedInBody = findUnresolvedPlaceholders(testBody);
@@ -205,6 +217,21 @@ export async function executeProviderCall(
         ok: false,
         status: 400,
         error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}`,
+      };
+    }
+  }
+  if (substituteBody && body.kind === "formData" && body.fieldTemplates?.length) {
+    const unresolved = new Set<string>();
+    for (const template of body.fieldTemplates) {
+      for (const v of findUnresolvedPlaceholders(substituteVars(template, creds.credentials))) {
+        unresolved.add(v);
+      }
+    }
+    if (unresolved.size) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Unresolved placeholders in body: {{${[...unresolved].join()}}}`,
       };
     }
   }
