@@ -191,9 +191,36 @@ export class PiRunner implements Runner {
     const runId = context.runId;
     const events: RunEvent[] = [];
 
-    const emit = async (event: RunEvent): Promise<void> => {
+    // Decouple agent-loop progress from event delivery latency.
+    //
+    // Pi SDK's `executeToolCallsParallel` does `await emit(...)` for
+    // every `tool_execution_start` / `tool_execution_end`, and our
+    // canonical `eventSink.handle` blocks on a signed HTTP POST to the
+    // platform. With awaits chained, a 10-tool parallel turn pays
+    // 20× HTTP RTT just for telemetry — the agent freezes after every
+    // tool result before the next iteration starts.
+    //
+    // Sequence numbers are still assigned synchronously inside
+    // `HttpSink.handle` (before the `await fetch`), so POSTs racing each
+    // other arrive at the platform with deterministic ordering — the
+    // platform's Redis buffer (REMOTE_RUN_BUFFER_FLUSH_MS) reorders
+    // anything that lands out of order. The agent loop returns to work
+    // immediately; finalize awaits the in-flight tail.
+    const pendingPosts = new Set<Promise<void>>();
+    const emit = (event: RunEvent): Promise<void> => {
       events.push(event);
-      await eventSink.handle(event);
+      const post = eventSink.handle(event).catch(() => {
+        // Swallow per-event delivery failures — HttpSink already
+        // retries with exponential backoff (4 attempts, 30s cap), so a
+        // rejection here means the event is permanently lost. Logging
+        // would race the structured `appstrate.error` path; the
+        // platform watchdog will surface stalled runs independently.
+      });
+      pendingPosts.add(post);
+      void post.finally(() => pendingPosts.delete(post));
+      // Resolve immediately so `await emit(...)` in Pi SDK is a no-op
+      // wait — the agent loop never blocks on event delivery.
+      return Promise.resolve();
     };
 
     // Wrap the sink so every internally-emitted event is both captured
@@ -225,6 +252,15 @@ export class PiRunner implements Runner {
       }
     };
 
+    // Drain all in-flight event POSTs before issuing the finalize POST.
+    // Sequence-ordered: finalize must observe the same prefix the
+    // platform has already ingested. allSettled swallows failures —
+    // HttpSink has already exhausted retries; nothing useful to do.
+    const drainPendingPosts = async (): Promise<void> => {
+      if (pendingPosts.size === 0) return;
+      await Promise.allSettled([...pendingPosts]);
+    };
+
     try {
       await this.executeSession(context, internalSink, signal, captureBridge);
     } catch (err) {
@@ -244,12 +280,14 @@ export class PiRunner implements Runner {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
       attachAccumulators(result);
+      await drainPendingPosts();
       await eventSink.finalize(result);
       return;
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
     attachAccumulators(result);
+    await drainPendingPosts();
     await eventSink.finalize(result);
   }
 

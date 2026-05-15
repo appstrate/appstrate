@@ -206,6 +206,129 @@ describe("PiRunner.run — usage in RunResult", () => {
   });
 });
 
+describe("PiRunner.run — non-blocking event delivery", () => {
+  // Pi SDK's executeToolCallsParallel `await emit(...)` on every
+  // tool_execution_start / tool_execution_end. If the runner's internal
+  // emit awaits the sink's HTTP POST, a 10-tool parallel turn pays 20×
+  // network RTT just for telemetry — the agent loop freezes between
+  // events. The runner unblocks Pi SDK by resolving emit immediately
+  // and draining pending posts before finalize.
+
+  it("does not block the agent loop on slow eventSink.handle", async () => {
+    // Slow sink: each handle takes 50ms. With 10 events, a blocking
+    // emit would force the script to wait ≥500ms before agent_end
+    // returns. The non-blocking emit must let the script complete in
+    // well under that — the 50ms penalty is paid once, after finalize.
+    const HANDLE_LATENCY_MS = 50;
+    const EVENT_COUNT = 10;
+
+    const sink = createCaptureSink();
+    const baseHandle = sink.handle.bind(sink);
+    sink.handle = async (ev) => {
+      await new Promise((r) => setTimeout(r, HANDLE_LATENCY_MS));
+      await baseHandle(ev);
+    };
+
+    let scriptElapsed = 0;
+    const runner = new ScriptedPiRunner(async (session) => {
+      const start = performance.now();
+      for (let i = 0; i < EVENT_COUNT; i++) {
+        session.emit({ type: "tool_execution_start", toolName: `tool_${i}` });
+      }
+      session.emit({ type: "agent_end" });
+      scriptElapsed = performance.now() - start;
+    });
+
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext(),
+      providerResolver: { resolve: async () => [] },
+      eventSink: sink,
+    });
+
+    // Script body finished without serialising on the per-event 50ms
+    // latency. Generous ceiling — anything ≥ EVENT_COUNT * latency means
+    // we re-introduced the blocking await.
+    expect(scriptElapsed).toBeLessThan((EVENT_COUNT * HANDLE_LATENCY_MS) / 2);
+
+    // Every event still reached the sink — drain runs before finalize.
+    expect(sink.events.length).toBe(EVENT_COUNT + 1); // 10 progress + 1 metric (agent_end)
+    expect(sink.finalizeCalls).toBe(1);
+  });
+
+  it("awaits all in-flight event posts before calling finalize", async () => {
+    // Even though emit is non-blocking, finalize must observe the same
+    // event prefix the platform has already ingested. The drain step
+    // before finalize guarantees handle() has resolved for every
+    // emitted event.
+    const order: string[] = [];
+    const sink = createCaptureSink();
+
+    sink.handle = async (ev) => {
+      // Asymmetric latency so handles complete in reverse order if the
+      // drain is missing — finalize would otherwise race past them.
+      const delay = ev.type === "appstrate.progress" ? 30 : 5;
+      await new Promise((r) => setTimeout(r, delay));
+      order.push(`handle:${ev.type}`);
+    };
+    const baseFinalize = sink.finalize.bind(sink);
+    sink.finalize = async (r) => {
+      order.push("finalize");
+      await baseFinalize(r);
+    };
+
+    const runner = new ScriptedPiRunner(async (session) => {
+      session.emit({ type: "tool_execution_start", toolName: "slow_one" });
+      session.emit({ type: "tool_execution_start", toolName: "slow_two" });
+      session.emit({ type: "agent_end" });
+    });
+
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext(),
+      providerResolver: { resolve: async () => [] },
+      eventSink: sink,
+    });
+
+    // Finalize must be last — drain awaited every pending post.
+    expect(order[order.length - 1]).toBe("finalize");
+    // All three handles completed before finalize.
+    expect(order.filter((s) => s.startsWith("handle:"))).toHaveLength(3);
+  });
+
+  it("swallows per-event delivery failures so a transient sink error does not crash the run", async () => {
+    // HttpSink already retries with exponential backoff. A rejection
+    // out of handle() is a permanently-lost event — surfacing it as an
+    // unhandled rejection would crash the agent. The runner must
+    // catch and continue.
+    const sink = createCaptureSink();
+    let calls = 0;
+    sink.handle = async () => {
+      calls += 1;
+      if (calls === 2) throw new Error("simulated permanent failure");
+    };
+
+    const runner = new ScriptedPiRunner(async (session) => {
+      session.emit({ type: "tool_execution_start", toolName: "a" });
+      session.emit({ type: "tool_execution_start", toolName: "b" });
+      session.emit({ type: "tool_execution_start", toolName: "c" });
+      session.emit({ type: "agent_end" });
+    });
+
+    // Must not throw — the rejected post is absorbed.
+    await runner.run({
+      bundle: STUB_BUNDLE,
+      context: makeContext(),
+      providerResolver: { resolve: async () => [] },
+      eventSink: sink,
+    });
+
+    expect(sink.finalizeCalls).toBe(1);
+    // Every event was attempted (3 progress + 1 metric); one rejected.
+    expect(calls).toBe(4);
+  });
+});
+
 describe("PiRunner.run — error path", () => {
   it("emits appstrate.error + finalize when executeSession throws", async () => {
     const sink = createCaptureSink();
