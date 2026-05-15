@@ -31,19 +31,6 @@
  * exit — the CAS in `finalizeRemoteRun` guarantees idempotency.
  */
 
-// Boot ordering note (item H):
-//
-// The static imports below run top-to-bottom before any top-level statement.
-// Anything that can be a `type` import is one — types are erased at parse
-// time and incur zero runtime cost. The heavy modules in this graph are
-// `@appstrate/runner-pi` (transitively pulls `@mariozechner/pi-coding-agent`)
-// and `@appstrate/afps-runtime/bundle`. We keep them static because the
-// rest of the bootloader needs their values within microseconds of the
-// first progress event firing — wrapping them in `await import()` only
-// shifts the cost to a later tick without saving wall-clock time, while
-// hurting readability + making the abort-on-error path harder to reason
-// about. The honest performance win for this file is in Bun's own ESM
-// graph cost; the bundling change in item D (build:runtime) collapses it.
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";

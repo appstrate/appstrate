@@ -244,9 +244,6 @@ export class PiRunner implements Runner {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
       attachAccumulators(result);
-      // Same drain rationale as the happy path — pending bridge fires
-      // on the error trail (last tool_execution_end before the throw,
-      // etc.) still need to land before finalize closes the sink.
       if (bridgeRef.current) {
         await bridgeRef.current.drainPending();
       }
@@ -257,10 +254,8 @@ export class PiRunner implements Runner {
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
-    // server-side sink via CAS, so any POST still in flight after that
-    // lands gets a 410 and silently dies in the bridge's catch handler
-    // — this is the canonical "missing tool_execution_end rows on
-    // bursty turns" bug we kept reproducing.
+    // server-side sink via CAS — any POST in flight after that lands
+    // gets a 410 and is silently dropped in the bridge's catch handler.
     if (bridgeRef.current) {
       await bridgeRef.current.drainPending();
     }
@@ -553,11 +548,7 @@ export function installSessionBridge(
   const fire = (event: RunEvent): void => {
     const promise: Promise<void> = sink
       .emit(event)
-      .catch(() => {
-        // Swallow — HttpSink has already exhausted its retry budget,
-        // and a thrown rejection in the synchronous Pi SDK callback
-        // would surface as unhandled.
-      })
+      .catch(() => {})
       .finally(() => {
         pendingFires.delete(promise);
       });
