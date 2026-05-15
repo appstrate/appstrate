@@ -151,13 +151,22 @@ _appstrate_bootstrap() {
   # incantation against the wrong manager is worse than failing closed).
   detect_minisign_installer() {
     if [ "$OS" = "darwin" ]; then
-      command -v brew >/dev/null 2>&1 && { printf 'brew'; return; }
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew'
+        return 0
+      fi
     else
-      command -v apt-get >/dev/null 2>&1 && { printf 'apt'; return; }
-      command -v apk >/dev/null 2>&1 && { printf 'apk'; return; }
-      command -v dnf >/dev/null 2>&1 && { printf 'dnf'; return; }
-      command -v pacman >/dev/null 2>&1 && { printf 'pacman'; return; }
-      command -v zypper >/dev/null 2>&1 && { printf 'zypper'; return; }
+      # `bin:name` pairs — bin we probe with `command -v`, name we emit.
+      # apt-get is the only case where the two differ (we surface it as
+      # "apt" because that's how the user knows it). Other distros: same.
+      for _mgr in apt-get:apt apk:apk dnf:dnf pacman:pacman zypper:zypper; do
+        _bin="${_mgr%:*}"
+        _name="${_mgr#*:}"
+        if command -v "$_bin" >/dev/null 2>&1; then
+          printf '%s' "$_name"
+          return 0
+        fi
+      done
     fi
     return 1
   }
