@@ -76,6 +76,25 @@ describe("Models API", () => {
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
     });
+
+    it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {
+      // System-key ids ("anthropic", "openai-prod", …) are slugs, not UUIDs —
+      // they live in SYSTEM_PROVIDER_KEYS env and never appear in the
+      // `model_provider_credentials` table. The UUID validator catches this
+      // before the FK constraint does.
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Claude Haiku 4 5",
+          modelId: "claude-haiku-4-5-20251001",
+          credentialId: "anthropic",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("UUID");
+    });
   });
 
   describe("DELETE /api/models/:id", () => {

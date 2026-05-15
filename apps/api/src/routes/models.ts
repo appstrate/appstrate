@@ -6,7 +6,7 @@ import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemModel } from "../services/model-registry.ts";
+import { isSystemModel, getSystemModelProviderKeys } from "../services/model-registry.ts";
 import { modelCostSchema } from "@appstrate/shared-types";
 import {
   listOrgModels,
@@ -44,7 +44,15 @@ export const createModelSchema = z.object({
    */
   label: z.string().min(1).optional(),
   modelId: z.string().min(1, "modelId is required"),
-  credentialId: z.string().min(1, "credentialId is required"),
+  // `org_models.credential_id` is a strict UUID FK to
+  // `model_provider_credentials.id` — built-in (system) credentials live
+  // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
+  // slugs (e.g. "anthropic"). Validating as UUID here turns the
+  // legacy 500 ("invalid input syntax for type uuid") into a clean 400
+  // and lets the route handler emit a hint that points operators at the
+  // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
+  // credential).
+  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
   /**
    * Catalog-derivable overrides. Omit (or send null on update) to let the
    * read path fall back to the live catalog — keeps existing rows in sync
@@ -60,7 +68,7 @@ export const createModelSchema = z.object({
 export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
   modelId: z.string().min(1).optional(),
-  credentialId: z.string().optional(),
+  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
   enabled: z.boolean().optional(),
   input: z.array(z.string()).nullable().optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
@@ -74,7 +82,7 @@ export const setDefaultSchema = z.object({
 });
 
 export const seedModelsSchema = z.object({
-  credentialId: z.string().min(1, "credentialId is required"),
+  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
   modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
 });
 
@@ -107,6 +115,21 @@ export function createModelsRouter() {
 
     try {
       const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost } = data;
+      // Block built-in (env-driven) credentials at the route boundary.
+      // `org_models.credential_id` is a UUID FK to `model_provider_credentials.id`;
+      // system keys live in `SYSTEM_PROVIDER_KEYS` env and are never present in
+      // that table. Without this check the insert succeeds Zod validation
+      // (the operator can declare a UUID in env if they want), then fails at
+      // the Postgres FK with a 500 the caller can't act on. Pointing them at
+      // the env var instead is the actionable fix.
+      if (getSystemModelProviderKeys().has(credentialId)) {
+        throw invalidRequest(
+          "Cannot add custom models against a built-in credential — declare the model in the " +
+            "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential via " +
+            "POST /api/model-provider-credentials and bind the model to that.",
+          "credentialId",
+        );
+      }
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the
       // right catalog (handles `catalogProviderId` for OAuth wrappers).
@@ -149,6 +172,16 @@ export function createModelsRouter() {
     const body = await c.req.json();
     const data = parseBody(seedModelsSchema, body);
 
+    // Same constraint as POST /api/models — seeding a built-in credential
+    // would FK-fail the org_models insert. Block early with an actionable
+    // hint instead of cascading to a 500.
+    if (getSystemModelProviderKeys().has(data.credentialId)) {
+      throw invalidRequest(
+        "Cannot seed models against a built-in credential — declare them in the " +
+          "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential.",
+        "credentialId",
+      );
+    }
     const creds = await loadInferenceCredentials(orgId, data.credentialId);
     if (!creds || !creds.providerId) {
       throw notFound("Credential not found or not registry-bound");
@@ -389,6 +422,15 @@ export function createModelsRouter() {
 
     if (isSystemModel(modelId)) {
       throw systemEntityForbidden("model", modelId);
+    }
+    // Same FK constraint applies to updates that re-point a model to a
+    // different credential. Catch the same case here.
+    if (data.credentialId && getSystemModelProviderKeys().has(data.credentialId)) {
+      throw invalidRequest(
+        "Cannot bind a custom model to a built-in credential — declare it in the " +
+          "SYSTEM_PROVIDER_KEYS env var instead.",
+        "credentialId",
+      );
     }
 
     try {
