@@ -87,6 +87,18 @@ describe("parseConcurrencyConfig", () => {
     }
   });
 
+  it("rejects non-positive-integer per-provider overrides (not just `default`)", () => {
+    // The parser validates every entry uniformly; pin that overrides
+    // can't sneak past with the same error message.
+    for (const bad of [
+      '{"@appstrate/foo":-1}',
+      '{"@appstrate/foo":0}',
+      '{"default":3,"@appstrate/foo":1.5}',
+    ]) {
+      expect(() => parseConcurrencyConfig(bad)).toThrow(/must be a positive integer/);
+    }
+  });
+
   it("rejects malformed plain values loudly", () => {
     for (const bad of ["0", "-1", "1.5", "abc", "NaN"]) {
       expect(() => parseConcurrencyConfig(bad)).toThrow(

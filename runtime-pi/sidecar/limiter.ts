@@ -282,6 +282,11 @@ export class LimiterRegistry {
    * Safe to call multiple times.
    */
   async onIdle(timeoutMs: number): Promise<boolean> {
+    // Snapshot is taken once. Invariant: callers (drainRegistry) MUST
+    // call `pause()` before `onIdle()` so no new `run()` calls can land
+    // a fresh provider lane between this snapshot and the awaited
+    // `q.onIdle()` settles. `pause()` flips `draining = true`, which
+    // makes `run()` reject before `getQueue()` runs.
     const all = Promise.all([...this.queues.values()].map((q) => q.onIdle()));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"timeout">((resolve) => {

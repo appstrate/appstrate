@@ -366,10 +366,14 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       // the sidecar is draining (SIGTERM, issue #435), the limiter
       // rejects with `DrainingError` and the handler surfaces a
       // structured tool error so the agent can react.
-      const providerId =
-        typeof (rawArgs as { providerId?: unknown })?.providerId === "string"
-          ? (rawArgs as { providerId: string }).providerId
-          : "_unknown";
+      // Validate providerId before `limiter.run()` so a misbehaving agent
+      // typoing the id (`"gmial"`, `"@foo/bar baz"`, …) doesn't silently
+      // spawn a fresh PQueue per typo. Anything that doesn't match the
+      // shared `PROVIDER_ID_RE` lands in a single `_invalid` lane —
+      // `providerCallInner`'s own validation will still surface the
+      // specific tool error to the agent.
+      const raw = (rawArgs as { providerId?: unknown })?.providerId;
+      const providerId = typeof raw === "string" && PROVIDER_ID_RE.test(raw) ? raw : "_invalid";
       const run = (): Promise<CallToolResult> => providerCallInner(rawArgs);
       if (!providerCallLimiter) return run();
       try {

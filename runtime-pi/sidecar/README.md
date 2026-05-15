@@ -107,11 +107,13 @@ Malformed values fail loud at sidecar boot — the parser refuses non-positive, 
 
 ### Graceful drain (SIGTERM)
 
-On SIGTERM (or SIGINT), the sidecar flips its limiter into drain mode:
+On SIGTERM (or SIGINT), the sidecar flips its `provider_call` limiter into drain mode:
 
 1. `GET /health` flips to `503` with `X-Drain-Reason: shutdown`.
 2. Every new `provider_call` MCP invocation returns an `isError: true` tool result with `structuredContent.error.code = "DRAINING"` so the agent can react instead of hanging.
 3. In-flight `provider_call`s drain to completion. The wait is capped at 30 s — beyond that the process exits with code 1 so external orchestrators can distinguish a clean drain (exit 0) from a stuck upstream (exit 1).
+
+**Scope (non-goal):** the drain covers `provider_call` only — `/llm/*` chat-completion streams and other `/mcp` tool calls (`run_history`, `recall_memory`) are not tracked. A streaming completion can legitimately stay open for `LLM_PROXY_TIMEOUT_MS` (30 min), so blocking shutdown on it would defeat the purpose of a 30 s ceiling. In practice the sidecar serves a single run; SIGTERM arrives when the platform tears down the run, which severs the agent ⇄ sidecar bridge at the network layer regardless. The drain ceiling matters for `provider_call` because that's the path the agent retries on a transient error — losing one mid-flight is worse than waiting briefly.
 
 ### Queue-depth alert
 
