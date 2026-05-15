@@ -189,23 +189,24 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("createSidecar failure path", () => {
+  describe("createSidecar (no health gate)", () => {
     beforeEach(async () => {
       await resetDataDir();
     });
 
-    it("kills the spawned sidecar and removes its pidfile when health check fails", async () => {
+    it("returns immediately, allocates a port, writes a pidfile, and registers in stopByRunId", async () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.initialize();
-      const boundary = await orchestrator.createIsolationBoundary("test-run-health-fail");
+      const runId = "test-run-no-gate";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
 
-      // Force the sidecar binary to a no-op script that never serves /health.
-      // The path lives inside the boundary so it's cleaned up with the run.
+      // Force the sidecar binary to a never-serves-/health script. Under the
+      // previous health-gated contract this would have thrown after 5s; under
+      // the new contract createSidecar must return immediately and the agent
+      // owns the connect retry.
       const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
       await writeFile(fakeSidecar, "setInterval(()=>{},60000);");
 
-      // Reflectively swap the sidecar entry path. We can't override the module
-      // constant, so we monkey-patch Bun.spawn for this single call.
       const originalSpawn = Bun.spawn;
       let capturedPid: number | undefined;
       const patchedSpawn = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) => {
@@ -216,26 +217,26 @@ describe("ProcessOrchestrator", () => {
       }) as typeof Bun.spawn;
       (Bun as { spawn: typeof Bun.spawn }).spawn = patchedSpawn;
 
+      const started = Date.now();
       try {
-        await expect(
-          orchestrator.createSidecar("test-run-health-fail", boundary, {
-            runToken: "tok",
-          }),
-        ).rejects.toThrow(/health check timed out/i);
+        const handle = await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+        const elapsed = Date.now() - started;
+        // Fast-return invariant: well under the 5s the old health gate burned.
+        expect(elapsed).toBeLessThan(1000);
+        expect(handle.runId).toBe(runId);
+        expect(handle.role).toBe("sidecar");
       } finally {
         (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       }
 
       expect(capturedPid).toBeDefined();
-      // The sidecar process should be dead.
-      expect(await waitForExit(capturedPid!)).toBe(true);
-      // No leftover pidfile under the boundary.
+      // Pidfile was written under the boundary directory.
       const remaining = await readdir(boundary.id).catch(() => [] as string[]);
-      expect(remaining.includes("sidecar.pid")).toBe(false);
-      // stopByRunId should now report not_found — internal map is purged.
-      expect(await orchestrator.stopByRunId("test-run-health-fail")).toBe("not_found");
-
-      await orchestrator.removeIsolationBoundary(boundary);
+      expect(remaining.includes("sidecar.pid")).toBe(true);
+      // stopByRunId finds the registered handle and reports stopped.
+      expect(await orchestrator.stopByRunId(runId)).toBe("stopped");
+      // The sidecar process is gone after stopByRunId.
+      expect(await waitForExit(capturedPid!)).toBe(true);
     }, 10_000);
   });
 

@@ -225,23 +225,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
 
-    try {
-      await this.waitForHealth(`http://localhost:${port}/health`, 5000);
-    } catch (err) {
-      // Health check failed — kill the spawned sidecar and purge state so the
-      // process doesn't outlive the failed createSidecar call. Without this,
-      // pi.ts's finally never sees a sidecarHandle and the leak persists.
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // Already dead
-      }
-      this.processes.delete(id);
-      this.sidecarPorts.delete(runId);
-      await this.removePidfile(runId, "sidecar");
-      throw err;
-    }
-    logger.info("Sidecar ready", { runId, port, pid: proc.pid });
+    // No /health gate — the agent's MCP client retries its handshake against
+    // the sidecar's /mcp with AWS full-jitter backoff (50ms→1s, 30s deadline)
+    // until the listener is up. Docker mode adopted the same contract in
+    // issue #406; process mode now mirrors it. Removes the unconditional
+    // ~200-500ms warm-path wait (5s on cold starts) from the run hot path.
+    logger.info("Sidecar spawned", { runId, port, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
   }
@@ -454,20 +443,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       }
     }
     throw new Error("Failed to find available port after retries");
-  }
-
-  private async waitForHealth(url: string, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
-        if (res.ok) return;
-      } catch {
-        // Not ready yet
-      }
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error(`Sidecar health check timed out after ${timeoutMs}ms (${url})`);
   }
 
   /**
