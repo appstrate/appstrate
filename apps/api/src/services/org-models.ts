@@ -9,7 +9,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   loadInferenceCredentials,
   type DecryptedModelProviderCredentials,
@@ -19,6 +19,34 @@ import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import type { InferenceProbeRequest } from "@appstrate/core/module";
+
+// --- Metadata projection ---
+
+/**
+ * Project the 6 metadata fields (label + 5 capability/cost fields) by
+ * cascading source → catalog defaults → final fallback. This is the single
+ * authoritative place where overrides beat the vendored catalog — cost-shape
+ * changes touch exactly one function.
+ *
+ * Used by every site that reads {@link ModelMetadata}: the wire-shape
+ * projection (`listOrgModels` for both system and DB rows), and the resolved-
+ * model builders for the run executor (`buildSystemResolvedModel`,
+ * `buildDbResolvedModel`).
+ */
+export function resolveModelMetadata(
+  src: ModelMetadata,
+  modelId: string,
+  defaults: CatalogDefaults,
+): Required<Omit<ModelMetadata, "label">> & { label: string } {
+  return {
+    label: src.label ?? defaults.label ?? modelId,
+    input: src.input ?? defaults.input ?? null,
+    contextWindow: src.contextWindow ?? defaults.contextWindow ?? null,
+    maxTokens: src.maxTokens ?? defaults.maxTokens ?? null,
+    reasoning: src.reasoning ?? defaults.reasoning ?? null,
+    cost: src.cost ?? defaults.cost ?? null,
+  };
+}
 
 // --- List (system + DB) ---
 
@@ -45,42 +73,36 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   return mergeSystemAndDb<ModelDefinition, (typeof reachableRows)[number], OrgModelInfo>({
     system,
     rows: reachableRows,
-    mapSystem: (id, def): OrgModelInfo => {
-      const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
-      return {
-        id,
-        label: def.label ?? defaults.label ?? def.modelId,
-        apiShape: def.apiShape,
-        baseUrl: def.baseUrl,
-        modelId: def.modelId,
-        input: def.input ?? defaults.input ?? null,
-        contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
-        maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
-        reasoning: def.reasoning ?? defaults.reasoning ?? null,
-        cost: def.cost ?? defaults.cost ?? null,
-        enabled: def.enabled !== false,
-        isDefault: !orgHasDefault && def.isDefault === true,
-        source: "built-in",
-        credentialId: def.credentialId,
-        createdBy: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-    },
+    mapSystem: (id, def): OrgModelInfo => ({
+      id,
+      ...resolveModelMetadata(
+        def,
+        def.modelId,
+        resolveCatalogDefaults(def.providerId, def.modelId),
+      ),
+      apiShape: def.apiShape,
+      baseUrl: def.baseUrl,
+      modelId: def.modelId,
+      enabled: def.enabled !== false,
+      isDefault: !orgHasDefault && def.isDefault === true,
+      source: "built-in",
+      credentialId: def.credentialId,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    }),
     mapRow: (row): OrgModelInfo => {
       const creds = credByRow.get(row.id)!;
-      const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
       return {
         id: row.id,
-        label: row.label ?? defaults.label ?? row.modelId,
+        ...resolveModelMetadata(
+          { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
+          row.modelId,
+          resolveCatalogDefaults(creds.providerId, row.modelId),
+        ),
         apiShape: creds.apiShape,
         baseUrl: creds.baseUrl,
         modelId: row.modelId,
-        input: (row.input as string[] | null) ?? defaults.input ?? null,
-        contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
-        maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
-        reasoning: row.reasoning ?? defaults.reasoning ?? null,
-        cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
         enabled: row.enabled,
         isDefault: row.isDefault,
         source: row.source as "custom" | "built-in",
@@ -373,7 +395,7 @@ interface DbModelCredentials {
  * Returns `{}` on any miss (unmapped provider, unknown model id, dropped
  * entry). Callers fall through to row values or final defaults.
  */
-interface CatalogDefaults {
+export interface CatalogDefaults {
   label?: string;
   input?: ("text" | "image")[];
   contextWindow?: number;
@@ -382,7 +404,7 @@ interface CatalogDefaults {
   cost?: ModelCost;
 }
 
-function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
   const provider = getModelProvider(providerId);
   const catalogKey = provider?.catalogProviderId ?? providerId;
   const entry = lookupCatalogModel(catalogKey, modelId);
@@ -397,58 +419,15 @@ function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDef
   };
 }
 
-/**
- * Focused cascade for the three numeric/cost capability fields a runner
- * needs to size compaction, budget responses, and price LLM calls. Keeps
- * the env-driven (`SYSTEM_PROVIDER_KEYS`) and DB-driven (`org_models`)
- * builders aligned on the exact same `explicit > catalog > null` chain.
- *
- * Honors `catalogProviderId` via {@link resolveCatalogDefaults} so OAuth
- * wrappers (codex → openai, claude-code → anthropic) hit the right
- * pricing file. Each field resolves independently — setting one explicit
- * override does not shadow another field's catalog fallback.
- */
-export function resolveCapabilities(
-  providerId: string,
-  modelId: string,
-  explicit: {
-    contextWindow: number | null;
-    maxTokens: number | null;
-    cost: ModelCost | null;
-  },
-): {
-  contextWindow: number | null;
-  maxTokens: number | null;
-  cost: ModelCost | null;
-} {
-  const catalog = resolveCatalogDefaults(providerId, modelId);
-  return {
-    contextWindow: explicit.contextWindow ?? catalog.contextWindow ?? null,
-    maxTokens: explicit.maxTokens ?? catalog.maxTokens ?? null,
-    cost: explicit.cost ?? catalog.cost ?? null,
-  };
-}
-
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
-  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
-  const capabilities = resolveCapabilities(def.providerId, def.modelId, {
-    contextWindow: def.contextWindow ?? null,
-    maxTokens: def.maxTokens ?? null,
-    cost: def.cost ?? null,
-  });
   return {
     providerId: def.providerId,
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    label: def.label ?? defaults.label ?? def.modelId,
-    input: def.input ?? defaults.input ?? null,
-    contextWindow: capabilities.contextWindow,
-    maxTokens: capabilities.maxTokens,
-    reasoning: def.reasoning ?? defaults.reasoning ?? null,
-    cost: capabilities.cost,
+    ...resolveModelMetadata(def, def.modelId, resolveCatalogDefaults(def.providerId, def.modelId)),
     isSystemModel: true,
   };
 }
@@ -460,28 +439,20 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
  * derivable column on `org_models` is an optional override that defers to
  * the catalog on null — so a weekly catalog refresh propagates to existing
- * rows. Numeric/cost capability fields go through {@link resolveCapabilities}
- * so the env-driven and DB-driven paths share the exact same cascade.
+ * rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
-  const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
-  const capabilities = resolveCapabilities(creds.providerId, row.modelId, {
-    contextWindow: row.contextWindow,
-    maxTokens: row.maxTokens,
-    cost: (row.cost as ModelCost | null) ?? null,
-  });
   return {
     providerId: creds.providerId,
     apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    label: row.label ?? defaults.label ?? row.modelId,
-    input: (row.input as string[] | null) ?? defaults.input ?? null,
-    contextWindow: capabilities.contextWindow,
-    maxTokens: capabilities.maxTokens,
-    reasoning: row.reasoning ?? defaults.reasoning ?? null,
-    cost: capabilities.cost,
+    ...resolveModelMetadata(
+      { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
+      row.modelId,
+      resolveCatalogDefaults(creds.providerId, row.modelId),
+    ),
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,
