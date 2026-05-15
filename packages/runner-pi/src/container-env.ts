@@ -159,15 +159,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.MODEL_RETRY_ENABLED = "false";
   }
 
-  // Forward the run-trace diagnostic gate so the container's HttpSink +
-  // bridge emit their `[run-trace]` stderr lines. Off by default — only
-  // a host that sets `APPSTRATE_RUN_TRACE=1` opts in. The platform-side
-  // mirror (logger.info `[run-trace]` calls) does not need this flag;
-  // it filters by LOG_LEVEL.
-  if (process.env["APPSTRATE_RUN_TRACE"] === "1") {
-    env.APPSTRATE_RUN_TRACE = "1";
-  }
-
   if (opts.sink) {
     env.APPSTRATE_SINK_URL = opts.sink.url;
     env.APPSTRATE_SINK_FINALIZE_URL = opts.sink.finalizeUrl;

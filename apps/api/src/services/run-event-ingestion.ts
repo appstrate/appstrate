@@ -58,17 +58,6 @@ import type { TokenUsage } from "@appstrate/shared-types";
 export { assertSinkOpen, verifyRunSignatureHeaders };
 
 // ---------------------------------------------------------------------------
-// Diagnostic trace
-// ---------------------------------------------------------------------------
-//
-// Mirror of the agent-side `[run-trace]` lines. Logged via `logger.info`
-// under a single namespace so they can be filtered out of normal
-// production logs (LOG_LEVEL=warn) but stream live during diagnosis.
-function trace(event: string, data: Record<string, unknown>): void {
-  logger.info(`[run-trace] ${event}`, data);
-}
-
-// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -157,14 +146,6 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
  */
 export async function ingestRunEvent(input: IngestRunEventInput): Promise<IngestOutcome> {
   const { run, envelope, webhookId } = input;
-  const t0 = Date.now();
-  trace("ingest.enter", {
-    runId: run.id,
-    sequence: envelope.sequence,
-    type: envelope.type,
-    webhookId,
-    lastSeqSnapshot: run.lastEventSequence,
-  });
 
   // 1. Replay check — SET … EX … NX atomically rejects a duplicate webhook-id.
   const replayKey = `${REPLAY_KEY_PREFIX}${run.id}:${webhookId}`;
@@ -173,117 +154,44 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
     ttlSeconds: getEnv().REMOTE_RUN_REPLAY_WINDOW_SECONDS,
     nx: true,
   });
-  if (!claimed) {
-    trace("ingest.exit", {
-      runId: run.id,
-      sequence: envelope.sequence,
-      type: envelope.type,
-      webhookId,
-      outcome: "replay-webhook",
-      latencyMs: Date.now() - t0,
-    });
-    return { status: "replay" };
-  }
+  if (!claimed) return { status: "replay" };
 
   const event = envelopeToRunEvent(envelope, run.id);
   const sequence = envelope.sequence;
 
   // 2. Fast path: contiguous sequence.
   if (sequence === run.lastEventSequence + 1) {
-    trace("ingest.path.fast", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      webhookId,
-    });
     await persistEventAndAdvance(run, event, sequence);
-    // Attempt to drain any buffered successors while we're here.
     await drainBufferedEvents(run);
-    trace("ingest.exit", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      webhookId,
-      outcome: "persisted-fast",
-      latencyMs: Date.now() - t0,
-      lastSeqAfter: run.lastEventSequence,
-    });
     return { status: "persisted", sequence };
   }
 
   // Already-seen sequence → idempotent ack, no-op.
-  if (sequence <= run.lastEventSequence) {
-    trace("ingest.exit", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      webhookId,
-      outcome: "replay-seq",
-      lastSeqSnapshot: run.lastEventSequence,
-      latencyMs: Date.now() - t0,
-    });
-    return { status: "replay" };
-  }
+  if (sequence <= run.lastEventSequence) return { status: "replay" };
 
   // 3. Out of order — buffer.
-  trace("ingest.path.buffer", {
-    runId: run.id,
-    sequence,
-    type: event.type,
-    webhookId,
-    gap: sequence - run.lastEventSequence - 1,
-  });
   await bufferEvent(run.id, sequence, event);
 
   // Terminal events flush unconditionally (accept gaps).
   if (TERMINAL_RUN_EVENT_TYPES.has(event.type)) {
-    trace("ingest.terminal_drain", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      webhookId,
-    });
     await drainBufferedEvents(run, { allowGaps: true });
-    trace("ingest.exit", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      webhookId,
-      outcome: "persisted-terminal-drain",
-      latencyMs: Date.now() - t0,
-      lastSeqAfter: run.lastEventSequence,
-    });
     return { status: "persisted", sequence };
   }
 
   // Refresh the in-memory snapshot from DB and try a drain. Concurrent
-  // POSTs each load their own `lastSeqSnapshot` in the verify-signature
-  // middleware before any of them persists, so a parallel burst of 10
-  // events all see the same stale snapshot, only one wins the fast path,
-  // and the other nine end up here. Without a refresh + drain attempt
-  // they sit in the buffer for the rest of the run (no contiguous arrival
-  // triggers a re-drain) and only land in `run_logs` at finalize via
-  // gap_fill — collapsing 30s of real-time activity into a single visual
-  // burst. The drain's `persistEventAndAdvance` CAS serialises across
-  // concurrent drainers so multiple racing buffer-path requests are safe.
+  // POSTs each load their own snapshot in the verify-signature middleware
+  // before any of them persists, so a parallel burst sees the same stale
+  // value: only one wins the fast path, the others end up here. Without a
+  // refresh + drain attempt, buffered events sit until finalize's gap_fill
+  // — collapsing real-time activity into a single visual burst.
   const [fresh] = await db
     .select({ s: runs.lastEventSequence })
     .from(runs)
     .where(eq(runs.id, run.id))
     .limit(1);
   if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
-  const drainedBeforeExit = run.lastEventSequence;
   await drainBufferedEvents(run);
 
-  trace("ingest.exit", {
-    runId: run.id,
-    sequence,
-    type: event.type,
-    webhookId,
-    outcome: run.lastEventSequence >= sequence ? "buffered-drained" : "buffered",
-    drainedThisRequest: run.lastEventSequence - drainedBeforeExit,
-    latencyMs: Date.now() - t0,
-  });
   return run.lastEventSequence >= sequence
     ? { status: "persisted", sequence }
     : { status: "buffered", sequence };
@@ -319,13 +227,6 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
 export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   const { run, result } = input;
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
-  const finalizeT0 = Date.now();
-  trace("finalize.enter", {
-    runId: run.id,
-    lastSeqSnapshot: run.lastEventSequence,
-    resultStatus: result.status ?? null,
-    hasError: result.error !== undefined,
-  });
 
   // 1. Flush any buffered events before we close the sink.
   await drainBufferedEvents(run, { allowGaps: true });
@@ -591,11 +492,6 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
-  trace("finalize.exit", {
-    runId: run.id,
-    status,
-    latencyMs: Date.now() - finalizeT0,
-  });
 }
 
 /**
@@ -742,35 +638,21 @@ async function persistEventAndAdvance(
   sequence: number,
   opts: { allowGap?: boolean } = {},
 ): Promise<void> {
-  // Claim the sequence atomically BEFORE dispatching. The CAS on the
-  // previous sequence is the single point of serialisation across
-  // concurrent ingestion paths (fast-path POST + drain races against
-  // a second POST whose drain peeks the same buffered sequence before
-  // the first has removed it). With dispatch-first, both racers would
-  // call `sink.handle(event)` and `appendRunLog` would INSERT two
-  // identical rows for the same sequence — `appendRunLog` has no
-  // idempotency key and the platform-wide replay cache only dedupes
-  // on `(runId, webhookId)`, not `(runId, sequence)`. Reversing the
-  // order means whoever loses the CAS observes zero affected rows
-  // and skips the dispatch entirely.
-  //
-  // We deliberately give up the prior "dispatch crashes → retry next
-  // time" property. It was illusory: `appendRunLog` was never
-  // idempotent, so a partial-write crash followed by retry would have
-  // duplicated rows just like a concurrent drain. Crash recovery for
-  // un-acked events lives in the HttpSink retry layer on the runner
-  // side (4 attempts, exponential backoff), not here.
+  // Claim the sequence atomically BEFORE dispatching. The CAS is the
+  // single point of serialisation across concurrent ingestion paths
+  // (fast-path POST + drain racing against a second POST whose drain
+  // peeks the same buffered sequence). Dispatch-first would let both
+  // racers INSERT identical run_logs rows for the same sequence —
+  // `appendRunLog` has no idempotency key, and the platform-wide replay
+  // cache only dedupes on `(runId, webhookId)`. Reversing the order
+  // means whoever loses the CAS observes zero affected rows and skips
+  // dispatch entirely.
   //
   // `allowGap`: relax the predecessor check to `lastEventSequence <
-  // sequence`. Used exclusively by the terminal drain in finalize when
-  // a fast-path POST never arrived for some intermediate sequence —
-  // without it, the strict `= sequence - 1` CAS rejects every buffered
-  // event past the missing one, drainBufferedEvents removes them from
-  // the buffer anyway, and the rows are silently lost. The relaxed CAS
-  // still serialises across concurrent drains: whoever wins jumps
-  // `lastEventSequence` to `sequence`, the loser sees `last >= sequence`
-  // and skips dispatch.
-  const casT0 = Date.now();
+  // sequence`. Used by the terminal drain in finalize when a fast-path
+  // POST never arrived for some intermediate sequence — the strict
+  // `= sequence - 1` CAS would otherwise reject every buffered event
+  // past the missing one and they would be silently lost.
   const predicate = opts.allowGap
     ? sql`${runs.lastEventSequence} < ${sequence}`
     : eq(runs.lastEventSequence, sequence - 1);
@@ -780,90 +662,43 @@ async function persistEventAndAdvance(
     .where(and(eq(runs.id, run.id), predicate))
     .returning({ id: runs.id });
   if (claimed.length === 0) {
-    // Another concurrent ingestion path already claimed this sequence.
-    // Skip the dispatch — that path is responsible for inserting the
-    // run_logs row exactly once.
-    //
-    // Refresh the in-memory snapshot from the DB. The caller (typically
-    // drainBufferedEvents) re-computes `next = run.lastEventSequence + 1`
-    // on every loop iteration; without the refresh it would keep using
-    // the stale pre-CAS value, conclude that the buffer head represents
-    // a gap (`head.sequence > next` when the gap was actually filled by
-    // the racing path), and bail out — leaving every subsequent buffered
-    // event stranded until finalize's gap_fill.
+    // Another concurrent path claimed this sequence. Refresh the
+    // in-memory snapshot so the caller's drain loop recomputes `next`
+    // against the actual DB state — otherwise it bails out on a false
+    // gap-at-head and strands every subsequent buffered event until
+    // finalize's gap_fill.
     const [fresh] = await db
       .select({ s: runs.lastEventSequence })
       .from(runs)
       .where(eq(runs.id, run.id))
       .limit(1);
     if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
-    trace("persist.cas_lost", {
-      runId: run.id,
-      sequence,
-      type: event.type,
-      latencyMs: Date.now() - casT0,
-      refreshedLastSeq: run.lastEventSequence,
-    });
     return;
   }
-  trace("persist.cas_won", {
-    runId: run.id,
-    sequence,
-    type: event.type,
-    latencyMs: Date.now() - casT0,
-  });
 
   const sink = new PersistingEventSink({
     scope: { orgId: run.orgId, applicationId: run.applicationId },
     runId: run.id,
-    // The metric event handler is one of the two writers of the
-    // runner-source ledger row (the other is the finalize fallback).
     writeLedger: true,
   });
-  const dispatchT0 = Date.now();
   await sink.handle(event);
-  trace("persist.dispatch.done", {
-    runId: run.id,
-    sequence,
-    type: event.type,
-    latencyMs: Date.now() - dispatchT0,
-  });
 
-  // The very first event a runner posts is the "run is live" signal. No
-  // runner currently emits `run.started` (see AppstrateEventSink handlers
-  // and HttpSink — neither produces it), so keying the flip on event type
-  // would leave remote runs stuck at `pending` until finalize. Instead we
-  // flip on the first ingested sequence, whatever its type. Terminal
-  // status remains the exclusive responsibility of finalizeRun.
+  // No runner emits `run.started`, so flip status → running on the
+  // first ingested sequence regardless of type. Terminal status is
+  // owned by finalizeRun.
   if (run.lastEventSequence === 0) {
     await updateRun({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
       status: "running",
     });
   }
 
-  // Keep the in-memory context fresh for the rest of the request.
   run.lastEventSequence = sequence;
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
   const buffer = await getEventBuffer();
   const ttlSeconds = Math.ceil(getEnv().REMOTE_RUN_BUFFER_FLUSH_MS / 1000) + 60;
-  const t0 = Date.now();
   await buffer.put(runId, sequence, event, ttlSeconds);
-  // Sanity: list buffer contents right after the put. If our sequence is
-  // not in the list, the ZADD silently failed (or some concurrent path
-  // removed it in the same tick) — both are bugs worth catching.
-  const contents = await buffer.debugList(runId);
-  const present = contents.includes(sequence);
-  trace("buffer.put_done", {
-    runId,
-    putSequence: sequence,
-    type: event.type,
-    bufferSize: contents.length,
-    present,
-    headAfterPut: contents.length > 0 ? contents[0] : null,
-    latencyMs: Date.now() - t0,
-  });
 }
 
 async function drainBufferedEvents(
@@ -871,87 +706,36 @@ async function drainBufferedEvents(
   opts: { allowGaps?: boolean } = {},
 ): Promise<void> {
   const buffer = await getEventBuffer();
-  let drainedCount = 0;
-  const drainT0 = Date.now();
-  trace("drain.enter", {
-    runId: run.id,
-    lastSeq: run.lastEventSequence,
-    allowGaps: opts.allowGaps ?? false,
-  });
 
   while (true) {
     const head = await buffer.peekLowest(run.id);
-    if (!head) {
-      trace("drain.exit", {
-        runId: run.id,
-        drainedCount,
-        lastSeq: run.lastEventSequence,
-        latencyMs: Date.now() - drainT0,
-        reason: "empty",
-      });
-      return;
-    }
+    if (!head) return;
 
     const next = run.lastEventSequence + 1;
 
     if (head.sequence === next) {
-      trace("drain.persist", {
-        runId: run.id,
-        sequence: head.sequence,
-        type: head.event.type,
-      });
       await persistEventAndAdvance(run, head.event, head.sequence);
-      trace("buffer.remove", {
-        runId: run.id,
-        sequence: head.sequence,
-        reason: "drain-contiguous",
-      });
       await buffer.remove(run.id, head.sequence);
-      drainedCount += 1;
       continue;
     }
 
     if (opts.allowGaps && head.sequence > next) {
-      // Skip the gap — persist the lowest buffered event as if it were the
-      // next in line. Records a gap-filling log line so operators can spot
-      // dropped events in post-mortems.
       logger.warn("remote run flushed with sequence gap", {
         runId: run.id,
         expectedSequence: next,
         actualSequence: head.sequence,
       });
-      trace("drain.gap_fill", {
-        runId: run.id,
-        expectedSequence: next,
-        actualSequence: head.sequence,
-        type: head.event.type,
-      });
-      // allowGap relaxes the CAS in persistEventAndAdvance so it accepts
-      // `lastEventSequence < sequence` instead of `= sequence - 1`. The
-      // strict CAS would otherwise reject every buffered event past the
-      // missing one, drainBufferedEvents would remove them from the
-      // buffer anyway, and they would silently never reach run_logs —
-      // the canonical "10 tool_execution_end rows missing on a bursty
-      // parallel turn" symptom this branch is meant to recover from.
       await persistEventAndAdvance(run, head.event, head.sequence, { allowGap: true });
-      trace("buffer.remove", {
-        runId: run.id,
-        sequence: head.sequence,
-        reason: "drain-gap-fill",
-      });
       await buffer.remove(run.id, head.sequence);
-      drainedCount += 1;
       continue;
     }
 
     // Gap at the head and gaps not allowed — could be a real gap, or a
-    // stale view: a concurrent drainer may have advanced `lastEventSequence`
-    // past the buffer's old lowest and removed it, leaving us peeking at a
-    // higher sequence while our in-memory `run.lastEventSequence` is still
-    // pre-advance. Refresh from the DB and retry the iteration before
-    // giving up — otherwise concurrent buffer-path drainers (one per
-    // bursty parallel-call event) all observe a false gap, exit early,
-    // and the buffer sits until finalize.
+    // stale view where a concurrent drainer advanced `lastEventSequence`
+    // and removed the buffer's old lowest. Refresh from DB and retry
+    // before giving up; otherwise concurrent buffer-path drainers (one
+    // per bursty parallel-call event) all observe a false gap, exit
+    // early, and the buffer sits until finalize.
     const [fresh] = await db
       .select({ s: runs.lastEventSequence })
       .from(runs)
@@ -959,30 +743,8 @@ async function drainBufferedEvents(
       .limit(1);
     if (fresh && fresh.s > run.lastEventSequence) {
       run.lastEventSequence = fresh.s;
-      // Loop continues — re-peek, re-compute `next` against the refreshed
-      // counter. If the head is now contiguous, the next iteration
-      // persists it; otherwise the next iteration exits via this branch
-      // again with a still-stale-resistant check.
       continue;
     }
-    // Dump the entire buffer contents on gap-at-head exit so we can tell
-    // whether the "missing" sequences are truly absent (real gap) or just
-    // out of view (stale snapshot). If the truly-missing sequence is
-    // visible here, the bug is upstream (drain didn't loop / didn't see
-    // its own put); if it's absent, the put for that sequence never
-    // landed in Redis (silent ZADD failure, wrong score, …).
-    const contents = await buffer.debugList(run.id);
-    trace("drain.exit", {
-      runId: run.id,
-      drainedCount,
-      lastSeq: run.lastEventSequence,
-      latencyMs: Date.now() - drainT0,
-      reason: "gap-at-head",
-      headSequence: head.sequence,
-      expectedSequence: next,
-      bufferContents: contents.slice(0, 30),
-      bufferSize: contents.length,
-    });
     return;
   }
 }

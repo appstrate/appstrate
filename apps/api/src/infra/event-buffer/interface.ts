@@ -35,12 +35,4 @@ export interface EventBuffer {
 
   /** Graceful shutdown — cleanup timers / connections. */
   shutdown(): Promise<void>;
-
-  /**
-   * Diagnostic: list every (sequence, member) currently buffered for a
-   * run. Used by run-event-ingestion tracing to make "supposedly-missing
-   * event" post-mortems unambiguous — the trace prints what's actually
-   * present in the buffer, not just the head.
-   */
-  debugList(runId: string): Promise<number[]>;
 }

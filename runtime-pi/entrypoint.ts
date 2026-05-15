@@ -68,12 +68,7 @@ import {
   type Bundle,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
-import {
-  HttpSink,
-  attachStdoutBridge,
-  getHttpSinkPendingPosts,
-} from "@appstrate/afps-runtime/sinks";
-import { getBridgePendingCount, runTrace } from "@appstrate/runner-pi";
+import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -564,51 +559,14 @@ try {
     authStoragePath: "/tmp/pi-auth/auth.json",
   });
 
-  runTrace("entrypoint.run.start", { runId: AGENT_RUN_ID });
   await runner.run({
     bundle: runnerBundle,
     context,
     providerResolver,
     eventSink: bridgedSink,
   });
-  runTrace("entrypoint.run.resolved", {
-    runId: AGENT_RUN_ID,
-    pendingPosts: getHttpSinkPendingPosts(),
-    pendingBridgeFires: getBridgePendingCount(),
-  });
   heartbeat.stop();
-  // Drain in-flight HttpSink POSTs before exit. The session-bridge
-  // (`installSessionBridge.fire`) and the stdout-bridge (`dispatchLine`)
-  // both kick off `sink.handle(event)` as fire-and-forget, so the
-  // promises they return are never awaited by pi-runner.run(). When
-  // `process.exit(0)` runs, any POST still mid-flight is killed —
-  // platform-side this manifests as missing `tool_execution_end` /
-  // `output.emitted` rows on bursty turns (10 parallel tool calls being
-  // the canonical case). The poll-until-idle pattern is intentional: a
-  // condition variable would require threading state through HttpSink
-  // for one site that fires once per run.
-  const drainStart = Date.now();
-  const drainTimeoutMs = 5_000;
-  while (getHttpSinkPendingPosts() > 0 && Date.now() - drainStart < drainTimeoutMs) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-  }
-  const pendingAtExit = getHttpSinkPendingPosts();
-  if (pendingAtExit > 0) {
-    // Last-resort log. The watchdog still backstops correctness, but
-    // operators want to spot this in run logs without diffing rows.
-    process.stderr.write(
-      `[runtime-pi] WARN: ${pendingAtExit} POSTs still pending after ${drainTimeoutMs}ms drain — events may be lost\n`,
-    );
-  }
   await mcpClient?.close().catch(() => {});
-  runTrace("entrypoint.exit", {
-    runId: AGENT_RUN_ID,
-    code: 0,
-    pendingPosts: pendingAtExit,
-    pendingBridgeFires: getBridgePendingCount(),
-    drainDurationMs: Date.now() - drainStart,
-    totalDurationMs: Date.now() - startTime,
-  });
   process.exit(0);
 } catch (err) {
   heartbeat.stop();

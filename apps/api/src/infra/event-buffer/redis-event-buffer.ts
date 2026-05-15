@@ -58,14 +58,6 @@ export class RedisEventBuffer implements EventBuffer {
   async shutdown(): Promise<void> {
     // Redis connection lifecycle is managed globally by `closeRedis()`.
   }
-
-  async debugList(runId: string): Promise<number[]> {
-    const redis = getRedisConnection();
-    const pairs = await redis.zrange(this.key(runId), 0, -1, "WITHSCORES");
-    const out: number[] = [];
-    for (let i = 1; i < pairs.length; i += 2) out.push(Number(pairs[i]!));
-    return out;
-  }
 }
 
 function parseMember(raw: string): RunEvent {

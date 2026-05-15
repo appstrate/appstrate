@@ -74,10 +74,6 @@ export class LocalEventBuffer implements EventBuffer {
     this.buffers.clear();
   }
 
-  async debugList(runId: string): Promise<number[]> {
-    return (this.buffers.get(runId) ?? []).map((e) => e.sequence);
-  }
-
   private purgeExpired(): void {
     const now = Date.now();
     for (const [runId, entries] of this.buffers) {

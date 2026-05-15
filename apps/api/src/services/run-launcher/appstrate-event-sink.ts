@@ -65,13 +65,6 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
 
-// Diagnostic trace — mirror of the run-event-ingestion trace so both
-// stages of the ingestion pipeline write to the same `[run-trace]`
-// namespace. Gated on log level (info+).
-function trace(event: string, data: Record<string, unknown>): void {
-  logger.info(`[run-trace] ${event}`, data);
-}
-
 export interface PersistingEventSinkOptions {
   scope: AppScope;
   runId: string;
@@ -126,29 +119,6 @@ export class PersistingEventSink implements EventSink {
   }
 
   protected async persist(event: RunEvent): Promise<void> {
-    const t0 = Date.now();
-    const toolCallId =
-      typeof (event as { toolCallId?: unknown }).toolCallId === "string"
-        ? (event as { toolCallId: string }).toolCallId
-        : undefined;
-    trace("sink.persist.enter", {
-      runId: this.runId,
-      type: event.type,
-      ...(toolCallId !== undefined ? { toolCallId } : {}),
-    });
-    try {
-      await this.persistInner(event);
-    } finally {
-      trace("sink.persist.exit", {
-        runId: this.runId,
-        type: event.type,
-        ...(toolCallId !== undefined ? { toolCallId } : {}),
-        latencyMs: Date.now() - t0,
-      });
-    }
-  }
-
-  private async persistInner(event: RunEvent): Promise<void> {
     switch (event.type) {
       case "output.emitted": {
         await appendRunLog(
