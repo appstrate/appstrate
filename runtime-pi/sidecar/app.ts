@@ -6,6 +6,7 @@ import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp } from "./mcp.ts";
 import { BlobStore } from "./blob-store.ts";
 import {
+  DEFAULT_PROVIDER_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
   isBlockedUrl,
@@ -31,15 +32,6 @@ import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
-
-/**
- * Default cap on simultaneous `provider_call` MCP invocations per run.
- * Three matches the typical browsing concurrency a single LLM turn can
- * usefully exploit while leaving headroom under most providers' per-IP
- * rate limits. Operators can override via
- * `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
- */
-const DEFAULT_PROVIDER_CALL_CONCURRENCY = 3;
 
 /**
  * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP

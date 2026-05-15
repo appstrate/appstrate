@@ -26,6 +26,15 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
+/**
+ * Default cap on simultaneous `provider_call` MCP invocations per run.
+ * Three matches the typical browsing concurrency a single LLM turn can
+ * usefully exploit while leaving headroom under most providers' per-IP
+ * rate limits. Operators can override via
+ * `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
+ */
+export const DEFAULT_PROVIDER_CALL_CONCURRENCY = 3;
+
 /** Absolute hard-cap for any body-size env override. Above this, raising
  *  the limit requires real engineering (streaming refactor, chunked
  *  uploads) rather than a config knob. */
@@ -58,7 +67,7 @@ export function readPositiveIntEnv(
   }
   if (opts.ceiling !== undefined && parsed > opts.ceiling) {
     throw new Error(
-      `${name}=${parsed} exceeds the absolute ceiling of ${opts.ceiling} bytes. ` +
+      `${name}=${parsed} exceeds the absolute ceiling of ${opts.ceiling}${unitSuffix}. ` +
         `Caps above this require code changes (memory pressure on the sidecar).`,
     );
   }
@@ -71,11 +80,10 @@ export function readPositiveIntEnv(
  * above {@link ABSOLUTE_BODY_CEILING} so misconfiguration fails loud at
  * sidecar boot rather than silently masking the problem at runtime.
  *
- * Thin wrapper over {@link readPositiveIntEnv} with `unit: "bytes"` and
- * a default ceiling of {@link ABSOLUTE_BODY_CEILING}.
- *
- * Exported for tests and for the runtime-side mirror in
- * `packages/afps-runtime/src/resolvers/provider-tool.ts`.
+ * Thin wrapper over {@link readPositiveIntEnv} that pins
+ * `unit: "bytes"` and a default ceiling of
+ * {@link ABSOLUTE_BODY_CEILING} so call sites in this module don't
+ * repeat the contract.
  */
 export function readPositiveByteEnv(
   name: string,

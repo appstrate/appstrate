@@ -538,11 +538,31 @@ describe("readPositiveIntEnv", () => {
     }
   });
 
-  it("ceiling error message references the ceiling value in bytes wording", () => {
+  it("ceiling error message references the ceiling value", () => {
     const name = `${NAME_BASE}_CEIL_MSG`;
     process.env[name] = "500";
     try {
       expect(() => readPositiveIntEnv(name, 1, { ceiling: 100 })).toThrow(/100/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("ceiling error message uses the provided unit, not a hard-coded one", () => {
+    const name = `${NAME_BASE}_CEIL_UNIT`;
+    process.env[name] = "1001";
+    try {
+      // Unit is "tokens" — ceiling message must say tokens, not bytes.
+      const msg = (() => {
+        try {
+          readPositiveIntEnv(name, 1, { unit: "tokens", ceiling: 1000 });
+          return "";
+        } catch (e) {
+          return e instanceof Error ? e.message : "";
+        }
+      })();
+      expect(msg).toContain("tokens");
+      expect(msg).not.toContain("bytes");
     } finally {
       delete process.env[name];
     }
