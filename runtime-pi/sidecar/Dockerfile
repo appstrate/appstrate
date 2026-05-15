@@ -12,7 +12,7 @@
 #
 # Paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.11-alpine
+ARG BUN_IMAGE=oven/bun:1.3.14-alpine
 ARG RUNTIME_IMAGE=alpine:3.21.3
 
 # ── Stage 1 — compile to a single-file binary ─────────────────────

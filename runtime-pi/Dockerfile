@@ -12,7 +12,7 @@
 #
 # All paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.11-alpine
+ARG BUN_IMAGE=oven/bun:1.3.14-alpine
 
 # ── Stage 1 — dependency install ──────────────────────────────────
 # Produces a runtime-pi-scoped `node_modules` tree (filter-installed
