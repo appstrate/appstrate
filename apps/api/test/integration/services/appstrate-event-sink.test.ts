@@ -22,6 +22,7 @@ import {
   AggregatingEventSink,
   PersistingEventSink,
 } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { reduceEvents, emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
@@ -231,6 +232,12 @@ describe("PersistingEventSink", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // The broadcaster's throttle map is module-scoped — wipe it between
+    // tests so a fire-and-forget broadcast scheduled by one test cannot
+    // race a later test's reads of runs.cost. The broadcaster's own
+    // behavior (including the runs.cost write) is covered by its
+    // dedicated test suite (run-metric-broadcaster.test.ts).
+    _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
@@ -273,8 +280,12 @@ describe("PersistingEventSink", () => {
       output_tokens: 125,
     });
 
-    // runs.cost MUST NOT be touched by the sink — only finalizeRun writes it.
-    expect(runRow?.cost).toBeNull();
+    // runs.cost is intentionally NOT asserted here — the sink schedules a
+    // fire-and-forget run_metric broadcast that also refreshes runs.cost
+    // (monotonic-max guarded) so a mid-run UI refresh sees the latest
+    // value rather than null until finalize. That write race is covered
+    // end-to-end by run-metric-broadcaster.test.ts; this test focuses on
+    // the synchronous ledger + tokenUsage write-through.
   });
 
   it("concurrent metric writes for the same run land at most one runner row (max wins)", async () => {
