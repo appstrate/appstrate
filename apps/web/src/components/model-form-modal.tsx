@@ -300,16 +300,21 @@ function ModelFormBody({
   //   - OAuth: pin to the canonical `providerId` (DB column) — apiShape +
   //            baseUrl would collide with api-key Anthropic credentials.
   //   - api-key: match on apiShape + baseUrl as before.
+  //
+  // Built-in (`source: "built-in"`) credentials come from `SYSTEM_PROVIDER_KEYS`
+  // env and use a slug id (e.g. `"anthropic"`), not a UUID — `org_models.credential_id`
+  // is a UUID FK to `model_provider_credentials.id` and would 400 the insert.
+  // Operators add models against system keys by declaring them in the env
+  // `models[]` block, not via this form. Hiding them removes the trap.
   const availableCredentials = useMemo(() => {
     if (!credentialsQuery.data) return [];
+    const customOnly = credentialsQuery.data.filter((k) => k.source === "custom");
     if (isOauthProvider) {
-      return credentialsQuery.data.filter(
-        (k) => k.authMode === "oauth2" && k.providerId === providerId,
-      );
+      return customOnly.filter((k) => k.authMode === "oauth2" && k.providerId === providerId);
     }
     if (!apiShape || !baseUrl) return [];
     const normalizedBase = baseUrl.replace(/\/+$/, "");
-    return credentialsQuery.data.filter(
+    return customOnly.filter(
       (k) =>
         k.authMode === "api_key" &&
         k.apiShape === apiShape &&
