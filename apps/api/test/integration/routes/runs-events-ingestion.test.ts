@@ -226,6 +226,64 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(after?.lastEventSequence).toBe(2);
   });
 
+  // Regression for the buffer-stuck-until-finalize bug.
+  //
+  // Symptom: on a 10-tool parallel turn, the runner's HttpSink fires 10
+  // POSTs near-simultaneously. `verifyRunSignature` middleware loads each
+  // request's snapshot of `lastEventSequence` BEFORE any of them
+  // persists, so all 10 see the same stale value. Only one (whichever
+  // matches `seq === snap + 1`) wins the fast path; the other 9 fall
+  // into the buffer path. Pre-fix, the buffer path did NOT re-attempt a
+  // drain — those 9 events sat in Redis until finalize's gap_fill,
+  // collapsing 30s of real-time event activity into a single visual
+  // burst at run end.
+  //
+  // We simulate the snapshot-staleness window by hand-advancing
+  // `lastEventSequence` between the two POSTs to mimic a fast-path
+  // request that completed between request A's middleware snapshot and
+  // request A's drain attempt.
+  it("buffer path refreshes snapshot and drains when DB has advanced", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Step 1: POST seq=3 with DB.lastSeq=0 → buffered (gap before).
+    const env3 = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "third", timestamp: Date.now() },
+      3,
+    );
+    const res3 = await postEvent(runId, env3);
+    expect(res3.status).toBe(200);
+    expect(((await res3.json()) as { outcome: string }).outcome).toBe("buffered");
+
+    const [mid1] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(mid1?.lastEventSequence).toBe(0);
+
+    // Step 2: simulate a concurrent fast-path that advanced DB to seq=2
+    // without leaving anything in the buffer. Pre-fix, the buffer entry
+    // for seq=3 stays untouched — no contiguous arrival ever wakes the
+    // drain.
+    await db.update(runs).set({ lastEventSequence: 2 }).where(eq(runs.id, runId));
+
+    // Step 3: POST seq=4. Middleware reads fresh snapshot=2; 4 != 3 →
+    // buffer path. With the fix, the buffer path's refresh-and-drain
+    // now sees DB.lastSeq=2 and seq=3 in the buffer (contiguous!),
+    // persists seq=3, then peeks seq=4 (just buffered), persists. Final
+    // lastSeq=4. Without the fix, both 3 and 4 sit in the buffer and
+    // lastSeq stays at 2 until finalize.
+    const env4 = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "fourth", timestamp: Date.now() },
+      4,
+    );
+    const res4 = await postEvent(runId, env4);
+    expect(res4.status).toBe(200);
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.lastEventSequence).toBe(4);
+  });
+
   // Regression for the silent-event-drop on bursty parallel turns.
   //
   // Symptom: on a 10-tool parallel turn, the 10 `tool_execution_end`

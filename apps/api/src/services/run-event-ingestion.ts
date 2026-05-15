@@ -256,15 +256,37 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
     return { status: "persisted", sequence };
   }
 
+  // Refresh the in-memory snapshot from DB and try a drain. Concurrent
+  // POSTs each load their own `lastSeqSnapshot` in the verify-signature
+  // middleware before any of them persists, so a parallel burst of 10
+  // events all see the same stale snapshot, only one wins the fast path,
+  // and the other nine end up here. Without a refresh + drain attempt
+  // they sit in the buffer for the rest of the run (no contiguous arrival
+  // triggers a re-drain) and only land in `run_logs` at finalize via
+  // gap_fill — collapsing 30s of real-time activity into a single visual
+  // burst. The drain's `persistEventAndAdvance` CAS serialises across
+  // concurrent drainers so multiple racing buffer-path requests are safe.
+  const [fresh] = await db
+    .select({ s: runs.lastEventSequence })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+  const drainedBeforeExit = run.lastEventSequence;
+  await drainBufferedEvents(run);
+
   trace("ingest.exit", {
     runId: run.id,
     sequence,
     type: event.type,
     webhookId,
-    outcome: "buffered",
+    outcome: run.lastEventSequence >= sequence ? "buffered-drained" : "buffered",
+    drainedThisRequest: run.lastEventSequence - drainedBeforeExit,
     latencyMs: Date.now() - t0,
   });
-  return { status: "buffered", sequence };
+  return run.lastEventSequence >= sequence
+    ? { status: "persisted", sequence }
+    : { status: "buffered", sequence };
 }
 
 /**
