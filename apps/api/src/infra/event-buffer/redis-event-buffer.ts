@@ -37,7 +37,9 @@ export class RedisEventBuffer implements EventBuffer {
     const redis = getRedisConnection();
     const pair = await redis.zrange(this.key(runId), 0, 0, "WITHSCORES");
     if (pair.length === 0) return null;
-    const event = parseMember(pair[0]!);
+    const raw = pair[0]!;
+    // Members are written by `put` as `${sequence}|${json}`. Strip the prefix.
+    const event = JSON.parse(raw.substring(raw.indexOf("|") + 1)) as RunEvent;
     const sequence = Number(pair[1]!);
     return { sequence, event };
   }
@@ -58,19 +60,4 @@ export class RedisEventBuffer implements EventBuffer {
   async shutdown(): Promise<void> {
     // Redis connection lifecycle is managed globally by `closeRedis()`.
   }
-}
-
-function parseMember(raw: string): RunEvent {
-  // Members written by `put` are `${sequence}|${json}`. Older entries
-  // written before this fix carried the bare JSON, so fall back when the
-  // separator is missing — a buffer that survives the upgrade still
-  // drains correctly.
-  const sep = raw.indexOf("|");
-  if (sep < 0) return JSON.parse(raw) as RunEvent;
-  // Validate the prefix is digits to avoid mis-splitting a JSON payload
-  // whose first character is `|`. `|` cannot appear inside a JSON
-  // top-level object before the opening `{`, but be defensive.
-  const prefix = raw.substring(0, sep);
-  if (!/^\d+$/.test(prefix)) return JSON.parse(raw) as RunEvent;
-  return JSON.parse(raw.substring(sep + 1)) as RunEvent;
 }
