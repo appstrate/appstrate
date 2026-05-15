@@ -48,10 +48,21 @@
 import { logger } from "./logger.ts";
 
 /**
+ * Hard ceiling on curl's stdout buffer. Mirrors `MAX_STREAMED_BODY_SIZE`
+ * in `helpers.ts` (100 MB) — kept as a local constant to avoid pulling
+ * the helpers module's transitive deps into this leaf file. If the
+ * helpers cap changes, change this one too (covered by integration via
+ * `credential-proxy.test.ts`).
+ */
+const MAX_RESPONSE_BYTES = 100 * 1024 * 1024;
+
+/**
  * Subset of `RequestInit` consumed by {@link curlFetch}. Extends with
  * `proxyUrl` (curl-specific routing; Bun's fetch reads `proxy`
- * directly) and `timeoutMs` (extracted from `signal` when present,
- * accepted explicitly for callers that don't bother with AbortSignal).
+ * directly) and `timeoutMs` (caller-supplied — must be set explicitly).
+ * `signal` is honoured for cancellation (kills the child on abort) —
+ * deadline extraction from `AbortSignal.timeout()` would have to reach
+ * for Bun-version-private fields, so we don't.
  */
 export interface CurlFetchInit {
   method?: string;
@@ -77,6 +88,16 @@ const MAX_STDERR_BYTES = 64 * 1024;
  * curl path and the undici path enforce the same ceiling.
  */
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Allowed HTTP methods on the curl path. Restrictive allowlist —
+ * `init.method` is LLM-controlled via `provider_call`, and curl
+ * writes `-X` straight into the request line, so a CRLF or arbitrary
+ * token here would let a misbehaving caller splice extra request
+ * lines onto the wire. Any method outside this set is rejected with
+ * a synthetic 400 before spawn.
+ */
+const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 /**
  * Spawn `curl` and return an HTTP `Response` shaped exactly like
@@ -106,7 +127,10 @@ export async function curlFetch(
   // 2. Build argv. Order matters only for readability; curl itself is
   //    order-agnostic for these flags.
   const method = (init.method ?? "GET").toUpperCase();
-  const timeoutMs = init.timeoutMs ?? extractTimeoutFromSignal(init.signal) ?? DEFAULT_TIMEOUT_MS;
+  if (!ALLOWED_METHODS.has(method)) {
+    return synthResponse(400, `curl-runner: refused method "${method}"`, url);
+  }
+  const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
 
   const args: string[] = [
@@ -174,6 +198,21 @@ export async function curlFetch(
     stderr: "pipe",
   });
 
+  // Honour caller-supplied AbortSignal — kill the child on abort so
+  // a cancelled run doesn't leave curl running for `--max-time`
+  // seconds (defeats the cancel pub/sub contract).
+  const onAbort = (): void => {
+    try {
+      (child as unknown as { kill?: (signal?: number) => void }).kill?.();
+    } catch {
+      // Best-effort — process may have already exited.
+    }
+  };
+  if (init.signal) {
+    if (init.signal.aborted) onAbort();
+    else init.signal.addEventListener("abort", onAbort, { once: true });
+  }
+
   // Write body to stdin (if any), then close. Bun.spawn returns a
   // FileSink for stdin when "pipe" — keep the write defensive in case
   // a future Bun release changes the shape.
@@ -187,13 +226,25 @@ export async function curlFetch(
     sink.end?.();
   }
 
-  // 7. Drain stdout / stderr concurrently. Cap stderr to avoid OOM
-  //    on a flapping child.
-  const [stdoutBytes, stderrSnippet, exitCode] = await Promise.all([
-    readAll(child.stdout),
+  // 7. Drain stdout / stderr concurrently. Both have hard caps so a
+  //    misbehaving upstream returning a 10 GB body or a flapping
+  //    child spewing stderr cannot OOM the sidecar — matches the
+  //    fetch path's `MAX_STREAMED_BODY_SIZE` ceiling.
+  const [stdoutResult, stderrSnippet, exitCode] = await Promise.all([
+    readAllCapped(child.stdout, MAX_RESPONSE_BYTES, onAbort),
     readCapped(child.stderr, MAX_STDERR_BYTES),
     child.exited,
   ]);
+  if (init.signal) init.signal.removeEventListener("abort", onAbort);
+
+  if (stdoutResult.overflow) {
+    logger.debug("curl-runner: response body exceeded cap", {
+      url,
+      cap: MAX_RESPONSE_BYTES,
+    });
+    return synthResponse(502, "curl-runner: upstream response exceeded size cap", url);
+  }
+  const stdoutBytes = stdoutResult.bytes;
 
   // 8. Map exit codes. curl(1) man page §EXIT CODES.
   if (exitCode !== 0) {
@@ -353,20 +404,6 @@ function synthResponse(status: number, reason: string, url: string): Response {
   });
 }
 
-/**
- * Best-effort extraction of a timeout (in ms) from an AbortSignal.
- * Bun's `AbortSignal.timeout(ms)` exposes the deadline on a private
- * field on some versions; falling back to `undefined` is safe — the
- * caller then uses {@link DEFAULT_TIMEOUT_MS}.
- */
-function extractTimeoutFromSignal(signal: AbortSignal | undefined): number | undefined {
-  if (!signal) return undefined;
-  const candidate =
-    (signal as unknown as { _timeout?: number; timeout?: number })._timeout ??
-    (signal as unknown as { _timeout?: number; timeout?: number }).timeout;
-  return typeof candidate === "number" && candidate > 0 ? candidate : undefined;
-}
-
 /** Coerce supported body shapes into a `Uint8Array`. */
 function toBytes(body: ArrayBuffer | string | Uint8Array): Uint8Array {
   if (typeof body === "string") return new TextEncoder().encode(body);
@@ -374,18 +411,35 @@ function toBytes(body: ArrayBuffer | string | Uint8Array): Uint8Array {
   return new Uint8Array(body);
 }
 
-/** Drain a `ReadableStream` to a single `Uint8Array`. */
-async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+/**
+ * Drain a `ReadableStream` to a single `Uint8Array`, aborting if the
+ * total exceeds `cap` bytes. On overflow the child is killed via
+ * `onOverflow` (best-effort) and the partial buffer is discarded —
+ * callers synthesize a 502 instead of returning truncated bytes.
+ */
+async function readAllCapped(
+  stream: ReadableStream<Uint8Array>,
+  cap: number,
+  onOverflow: () => void,
+): Promise<{ bytes: Uint8Array; overflow: boolean }> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   const reader = stream.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (value) {
-      chunks.push(value);
-      total += value.byteLength;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > cap) {
+      onOverflow();
+      // Drain the rest cheaply so the child's pipe doesn't deadlock.
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+      }
+      return { bytes: new Uint8Array(), overflow: true };
     }
+    chunks.push(value);
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -393,7 +447,7 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
     out.set(c, offset);
     offset += c.byteLength;
   }
-  return out;
+  return { bytes: out, overflow: false };
 }
 
 /** Drain up to `cap` bytes from a stream; discard the rest. */

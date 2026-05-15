@@ -305,6 +305,83 @@ describe("curlFetch — security posture", () => {
     const res = await curlFetch("not a url", {}, spawn);
     expect(res.status).toBe(502);
   });
+
+  it("refuses methods outside the HTTP allowlist (request-line splicing defence)", async () => {
+    const spawn = makeFakeSpawn({ stdout: "" });
+    const res = await curlFetch("https://api.example.com/x", { method: "GET\r\nX-Bad: 1" }, spawn);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/refused method/);
+  });
+
+  it("refuses arbitrary tokens as method (not just CR/LF)", async () => {
+    const spawn = makeFakeSpawn({ stdout: "" });
+    const res = await curlFetch("https://api.example.com/x", { method: "TRACE" }, spawn);
+    expect(res.status).toBe(400);
+  });
+
+  it("synthesizes 502 when response exceeds memory cap", async () => {
+    // 101 MB of zero bytes — one past the 100 MB cap. The cap drains
+    // and discards the partial buffer, so the resulting response body
+    // is the synthetic error message, not 101 MB of payload.
+    const oversized = new Uint8Array(101 * 1024 * 1024);
+    const spawn = makeFakeSpawn({ stdout: oversized, exitCode: 0 });
+    const res = await curlFetch("https://api.example.com/x", {}, spawn);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toMatch(/size cap/);
+  });
+
+  it("aborts the child when the caller's AbortSignal fires", async () => {
+    let killed = false;
+    // Custom fake spawn — exposes a `kill` method on the child and
+    // resolves `exited` only after `kill()` is called, so the test
+    // proves the abort actually flows through.
+    const spawnFn = ((options: { cmd: string[]; stdin?: unknown }) => {
+      let resolveExit: (code: number) => void = () => {};
+      const exited = new Promise<number>((resolve) => {
+        resolveExit = resolve;
+      });
+      return {
+        stdin: options.stdin === "pipe" ? { write: () => {}, end: () => {} } : undefined,
+        stdout: new ReadableStream({
+          start(c) {
+            c.close();
+          },
+        }),
+        stderr: new ReadableStream({
+          start(c) {
+            c.close();
+          },
+        }),
+        exited,
+        kill(): void {
+          killed = true;
+          resolveExit(0);
+        },
+      };
+    }) as unknown as typeof Bun.spawn;
+
+    const ac = new AbortController();
+    const promise = curlFetch("https://api.example.com/x", { signal: ac.signal }, spawnFn);
+    // Wait a tick for the listener to attach, then abort.
+    await new Promise((r) => setTimeout(r, 0));
+    ac.abort();
+    await promise;
+    expect(killed).toBe(true);
+  });
+});
+
+describe("curlFetch — status line parsing", () => {
+  it("parses HTTP/2 status lines (no reason phrase)", async () => {
+    // Real curl on HTTP/2 emits `HTTP/2 200\r\n` — no trailing space,
+    // no reason phrase. Regression guard against a future regex tweak.
+    const head = "HTTP/2 200\r\nContent-Type: application/json\r\n\r\n";
+    const spawn = makeFakeSpawn({
+      stdout: new TextEncoder().encode(head + '{"ok":true}'),
+    });
+    const res = await curlFetch("https://api.example.com/x", {}, spawn);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('{"ok":true}');
+  });
 });
 
 describe("curlFetch — header propagation", () => {

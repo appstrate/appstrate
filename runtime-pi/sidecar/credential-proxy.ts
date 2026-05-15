@@ -243,11 +243,12 @@ export async function executeProviderCall(
     }
 
     const builtBody = buildBody(activeCreds.credentials);
+    const signal = AbortSignal.timeout(OUTBOUND_TIMEOUT_MS);
     const init: RequestInit & Record<string, unknown> = {
       method,
       headers: resolvedHeaders,
       body: builtBody,
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      signal,
       proxy: args.proxyUrl || undefined,
     };
     if (init.body instanceof ReadableStream) {
@@ -276,6 +277,7 @@ export async function executeProviderCall(
         method,
         headers: resolvedHeaders,
         timeoutMs: OUTBOUND_TIMEOUT_MS,
+        signal,
         ...(args.proxyUrl ? { proxyUrl: args.proxyUrl } : {}),
         ...(builtBody !== undefined ? { body: builtBody as ArrayBuffer | string } : {}),
       };
