@@ -383,14 +383,38 @@ export async function waitForCompactionToSettle(
 ): Promise<void> {
   if (typeof session.isCompacting !== "boolean") return; // SDK older than 0.70 — best-effort no-op.
   if (!session.isCompacting) return;
+  // Compaction is rare in the happy path — when it does fire it's the
+  // signal that we just stopped a prompt-too-long from killing the run.
+  // Surfacing a structured line on entry + exit gives operators a clear
+  // before/after pair without bloating the steady-state log. runner-pi
+  // intentionally avoids a logger dep, so the existing console.error
+  // convention from sink-heartbeat applies (info-level message routed to
+  // stderr so Docker captures it).
+  const startedAt = Date.now();
+  console.error(JSON.stringify({ level: "info", msg: "[pi-runner] awaiting compaction" }));
   const timeoutMs = options.timeoutMs ?? COMPACTION_WAIT_TIMEOUT_MS;
   const pollMs = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS;
   const deadline = Date.now() + timeoutMs;
+  let outcome: "settled" | "timeout" | "aborted" = "settled";
   while (session.isCompacting) {
-    if (signal?.aborted) return; // Cancellation supersedes the wait — entrypoint will surface the abort.
-    if (Date.now() >= deadline) return; // Timeout — let the caller proceed; outer run timeout still applies.
+    if (signal?.aborted) {
+      outcome = "aborted";
+      break;
+    }
+    if (Date.now() >= deadline) {
+      outcome = "timeout";
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
+  console.error(
+    JSON.stringify({
+      level: outcome === "settled" ? "info" : "warn",
+      msg: "[pi-runner] compaction wait done",
+      outcome,
+      elapsedMs: Date.now() - startedAt,
+    }),
+  );
 }
 
 // ─── Pi SDK → RunEvent bridge ──────────────────────────────────────

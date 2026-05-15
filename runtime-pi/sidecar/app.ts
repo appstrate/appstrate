@@ -561,6 +561,22 @@ export function createApp(deps: AppDeps): Hono {
     runBudgetTokens,
     ...contextWindowOpt,
   });
+  // Boot-time visibility into the budget config — operators can confirm
+  // the launcher actually forwarded the window/reserve pair (vs. silently
+  // falling back to the legacy two-tier guard). Reading the resolved
+  // fields off the budget itself avoids drift between the env values and
+  // what the constructor accepted.
+  logger.info("token-budget configured", {
+    inlineCapTokens: tokenBudget.inlineCapTokens,
+    runBudgetTokens: tokenBudget.runBudgetTokens,
+    contextWindowTokens: tokenBudget.contextWindowTokens,
+    reserveTokens: tokenBudget.reserveTokens,
+    contextWindowGuardActive: tokenBudget.contextWindowTokens !== null,
+    spillThresholdTokens:
+      tokenBudget.contextWindowTokens !== null
+        ? tokenBudget.contextWindowTokens - tokenBudget.reserveTokens
+        : null,
+  });
   // Fan-out cap on `provider_call`. Defaults to
   // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
   // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
