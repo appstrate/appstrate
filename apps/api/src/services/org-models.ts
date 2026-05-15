@@ -397,9 +397,46 @@ function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDef
   };
 }
 
+/**
+ * Focused cascade for the three numeric/cost capability fields a runner
+ * needs to size compaction, budget responses, and price LLM calls. Keeps
+ * the env-driven (`SYSTEM_PROVIDER_KEYS`) and DB-driven (`org_models`)
+ * builders aligned on the exact same `explicit > catalog > null` chain.
+ *
+ * Honors `catalogProviderId` via {@link resolveCatalogDefaults} so OAuth
+ * wrappers (codex → openai, claude-code → anthropic) hit the right
+ * pricing file. Each field resolves independently — setting one explicit
+ * override does not shadow another field's catalog fallback.
+ */
+export function resolveCapabilities(
+  providerId: string,
+  modelId: string,
+  explicit: {
+    contextWindow: number | null;
+    maxTokens: number | null;
+    cost: ModelCost | null;
+  },
+): {
+  contextWindow: number | null;
+  maxTokens: number | null;
+  cost: ModelCost | null;
+} {
+  const catalog = resolveCatalogDefaults(providerId, modelId);
+  return {
+    contextWindow: explicit.contextWindow ?? catalog.contextWindow ?? null,
+    maxTokens: explicit.maxTokens ?? catalog.maxTokens ?? null,
+    cost: explicit.cost ?? catalog.cost ?? null,
+  };
+}
+
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+  const capabilities = resolveCapabilities(def.providerId, def.modelId, {
+    contextWindow: def.contextWindow ?? null,
+    maxTokens: def.maxTokens ?? null,
+    cost: def.cost ?? null,
+  });
   return {
     providerId: def.providerId,
     apiShape: def.apiShape,
@@ -408,10 +445,10 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     apiKey: def.apiKey,
     label: def.label ?? defaults.label ?? def.modelId,
     input: def.input ?? defaults.input ?? null,
-    contextWindow: def.contextWindow ?? defaults.contextWindow ?? null,
-    maxTokens: def.maxTokens ?? defaults.maxTokens ?? null,
+    contextWindow: capabilities.contextWindow,
+    maxTokens: capabilities.maxTokens,
     reasoning: def.reasoning ?? defaults.reasoning ?? null,
-    cost: def.cost ?? defaults.cost ?? null,
+    cost: capabilities.cost,
     isSystemModel: true,
   };
 }
@@ -422,11 +459,17 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * service resolves them from the registry by `providerId` (with the per-row
  * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
  * derivable column on `org_models` is an optional override that defers to
- * {@link resolveCatalogDefaults} on null — so a weekly catalog refresh
- * propagates to existing rows.
+ * the catalog on null — so a weekly catalog refresh propagates to existing
+ * rows. Numeric/cost capability fields go through {@link resolveCapabilities}
+ * so the env-driven and DB-driven paths share the exact same cascade.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+  const capabilities = resolveCapabilities(creds.providerId, row.modelId, {
+    contextWindow: row.contextWindow,
+    maxTokens: row.maxTokens,
+    cost: (row.cost as ModelCost | null) ?? null,
+  });
   return {
     providerId: creds.providerId,
     apiShape: creds.apiShape,
@@ -435,10 +478,10 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     apiKey: creds.apiKey,
     label: row.label ?? defaults.label ?? row.modelId,
     input: (row.input as string[] | null) ?? defaults.input ?? null,
-    contextWindow: row.contextWindow ?? defaults.contextWindow ?? null,
-    maxTokens: row.maxTokens ?? defaults.maxTokens ?? null,
+    contextWindow: capabilities.contextWindow,
+    maxTokens: capabilities.maxTokens,
     reasoning: row.reasoning ?? defaults.reasoning ?? null,
-    cost: (row.cost as ModelCost | null) ?? defaults.cost ?? null,
+    cost: capabilities.cost,
     isSystemModel: false,
     accountId: creds.accountId,
     credentialId: row.credentialId,
