@@ -214,11 +214,6 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 }
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
-  // Captured at command entry so the "runtime ready in {N}ms" signal
-  // reflects the user-perceived warm-up cost (profile resolution, model
-  // download, bundle prep, sink setup) — not just PiRunner construction.
-  const commandStartedAt = Date.now();
-
   // ─── 1. Resolve provider mode + profile state ──────────────────────
   const mode: ProviderMode = parseProviderMode(opts.providers);
   const target = parseRunTarget(opts.bundle);
@@ -609,12 +604,21 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // it to the platform, flipping the remote run from pending to
     // running on the first ingested sequence. Identical signal shape
     // to the one runtime-pi emits inside the Docker container.
+    //
+    // `performance.now()` is measured from `performance.timeOrigin` (the
+    // wall-clock instant the CLI process started), so the reported
+    // duration covers Bun startup + ESM import evaluation + the warm-up
+    // work below (profile resolution, model download, bundle prep, sink
+    // setup) — i.e. the full user-perceived gap. A top-level
+    // `Date.now()` captured at function entry would miss the import
+    // phase entirely because ES module imports are evaluated before any
+    // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
     const extensionsCount = prepared.extensionFactories.length + providerFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,
-      bootDurationMs: Date.now() - commandStartedAt,
+      bootDurationMs: performance.now(),
     }).catch((err) => {
       // Do not fail the run because the heartbeat failed — the sink's
       // own retry loop has already done what it could. A warning to

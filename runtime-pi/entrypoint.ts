@@ -107,11 +107,6 @@ function buildInContainerBundle(prompt: string): Bundle {
   };
 }
 
-// Captured as early as possible so the "runtime ready in {N}ms" signal
-// reflects the full bootloader cost (bundle extract, providers wiring,
-// dynamic tool imports) — not just the post-init slice.
-const BOOT_STARTED_AT = Date.now();
-
 // --- 0. Env validation + sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
@@ -448,10 +443,19 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // imports are all done. It also gives the dashboard a first log line
 // immediately on cold starts (Docker pull can take seconds) instead of
 // a silent gap between `pending` and the first tool call.
+//
+// `performance.now()` is measured from `performance.timeOrigin` (the
+// wall-clock instant the process started), so it folds in Bun startup
+// + ESM import evaluation (the heavy module loading at the top of this
+// file) on top of the post-import boot work. An earlier `Date.now()`
+// timer declared as a top-level const missed all of that — ES modules
+// evaluate every `import` before any top-level statement runs, so the
+// timer started only after the slow part was already done and reported
+// an artificially low duration vs. the user-perceived gap.
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
   extensions: extensionFactories.length,
-  bootDurationMs: Date.now() - BOOT_STARTED_AT,
+  bootDurationMs: performance.now(),
 });
 
 // --- 6a. Liveness keep-alive ---
