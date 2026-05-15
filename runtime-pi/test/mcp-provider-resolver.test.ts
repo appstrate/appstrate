@@ -636,28 +636,75 @@ describe("McpProviderResolver — upstream meta propagation", () => {
   });
 });
 
-describe("McpProviderResolver — resource_link preservation (#464)", () => {
+describe("McpProviderResolver — resource_link auto-materialisation (#464)", () => {
   /**
    * The sidecar's TokenBudget spills oversize text responses to a
-   * blob store and returns a `resource_link`. Honoring that decision
-   * end-to-end is what keeps the LLM context bounded: re-reading the
-   * blob here would inline the full payload into the tool result and
-   * blow past the model's context window (the failure mode of #464).
+   * blob store and returns a `resource_link`. We mirror that decision
+   * end-to-end by writing the blob to a workspace file the LLM can
+   * read with the standard `read` tool — never inlining the bytes
+   * back into the tool result, which would re-bloat the model
+   * context and reproduce the #464 failure mode.
    *
-   * `makeServer` does NOT register a `resources/*` provider, so any
-   * `resources/read` invocation would throw `MethodNotFound`. The
-   * resolver completing without an error is itself the assertion that
-   * the resolver did not attempt to read the blob.
+   * The default path is `responses/<toolCallId>.<ext>` with the
+   * extension derived from the sidecar's mimeType (the auto-spill
+   * convention documented in the platform prompt). An explicit
+   * `responseMode.toFile` always wins.
    */
-  it("returns a `link` body without reading the blob when sidecar spills", async () => {
+
+  /**
+   * Mock MCP server that registers a `resources/*` provider so the
+   * resolver can read the spilled blob. The local `makeServer` helper
+   * registers tools only, so we build a tailored pair here to keep
+   * those existing tests unchanged.
+   */
+  async function makeServerWithResources(opts: {
+    responseBlock: { type: "resource_link"; uri: string; name?: string; mimeType?: string };
+    resourceBytes: string;
+    resourceMime?: string;
+    meta?: Record<string, unknown>;
+  }) {
+    const block = opts.responseBlock;
+    const tool: AppstrateToolDefinition = {
+      descriptor: {
+        name: "provider_call",
+        description: "mock",
+        inputSchema: { type: "object" },
+      },
+      handler: (async () => ({
+        content: [block],
+        _meta: opts.meta ?? { "appstrate/upstream": { status: 200, headers: {} } },
+      })) as never,
+    };
+    const pair = await createInProcessPair([tool], {
+      resources: {
+        list: async () => [],
+        read: async (uri: string) => ({
+          contents: [
+            {
+              uri,
+              mimeType: opts.resourceMime ?? "application/json",
+              text: opts.resourceBytes,
+            },
+          ],
+        }),
+      },
+    });
+    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
+    return { mcp, close: () => pair.close() };
+  }
+
+  it("auto-spills the blob to `responses/<toolCallId>.<ext>` and returns a file body", async () => {
     const uri = "appstrate://provider-response/run_test/01HXYZ123";
-    const { pair, mcp } = await makeServer({
+    const body = JSON.stringify({ items: Array.from({ length: 500 }, (_, i) => ({ i })) });
+    const { mcp, close } = await makeServerWithResources({
       responseBlock: {
         type: "resource_link",
         uri,
         name: "@appstrate/gmail",
         mimeType: "application/json",
       },
+      resourceBytes: body,
+      resourceMime: "application/json",
     });
     try {
       const resolver = new McpProviderResolver(mcp);
@@ -672,29 +719,25 @@ describe("McpProviderResolver — resource_link preservation (#464)", () => {
       );
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.status).toBe(200);
-      expect(parsed.body.kind).toBe("link");
-      expect(parsed.body.uri).toBe(uri);
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("responses/tc_1.json");
       expect(parsed.body.mimeType).toBe("application/json");
+      expect(parsed.body.size).toBe(body.length);
+      const fs = await import("node:fs/promises");
+      const written = await fs.readFile(join(workspace, "responses/tc_1.json"), "utf8");
+      expect(written).toBe(body);
     } finally {
-      await pair.close();
+      await close();
     }
   });
 
-  it("preserves upstream status from _meta when sidecar spills a non-2xx body", async () => {
+  it("honors an explicit responseMode.toFile path", async () => {
     const uri = "appstrate://provider-response/run_test/01HXYZ456";
-    const { pair, mcp } = await makeServer({
-      responseBlock: {
-        type: "resource_link",
-        uri,
-        name: "@appstrate/gmail",
-        mimeType: "application/json",
-      },
-      meta: {
-        "appstrate/upstream": {
-          status: 429,
-          headers: { "retry-after": "120" },
-        },
-      },
+    const body = "x".repeat(2048);
+    const { mcp, close } = await makeServerWithResources({
+      responseBlock: { type: "resource_link", uri, name: "blob", mimeType: "text/plain" },
+      resourceBytes: body,
+      resourceMime: "text/plain",
     });
     try {
       const resolver = new McpProviderResolver(mcp);
@@ -704,23 +747,27 @@ describe("McpProviderResolver — resource_link preservation (#464)", () => {
       );
       const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
       const result = await tool!.execute(
-        { method: "GET", target: "https://api.example.com/items" },
+        {
+          method: "GET",
+          target: "https://api.example.com/items",
+          responseMode: { toFile: "downloads/report.txt" },
+        },
         ctxBase(workspace),
       );
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.status).toBe(429);
-      expect(parsed.headers["retry-after"]).toBe("120");
-      expect(parsed.body.kind).toBe("link");
-      expect(parsed.body.uri).toBe(uri);
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("downloads/report.txt");
     } finally {
-      await pair.close();
+      await close();
     }
   });
 
-  it("falls back to application/octet-stream when sidecar omits mimeType", async () => {
+  it("derives `.bin` for unknown content types", async () => {
     const uri = "appstrate://provider-response/run_test/01HXYZ789";
-    const { pair, mcp } = await makeServer({
+    const { mcp, close } = await makeServerWithResources({
       responseBlock: { type: "resource_link", uri, name: "blob" },
+      resourceBytes: "raw",
+      resourceMime: "application/x-custom",
     });
     try {
       const resolver = new McpProviderResolver(mcp);
@@ -734,10 +781,10 @@ describe("McpProviderResolver — resource_link preservation (#464)", () => {
         ctxBase(workspace),
       );
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.body.kind).toBe("link");
-      expect(parsed.body.mimeType).toBe("application/octet-stream");
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("responses/tc_1.bin");
     } finally {
-      await pair.close();
+      await close();
     }
   });
 });

@@ -229,57 +229,66 @@ export class McpProviderResolver implements ProviderResolver {
 
     if (block.type === "resource_link") {
       // Binary or oversize text — sidecar decided to spill to its
-      // BlobStore (token-budget threshold or non-text upstream). Honor
-      // that decision end-to-end: return a `link` body so the LLM sees
-      // a small reference, not the full payload. Re-reading the blob
-      // here would defeat the token-budget guard and let the agent
-      // blow past the model context window (the failure mode of #464).
-      // The agent can fetch the bytes via MCP `resources/read({ uri })`
-      // on demand when it actually needs them.
+      // BlobStore (token-budget threshold or non-text upstream). The
+      // sidecar's decision is the right boundary for "too big to
+      // inline into the LLM context"; honoring it means we must NOT
+      // route the bytes back through `serializeFetchResponse`'s text
+      // path (which would inline anything below `defaultInlineLimit`
+      // = 256 KB and re-bloat the prompt — the failure mode of #464).
       //
-      // `responseMode.toFile` is the one case where we DO want to
-      // materialise: the agent explicitly asked for the bytes routed
-      // to disk, so we read the blob and stream it to the path the
-      // canonical serializer would have used.
-      if (typeof req.responseMode?.toFile === "string" && req.responseMode.toFile.length > 0) {
-        const resource = await this.mcp.readResource({ uri: block.uri }, { signal: ctx.signal });
-        const part = resource.contents[0];
-        if (!part) {
-          return {
-            status: 502,
-            headers: {},
-            body: { kind: "text", text: `provider_call: empty resource ${block.uri}` },
-          };
-        }
-        const mimeType = part.mimeType ?? block.mimeType ?? "application/octet-stream";
-        let bytes: Uint8Array;
-        if ("blob" in part && typeof part.blob === "string") {
-          bytes = decodeBase64Loose(part.blob);
-        } else if ("text" in part && typeof part.text === "string") {
-          bytes = new TextEncoder().encode(part.text);
-        } else {
-          return {
-            status: 502,
-            headers: {},
-            body: {
-              kind: "text",
-              text: `provider_call: resource ${block.uri} has no readable content`,
-            },
-          };
-        }
-        const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
-        return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
+      // Instead, we always materialise to a workspace file. The LLM
+      // receives a `kind: "file"` response it can read with the same
+      // `read` tool it uses for any other workspace artefact. If the
+      // agent supplied `responseMode.toFile`, we honor that path;
+      // otherwise we default to `responses/<toolCallId>.<ext>` —
+      // the same convention the auto-spill path of
+      // `serializeFetchResponse` already documents in the platform
+      // prompt.
+      const resource = await this.mcp.readResource({ uri: block.uri }, { signal: ctx.signal });
+      const part = resource.contents[0];
+      if (!part) {
+        return {
+          status: 502,
+          headers: {},
+          body: { kind: "text", text: `provider_call: empty resource ${block.uri}` },
+        };
       }
-      const mimeType = block.mimeType ?? "application/octet-stream";
-      return {
-        status: upstream.status === 0 ? 502 : upstream.status,
-        headers: upstream.headers,
-        body: {
-          kind: "link",
-          uri: block.uri,
-          mimeType,
-        },
-      };
+      const mimeType = part.mimeType ?? block.mimeType ?? "application/octet-stream";
+      let bytes: Uint8Array;
+      if ("blob" in part && typeof part.blob === "string") {
+        bytes = decodeBase64Loose(part.blob);
+      } else if ("text" in part && typeof part.text === "string") {
+        bytes = new TextEncoder().encode(part.text);
+      } else {
+        return {
+          status: 502,
+          headers: {},
+          body: {
+            kind: "text",
+            text: `provider_call: resource ${block.uri} has no readable content`,
+          },
+        };
+      }
+      const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
+      // Override `responseMode.toFile` only when the agent didn't
+      // already supply one. The auto-derived path matches the existing
+      // auto-spill convention so the LLM sees the same shape regardless
+      // of whether spillover happened upstream (sidecar) or downstream
+      // (serializeFetchResponse byte-size threshold).
+      const ctxToUse =
+        typeof req.responseMode?.toFile === "string" && req.responseMode.toFile.length > 0
+          ? this.serializeCtx(req, ctx)
+          : this.serializeCtx(
+              {
+                ...req,
+                responseMode: {
+                  ...(req.responseMode ?? {}),
+                  toFile: `responses/${ctx.toolCallId}.${extensionForMime(mimeType)}`,
+                },
+              },
+              ctx,
+            );
+      return await serializeFetchResponse(fake, ctxToUse);
     }
 
     // resource (inline) and image blocks are not produced by the
@@ -330,4 +339,28 @@ function decodeBase64Loose(s: string): Uint8Array {
   const u8 = new Uint8Array(buf.byteLength);
   u8.set(buf);
   return u8;
+}
+
+/**
+ * Map a Content-Type to a workspace file extension. Used to auto-name
+ * spillover files (`responses/<toolCallId>.<ext>`) so the LLM can pick
+ * the right reader (`read` for text/JSON, image viewer for PNG, …)
+ * from the path alone. Falls back to `bin` for anything outside the
+ * curated whitelist — agents inspecting unknown payloads can still
+ * look at `body.mimeType` for the authoritative type.
+ */
+function extensionForMime(mimeType: string): string {
+  const [base] = mimeType.split(";", 1);
+  const m = (base ?? "").trim().toLowerCase();
+  if (m === "application/json" || m.endsWith("+json")) return "json";
+  if (m === "application/xml" || m === "text/xml" || m.endsWith("+xml")) return "xml";
+  if (m === "text/html") return "html";
+  if (m === "text/csv") return "csv";
+  if (m === "text/plain") return "txt";
+  if (m === "image/png") return "png";
+  if (m === "image/jpeg") return "jpg";
+  if (m === "image/gif") return "gif";
+  if (m === "image/webp") return "webp";
+  if (m === "application/pdf") return "pdf";
+  return "bin";
 }
