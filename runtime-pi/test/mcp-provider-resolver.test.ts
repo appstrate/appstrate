@@ -693,7 +693,7 @@ describe("McpProviderResolver — resource_link auto-materialisation (#464)", ()
     return { mcp, close: () => pair.close() };
   }
 
-  it("auto-spills the blob to `responses/<toolCallId>.<ext>` and returns a file body", async () => {
+  it("auto-spills the blob to `responses/<toolCallId>` and returns a file body", async () => {
     const uri = "appstrate://provider-response/run_test/01HXYZ123";
     const body = JSON.stringify({ items: Array.from({ length: 500 }, (_, i) => ({ i })) });
     const { mcp, close } = await makeServerWithResources({
@@ -720,11 +720,11 @@ describe("McpProviderResolver — resource_link auto-materialisation (#464)", ()
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.status).toBe(200);
       expect(parsed.body.kind).toBe("file");
-      expect(parsed.body.path).toBe("responses/tc_1.json");
+      expect(parsed.body.path).toBe("responses/tc_1");
       expect(parsed.body.mimeType).toBe("application/json");
       expect(parsed.body.size).toBe(body.length);
       const fs = await import("node:fs/promises");
-      const written = await fs.readFile(join(workspace, "responses/tc_1.json"), "utf8");
+      const written = await fs.readFile(join(workspace, "responses/tc_1"), "utf8");
       expect(written).toBe(body);
     } finally {
       await close();
@@ -762,7 +762,7 @@ describe("McpProviderResolver — resource_link auto-materialisation (#464)", ()
     }
   });
 
-  it("derives `.bin` for unknown content types", async () => {
+  it("uses the same extensionless path regardless of content type", async () => {
     const uri = "appstrate://provider-response/run_test/01HXYZ789";
     const { mcp, close } = await makeServerWithResources({
       responseBlock: { type: "resource_link", uri, name: "blob" },
@@ -782,7 +782,12 @@ describe("McpProviderResolver — resource_link auto-materialisation (#464)", ()
       );
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.body.kind).toBe("file");
-      expect(parsed.body.path).toBe("responses/tc_1.bin");
+      expect(parsed.body.path).toBe("responses/tc_1");
+      // mimeType is the authoritative content descriptor — sniffing may
+      // upgrade `application/x-custom` to a recognised type, so we just
+      // assert the field is present rather than pinning a specific
+      // value (the auto-spill path runs mime-sniff on unknown types).
+      expect(typeof parsed.body.mimeType).toBe("string");
     } finally {
       await close();
     }

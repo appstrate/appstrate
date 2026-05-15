@@ -220,7 +220,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push(
       'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, or `body: { fromBytes: "<base64>", encoding: "base64" }` to upload inline binary bytes computed in memory (up to 5 MB; standard base64 RFC 4648 §4 only — alphabet `+/`; URL-safe base64 with `-_` is not accepted). ' +
         'Use `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
-        'Without `toFile`, responses that would blow the LLM context (large text payloads or binary blobs over 64 KB) auto-spill to a workspace file under `responses/<toolCallId>.<ext>` (extension derived from `Content-Type`; `.bin` for unknown types) — the result is `body.kind === "file"` with the workspace-relative `path`. Read the spilled file with the standard `read` tool when you need the content. Smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
+        'Without `toFile`, responses that would blow the LLM context (large text payloads or binary blobs over 64 KB) auto-spill to a workspace file under `responses/<toolCallId>` (no extension — the authoritative content type is on `body.mimeType`). The result is `body.kind === "file"` with the workspace-relative `path`; read the spilled file with the standard `read` tool when you need the content. Smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
         "Inspect `body.kind` on the returned JSON to dispatch.\n",
     );
 

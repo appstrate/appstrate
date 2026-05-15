@@ -283,7 +283,7 @@ export class McpProviderResolver implements ProviderResolver {
                 ...req,
                 responseMode: {
                   ...(req.responseMode ?? {}),
-                  toFile: `responses/${ctx.toolCallId}.${extensionForMime(mimeType)}`,
+                  toFile: `responses/${ctx.toolCallId}`,
                 },
               },
               ctx,
@@ -339,28 +339,4 @@ function decodeBase64Loose(s: string): Uint8Array {
   const u8 = new Uint8Array(buf.byteLength);
   u8.set(buf);
   return u8;
-}
-
-/**
- * Map a Content-Type to a workspace file extension. Used to auto-name
- * spillover files (`responses/<toolCallId>.<ext>`) so the LLM can pick
- * the right reader (`read` for text/JSON, image viewer for PNG, …)
- * from the path alone. Falls back to `bin` for anything outside the
- * curated whitelist — agents inspecting unknown payloads can still
- * look at `body.mimeType` for the authoritative type.
- */
-function extensionForMime(mimeType: string): string {
-  const [base] = mimeType.split(";", 1);
-  const m = (base ?? "").trim().toLowerCase();
-  if (m === "application/json" || m.endsWith("+json")) return "json";
-  if (m === "application/xml" || m === "text/xml" || m.endsWith("+xml")) return "xml";
-  if (m === "text/html") return "html";
-  if (m === "text/csv") return "csv";
-  if (m === "text/plain") return "txt";
-  if (m === "image/png") return "png";
-  if (m === "image/jpeg") return "jpg";
-  if (m === "image/gif") return "gif";
-  if (m === "image/webp") return "webp";
-  if (m === "application/pdf") return "pdf";
-  return "bin";
 }
