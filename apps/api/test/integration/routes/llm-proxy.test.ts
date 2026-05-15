@@ -41,6 +41,12 @@ import {
   resetResponseCacheConfigForTesting,
   setResponseCacheConfig,
 } from "../../../src/lib/llm-proxy-cache-config.ts";
+import {
+  _resetProxyLimitsForTesting,
+  _setProxyLimitsForTesting,
+  initProxyLimits,
+} from "../../../src/services/proxy-limits.ts";
+import { _resetTpmLimiterForTesting } from "../../../src/services/llm-tpm-limiter.ts";
 
 const app = getTestApp();
 
@@ -685,5 +691,205 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     });
     expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
     expect(upstreamCalls).toBe(2);
+  });
+});
+
+/**
+ * Org-scale TPM bucket — closes #431.
+ *
+ * The bucket draws from `LLM_PROXY_LIMITS.tpm_buckets` configured per
+ * `ResolvedModel.label`. We seed a preset with a known label and install
+ * a tight bucket so a handful of requests already exhausts it. The proxy
+ * must:
+ *
+ *   - allow draws under budget and forward upstream as usual
+ *   - return a clean 429 `application/problem+json` with `Retry-After`
+ *     once the bucket is empty, BEFORE hitting upstream
+ *   - mint `llm_usage` rows ONLY for the calls that actually reached
+ *     upstream (denied calls never touch the meter)
+ */
+describe("POST /api/llm-proxy/* — org-scale TPM bucket (#431)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    _resetProxyLimitsForTesting();
+    _resetTpmLimiterForTesting();
+  });
+  afterEach(() => {
+    restoreFetch();
+    // Restore the suite-wide defaults so subsequent describe blocks (and
+    // subsequent test files in the same `bun test` process) keep seeing a
+    // populated proxy-limits singleton. The unit-test counterpart does
+    // the same dance in its `afterAll`.
+    _resetProxyLimitsForTesting();
+    _resetTpmLimiterForTesting();
+    initProxyLimits();
+  });
+
+  it("allows concurrent calls under the TPM ceiling and records usage for each", async () => {
+    const h = await buildHarness();
+    // The preset is seeded with `label: "Preset"` (see buildHarness above),
+    // so the bucket configuration must match that label.
+    _setProxyLimitsForTesting({
+      tpm_buckets: { Preset: { tpm: 200_000 } },
+    });
+
+    let upstreamHits = 0;
+    mockUpstream(async () => {
+      upstreamHits += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamHits}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    // 10 small concurrent calls — each estimates well under the 200k cap.
+    const calls = Array.from({ length: 10 }, () =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          max_tokens: 100,
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      }),
+    );
+    const responses = await Promise.all(calls);
+    for (const res of responses) {
+      expect(res.status).toBe(200);
+    }
+    expect(upstreamHits).toBe(10);
+
+    const rows = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(rows.length).toBe(10);
+  });
+
+  it("returns 429 with Retry-After and application/problem+json once the bucket is exhausted", async () => {
+    const h = await buildHarness();
+    // Tight bucket: ~4196 tokens per draw (DEFAULT_MAX_TOKENS_RESERVATION
+    // + a tiny prompt). With tpm=10_000 the first two calls fit, the third
+    // must deny.
+    _setProxyLimitsForTesting({
+      tpm_buckets: { Preset: { tpm: 10_000 } },
+    });
+
+    let upstreamHits = 0;
+    mockUpstream(async () => {
+      upstreamHits += 1;
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl_${upstreamHits}`,
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    // No `max_tokens` → estimator reserves DEFAULT_MAX_TOKENS_RESERVATION
+    // (4096). Three calls = ~12288 > 10_000 ceiling, so the third denies.
+    const allowed1 = await app.request(
+      "/api/llm-proxy/openai-completions/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    expect(allowed1.status).toBe(200);
+
+    const allowed2 = await app.request(
+      "/api/llm-proxy/openai-completions/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    expect(allowed2.status).toBe(200);
+
+    const denied = await app.request(
+      "/api/llm-proxy/openai-completions/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({
+          model: h.presetId,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get("content-type")).toContain("application/problem+json");
+
+    const retryAfter = denied.headers.get("retry-after");
+    expect(retryAfter).not.toBeNull();
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+    expect(Number(retryAfter)).toBeLessThanOrEqual(60);
+
+    const body = (await denied.json()) as {
+      code: string;
+      status: number;
+      retryAfter?: number;
+      detail: string;
+    };
+    expect(body.code).toBe("llm_tpm_exhausted");
+    expect(body.status).toBe(429);
+    expect(body.retryAfter).toBeGreaterThan(0);
+    expect(body.detail).toContain("Preset");
+
+    // Two upstream calls — denied call NEVER reached the upstream.
+    expect(upstreamHits).toBe(2);
+
+    // llm_usage rows exist only for the two allowed calls.
+    const rows = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(rows.length).toBe(2);
+  });
+
+  it("is a no-op when no bucket is configured (zero-footprint when feature unused)", async () => {
+    const h = await buildHarness();
+    _setProxyLimitsForTesting({ tpm_buckets: {} });
+
+    let upstreamHits = 0;
+    mockUpstream(async () => {
+      upstreamHits += 1;
+      return new Response(
+        JSON.stringify({
+          id: "chatcmpl_x",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    // Five back-to-back calls all succeed — no bucket means no draw.
+    for (let i = 0; i < 5; i += 1) {
+      const res = await app.request(
+        "/api/llm-proxy/openai-completions/v1/chat/completions",
+        {
+          method: "POST",
+          headers: authHeaders(h),
+          body: JSON.stringify({
+            model: h.presetId,
+            max_tokens: 50,
+            messages: [{ role: "user", content: "hi" }],
+          }),
+        },
+      );
+      expect(res.status).toBe(200);
+    }
+    expect(upstreamHits).toBe(5);
   });
 });

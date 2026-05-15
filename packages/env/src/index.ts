@@ -167,9 +167,20 @@ const envSchema = z
       .default("{}")
       .transform((s) => JSON.parse(s) as Record<string, unknown>),
 
-    // LLM proxy limits — caps on `/api/llm-proxy/*` (per-call rate, body size).
-    // Empty object means defaults apply. Validated strictly at boot via
+    // LLM proxy limits — caps on `/api/llm-proxy/*`. Empty object means
+    // defaults apply. Validated strictly at boot via
     // `apps/api/src/services/proxy-limits.ts`; unknown keys fail-fast.
+    //
+    // Fields:
+    //   - rate_per_min       (default 60)     — per-call request rate cap.
+    //   - max_request_bytes  (default 10 MiB) — request body size cap.
+    //   - tpm_buckets        (default {})     — org-scale TPM bucket map
+    //     keyed by ResolvedModel.label or "default". Each entry is
+    //     `{ tpm: number, burst?: number }`. Closes #431 — a Redis-backed
+    //     token-bucket fed by `rate-limiter-flexible` that caps cumulative
+    //     tokens-per-minute per (orgId, modelLabel) so N concurrent runs
+    //     in the same org cannot collectively blow past upstream TPM. Omit
+    //     `tpm_buckets` (or leave it `{}`) to disable the limiter entirely.
     LLM_PROXY_LIMITS: z
       .string()
       .default("{}")

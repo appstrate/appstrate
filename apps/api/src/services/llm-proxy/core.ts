@@ -20,12 +20,14 @@
 
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
+import { ApiError } from "@appstrate/core/api-errors";
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse, storeResponse } from "./response-cache.ts";
-import { parseProxyRequest } from "./helpers.ts";
+import { estimateRequestTokens, parseProxyRequest } from "./helpers.ts";
+import { DEFAULT_MAX_TOKENS_RESERVATION, drawTpm } from "../llm-tpm-limiter.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelCost } from "@appstrate/core/module";
@@ -110,6 +112,30 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       return probe.response;
     }
     cacheKeyForWrite = probe.cacheKey;
+  }
+
+  // Org-scale TPM bucket — runs AFTER cache lookup (cache hits are free
+  // upstream-wise, so they don't draw) and BEFORE the upstream fetch.
+  // Closes #431. Returns a clean 429 instead of letting the bucket leak
+  // into upstream provider 429s, which would surface as null-output
+  // success runs (the #427 incident).
+  const tpmEstimate = estimateRequestTokens(inputs.rawBody, DEFAULT_MAX_TOKENS_RESERVATION);
+  const tpmResult = await drawTpm({
+    orgId: inputs.principal.orgId,
+    modelLabel: resolved.label,
+    estimatedTokens: tpmEstimate,
+  });
+  if (!tpmResult.ok) {
+    throw new ApiError({
+      status: 429,
+      code: "llm_tpm_exhausted",
+      title: "LLM Token Budget Exhausted",
+      detail: `Org-level TPM bucket "${tpmResult.bucketKey}" (capacity ${tpmResult.capacity}/min) cannot accommodate an estimated ${tpmResult.requested}-token request. Retry in ${tpmResult.retryAfterSeconds}s.`,
+      retryAfter: tpmResult.retryAfterSeconds,
+      headers: {
+        "Retry-After": String(tpmResult.retryAfterSeconds),
+      },
+    });
   }
 
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
