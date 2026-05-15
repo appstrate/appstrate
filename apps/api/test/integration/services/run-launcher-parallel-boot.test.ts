@@ -148,7 +148,16 @@ function buildRunPlan(): AppstrateRunPlan {
       isSystemModel: false,
     },
     tokens: {},
-    providers: [],
+    // Declare at least one provider so the launcher's sidecar-skip
+    // shortcut does not bypass createSidecar in this parallel-boot test.
+    providers: [
+      {
+        id: "gmail",
+        name: "gmail",
+        displayName: "Gmail",
+        authMode: "oauth2",
+      } as AppstrateRunPlan["providers"][number],
+    ],
     timeout: 60,
   };
 }

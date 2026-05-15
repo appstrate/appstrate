@@ -161,7 +161,6 @@ export function createRunsEventsRouter() {
 
   router.post("/runs/:runId/events/finalize", eventLimiter, verifyRunSignature, async (c) => {
     const run = c.get("run")!;
-    const webhookId = c.get("webhookId")!;
 
     const parsed = RunResultSchema.safeParse(await c.req.json());
     if (!parsed.success) {
@@ -184,7 +183,7 @@ export function createRunsEventsRouter() {
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
     };
 
-    await finalizeRun({ run, result, webhookId });
+    await finalizeRun({ run, result });
 
     return c.json({ ok: true });
   });

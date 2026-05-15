@@ -54,7 +54,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { db } from "@appstrate/db/client";
+import { db, type Db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import type { AppScope } from "../../lib/scope.ts";
@@ -119,101 +119,122 @@ export class PersistingEventSink implements EventSink {
   }
 
   protected async persist(event: RunEvent): Promise<void> {
-    switch (event.type) {
-      case "output.emitted": {
-        await appendRunLog(
-          this.scope,
-          this.runId,
-          "result",
-          "output",
-          null,
-          (event.data as Record<string, unknown> | null | undefined) ?? null,
-          "info",
-        );
-        break;
-      }
+    const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
+      writeLedger: this.writeLedger,
+    });
+    if (adapterError !== null) this.lastAdapterError = adapterError;
+  }
+}
 
-      case "log.written": {
-        const level = event.level;
-        const message = event.message;
-        if (
-          (level === "info" || level === "warn" || level === "error") &&
-          typeof message === "string"
-        ) {
-          await appendRunLog(this.scope, this.runId, "progress", "progress", message, null, level);
-        }
-        break;
-      }
-
-      case "report.appended": {
-        // `@appstrate/report` system tool — appends one Markdown chunk
-        // to the run's user-facing report. Stored as `type='result'
-        // event='report'` so the UI can find it in O(rows-with-event-report)
-        // instead of scanning every log payload. Each emit is its own
-        // row; concatenation is the renderer's job (the UI joins them
-        // in id order). Without this case the content was silently
-        // dropped (default branch) and the agent's report never
-        // surfaced anywhere.
-        const content = typeof event.content === "string" ? event.content : null;
-        if (content !== null) {
-          await appendRunLog(this.scope, this.runId, "result", "report", null, { content }, "info");
-        }
-        break;
-      }
-
-      case "appstrate.progress": {
-        const message = typeof event.message === "string" ? event.message : null;
-        const data = isPlainObject(event.data) ? event.data : null;
-        const level = resolveLogLevel(event.level) ?? "debug";
-        await appendRunLog(this.scope, this.runId, "progress", "progress", message, data, level);
-        break;
-      }
-
-      case "appstrate.error": {
-        const message = typeof event.message === "string" ? event.message : null;
-        const data = isPlainObject(event.data) ? event.data : null;
-        if (message) this.lastAdapterError = message;
-        await appendRunLog(
-          this.scope,
-          this.runId,
-          "system",
-          "adapter_error",
-          message,
-          data,
-          "error",
-        );
-        break;
-      }
-
-      case "appstrate.metric": {
-        const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
-        const cost = typeof event.cost === "number" ? event.cost : null;
-
-        // Token usage is a running-total snapshot on the run row.
-        if (usage) {
-          await updateRun(this.scope, this.runId, {
-            tokenUsage: usage as unknown as Record<string, unknown>,
-          });
-        }
-        // Ledger row — only the ingestion path opts in. The runner
-        // emits cumulative running totals on each metric event, so
-        // concurrent writers (a later metric event, the finalize-time
-        // fallback) UPSERT the row with monotonic-max semantics.
-        if (this.writeLedger) {
-          await writeRunnerLedgerRow(this.scope, this.runId, { cost, usage });
-          // Best-effort live broadcast — never blocks the ingestion
-          // hot path nor fails it. The broadcaster throttles per-run
-          // to avoid flooding SSE subscribers under bursty metric
-          // emission (e.g. tool-heavy turns).
-          scheduleRunMetricBroadcast(this.runId);
-        }
-        break;
-      }
-
-      default:
-        // memory.added / pinned.set / third-party — no run_logs row.
-        break;
+/**
+ * Dispatch one {@link RunEvent} through the platform write-through table.
+ * Extracted so the ingestion hot path can run the dispatch inside a
+ * Drizzle transaction (passing `tx` as the executor) — that way the CAS
+ * advance of `runs.last_event_sequence` and the `run_logs` INSERT
+ * commit-or-roll-back atomically. A transient INSERT failure no longer
+ * leaves a sequence advanced with no log row to back it.
+ *
+ * Returns the `appstrate.error.message` if this event was one, so the
+ * caller can update its own `lastAdapterError` cache.
+ */
+export async function persistRunEvent(
+  executor: Db,
+  scope: AppScope,
+  runId: string,
+  event: RunEvent,
+  opts: { writeLedger?: boolean } = {},
+): Promise<string | null> {
+  switch (event.type) {
+    case "output.emitted": {
+      await appendRunLog(
+        scope,
+        runId,
+        "result",
+        "output",
+        null,
+        (event.data as Record<string, unknown> | null | undefined) ?? null,
+        "info",
+        executor,
+      );
+      return null;
     }
+
+    case "log.written": {
+      const level = event.level;
+      const message = event.message;
+      if (
+        (level === "info" || level === "warn" || level === "error") &&
+        typeof message === "string"
+      ) {
+        await appendRunLog(scope, runId, "progress", "progress", message, null, level, executor);
+      }
+      return null;
+    }
+
+    case "report.appended": {
+      // `@appstrate/report` system tool — appends one Markdown chunk
+      // to the run's user-facing report. Stored as `type='result'
+      // event='report'` so the UI can find it in O(rows-with-event-report)
+      // instead of scanning every log payload. Each emit is its own
+      // row; concatenation is the renderer's job (the UI joins them
+      // in id order). Without this case the content was silently
+      // dropped (default branch) and the agent's report never
+      // surfaced anywhere.
+      const content = typeof event.content === "string" ? event.content : null;
+      if (content !== null) {
+        await appendRunLog(scope, runId, "result", "report", null, { content }, "info", executor);
+      }
+      return null;
+    }
+
+    case "appstrate.progress": {
+      const message = typeof event.message === "string" ? event.message : null;
+      const data = isPlainObject(event.data) ? event.data : null;
+      const level = resolveLogLevel(event.level) ?? "debug";
+      await appendRunLog(scope, runId, "progress", "progress", message, data, level, executor);
+      return null;
+    }
+
+    case "appstrate.error": {
+      const message = typeof event.message === "string" ? event.message : null;
+      const data = isPlainObject(event.data) ? event.data : null;
+      await appendRunLog(scope, runId, "system", "adapter_error", message, data, "error", executor);
+      return message;
+    }
+
+    case "appstrate.metric": {
+      const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
+      const cost = typeof event.cost === "number" ? event.cost : null;
+
+      // Token usage is a running-total snapshot on the run row.
+      if (usage) {
+        await updateRun(
+          scope,
+          runId,
+          { tokenUsage: usage as unknown as Record<string, unknown> },
+          executor,
+        );
+      }
+      // Ledger row — only the ingestion path opts in. The runner emits
+      // cumulative running totals on each metric event, so concurrent
+      // writers (a later metric event, the finalize-time fallback)
+      // UPSERT the row with monotonic-max semantics. The ledger write
+      // is best-effort by its own contract (see writeRunnerLedgerRow's
+      // try/catch) so it never aborts the surrounding transaction.
+      if (opts.writeLedger) {
+        await writeRunnerLedgerRow(scope, runId, { cost, usage });
+        // Best-effort live broadcast — never blocks the ingestion hot
+        // path nor fails it. The broadcaster throttles per-run to
+        // avoid flooding SSE subscribers under bursty metric emission
+        // (e.g. tool-heavy turns).
+        scheduleRunMetricBroadcast(runId);
+      }
+      return null;
+    }
+
+    default:
+      // memory.added / pinned.set / third-party — no run_logs row.
+      return null;
   }
 }
 

@@ -172,6 +172,14 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
   let finalizeCalled = false;
   let partial = "";
 
+  // Fire-and-forget POSTs kicked off by `dispatchLine` — the
+  // monkey-patched `process.stdout.write` is synchronous and cannot
+  // await `sink.handle(event)`, so each dispatch is tracked here and
+  // drained by `finalize` before forwarding to the underlying sink.
+  // Otherwise the server CAS-closes the sink and a late POST gets a
+  // 410 the catch swallows.
+  const pendingDispatches = new Set<Promise<void>>();
+
   const sink: EventSink = {
     async handle(event) {
       if (isStdoutEventLine(event)) foldEvent(aggregate, event);
@@ -183,6 +191,9 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
       // CAS-guarded, but we don't want to send the same payload twice).
       if (finalizeCalled) return;
       finalizeCalled = true;
+      if (pendingDispatches.size > 0) {
+        await Promise.allSettled([...pendingDispatches]);
+      }
       await opts.sink.finalize(mergeTerminalResult(aggregate, result));
     },
   };
@@ -205,9 +216,9 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
     // which may be absent or stale (e.g. a CLI that didn't set the env
     // var). The bridge owns the canonical run identity here.
     const event: RunEvent = { ...(parsed as RunEvent), runId: opts.runId };
-    // Fire-and-forget — the underlying sink owns its own retry/error
-    // policy. Awaiting here would block stdout writes synchronously.
-    void sink.handle(event).catch(() => {});
+    const promise: Promise<void> = sink.handle(event).catch(() => {});
+    pendingDispatches.add(promise);
+    promise.finally(() => pendingDispatches.delete(promise));
     return true;
   }
 

@@ -111,6 +111,13 @@ export async function runPlatformContainer(
       ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
       : deriveKeyPlaceholder(llmApiKey);
 
+    // Skip the sidecar entirely when the run declares no providers AND
+    // uses a static API key. The sidecar's sole purpose is credential
+    // injection (provider_call) + LLM passthrough for OAuth; an API-key
+    // model with no providers needs neither. Saves a subprocess spawn +
+    // MCP handshake + forward-proxy bind on every run.
+    const skipSidecar = plan.providers.length === 0 && !!llmConfig.apiKey && !isOauthCredential;
+
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
       // Read `oauthWireFormat` straight from the registry at the sidecar-
@@ -162,7 +169,10 @@ export async function runPlatformContainer(
         modelId,
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,
-        apiKeyPlaceholder: llmPlaceholder,
+        // When the sidecar is skipped, the agent talks to the upstream
+        // provider directly — we must hand it the real API key, not the
+        // placeholder the sidecar would normally substitute.
+        apiKeyPlaceholder: skipSidecar ? llmApiKey : llmPlaceholder,
         input: llmConfig.input,
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
@@ -171,10 +181,20 @@ export async function runPlatformContainer(
       },
       agentPrompt: prompt,
       runId,
-      sidecarProxyLlmUrl: llmApiKey ? "http://sidecar:8080/llm" : undefined,
+      noSidecar: skipSidecar,
+      // Without a sidecar, MODEL_BASE_URL is omitted — the Pi SDK falls
+      // back to the api-shape's native default (e.g. api.openai.com).
+      // The model definition's baseUrl is already wired on the Model
+      // object via PiRunner; runtime-pi doesn't need MODEL_BASE_URL when
+      // talking directly to the upstream.
+      sidecarProxyLlmUrl: skipSidecar
+        ? undefined
+        : llmApiKey
+          ? "http://sidecar:8080/llm"
+          : undefined,
       connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      forwardProxyUrl: "http://sidecar:8081",
+      forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalizeUrl,
@@ -201,12 +221,15 @@ export async function runPlatformContainer(
       }
     }
 
-    await orch.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
+    await orch.ensureImages(
+      skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
+    );
 
     // Sidecar + agent setup in parallel (identical to the legacy path —
     // the only behavioural change is WHERE the agent's events end up).
+    // When `skipSidecar`, we only create the agent workload.
     const [sidecar, agent] = await Promise.all([
-      orch.createSidecar(runId, boundary, sidecarSpec),
+      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       orch.createWorkload(
         {
           runId,
@@ -265,7 +288,7 @@ export async function runPlatformContainer(
 async function waitForWorkload(
   orch: ContainerOrchestrator,
   agent: WorkloadHandle,
-  sidecar: WorkloadHandle,
+  sidecar: WorkloadHandle | undefined,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
 ): Promise<PlatformContainerResult> {
@@ -293,12 +316,12 @@ async function waitForWorkload(
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
     orch.stopWorkload(agent).catch(() => {});
-    orch.stopWorkload(sidecar).catch(() => {});
+    if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
   }, timeoutSeconds * 1000);
 
   const onAbort = () => {
     orch.stopWorkload(agent).catch(() => {});
-    orch.stopWorkload(sidecar).catch(() => {});
+    if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
   };
   if (signal) {
     if (signal.aborted) onAbort();

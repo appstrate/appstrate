@@ -130,6 +130,25 @@ describe("buildRuntimePiEnv", () => {
     expect(env.NO_PROXY).toBeUndefined();
   });
 
+  it("omits SIDECAR_URL and proxy env vars when noSidecar is true", () => {
+    const env = buildRuntimePiEnv({
+      model,
+      agentPrompt: "p",
+      noSidecar: true,
+      // Even with forwardProxyUrl supplied, it must be ignored — the
+      // forward proxy lives next to the sidecar.
+      forwardProxyUrl: "http://sidecar:8081",
+    });
+    expect(env.SIDECAR_URL).toBeUndefined();
+    expect(env.HTTP_PROXY).toBeUndefined();
+    expect(env.HTTPS_PROXY).toBeUndefined();
+    expect(env.NO_PROXY).toBeUndefined();
+    // Required keys still emitted.
+    expect(env.AGENT_PROMPT).toBe("p");
+    expect(env.MODEL_API).toBe(model.api);
+    expect(env.MODEL_ID).toBe(model.modelId);
+  });
+
   it("forwards a W3C traceparent into TRACEPARENT when supplied", () => {
     const env = buildRuntimePiEnv({
       model,

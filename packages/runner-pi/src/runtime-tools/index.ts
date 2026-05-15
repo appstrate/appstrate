@@ -11,10 +11,13 @@
  * self-contained directory with `tool.ts` (descriptor) + `TOOL.md`
  * (prose). Adding a runtime-injected tool means:
  *
- *   1. Create `<tool-slug>/tool.ts` exporting a `RuntimeInjectedTool`,
- *      with `doc` loaded from a co-located `TOOL.md` via
- *      `readFileSync(new URL("./TOOL.md", import.meta.url))`.
- *   2. Add the import + array entry below.
+ *   1. Create `<tool-slug>/tool.ts` exporting a `RuntimeInjectedTool`
+ *      (descriptor only — no doc inlining).
+ *   2. Create `<tool-slug>/TOOL.md` next to it. The platform prompt
+ *      builder reads it at run time via `loadRuntimeToolDoc(tool)`,
+ *      mirroring how bundle tools expose `TOOL.md` via
+ *      `pkg.files.get("TOOL.md")`.
+ *   3. Add the import + array entry below.
  *
  * No edits anywhere else — the registration loop in
  * `runtime-pi/mcp/direct.ts:buildMcpDirectFactories` and the
@@ -26,6 +29,7 @@ import { runHistoryTool } from "./run-history/tool.ts";
 import { recallMemoryTool } from "./recall-memory/tool.ts";
 
 export type { RuntimeInjectedTool } from "./types.ts";
+export { loadRuntimeToolDoc } from "./load-doc.ts";
 
 export { runHistoryTool as RUN_HISTORY_INJECTED_TOOL };
 export { recallMemoryTool as RECALL_MEMORY_INJECTED_TOOL };

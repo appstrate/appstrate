@@ -421,7 +421,6 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
         logs: [],
         status: "success",
       },
-      webhookId: `late-${runId}`,
     });
 
     const [second] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);

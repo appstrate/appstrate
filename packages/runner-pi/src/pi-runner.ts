@@ -244,12 +244,21 @@ export class PiRunner implements Runner {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
       attachAccumulators(result);
+      if (bridgeRef.current) {
+        await bridgeRef.current.drainPending();
+      }
       await eventSink.finalize(result);
       return;
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
     attachAccumulators(result);
+    // Drain pending bridge fires BEFORE finalize. Finalize closes the
+    // server-side sink via CAS — any POST in flight after that lands
+    // gets a 410 and is silently dropped in the bridge's catch handler.
+    if (bridgeRef.current) {
+      await bridgeRef.current.drainPending();
+    }
     await eventSink.finalize(result);
   }
 
@@ -404,6 +413,17 @@ export interface SessionBridgeHandle {
   getUsage(): TokenUsage;
   /** Snapshot of total LLM cost in USD accumulated across the session so far. */
   getCost(): number;
+  /**
+   * Wait until every fire-and-forget `sink.emit(event)` dispatched from
+   * the Pi SDK subscribe callback has settled. The Pi SDK callback runs
+   * synchronously and cannot be awaited, so the bridge dispatches each
+   * sink write as a detached promise — `drainPending()` is the only
+   * supported way to converge them. Callers MUST invoke this before
+   * `sink.finalize()` because finalize closes the server-side sink, and
+   * any POST still in flight after that lands on a closed sink (410)
+   * and is silently dropped by the bridge's catch handler.
+   */
+  drainPending(): Promise<void>;
 }
 
 /**
@@ -566,12 +586,25 @@ export function installSessionBridge(
   };
   let totalCost = 0;
 
+  // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
+  // call without awaiting (the Pi SDK callback is synchronous), and
+  // pushes the resulting promise here so `drainPending()` can await
+  // them as a group before the runner reaches finalize. The Set is
+  // self-pruning: each promise removes itself on settle.
+  const pendingFires = new Set<Promise<void>>();
+
   // Fire-and-forget emit. Rejections are swallowed so a transient sink
   // failure never propagates as an unhandled rejection out of the
   // synchronous Pi SDK callback. Authoritative data still reaches the
   // platform via `getUsage` / `getCost` on the finalize body.
   const fire = (event: RunEvent): void => {
-    sink.emit(event).catch(() => {});
+    const promise: Promise<void> = sink
+      .emit(event)
+      .catch(() => {})
+      .finally(() => {
+        pendingFires.delete(promise);
+      });
+    pendingFires.add(promise);
   };
 
   session.subscribe((rawEvent) => {
@@ -719,6 +752,17 @@ export function installSessionBridge(
     },
     getCost(): number {
       return totalCost;
+    },
+    async drainPending(): Promise<void> {
+      // Snapshot the current pending set: events fired AFTER drainPending
+      // is called are not part of this drain window. In practice the
+      // caller (pi-runner.run, just before finalize) runs after the
+      // SDK's session.prompt() has resolved, so no fresh events should
+      // arrive — but the Set semantics keep us honest if the SDK ever
+      // changes its quiescence guarantees.
+      const snapshot = [...pendingFires];
+      if (snapshot.length === 0) return;
+      await Promise.allSettled(snapshot);
     },
   };
 }

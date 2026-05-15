@@ -117,18 +117,34 @@ function buildPlatformServices(): PlatformServices {
       // so the published contract is non-breaking when fields are added.
       get: getRunByOrg,
       listLogs: listRunLogs,
-      appendLog: (a) =>
-        appendRunLog(
-          { orgId: a.orgId },
-          a.runId,
-          a.type,
-          a.event ?? null,
-          a.message ?? null,
-          a.data ?? null,
-          a.level,
-        ),
-      update: (a) =>
-        updateRun({ orgId: a.orgId, applicationId: a.applicationId }, a.runId, a.updates),
+      // Both writes are best-effort from a module's perspective: a
+      // transient DB failure must not crash a module handler. The
+      // strict (throw-on-error) contract on the underlying functions
+      // is reserved for the ingestion hot path, which wraps them in
+      // a transaction.
+      appendLog: async (a) => {
+        try {
+          return await appendRunLog(
+            { orgId: a.orgId },
+            a.runId,
+            a.type,
+            a.event ?? null,
+            a.message ?? null,
+            a.data ?? null,
+            a.level,
+          );
+        } catch (err) {
+          logger.error("module appendRunLog failed", { runId: a.runId, err: String(err) });
+          return 0;
+        }
+      },
+      update: async (a) => {
+        try {
+          await updateRun({ orgId: a.orgId, applicationId: a.applicationId }, a.runId, a.updates);
+        } catch (err) {
+          logger.error("module updateRun failed", { runId: a.runId, err: String(err) });
+        }
+      },
       abort: abortRun,
     },
     inline: { preflight: runInlinePreflight, run: triggerInlineRun },

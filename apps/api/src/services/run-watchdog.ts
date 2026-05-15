@@ -209,9 +209,5 @@ async function finalizeStalledRun(runId: string, stallThresholdSeconds: number):
     message: `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
   };
 
-  await finalizeRun({
-    run,
-    result,
-    webhookId: `watchdog-${runId}`,
-  });
+  await finalizeRun({ run, result });
 }

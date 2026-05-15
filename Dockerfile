@@ -1,5 +1,5 @@
 # ── Stage 1: Install dependencies ──────────────────────────────────
-FROM oven/bun:1.3.11-alpine AS deps
+FROM oven/bun:1.3.14-alpine AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
@@ -22,6 +22,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
 COPY packages/mcp-transport/package.json packages/mcp-transport/
+COPY packages/module-claude-code/package.json packages/module-claude-code/
 COPY packages/module-codex/package.json packages/module-codex/
 COPY packages/runner-pi/package.json packages/runner-pi/
 COPY packages/shared-types/package.json packages/shared-types/
@@ -34,7 +35,7 @@ COPY patches/ patches/
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: Build ────────────────────────────────────────────────
-FROM oven/bun:1.3.11-alpine AS build
+FROM oven/bun:1.3.14-alpine AS build
 
 WORKDIR /app
 
@@ -61,7 +62,7 @@ RUN bun install --frozen-lockfile
 RUN bun run build
 
 # ── Stage 3: Production image ─────────────────────────────────────
-FROM oven/bun:1.3.11-alpine
+FROM oven/bun:1.3.14-alpine
 
 WORKDIR /app
 
@@ -114,12 +115,16 @@ COPY --from=build /app/packages/emails/package.json ./packages/emails/
 COPY --from=build /app/packages/env/src ./packages/env/src
 COPY --from=build /app/packages/env/package.json ./packages/env/
 
-# Module: Codex OAuth model provider — opt-in via MODULES env
-# (default `oidc,webhooks,core-providers,@appstrate/module-codex`).
-# Module-loader dynamic-imports it at boot; src + package.json must
-# both be present so the workspace symlink in node_modules resolves.
+# Modules: Codex (default) + Claude Code (opt-in) OAuth model providers.
+# Module-loader dynamic-imports them at boot via MODULES env; src +
+# package.json must both be present so the workspace symlink in
+# node_modules resolves. module-claude-code source is shipped so
+# operators can enable it by appending `@appstrate/module-claude-code`
+# to MODULES without a custom image build.
 COPY --from=build /app/packages/module-codex/src ./packages/module-codex/src
 COPY --from=build /app/packages/module-codex/package.json ./packages/module-codex/
+COPY --from=build /app/packages/module-claude-code/src ./packages/module-claude-code/src
+COPY --from=build /app/packages/module-claude-code/package.json ./packages/module-claude-code/
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
