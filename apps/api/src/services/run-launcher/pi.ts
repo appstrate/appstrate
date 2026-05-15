@@ -42,6 +42,7 @@ import { isOAuthModelProvider, getModelProvider } from "../model-providers/regis
 import type {
   LlmProxyConfig,
   LlmProxyOauthConfig,
+  ModelApiShape,
   SidecarLaunchSpec,
 } from "@appstrate/core/sidecar-types";
 
@@ -155,6 +156,12 @@ export async function runPlatformContainer(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+      // Propagate apiShape so the sidecar picks a tokenizer-tuned estimator
+      // (Anthropic BPE vs OpenAI cl100k vs Gemini SentencePiece). The legacy
+      // 3.5 chars/token heuristic was calibrated for Anthropic prose and
+      // under-counts JSON-dense Gemini payloads by ~20 % — enough to let
+      // an "inline" decision blow the upstream context window.
+      ...(llmConfig.apiShape ? { modelApiShape: llmConfig.apiShape as ModelApiShape } : {}),
     };
 
     const hasOutputSchema =

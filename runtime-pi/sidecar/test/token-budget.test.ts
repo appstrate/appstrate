@@ -20,6 +20,7 @@ import {
   TokenBudget,
   deriveBudgetDefaults,
   estimateTokens,
+  estimatorForApiShape,
   type TokenEstimator,
 } from "../token-budget.ts";
 
@@ -532,5 +533,60 @@ describe("deriveBudgetDefaults", () => {
       inlineCapTokens: 32_000,
       runBudgetTokens: 500_000,
     });
+  });
+});
+
+describe("estimatorForApiShape", () => {
+  it("falls back to the legacy 3.5 chars/token estimator when apiShape is undefined", () => {
+    const estimator = estimatorForApiShape(undefined);
+    // Same numerical contract as `estimateTokens` — verifying via identity
+    // is brittle, so we check observable behaviour on a known input.
+    expect(estimator("x".repeat(350))).toBe(100);
+  });
+
+  it("uses 3.2 chars/token for anthropic-messages", () => {
+    const estimator = estimatorForApiShape("anthropic-messages");
+    expect(estimator("x".repeat(320))).toBe(100);
+  });
+
+  it("uses 3.4 chars/token for the OpenAI family", () => {
+    const expected = Math.ceil(1000 / 3.4);
+    expect(estimatorForApiShape("openai-chat")("x".repeat(1000))).toBe(expected);
+    expect(estimatorForApiShape("openai-completions")("x".repeat(1000))).toBe(expected);
+    expect(estimatorForApiShape("openai-responses")("x".repeat(1000))).toBe(expected);
+    expect(estimatorForApiShape("openai-codex-responses")("x".repeat(1000))).toBe(expected);
+    expect(estimatorForApiShape("azure-openai-responses")("x".repeat(1000))).toBe(expected);
+  });
+
+  it("uses 2.8 chars/token for the Google family (densest tokenizer)", () => {
+    const expected = Math.ceil(1000 / 2.8);
+    expect(estimatorForApiShape("google-generative-ai")("x".repeat(1000))).toBe(expected);
+    expect(estimatorForApiShape("google-vertex")("x".repeat(1000))).toBe(expected);
+  });
+
+  it("returns higher token counts for Google than for Anthropic on identical input", () => {
+    // Sanity check on the bias direction — Gemini's denser tokenizer
+    // should always count more tokens for the same byte payload.
+    const payload = "x".repeat(10_000);
+    const google = estimatorForApiShape("google-generative-ai")(payload);
+    const anthropic = estimatorForApiShape("anthropic-messages")(payload);
+    expect(google).toBeGreaterThan(anthropic);
+  });
+
+  it("falls back to 3.0 chars/token for unknown apiShape (conservative)", () => {
+    const estimator = estimatorForApiShape("acme-rocket-protocol");
+    expect(estimator("x".repeat(300))).toBe(100);
+  });
+
+  it("returns 0 tokens for empty input regardless of apiShape", () => {
+    for (const shape of [
+      undefined,
+      "anthropic-messages",
+      "openai-chat",
+      "google-generative-ai",
+      "unknown-shape",
+    ]) {
+      expect(estimatorForApiShape(shape)("")).toBe(0);
+    }
   });
 });

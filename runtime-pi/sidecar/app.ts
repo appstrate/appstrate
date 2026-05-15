@@ -14,7 +14,12 @@ import {
   type CredentialsResponse,
   type LlmProxyOauthConfig,
 } from "./helpers.ts";
-import { TokenBudget, deriveBudgetDefaults, readPositiveTokenEnv } from "./token-budget.ts";
+import {
+  TokenBudget,
+  deriveBudgetDefaults,
+  estimatorForApiShape,
+  readPositiveTokenEnv,
+} from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import {
   buildIdentityHeaders,
@@ -559,6 +564,7 @@ export function createApp(deps: AppDeps): Hono {
     inlineCapTokens,
     runBudgetTokens,
     ...contextWindowOpt,
+    estimate: estimatorForApiShape(config.modelApiShape),
   });
   // Boot-time visibility into the budget config — operators can confirm
   // the launcher actually forwarded the window/reserve pair (vs. silently
@@ -581,6 +587,7 @@ export function createApp(deps: AppDeps): Hono {
       tokenBudget.contextWindowTokens !== null
         ? tokenBudget.contextWindowTokens - tokenBudget.reserveTokens
         : null,
+    modelApiShape: config.modelApiShape ?? null,
   });
   // Fan-out cap on `provider_call`. Defaults to
   // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for

@@ -208,6 +208,9 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (spec.modelMaxTokens != null) {
       env.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
     }
+    if (spec.modelApiShape) {
+      env.MODEL_API_SHAPE = spec.modelApiShape;
+    }
     if (spec.llm) {
       if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts

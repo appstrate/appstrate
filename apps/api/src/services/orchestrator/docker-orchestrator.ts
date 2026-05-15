@@ -111,6 +111,9 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (spec.modelMaxTokens != null) {
       sidecarEnv.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
     }
+    if (spec.modelApiShape) {
+      sidecarEnv.MODEL_API_SHAPE = spec.modelApiShape;
+    }
     if (spec.llm) {
       if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON so

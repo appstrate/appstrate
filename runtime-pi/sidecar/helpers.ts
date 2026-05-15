@@ -146,6 +146,7 @@ export type {
   LlmProxyConfig,
   LlmProxyApiKeyConfig,
   LlmProxyOauthConfig,
+  ModelApiShape,
 } from "@appstrate/core/sidecar-types";
 
 // The credentials payload the sidecar receives over HTTP is

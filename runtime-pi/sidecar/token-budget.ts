@@ -205,6 +205,59 @@ export const estimateTokens: TokenEstimator = (text) => {
 };
 
 /**
+ * Per-apiShape chars/token ratios, biased toward JSON-dense
+ * `provider_call` payloads (typical Gmail / ClickUp / Notion outputs).
+ *
+ * Each provider's tokenizer compresses text differently:
+ *   - Anthropic (BPE) — ~3.5 prose, ~3.0 JSON  → 3.2 compromise.
+ *   - OpenAI cl100k / o200k — ~3.8 prose, ~3.0 JSON  → 3.4.
+ *   - Google SentencePiece — ~3.3 prose, ~2.5 JSON  → 2.8.
+ *   - Mistral (BPE) — close to OpenAI → 3.4.
+ *   - Bedrock multi-model — borne Anthropic-conservative → 3.2.
+ *
+ * Bias direction is deliberately conservative (lower ratio = more
+ * pessimistic = more spilling). Over-counting forces an unnecessary
+ * spill-to-file; under-counting lets a borderline payload inline and
+ * blow the upstream context window — only the latter triggers a 400.
+ */
+const CHARS_PER_TOKEN_BY_API_SHAPE: Record<string, number> = {
+  "anthropic-messages": 3.2,
+  "openai-chat": 3.4,
+  "openai-completions": 3.4,
+  "openai-responses": 3.4,
+  "openai-codex-responses": 3.4,
+  "azure-openai-responses": 3.4,
+  "mistral-conversations": 3.4,
+  "google-generative-ai": 2.8,
+  "google-vertex": 2.8,
+  "bedrock-converse-stream": 3.2,
+};
+
+/**
+ * Fallback chars/token ratio when `apiShape` is unknown or absent.
+ * 3.0 is the worst-case observed across the known shapes — picking
+ * the most pessimistic keeps unknown providers on the safe side.
+ */
+const FALLBACK_CHARS_PER_TOKEN = 3.0;
+
+/**
+ * Build a {@link TokenEstimator} tuned to a given upstream apiShape.
+ * Returns the legacy 3.5-chars/token heuristic when `apiShape` is
+ * undefined or unmapped — preserves pre-model-aware behaviour for any
+ * caller that hasn't wired apiShape through yet.
+ *
+ * Exported for testing; the production call site is in `app.ts`.
+ */
+export function estimatorForApiShape(apiShape: string | undefined): TokenEstimator {
+  if (apiShape === undefined) return estimateTokens;
+  const ratio = CHARS_PER_TOKEN_BY_API_SHAPE[apiShape] ?? FALLBACK_CHARS_PER_TOKEN;
+  return (text) => {
+    if (text.length === 0) return 0;
+    return Math.ceil(text.length / ratio);
+  };
+}
+
+/**
  * Decision returned by {@link TokenBudget.decide} and
  * {@link TokenBudget.tryReserve}.
  *
