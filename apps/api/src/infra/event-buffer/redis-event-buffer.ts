@@ -2,9 +2,20 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { getRedisConnection } from "../../lib/redis.ts";
+import { logger } from "../../lib/logger.ts";
 import type { EventBuffer, BufferedEvent } from "./interface.ts";
 
 const KEY_PREFIX = "appstrate:remote-run:buffer:";
+
+/**
+ * Hard cap on buffered events per run. A pathological runner that
+ * permanently skips a sequence would otherwise accumulate every later
+ * event in Redis until the watchdog finalises the run — sized 100×
+ * above any realistic burst so the happy path never trips this. When
+ * it does trip, we drop the LOWEST-scored entries (the stale ones
+ * waiting on the missing gap) so the most recent events are kept.
+ */
+const MAX_BUFFER_ENTRIES = 10_000;
 
 /**
  * Redis-backed ordering buffer — a sorted set per run keyed by sequence.
@@ -30,6 +41,18 @@ export class RedisEventBuffer implements EventBuffer {
     // separator that JSON can't produce at column 0) to make the member
     // identity sequence-keyed regardless of payload content.
     await redis.zadd(key, sequence, `${sequence}|${JSON.stringify(event)}`);
+    // Trim from the lowest-scored end if we overflow MAX_BUFFER_ENTRIES.
+    // `0` is the lowest rank; `-(MAX_BUFFER_ENTRIES + 1)` keeps the
+    // top-N most recent. Returns the number of removed members — non-zero
+    // means we dropped events, which is a real anomaly worth surfacing.
+    const trimmed = await redis.zremrangebyrank(key, 0, -(MAX_BUFFER_ENTRIES + 1));
+    if (trimmed > 0) {
+      logger.warn("event buffer overflowed — dropped oldest entries", {
+        runId,
+        trimmed,
+        cap: MAX_BUFFER_ENTRIES,
+      });
+    }
     await redis.expire(key, ttlSeconds);
   }
 

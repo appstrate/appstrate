@@ -82,7 +82,6 @@ export interface IngestRunEventInput {
 export interface FinalizeRunInput {
   run: RunSinkContext;
   result: RunResult;
-  webhookId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,11 +573,7 @@ export async function synthesiseFinalize(
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
-  await finalizeRun({
-    run,
-    result,
-    webhookId: `synthesized-${runId}`,
-  });
+  await finalizeRun({ run, result });
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
