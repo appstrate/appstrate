@@ -68,11 +68,19 @@ export interface RuntimeEnv {
    * avoid minting a separate secret.
    */
   runToken?: string;
+  /**
+   * Wall-clock budget for the initial MCP handshake against the sidecar
+   * (in milliseconds). Wraps both the connect retry loop and the final
+   * attempt. Operators on slow registries can widen this when cold
+   * container pulls exceed the default. See issue #406.
+   */
+  mcpConnectDeadlineMs: number;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
+const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
 const KNOWN_MODEL_APIS = new Set([
   "anthropic-messages",
   "openai-completions",
@@ -267,6 +275,12 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     DEFAULT_HEARTBEAT_INTERVAL_MS,
     issues,
   );
+  const mcpConnectDeadlineMs = parsePositiveInt(
+    "APPSTRATE_MCP_CONNECT_DEADLINE_MS",
+    source.APPSTRATE_MCP_CONNECT_DEADLINE_MS,
+    DEFAULT_MCP_CONNECT_DEADLINE_MS,
+    issues,
+  );
 
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
@@ -287,6 +301,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
     sidecarUrl: sidecarUrl || undefined,
     heartbeatIntervalMs,
+    mcpConnectDeadlineMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
     runToken: source.RUN_TOKEN || undefined,

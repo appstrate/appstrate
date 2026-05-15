@@ -325,14 +325,15 @@ try {
   // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
   // still wiring its listener and the Docker DNS alias is propagating.
   // AWS-style full jitter (50ms → 1s) absorbs the race without
-  // pessimising the warm-path; the 30s deadline matches the sidecar's
-  // own outbound timeout so a sidecar that crashes outright still
-  // surfaces as a deterministic boot failure rather than a hang.
+  // pessimising the warm-path; the default 60s deadline covers
+  // worst-case cold container pulls (#406 acceptance criteria: 20–45s
+  // boots are routine). Operators on slow registries can widen via
+  // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
   mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
     ...(env.runToken ? { bearerToken: env.runToken } : {}),
     clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
     retry: {
-      deadlineMs: 30_000,
+      deadlineMs: env.mcpConnectDeadlineMs,
       baseMs: 50,
       capMs: 1_000,
       onRetry: ({ url, attempt, delayMs, errorCode, error }) => {

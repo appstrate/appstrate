@@ -38,7 +38,8 @@ export class DockerOrchestrator implements ContainerOrchestrator {
    * Set of sidecar container IDs whose exit is expected (run is being
    * torn down). The {@link watchSidecarExit} watcher consults this set
    * to suppress the "sidecar exited unexpectedly" log on the cleanup
-   * path. Removed in {@link stopWorkload} / {@link removeWorkload}.
+   * path. Added in {@link stopWorkload}, consumed by the watcher, and
+   * defensively cleared in {@link removeWorkload} / {@link shutdown}.
    */
   private expectedSidecarExits = new Set<string>();
 
@@ -62,6 +63,10 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.removeNetwork(this.egressNetworkId).catch(() => {});
       this.egressNetworkId = null;
     }
+    // Drop any residual entries — long-lived API processes accumulate
+    // one per timed-out / aborted run because `removeWorkload` always
+    // re-adds after `stopWorkload` consumed the watcher's match.
+    this.expectedSidecarExits.clear();
   }
 
   async ensureImages(images: string[]): Promise<void> {
@@ -221,10 +226,13 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         if (exitCode !== 0) {
           // Pull a short tail of logs — best-effort, bounded so we
           // don't keep a generator open forever if logs are streamed.
+          // 2s window: on a busy Docker daemon the multiplexed-stream
+          // parser may not have emitted any complete lines under 500ms
+          // after the exit, which defeats the purpose of the watcher.
           let tail = "";
           try {
             const abort = new AbortController();
-            const timer = setTimeout(() => abort.abort(), 500);
+            const timer = setTimeout(() => abort.abort(), 2_000);
             const lines: string[] = [];
             for await (const line of docker.streamLogs(containerId, abort.signal)) {
               lines.push(line);
@@ -280,8 +288,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
-    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
+    // No `expectedSidecarExits.add` here: by the time we're removing the
+    // container its `waitForExit` watcher has already resolved (either
+    // through the happy path or via `stopWorkload`'s suppression). Adding
+    // again would leak one string per run for the process lifetime.
     await docker.removeContainer(handle.id);
+    if (handle.role === "sidecar") this.expectedSidecarExits.delete(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {

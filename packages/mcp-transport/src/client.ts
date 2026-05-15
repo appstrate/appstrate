@@ -80,8 +80,12 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
 export interface McpConnectRetryOptions {
   /**
    * Hard wall-clock budget for the entire connect (including all retries
-   * + final attempt). Defaults to 30s — matches the sidecar's outbound
-   * upstream timeout so a sidecar that never boots eventually surfaces.
+   * + final attempt). Defaults to 60s — wider than the sidecar's 30s
+   * outbound upstream timeout because cold-start container pulls + boot
+   * can routinely consume 20–45s (issue #406). Callers that race against
+   * a pre-warmed pool can pass a tighter budget; operators can widen it
+   * on slow registries via the `APPSTRATE_MCP_CONNECT_DEADLINE_MS` env
+   * var wired in `runtime-pi/entrypoint.ts`.
    */
   deadlineMs?: number;
   /**
@@ -231,7 +235,7 @@ async function connectWithRetry(
   options: McpHttpClientOptions,
   retry: McpConnectRetryOptions,
 ): Promise<AppstrateMcpClient> {
-  const deadlineMs = retry.deadlineMs ?? 30_000;
+  const deadlineMs = retry.deadlineMs ?? 60_000;
   const baseMs = retry.baseMs ?? 50;
   const capMs = retry.capMs ?? 1_000;
   const startedAt = Date.now();
@@ -337,17 +341,30 @@ async function sleep(
  * deeper) and only exposes a generic `"fetch failed"` message at the
  * top — the retry policy needs the inner code to decide whether to
  * retry, so we walk the chain bounded by a safety depth.
+ *
+ * Also probes `AggregateError.errors[]` (modern fetch can surface DNS
+ * lookup failures as an aggregate of `EAGAIN` + `EAI_AGAIN`), returning
+ * the first retryable code found among aggregated children.
  */
 function extractErrorCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let i = 0; i < 8 && cur != null; i++) {
-    if (typeof cur === "object" && cur !== null) {
-      const c = (cur as { code?: unknown }).code;
-      if (typeof c === "string") return c;
-      cur = (cur as { cause?: unknown }).cause;
-    } else {
-      return undefined;
+  const seen = new Set<unknown>();
+  // FIFO queue: visit `.cause` chain in order, and aggregate children in
+  // declaration order. Lets callers reason about "first matching code"
+  // deterministically — the most-recent wrapper wins, not the deepest.
+  const queue: unknown[] = [err];
+  let visited = 0;
+  while (queue.length > 0 && visited < 16) {
+    const cur = queue.shift();
+    visited += 1;
+    if (cur == null || typeof cur !== "object" || seen.has(cur)) continue;
+    seen.add(cur);
+    const c = (cur as { code?: unknown }).code;
+    if (typeof c === "string") return c;
+    const errs = (cur as { errors?: unknown }).errors;
+    if (Array.isArray(errs)) {
+      for (const child of errs) queue.push(child);
     }
+    queue.push((cur as { cause?: unknown }).cause);
   }
   return undefined;
 }

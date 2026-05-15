@@ -293,6 +293,40 @@ describe("createMcpHttpClient — retry", () => {
     expect(calls).toBeLessThan(20);
   });
 
+  it("retries when the Node-style code is nested inside AggregateError.errors[]", async () => {
+    // Modern fetch implementations sometimes surface DNS lookup failures
+    // as an `AggregateError` whose `.errors[]` carry the real syscall
+    // codes. The retry walker must dig through `.errors[]`, not just
+    // `.cause`, to identify the error as retryable.
+    const working = buildWorkingFetch();
+    let count = 0;
+    const fetcher: typeof fetch = ((req: Request | string | URL, init?: RequestInit) => {
+      count += 1;
+      if (count <= 2) {
+        const child1 = Object.assign(new Error("getaddrinfo EAI_AGAIN"), { code: "EAI_AGAIN" });
+        const child2 = Object.assign(new Error("getaddrinfo EAGAIN"), { code: "EAGAIN" });
+        return Promise.reject(new AggregateError([child1, child2], "All addresses failed"));
+      }
+      return working(req as Request, init);
+    }) as typeof fetch;
+
+    const attempts: number[] = [];
+    const client = await createMcpHttpClient(TARGET_URL, {
+      fetch: fetcher,
+      retry: {
+        deadlineMs: 5_000,
+        baseMs: 10,
+        capMs: 50,
+        onRetry: ({ attempt }) => attempts.push(attempt),
+      },
+    });
+    try {
+      expect(attempts.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("preserves the legacy single-shot behaviour when `retry` is omitted", async () => {
     // No retry option → single attempt, throw immediately on failure.
     let calls = 0;
