@@ -205,7 +205,11 @@ export async function drawTpm(input: TpmDrawInput): Promise<TpmDrawResult> {
         1,
         Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000),
       );
-      logger.info("llm-tpm: denied", {
+      // `warn` rather than `info`: a hammered org under sustained denial
+      // can emit 1k 429/sec — log-volume budget matters, but we still
+      // need the signal for ops dashboards. `info` (the allow path) is
+      // far higher volume and stays at `info`.
+      logger.warn("llm-tpm: denied", {
         orgId: input.orgId,
         modelLabel: input.modelLabel,
         bucketKey: input.modelLabel,
@@ -223,7 +227,11 @@ export async function drawTpm(input: TpmDrawInput): Promise<TpmDrawResult> {
         retryAfterSeconds: retryAfter,
       };
     }
-    logger.warn("llm-tpm: limiter backend error — failing open", {
+    // `error` rather than `warn`: a multi-hour Redis outage would
+    // silently disable the limiter across the fleet at `warn`. `error`
+    // ensures the fail-open path pages ops so they can decide whether
+    // to keep failing open or shed traffic.
+    logger.error("llm-tpm: limiter backend error — failing open", {
       orgId: input.orgId,
       modelLabel: input.modelLabel,
       policyKey: policy.configKey,
