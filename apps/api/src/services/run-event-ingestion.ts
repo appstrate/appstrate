@@ -919,7 +919,27 @@ async function drainBufferedEvents(
       continue;
     }
 
-    // Gap at the head and gaps not allowed — wait for the missing event.
+    // Gap at the head and gaps not allowed — could be a real gap, or a
+    // stale view: a concurrent drainer may have advanced `lastEventSequence`
+    // past the buffer's old lowest and removed it, leaving us peeking at a
+    // higher sequence while our in-memory `run.lastEventSequence` is still
+    // pre-advance. Refresh from the DB and retry the iteration before
+    // giving up — otherwise concurrent buffer-path drainers (one per
+    // bursty parallel-call event) all observe a false gap, exit early,
+    // and the buffer sits until finalize.
+    const [fresh] = await db
+      .select({ s: runs.lastEventSequence })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (fresh && fresh.s > run.lastEventSequence) {
+      run.lastEventSequence = fresh.s;
+      // Loop continues — re-peek, re-compute `next` against the refreshed
+      // counter. If the head is now contiguous, the next iteration
+      // persists it; otherwise the next iteration exits via this branch
+      // again with a still-stale-resistant check.
+      continue;
+    }
     trace("drain.exit", {
       runId: run.id,
       drainedCount,
