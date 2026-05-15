@@ -262,9 +262,15 @@ const envSchema = z
     // Modules (comma-separated specifiers). API-key LLM calls are routed
     // directly to the upstream provider — retry is handled by the Pi SDK
     // natively (Retry-After honoring + jitter). The defaults are the
-    // built-in OSS modules plus `@appstrate/module-codex` (ChatGPT/Codex
-    // OAuth — remove to drop that provider surface).
-    MODULES: z.string().default("oidc,webhooks,core-providers,@appstrate/module-codex"),
+    // built-in OSS modules plus the two reference OAuth-provider modules:
+    // `@appstrate/module-codex` (ChatGPT/Codex) and
+    // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — remove
+    // either to drop that provider surface.
+    MODULES: z
+      .string()
+      .default(
+        "oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code",
+      ),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

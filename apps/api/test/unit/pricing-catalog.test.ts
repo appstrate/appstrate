@@ -28,10 +28,11 @@ describe("lookupCatalogModel", () => {
     expect(lookupCatalogModel("openai", "definitely-not-a-real-model-xyz")).toBeNull();
   });
 
-  it("returns null for subscription-OAuth providers (codex bypass)", () => {
+  it("returns null for subscription-OAuth providers (codex / claude-code bypass)", () => {
     // Codex / Claude Pro are flat-fee subscriptions — no per-token cost
     // attribution. The catalog must not vendor them.
     expect(lookupCatalogModel("codex", "gpt-5.5")).toBeNull();
+    expect(lookupCatalogModel("claude-code", "claude-sonnet-4-6")).toBeNull();
   });
 
   it("returns canonical pricing for anthropic claude-haiku-4-5", () => {
@@ -82,10 +83,11 @@ describe("listCatalogModels", () => {
     }
   });
 
-  it("returns empty for non-catalogued providers (openrouter, openai-compatible, codex)", () => {
+  it("returns empty for non-catalogued providers (openrouter, openai-compatible, codex, claude-code)", () => {
     expect(listCatalogModels("openrouter")).toEqual([]);
     expect(listCatalogModels("openai-compatible")).toEqual([]);
     expect(listCatalogModels("codex")).toEqual([]);
+    expect(listCatalogModels("claude-code")).toEqual([]);
   });
 });
 

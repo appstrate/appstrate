@@ -143,9 +143,12 @@ jobs:
           #  - @appstrate/module-codex: registers `codex` so the pairing-lifecycle
           #    e2e (`providerId: "codex"`) passes `isOAuthModelProvider()` and
           #    mint returns 200 instead of 400.
+          #  - @appstrate/module-claude-code: registers `claude-code` so the
+          #    parallel pairing-lifecycle e2e (`providerId: "claude-code"`)
+          #    passes the same checks for the Anthropic OAuth surface.
           # oidc is kept in lockstep with .env.example / packages/env defaults so
           # the suite stays representative of a default self-host install.
-          MODULES: oidc,webhooks,core-providers,@appstrate/module-codex
+          MODULES: oidc,webhooks,core-providers,@appstrate/module-codex,@appstrate/module-claude-code
           # Default system model so run-acceptance passes in specs that POST
           # /agents/:id/run (e.g. upload-flow). The run pipeline only needs a
           # resolvable model at acceptance time — the dummy apiKey is never
