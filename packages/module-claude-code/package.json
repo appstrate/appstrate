@@ -1,0 +1,19 @@
+{
+  "name": "@appstrate/module-claude-code",
+  "version": "0.0.0",
+  "description": "Appstrate module — OAuth model provider for Claude Pro / Max / Team via Claude Code. Opt-in: append `@appstrate/module-claude-code` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@appstrate/core": "workspace:*"
+  }
+}

@@ -21,6 +21,7 @@ describe("getModuleRegistry", () => {
       "webhooks",
       "core-providers",
       "@appstrate/module-codex",
+      "@appstrate/module-claude-code",
     ]);
   });
 

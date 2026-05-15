@@ -4,9 +4,10 @@
  * Pins the OSS-mode boot contract for `loadModules`:
  *
  *   - the default registry (`MODULES` unset) is the OSS module set
- *     (oidc, webhooks, core-providers, @appstrate/module-codex) and never
- *     attempts to dynamically import `@appstrate/cloud`. An OSS install
- *     without the private cloud package on disk MUST boot cleanly.
+ *     (oidc, webhooks, core-providers, @appstrate/module-codex,
+ *     @appstrate/module-claude-code) and never attempts to dynamically
+ *     import `@appstrate/cloud`. An OSS install without the private
+ *     cloud package on disk MUST boot cleanly.
  *   - when a non-builtin specifier is listed but the npm package is not
  *     installed, the loader surfaces a wrapped error mentioning the
  *     specifier name (so operators see "Module \"@appstrate/cloud\" could
@@ -44,13 +45,15 @@ describe("OSS-mode module loading", () => {
     const previous = process.env.MODULES;
     delete process.env.MODULES;
     try {
-      // Defaults: built-in OSS modules + @appstrate/module-codex
-      // (ChatGPT/Codex OAuth) as the reference external-provider module.
+      // Defaults: built-in OSS modules + the two reference OAuth-provider
+      // modules (@appstrate/module-codex for ChatGPT/Codex,
+      // @appstrate/module-claude-code for Claude Pro/Max/Team).
       expect(getModuleRegistry()).toEqual([
         "oidc",
         "webhooks",
         "core-providers",
         "@appstrate/module-codex",
+        "@appstrate/module-claude-code",
       ]);
     } finally {
       if (previous !== undefined) process.env.MODULES = previous;
