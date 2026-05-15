@@ -328,9 +328,13 @@ export const packagePersistence = pgTable(
  *                events carry the run's monotonic `sequence`; dedup on
  *                `(run_id, source, sequence)`.
  *
- * `runs.cost` is the cached SUM of this table for that run, written once
- * at `finalizeRun`. Never write to `runs.cost` from anywhere else — this
- * table is the single source of truth for run cost. (`credential_proxy_usage`
+ * `runs.cost` is the cached SUM of this table for that run. It is
+ * refreshed on two paths: the throttled `run_metric` broadcaster
+ * (during streaming, so a mid-run refresh sees the latest value) and
+ * `finalizeRun` (terminal write). Both writers use a monotonic guard
+ * (`UPDATE … WHERE cost IS NULL OR cost < new`) so the value never
+ * regresses. This table remains the single source of truth — `runs.cost`
+ * is only a cache of `SUM(llm_usage.cost_usd)`. (`credential_proxy_usage`
  * is an audit log, not a cost ledger — see its header comment.)
  *
  * A call is attributable to exactly one principal: either an API key

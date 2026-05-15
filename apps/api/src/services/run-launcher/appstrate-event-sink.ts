@@ -37,11 +37,16 @@
  *     appstrate.error    → run_logs (system/adapter_error) + lastAdapterError
  *     appstrate.metric   → runs.tokenUsage snapshot (running total)
  *                         + llm_usage ledger row (source="runner")
+ *                         + schedules a throttled `run_metric` broadcast
+ *                           which also persists `cost_so_far` onto the
+ *                           run row (monotonic-max guarded)
  *
- * `runs.cost` is NEVER written here — it is the cached aggregate written
- * exactly once by `finalizeRun`. These sinks are the single writer of
- * the `llm_usage` runner rows and the single reader/writer of
- * `runs.tokenUsage`.
+ * These sinks are the single writer of the `llm_usage` runner rows and
+ * the single reader/writer of `runs.tokenUsage`. `runs.cost` is cached
+ * aggregate of `llm_usage` and is refreshed on two paths: the throttled
+ * broadcaster (during streaming, via {@link scheduleRunMetricBroadcast})
+ * and `finalizeRun` (terminal write). Both writers use a monotonic guard
+ * so the recorded value never regresses.
  */
 
 import { createReducerSink, type ReducerSinkHandle } from "@appstrate/afps-runtime/sinks";
