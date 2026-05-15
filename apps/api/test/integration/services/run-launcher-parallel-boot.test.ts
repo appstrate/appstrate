@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import type {
   ContainerOrchestrator,
   IsolationBoundary,
-  SidecarConfig,
+  SidecarLaunchSpec,
   WorkloadHandle,
   WorkloadSpec,
   CleanupReport,
@@ -78,7 +78,7 @@ function createTimingFake(config: TimingFakeConfig): {
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,
-      _sidecarConfig: SidecarConfig,
+      _spec: SidecarLaunchSpec,
     ): Promise<WorkloadHandle> {
       obs.sidecarCreateStartedAt = Date.now();
       // Artificial delay simulates the pre-#406 health-wait. Post-#406,

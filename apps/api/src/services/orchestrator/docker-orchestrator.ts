@@ -7,7 +7,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  SidecarConfig,
+  SidecarLaunchSpec,
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
@@ -90,36 +90,31 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   async createSidecar(
     runId: string,
     boundary: IsolationBoundary,
-    config: SidecarConfig,
+    spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     const env = getEnv();
-    const platformNetwork = await docker.detectPlatformNetwork();
-
-    // Resolve platform API URL. When we can talk to the platform over its
-    // Docker network, always prefer that: it keeps credential traffic inside
-    // the Docker bridge (no NAT, no public hop, no TLS overhead) and survives
-    // Coolify redeploys that rename the platform container.
-    const platformApiUrl = platformNetwork
-      ? `http://${platformNetwork.hostname}:${env.PORT}`
-      : config.platformApiUrl;
+    const [platformApiUrl, platformNetwork] = await Promise.all([
+      this.resolvePlatformApiUrl(),
+      docker.detectPlatformNetwork(),
+    ]);
 
     const sidecarEnv: Record<string, string> = {
       PORT: "8080",
       ...pickOperatorSidecarEnv(),
-      RUN_TOKEN: config.runToken,
+      RUN_TOKEN: spec.runToken,
       PLATFORM_API_URL: platformApiUrl,
     };
-    if (config.proxyUrl) sidecarEnv.PROXY_URL = config.proxyUrl;
-    if (config.llm) {
-      if (config.llm.authMode === "oauth") {
+    if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
+    if (spec.llm) {
+      if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
         // server.ts parses it into config.llm at boot. Without this,
         // /llm/* returns 503 "LLM proxy not configured".
-        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(config.llm);
+        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
       } else {
-        sidecarEnv.PI_BASE_URL = config.llm.baseUrl;
-        sidecarEnv.PI_API_KEY = config.llm.apiKey;
-        sidecarEnv.PI_PLACEHOLDER = config.llm.placeholder;
+        sidecarEnv.PI_BASE_URL = spec.llm.baseUrl;
+        sidecarEnv.PI_API_KEY = spec.llm.apiKey;
+        sidecarEnv.PI_PLACEHOLDER = spec.llm.placeholder;
       }
     }
 

@@ -9,9 +9,30 @@
  * via environment variables at container start.
  */
 
+/**
+ * Sidecar runtime configuration. The sidecar process reads this from its
+ * own environment at boot and uses it for the lifetime of the run. The
+ * platform sends every field as an env var when spawning the container.
+ */
 export interface SidecarConfig {
   runToken: string;
   platformApiUrl: string;
+  proxyUrl?: string;
+  llm?: LlmProxyConfig;
+}
+
+/**
+ * Platform → orchestrator spawn-boundary spec. Strict subset of
+ * {@link SidecarConfig}: `platformApiUrl` is intentionally absent because
+ * each orchestrator resolves it from its own context (Docker network
+ * detection for the docker adapter, loopback for the process adapter)
+ * right before spawning the container — see
+ * `ContainerOrchestrator.resolvePlatformApiUrl`. Letting callers supply
+ * a URL here would duplicate that resolution and let the two answers
+ * drift apart.
+ */
+export interface SidecarLaunchSpec {
+  runToken: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
 }

@@ -9,10 +9,10 @@
  * @appstrate/core package without reaching into apps/api internals.
  */
 
-import type { SidecarConfig } from "./sidecar-types.ts";
+import type { SidecarLaunchSpec } from "./sidecar-types.ts";
 
 // Re-export sidecar config types from the dedicated module for convenience.
-export type { SidecarConfig, LlmProxyConfig } from "./sidecar-types.ts";
+export type { SidecarConfig, SidecarLaunchSpec, LlmProxyConfig } from "./sidecar-types.ts";
 
 // ---------------------------------------------------------------------------
 // Actor — who initiated an operation
@@ -242,14 +242,14 @@ export interface ContainerOrchestrator {
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;
 
   /**
-   * Create a ready-to-use sidecar (from pool or fresh).
-   * Internally handles: pool acquisition, fresh creation, platform network,
-   * ExtraHosts, port mapping, health check.
+   * Create + start a sidecar container for the given run. The orchestrator
+   * resolves the platform API URL from its own context (see
+   * {@link resolvePlatformApiUrl}) — callers do not supply it.
    */
   createSidecar(
     runId: string,
     boundary: IsolationBoundary,
-    config: SidecarConfig,
+    spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle>;
 
   /** Create a workload (agent). Does NOT start it — file injection included in the spec. */

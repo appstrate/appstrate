@@ -86,7 +86,7 @@ interface PromptContext {
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousCheckpoint: Record<string, unknown> | null;
-  runApi?: { url: string; token: string };
+  runToken?: string;
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: TestSchemas;
@@ -129,7 +129,7 @@ function splitLegacy(ctx: PromptContext): {
     rawPrompt: ctx.rawPrompt,
     ...(ctx.schemas.output ? { outputSchema: ctx.schemas.output } : {}),
     llmConfig: ctx.llmConfig,
-    ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),
+    ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
     tokens: ctx.tokens,
@@ -448,19 +448,17 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   // whose curl snippet exposed `$SIDECAR_URL`. That surface was migrated
   // to a typed `run_history` tool wired by the runtime (runtime-pi
   // Phase D); the prompt MUST NEVER mention the sidecar, regardless of
-  // whether `runApi` credentials are present.
+  // whether a signed `runToken` is present.
 
-  it("does not render a Run History section when runApi is present", () => {
-    const ctx = baseContext({
-      runApi: { url: "http://platform:3000", token: "exec_token_123" },
-    });
+  it("does not render a Run History section when runToken is present", () => {
+    const ctx = baseContext({ runToken: "exec_token_123" });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
   });
 
-  it("does not render a Run History section when runApi is absent", () => {
-    const ctx = baseContext({ runApi: undefined });
+  it("does not render a Run History section when runToken is absent", () => {
+    const ctx = baseContext({ runToken: undefined });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
