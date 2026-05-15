@@ -13,6 +13,7 @@
 import { describe, it, expect } from "bun:test";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { LocalEventBuffer } from "../../../src/infra/event-buffer/local-event-buffer.ts";
+import { RedisEventBuffer } from "../../../src/infra/event-buffer/redis-event-buffer.ts";
 
 function mkEvent(seq: number): RunEvent {
   return {
@@ -136,5 +137,53 @@ describe("LocalEventBuffer", () => {
     expect((h1?.event as unknown as { message: string }).message).toBe("event-1");
     expect((h2?.event as unknown as { message: string }).message).toBe("event-100");
     await buf.shutdown();
+  });
+});
+
+describe("RedisEventBuffer", () => {
+  // Regression: the runner can emit multiple events whose
+  // `JSON.stringify(event)` collapses to the same string — e.g. 10 parallel
+  // `provider.called` events that complete in the same millisecond with
+  // identical providerId/method/target/status/durationMs and a
+  // `toolCallId: undefined` field that JSON drops. In a Redis sorted set,
+  // ZADD with an existing member updates the score instead of inserting a
+  // new entry, so all 10 would collapse into one entry and 9 sequences
+  // would silently disappear from the buffer (then re-surface only via
+  // finalize's gap_fill, clustered at the close timestamp).
+  //
+  // The fix prefixes each member with its sequence so member identity is
+  // sequence-keyed regardless of payload.
+  it("preserves every sequence even when JSON.stringify(event) collides", async () => {
+    const runId = `r_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const buf = new RedisEventBuffer();
+    try {
+      const identical: RunEvent = {
+        type: "provider.called",
+        runId,
+        timestamp: 1700000000000,
+        providerId: "@appstrate/gmail",
+        method: "GET",
+        target: "https://www.googleapis.com/gmail/v1/users/me/messages",
+        status: 200,
+        durationMs: 0,
+      };
+
+      for (let seq = 10; seq <= 19; seq++) {
+        await buf.put(runId, seq, identical, 60);
+      }
+
+      const drained: number[] = [];
+      while (true) {
+        const head = await buf.peekLowest(runId);
+        if (!head) break;
+        drained.push(head.sequence);
+        await buf.remove(runId, head.sequence);
+      }
+
+      expect(drained).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    } finally {
+      await buf.clear(runId);
+      await buf.shutdown();
+    }
   });
 });

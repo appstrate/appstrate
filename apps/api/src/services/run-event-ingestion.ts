@@ -848,7 +848,22 @@ async function persistEventAndAdvance(
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
   const buffer = await getEventBuffer();
   const ttlSeconds = Math.ceil(getEnv().REMOTE_RUN_BUFFER_FLUSH_MS / 1000) + 60;
+  const t0 = Date.now();
   await buffer.put(runId, sequence, event, ttlSeconds);
+  // Sanity: list buffer contents right after the put. If our sequence is
+  // not in the list, the ZADD silently failed (or some concurrent path
+  // removed it in the same tick) — both are bugs worth catching.
+  const contents = await buffer.debugList(runId);
+  const present = contents.includes(sequence);
+  trace("buffer.put_done", {
+    runId,
+    putSequence: sequence,
+    type: event.type,
+    bufferSize: contents.length,
+    present,
+    headAfterPut: contents.length > 0 ? contents[0] : null,
+    latencyMs: Date.now() - t0,
+  });
 }
 
 async function drainBufferedEvents(
@@ -886,6 +901,11 @@ async function drainBufferedEvents(
         type: head.event.type,
       });
       await persistEventAndAdvance(run, head.event, head.sequence);
+      trace("buffer.remove", {
+        runId: run.id,
+        sequence: head.sequence,
+        reason: "drain-contiguous",
+      });
       await buffer.remove(run.id, head.sequence);
       drainedCount += 1;
       continue;
@@ -914,6 +934,11 @@ async function drainBufferedEvents(
       // the canonical "10 tool_execution_end rows missing on a bursty
       // parallel turn" symptom this branch is meant to recover from.
       await persistEventAndAdvance(run, head.event, head.sequence, { allowGap: true });
+      trace("buffer.remove", {
+        runId: run.id,
+        sequence: head.sequence,
+        reason: "drain-gap-fill",
+      });
       await buffer.remove(run.id, head.sequence);
       drainedCount += 1;
       continue;
@@ -940,6 +965,13 @@ async function drainBufferedEvents(
       // again with a still-stale-resistant check.
       continue;
     }
+    // Dump the entire buffer contents on gap-at-head exit so we can tell
+    // whether the "missing" sequences are truly absent (real gap) or just
+    // out of view (stale snapshot). If the truly-missing sequence is
+    // visible here, the bug is upstream (drain didn't loop / didn't see
+    // its own put); if it's absent, the put for that sequence never
+    // landed in Redis (silent ZADD failure, wrong score, …).
+    const contents = await buffer.debugList(run.id);
     trace("drain.exit", {
       runId: run.id,
       drainedCount,
@@ -948,6 +980,8 @@ async function drainBufferedEvents(
       reason: "gap-at-head",
       headSequence: head.sequence,
       expectedSequence: next,
+      bufferContents: contents.slice(0, 30),
+      bufferSize: contents.length,
     });
     return;
   }
