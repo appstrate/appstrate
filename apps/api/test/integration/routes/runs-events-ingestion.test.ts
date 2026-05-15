@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
@@ -432,6 +432,50 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     // Sequence counter advanced exactly once.
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.lastEventSequence).toBe(1);
+  });
+
+  // Regression: CAS-advance and run_logs INSERT MUST commit or roll back
+  // together. Before the transaction wrap, a transient INSERT failure
+  // (FK violation, check constraint, deadlock, network drop mid-statement)
+  // left `runs.last_event_sequence` advanced with no row in `run_logs` —
+  // the next event's CAS predicate `= seq - 1` matched the advanced
+  // value and silently skipped the missing row. The fix wraps the CAS
+  // and the dispatch in `db.transaction()` so either both apply or
+  // neither does.
+  //
+  // We simulate a transient failure by adding a CHECK constraint that
+  // rejects a marker message. The dispatch INSERT throws inside the tx,
+  // rolling the CAS back.
+  it("rolls back the sequence advance when the run_logs INSERT fails", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    await db.execute(
+      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
+    );
+
+    try {
+      const envelope = buildEnvelope(
+        runId,
+        "appstrate.progress",
+        { message: "__poison__", timestamp: Date.now() },
+        1,
+      );
+      const res = await postEvent(runId, envelope);
+      // The transaction aborts on the CHECK violation; the route surfaces
+      // an unhandled error as a 5xx. Either 500 or a problem+json shape
+      // is acceptable — the contract is the rollback below.
+      expect(res.status).toBeGreaterThanOrEqual(500);
+
+      // CAS was rolled back: counter still 0.
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.lastEventSequence).toBe(0);
+
+      // No log row was inserted.
+      const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+      expect(logs).toHaveLength(0);
+    } finally {
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+    }
   });
 
   // End-to-end coverage for the `@appstrate/report` system tool.

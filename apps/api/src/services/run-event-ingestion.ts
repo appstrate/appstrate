@@ -33,7 +33,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { PersistingEventSink, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
+import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -395,15 +395,25 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.
   if (outputValidationErrors) {
-    await appendRunLog(
-      scope,
-      run.id,
-      "system",
-      "output_validation",
-      null,
-      { valid: false, errors: outputValidationErrors },
-      "error",
-    );
+    // Post-CAS best-effort: the run is already terminal, a transient
+    // log INSERT failure must not crash finalize. The validation
+    // failure is also surfaced via `runs.error` (CAS update above).
+    try {
+      await appendRunLog(
+        scope,
+        run.id,
+        "system",
+        "output_validation",
+        null,
+        { valid: false, errors: outputValidationErrors },
+        "error",
+      );
+    } catch (err) {
+      logger.error("finalize: appendRunLog output_validation failed", {
+        runId: run.id,
+        err: getErrorMessage(err),
+      });
+    }
   }
 
   // Resolve the run's actor for the unified persistence scope.
@@ -471,18 +481,28 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       );
     }
   }
-  if (status === "success" && resultToPersist) {
-    await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+  // Post-CAS best-effort: the run is already terminal in `runs`. A
+  // transient log INSERT failure here is logged and swallowed — the UI
+  // shows the run as complete from the row-level state regardless.
+  try {
+    if (status === "success" && resultToPersist) {
+      await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");
+    }
+    await appendRunLog(
+      scope,
+      run.id,
+      "system",
+      "run_completed",
+      null,
+      { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
+      status === "success" ? "info" : "error",
+    );
+  } catch (err) {
+    logger.error("finalize: appendRunLog terminal row failed", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
   }
-  await appendRunLog(
-    scope,
-    run.id,
-    "system",
-    "run_completed",
-    null,
-    { runId: run.id, status, ...(errorMessage ? { error: errorMessage } : {}) },
-    status === "success" ? "info" : "error",
-  );
 
   // 8. Status-change broadcast with the enriched params (including
   //    validation-failure errors and any afterRun metadata).
@@ -656,12 +676,34 @@ async function persistEventAndAdvance(
   const predicate = opts.allowGap
     ? sql`${runs.lastEventSequence} < ${sequence}`
     : eq(runs.lastEventSequence, sequence - 1);
-  const claimed = await db
-    .update(runs)
-    .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-    .where(and(eq(runs.id, run.id), predicate))
-    .returning({ id: runs.id });
-  if (claimed.length === 0) {
+
+  // Wrap the CAS + dispatch in a single transaction so a transient
+  // INSERT failure inside `persistRunEvent` rolls the sequence advance
+  // back. Otherwise we could leave `runs.last_event_sequence` advanced
+  // with no `run_logs` row to back it — a silent loss that the next
+  // event's CAS would tolerate without retrying the dropped one.
+  const scope = { orgId: run.orgId, applicationId: run.applicationId };
+  const firstEvent = run.lastEventSequence === 0;
+  const claimed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(runs)
+      .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
+      .where(and(eq(runs.id, run.id), predicate))
+      .returning({ id: runs.id });
+    if (rows.length === 0) return false;
+
+    await persistRunEvent(tx, scope, run.id, event, { writeLedger: true });
+
+    // No runner emits `run.started`, so flip status → running on the
+    // first ingested sequence regardless of type. Terminal status is
+    // owned by finalizeRun.
+    if (firstEvent) {
+      await updateRun(scope, run.id, { status: "running" }, tx);
+    }
+    return true;
+  });
+
+  if (!claimed) {
     // Another concurrent path claimed this sequence. Refresh the
     // in-memory snapshot so the caller's drain loop recomputes `next`
     // against the actual DB state — otherwise it bails out on a false
@@ -674,22 +716,6 @@ async function persistEventAndAdvance(
       .limit(1);
     if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
     return;
-  }
-
-  const sink = new PersistingEventSink({
-    scope: { orgId: run.orgId, applicationId: run.applicationId },
-    runId: run.id,
-    writeLedger: true,
-  });
-  await sink.handle(event);
-
-  // No runner emits `run.started`, so flip status → running on the
-  // first ingested sequence regardless of type. Terminal status is
-  // owned by finalizeRun.
-  if (run.lastEventSequence === 0) {
-    await updateRun({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-      status: "running",
-    });
   }
 
   run.lastEventSequence = sequence;

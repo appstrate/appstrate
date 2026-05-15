@@ -17,8 +17,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { db } from "@appstrate/db/client";
+import { db, type Db } from "@appstrate/db/client";
 import {
   runs,
   runLogs,
@@ -317,6 +316,7 @@ export async function updateRun(
     /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
     sinkClosedAt?: string;
   },
+  executor: Db = db,
 ): Promise<void> {
   const set: Record<string, unknown> = {};
 
@@ -331,23 +331,16 @@ export async function updateRun(
   if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
   if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
-  try {
-    await db
-      .update(runs)
-      .set(set)
-      .where(
-        scopedWhere(runs, {
-          orgId: scope.orgId,
-          applicationId: scope.applicationId,
-          extra: [eq(runs.id, id)],
-        }),
-      );
-  } catch (err) {
-    logger.error("Failed to update run", {
-      runId: id,
-      error: getErrorMessage(err),
-    });
-  }
+  await executor
+    .update(runs)
+    .set(set)
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(runs.id, id)],
+      }),
+    );
 }
 
 export async function getLastCheckpoint(
@@ -470,28 +463,21 @@ export async function appendRunLog(
   message: string | null,
   data: Record<string, unknown> | null,
   level: "debug" | "info" | "warn" | "error" = "debug",
+  executor: Db = db,
 ): Promise<number> {
-  try {
-    const [row] = await db
-      .insert(runLogs)
-      .values({
-        runId,
-        orgId: scope.orgId,
-        type,
-        event,
-        message,
-        data: safeRunLogData(data),
-        level,
-      })
-      .returning({ id: runLogs.id });
-    return row?.id ?? 0;
-  } catch (err) {
-    logger.error("Failed to append run log", {
+  const [row] = await executor
+    .insert(runLogs)
+    .values({
       runId,
-      error: getErrorMessage(err),
-    });
-    return 0;
-  }
+      orgId: scope.orgId,
+      type,
+      event,
+      message,
+      data: safeRunLogData(data),
+      level,
+    })
+    .returning({ id: runLogs.id });
+  return row?.id ?? 0;
 }
 
 export async function getRunningRunsForPackage(
