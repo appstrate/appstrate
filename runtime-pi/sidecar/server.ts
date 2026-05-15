@@ -2,7 +2,7 @@
 
 import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { CredentialsResponse, LlmProxyConfig, ModelApiShape } from "./helpers.ts";
+import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 
@@ -38,33 +38,6 @@ function readPositiveIntFromEnv(name: string): number | undefined {
   return parsed;
 }
 
-const KNOWN_MODEL_API_SHAPES = new Set<ModelApiShape>([
-  "anthropic-messages",
-  "openai-chat",
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-  "google-generative-ai",
-  "google-vertex",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
-]);
-
-function readModelApiShapeFromEnv(): ModelApiShape | undefined {
-  const raw = process.env.MODEL_API_SHAPE;
-  if (!raw) return undefined;
-  if (!KNOWN_MODEL_API_SHAPES.has(raw as ModelApiShape)) {
-    // Same soft-fail policy as the numeric envs — fall back to the legacy
-    // estimator rather than crash. An unknown apiShape means the launcher
-    // version drifted ahead of the runtime image; the apiShape-tuned
-    // estimator is a precision win, not a correctness gate.
-    logger.warn("Sidecar env: ignoring unknown MODEL_API_SHAPE", { raw });
-    return undefined;
-  }
-  return raw as ModelApiShape;
-}
-
 // Config is set once at startup via env vars — sidecars are spawned per-run
 // with credentials already baked in.
 const config = {
@@ -74,7 +47,11 @@ const config = {
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
-  modelApiShape: readModelApiShapeFromEnv(),
+  // Passed through as-is — `estimatorForApiShape` falls back to a
+  // conservative ratio for any value not in its lookup table, so an env
+  // var typo or a launcher that drifts ahead of the runtime image just
+  // degrades estimator precision rather than crashing the sidecar.
+  modelApiShape: process.env.MODEL_API_SHAPE,
 };
 
 const cookieJar = new Map<string, string[]>();

@@ -42,7 +42,6 @@ import { isOAuthModelProvider, getModelProvider } from "../model-providers/regis
 import type {
   LlmProxyConfig,
   LlmProxyOauthConfig,
-  ModelApiShape,
   SidecarLaunchSpec,
 } from "@appstrate/core/sidecar-types";
 
@@ -161,7 +160,7 @@ export async function runPlatformContainer(
       // 3.5 chars/token heuristic was calibrated for Anthropic prose and
       // under-counts JSON-dense Gemini payloads by ~20 % — enough to let
       // an "inline" decision blow the upstream context window.
-      ...(llmConfig.apiShape ? { modelApiShape: llmConfig.apiShape as ModelApiShape } : {}),
+      ...(llmConfig.apiShape ? { modelApiShape: llmConfig.apiShape } : {}),
     };
 
     const hasOutputSchema =

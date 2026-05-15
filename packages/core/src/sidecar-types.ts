@@ -37,14 +37,15 @@ export interface SidecarConfig {
    */
   modelMaxTokens?: number;
   /**
-   * Upstream model's wire-format ({@link ModelApiShape}). Drives the
-   * sidecar's token estimator: each provider's tokenizer (Anthropic BPE,
-   * OpenAI cl100k/o200k, Gemini SentencePiece) compresses text at a
-   * different chars/token ratio, especially on JSON-dense `provider_call`
-   * payloads. When set, the sidecar picks an apiShape-tuned estimator;
-   * when unset, the legacy 3.5 chars/token Anthropic heuristic applies.
+   * Upstream model's wire-format (typically a {@link ModelApiShape}, but
+   * kept as `string` because the sidecar's estimator lookup is a graceful
+   * `Record<string, number>` — an unknown value just takes the
+   * conservative fallback ratio rather than being rejected). Drives the
+   * token estimator: each provider's tokenizer (Anthropic BPE, OpenAI
+   * cl100k/o200k, Gemini SentencePiece) compresses text at a different
+   * chars/token ratio, especially on JSON-dense `provider_call` payloads.
    */
-  modelApiShape?: ModelApiShape;
+  modelApiShape?: string;
 }
 
 /**
@@ -66,7 +67,7 @@ export interface SidecarLaunchSpec {
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
   /** See {@link SidecarConfig.modelApiShape}. */
-  modelApiShape?: ModelApiShape;
+  modelApiShape?: string;
 }
 
 /**
