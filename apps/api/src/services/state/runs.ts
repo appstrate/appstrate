@@ -471,6 +471,7 @@ export async function appendRunLog(
   data: Record<string, unknown> | null,
   level: "debug" | "info" | "warn" | "error" = "debug",
 ): Promise<number> {
+  const t0 = Date.now();
   try {
     const [row] = await db
       .insert(runLogs)
@@ -484,11 +485,19 @@ export async function appendRunLog(
         level,
       })
       .returning({ id: runLogs.id });
+    logger.info(`[run-trace] appendRunLog.done`, {
+      runId,
+      logId: row?.id ?? 0,
+      type,
+      event,
+      latencyMs: Date.now() - t0,
+    });
     return row?.id ?? 0;
   } catch (err) {
     logger.error("Failed to append run log", {
       runId,
       error: getErrorMessage(err),
+      latencyMs: Date.now() - t0,
     });
     return 0;
   }

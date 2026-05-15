@@ -3,6 +3,8 @@
 export {
   PiRunner,
   installSessionBridge,
+  runTrace,
+  getBridgePendingCount,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,

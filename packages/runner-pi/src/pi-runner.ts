@@ -102,6 +102,43 @@ export interface PiRunnerOptions {
   thinkingLevel?: "low" | "medium" | "high";
 }
 
+// ─── Run trace ────────────────────────────────────────────────────
+//
+// Diagnostic trace lines for the agent → platform event pipeline. Each
+// line is a JSON object on stderr, prefixed with `[run-trace]` so it can
+// be tee'd / grepped separately from the stdout JSONL bridge. Disabled
+// when `APPSTRATE_RUN_TRACE !== "1"` so production builds pay only the
+// env-var check (one branch, no allocation).
+const RUN_TRACE_ENABLED = process.env.APPSTRATE_RUN_TRACE === "1";
+
+export function runTrace(event: string, data: Record<string, unknown>): void {
+  if (!RUN_TRACE_ENABLED) return;
+  try {
+    process.stderr.write(`[run-trace] ${JSON.stringify({ ts: Date.now(), event, ...data })}\n`);
+  } catch {
+    // stderr write failures are non-fatal — diagnostics must never break
+    // the run.
+  }
+}
+
+function extractToolCallId(event: RunEvent): string | undefined {
+  const data = (event as { data?: unknown }).data;
+  if (typeof data === "object" && data !== null && "toolCallId" in data) {
+    const id = (data as { toolCallId?: unknown }).toolCallId;
+    return typeof id === "string" ? id : undefined;
+  }
+  return undefined;
+}
+
+// Count of bridge fire() promises that have not resolved yet. Read by
+// pi-runner.run() before/after executeSession and finalize so we can spot
+// in-flight POSTs that risk being killed by `process.exit(0)`.
+let bridgePendingFires = 0;
+
+export function getBridgePendingCount(): number {
+  return bridgePendingFires;
+}
+
 /**
  * Default response budget when the model carries no `maxTokens`.
  * 16384 covers the common "no thinking" Claude / GPT response shape;
@@ -193,7 +230,31 @@ export class PiRunner implements Runner {
 
     const emit = async (event: RunEvent): Promise<void> => {
       events.push(event);
-      await eventSink.handle(event);
+      const t0 = Date.now();
+      runTrace("pi-runner.emit.start", {
+        runId,
+        type: event.type,
+        toolCallId: extractToolCallId(event),
+        eventsLen: events.length,
+      });
+      try {
+        await eventSink.handle(event);
+        runTrace("pi-runner.emit.end", {
+          runId,
+          type: event.type,
+          toolCallId: extractToolCallId(event),
+          latencyMs: Date.now() - t0,
+        });
+      } catch (err) {
+        runTrace("pi-runner.emit.error", {
+          runId,
+          type: event.type,
+          toolCallId: extractToolCallId(event),
+          latencyMs: Date.now() - t0,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     };
 
     // Wrap the sink so every internally-emitted event is both captured
@@ -227,6 +288,11 @@ export class PiRunner implements Runner {
 
     try {
       await this.executeSession(context, internalSink, signal, captureBridge);
+      runTrace("pi-runner.executeSession.resolved", {
+        runId,
+        emittedCount: events.length,
+        pendingBridgeFires: getBridgePendingCount(),
+      });
     } catch (err) {
       if (signal?.aborted) {
         // Cancellation: propagate without finalizing — the caller's
@@ -250,7 +316,16 @@ export class PiRunner implements Runner {
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
     attachAccumulators(result);
+    runTrace("pi-runner.finalize.start", {
+      runId,
+      emittedCount: events.length,
+      pendingBridgeFires: getBridgePendingCount(),
+    });
     await eventSink.finalize(result);
+    runTrace("pi-runner.finalize.end", {
+      runId,
+      pendingBridgeFires: getBridgePendingCount(),
+    });
   }
 
   protected async executeSession(
@@ -519,11 +594,37 @@ export function installSessionBridge(
   // synchronous Pi SDK callback. Authoritative data still reaches the
   // platform via `getUsage` / `getCost` on the finalize body.
   const fire = (event: RunEvent): void => {
-    sink.emit(event).catch(() => {});
+    bridgePendingFires += 1;
+    runTrace("bridge.fire", {
+      runId,
+      type: event.type,
+      toolCallId: extractToolCallId(event),
+      pending: bridgePendingFires,
+    });
+    sink
+      .emit(event)
+      .catch((err) => {
+        runTrace("bridge.fire.error", {
+          runId,
+          type: event.type,
+          toolCallId: extractToolCallId(event),
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        bridgePendingFires -= 1;
+        runTrace("bridge.fire.settled", {
+          runId,
+          type: event.type,
+          toolCallId: extractToolCallId(event),
+          pending: bridgePendingFires,
+        });
+      });
   };
 
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
+    runTrace("bridge.sdk_event", { runId, sdkType: event.type });
     switch (event.type) {
       case "message_end": {
         const entries = session.state.messages;

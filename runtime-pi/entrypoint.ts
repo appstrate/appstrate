@@ -68,7 +68,12 @@ import {
   type Bundle,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
-import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
+import {
+  HttpSink,
+  attachStdoutBridge,
+  getHttpSinkPendingPosts,
+} from "@appstrate/afps-runtime/sinks";
+import { getBridgePendingCount, runTrace } from "@appstrate/runner-pi";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -559,14 +564,27 @@ try {
     authStoragePath: "/tmp/pi-auth/auth.json",
   });
 
+  runTrace("entrypoint.run.start", { runId: AGENT_RUN_ID });
   await runner.run({
     bundle: runnerBundle,
     context,
     providerResolver,
     eventSink: bridgedSink,
   });
+  runTrace("entrypoint.run.resolved", {
+    runId: AGENT_RUN_ID,
+    pendingPosts: getHttpSinkPendingPosts(),
+    pendingBridgeFires: getBridgePendingCount(),
+  });
   heartbeat.stop();
   await mcpClient?.close().catch(() => {});
+  runTrace("entrypoint.exit", {
+    runId: AGENT_RUN_ID,
+    code: 0,
+    pendingPosts: getHttpSinkPendingPosts(),
+    pendingBridgeFires: getBridgePendingCount(),
+    durationMs: Date.now() - startTime,
+  });
   process.exit(0);
 } catch (err) {
   heartbeat.stop();

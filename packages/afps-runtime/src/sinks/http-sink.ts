@@ -77,6 +77,34 @@ export interface HttpSinkOptions {
  * Transient failures (network error, 5xx, 429) are retried with
  * exponential backoff + jitter. Non-transient 4xx errors propagate.
  */
+// ─── Diagnostic trace ─────────────────────────────────────────────
+//
+// `[run-trace]`-prefixed JSON lines on stderr — same protocol as the
+// pi-runner trace, so both sides of the pipeline correlate by greping
+// `[run-trace]`. Gated by `APPSTRATE_RUN_TRACE=1` so production runs pay
+// only a branch check.
+const RUN_TRACE_ENABLED =
+  typeof process !== "undefined" && process.env?.["APPSTRATE_RUN_TRACE"] === "1";
+
+function runTrace(event: string, data: Record<string, unknown>): void {
+  if (!RUN_TRACE_ENABLED) return;
+  try {
+    process.stderr.write(`[run-trace] ${JSON.stringify({ ts: Date.now(), event, ...data })}\n`);
+  } catch {
+    /* never break the sink on a trace write failure */
+  }
+}
+
+// Per-process counter of POSTs the HttpSink is awaiting (initial attempt
+// or retry). Exposed via getHttpSinkPendingPosts so the entrypoint can
+// log it just before process.exit(), since killing in-flight POSTs is
+// the prime suspect for missing run_logs rows.
+let pendingPosts = 0;
+
+export function getHttpSinkPendingPosts(): number {
+  return pendingPosts;
+}
+
 export class HttpSink implements EventSink {
   private readonly url: string;
   private readonly finalizeUrl: string;
@@ -115,24 +143,82 @@ export class HttpSink implements EventSink {
   async handle(event: RunEvent): Promise<void> {
     const id = this.generateId();
     const nowMs = this.now();
+    const seq = this.sequence++;
     const cloudEvent = buildCloudEventEnvelope({
       event,
-      sequence: this.sequence++,
+      sequence: seq,
       id,
       nowMs,
     });
     const body = JSON.stringify(cloudEvent);
-    await this.sendSigned(this.url, id, nowMs, body);
+    runTrace("http-sink.handle.start", {
+      sequence: seq,
+      webhookId: id,
+      type: event.type,
+      bodyBytes: body.length,
+    });
+    pendingPosts += 1;
+    const t0 = Date.now();
+    try {
+      await this.sendSigned(this.url, id, nowMs, body, { sequence: seq, type: event.type });
+      runTrace("http-sink.handle.end", {
+        sequence: seq,
+        webhookId: id,
+        type: event.type,
+        latencyMs: Date.now() - t0,
+        pendingPosts: pendingPosts - 1,
+      });
+    } catch (err) {
+      runTrace("http-sink.handle.error", {
+        sequence: seq,
+        webhookId: id,
+        type: event.type,
+        latencyMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      pendingPosts -= 1;
+    }
   }
 
   async finalize(result: RunResult): Promise<void> {
     const id = this.generateId();
     const nowMs = this.now();
     const body = JSON.stringify(result);
-    await this.sendSigned(this.finalizeUrl, id, nowMs, body);
+    runTrace("http-sink.finalize.start", {
+      webhookId: id,
+      bodyBytes: body.length,
+      pendingPosts,
+    });
+    pendingPosts += 1;
+    const t0 = Date.now();
+    try {
+      await this.sendSigned(this.finalizeUrl, id, nowMs, body, { sequence: -1, type: "finalize" });
+      runTrace("http-sink.finalize.end", {
+        webhookId: id,
+        latencyMs: Date.now() - t0,
+        pendingPosts: pendingPosts - 1,
+      });
+    } catch (err) {
+      runTrace("http-sink.finalize.error", {
+        webhookId: id,
+        latencyMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      pendingPosts -= 1;
+    }
   }
 
-  private async sendSigned(url: string, id: string, nowMs: number, body: string): Promise<void> {
+  private async sendSigned(
+    url: string,
+    id: string,
+    nowMs: number,
+    body: string,
+    trace?: { sequence: number; type: string },
+  ): Promise<void> {
     const timestampSec = Math.floor(nowMs / 1000);
     const headers = sign({
       msgId: id,
@@ -150,6 +236,7 @@ export class HttpSink implements EventSink {
 
     while (attempt < this.maxAttempts) {
       attempt += 1;
+      const attemptT0 = Date.now();
       try {
         const res = await this.fetchImpl(url, {
           method: "POST",
@@ -159,6 +246,14 @@ export class HttpSink implements EventSink {
             traceparent,
           },
           body,
+        });
+
+        runTrace("http-sink.attempt", {
+          ...(trace ?? {}),
+          webhookId: id,
+          attempt,
+          status: res.status,
+          latencyMs: Date.now() - attemptT0,
         });
 
         if (res.ok) return;
