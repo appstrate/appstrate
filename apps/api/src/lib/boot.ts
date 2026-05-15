@@ -201,8 +201,8 @@ export async function boot(): Promise<void> {
     }),
   ]);
 
-  // Sequential cleanup: orphan runs must be finalized before container cleanup,
-  // and containers must be cleaned before sidecar pool init.
+  // Sequential cleanup: orphan runs must be finalized before container
+  // cleanup, and containers must be cleaned before orchestrator init.
   //
   // Each orphan flows through `synthesiseFinalize` → `finalizeRun` so the
   // afterRun hook fires (billing, observability, ...) for runs that burned
@@ -250,10 +250,10 @@ export async function boot(): Promise<void> {
   // Initialize cross-instance cancel subscriber
   await initCancelSubscriber();
 
-  // Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
+  // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
-      logger.warn("Could not initialize sidecar pool", {
+      logger.warn("Could not initialize container orchestrator", {
         error: getErrorMessage(err),
       });
     }),

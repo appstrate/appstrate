@@ -135,20 +135,20 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |-- Exactly-once guaranteed (Redis atomic dequeue)
      |                                |-- Uses same executeAgentInBackground() path
      |                                |
-     |            Image pre-pull at boot:    |-- ensureImage(PI_IMAGE, SIDECAR_IMAGE)
-     |            - amortises 20-45s cold pull off the first run
+     |            Image pre-pull (boot):    |-- ensureImage(PI_IMAGE, SIDECAR_IMAGE)
+     |                                      |   amortises 20-45s cold pull off run 1
      |                                |
      |            Docker network: appstrate-exec-{runId} (isolated bridge)
      |            Sidecar + Agent setup run in parallel (Promise.all)
      |            ┌─────────────────────────────────────────────┐
      |            │  Sidecar Container (alias: "sidecar")       │
-     |            │  - RUN_TOKEN, PLATFORM_API_URL              │
-     |            │  - Configured via env vars at container start
+     |            │  - RUN_TOKEN, PLATFORM_API_URL via env      │
      |            │  - Exposes /mcp (JSON-RPC, stateless)       │
      |            │    - provider_call: credential injection    │
      |            │    - run_history                            │
      |            │    - recall_memory                          │
-     |            │  - ExtraHosts → host.docker.internal        │
+     |            │  - ExtraHosts → host.docker.internal only   │
+     |            │    when platform network not auto-detected  │
      |            ├─────────────────────────────────────────────┤
      |            │  Agent Container (Pi Coding Agent, Bun)     │
      |            │  - AGENT_PROMPT, LLM_*                      │
@@ -156,7 +156,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |            │  - NO RUN_TOKEN, NO PLATFORM_API_URL        │
      |            │  - NO ExtraHosts (cannot reach host)        │
      |            │  - Files injected before start (parallel)   │
-     |            │  - MCP client calls /mcp tools/call          │
+     |            │  - MCP client calls /mcp tools/call         │
      |            │  - Outputs JSON lines on stdout             │
      |            └─────────────────────────────────────────────┘
 ```

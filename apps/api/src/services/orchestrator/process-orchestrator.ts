@@ -202,8 +202,8 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (config.llm) {
       if (config.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
-        // parses it into config.llm so handleOauthLlmRequest can run from
-        // boot (no /configure round-trip needed in process mode).
+        // parses it into config.llm at boot so handleOauthLlmRequest can run
+        // from the first request.
         env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(config.llm);
       } else {
         env.PI_BASE_URL = config.llm.baseUrl;

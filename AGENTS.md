@@ -134,7 +134,7 @@ appstrate/
 ### Docker Integration
 
 - Docker client: `fetch()` + unix socket -- NOT dockerode (socket bugs with Bun)
-- Sidecar pool: pre-warmed containers for fast startup
+- Sidecars are spawned per-run; image pre-pull at orchestrator init absorbs cold-pull (20-45s) off the first run
 - Credential isolation: agent calls sidecar proxy, never sees raw credentials
 - Multiplexed stream headers: `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`
 
