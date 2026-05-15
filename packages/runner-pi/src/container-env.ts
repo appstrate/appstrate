@@ -44,6 +44,15 @@ export interface RuntimePiEnvOptions {
    * before container boot.
    */
   sidecarProxyLlmUrl?: string;
+  /**
+   * When `true`, no sidecar will be attached to the run. The entrypoint
+   * skips the MCP wiring phase entirely (no `provider_call`, `run_history`,
+   * `recall_memory` tools), `SIDECAR_URL` is not emitted, and the agent
+   * talks to the upstream LLM directly via {@link sidecarProxyLlmUrl} or
+   * the model's native baseUrl. Only valid for runs that declare no
+   * providers and use a static API key.
+   */
+  noSidecar?: boolean;
   /** IDs of the providers the agent may call. Serialised as a comma-separated list. */
   connectedProviders?: ReadonlyArray<string>;
   /** Optional JSON Schema injected for constrained decoding. */
@@ -95,14 +104,16 @@ export interface RuntimePiEnvOptions {
  */
 export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, string> {
   const { model } = opts;
-  const sidecarUrl = opts.sidecarUrl ?? "http://sidecar:8080";
 
   const env: Record<string, string> = {
     AGENT_PROMPT: opts.agentPrompt,
     MODEL_API: model.api,
     MODEL_ID: model.modelId,
-    SIDECAR_URL: sidecarUrl,
   };
+
+  if (!opts.noSidecar) {
+    env.SIDECAR_URL = opts.sidecarUrl ?? "http://sidecar:8080";
+  }
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
@@ -134,7 +145,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.OUTPUT_SCHEMA = JSON.stringify(opts.outputSchema);
   }
 
-  if (opts.forwardProxyUrl) {
+  if (opts.forwardProxyUrl && !opts.noSidecar) {
     const noProxy = opts.noProxy ?? "sidecar,localhost,127.0.0.1";
     env.HTTP_PROXY = opts.forwardProxyUrl;
     env.HTTPS_PROXY = opts.forwardProxyUrl;

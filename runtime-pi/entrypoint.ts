@@ -302,10 +302,6 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
-if (!sidecarUrl) {
-  await emitError("SIDECAR_URL is required: the agent container cannot run without a sidecar.");
-  process.exit(1);
-}
 
 // Empty stub forwarded to `runner.run({ providerResolver })` to satisfy
 // the AFPS spec contract — PiRunner does not invoke the resolver
@@ -313,108 +309,133 @@ if (!sidecarUrl) {
 // `RunOptions.providerResolver` field is REQUIRED on the AFPS interface.
 const providerResolver: ProviderResolver = { resolve: async () => [] };
 
-let mcpClient: AppstrateMcpClient;
-try {
-  // Retry the initial MCP handshake — the platform now starts the agent
-  // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
-  // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
-  // still wiring its listener and the Docker DNS alias is propagating.
-  // AWS-style full jitter (50ms → 1s) absorbs the race without
-  // pessimising the warm-path; the default 60s deadline covers
-  // worst-case cold container pulls (#406 acceptance criteria: 20–45s
-  // boots are routine). Operators on slow registries can widen via
-  // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
-  mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-    ...(env.runToken ? { bearerToken: env.runToken } : {}),
-    clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
-    retry: {
-      deadlineMs: env.mcpConnectDeadlineMs,
-      baseMs: 50,
-      capMs: 1_000,
-      onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-        // pino-shaped JSON line — stdout is captured by the platform's
-        // container log buffer, so this lands on the same audit trail
-        // operators use for run diagnostics.
-        process.stdout.write(
-          `${JSON.stringify({
-            level: "warn",
-            event: "mcp_connect_retry",
-            url,
-            attempt,
-            delayMs,
-            errorCode: errorCode ?? null,
-            error: error instanceof Error ? error.message : String(error),
-          })}\n`,
-        );
+// When no sidecar is attached (plan with empty providers[] + static API
+// key), the agent runs without MCP-backed tools. The platform wires
+// MODEL_BASE_URL directly to the upstream provider; the LLM only sees
+// the agent's bundle tools + runtime extensions.
+let mcpClient: AppstrateMcpClient | undefined;
+if (sidecarUrl) {
+  try {
+    // Retry the initial MCP handshake — the platform now starts the agent
+    // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+    // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
+    // still wiring its listener and the Docker DNS alias is propagating.
+    // AWS-style full jitter (50ms → 1s) absorbs the race without
+    // pessimising the warm-path; the default 60s deadline covers
+    // worst-case cold container pulls (#406 acceptance criteria: 20–45s
+    // boots are routine). Operators on slow registries can widen via
+    // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
+    mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+      ...(env.runToken ? { bearerToken: env.runToken } : {}),
+      clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+      retry: {
+        deadlineMs: env.mcpConnectDeadlineMs,
+        baseMs: 50,
+        capMs: 1_000,
+        onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
+          // pino-shaped JSON line — stdout is captured by the platform's
+          // container log buffer, so this lands on the same audit trail
+          // operators use for run diagnostics.
+          process.stdout.write(
+            `${JSON.stringify({
+              level: "warn",
+              event: "mcp_connect_retry",
+              url,
+              attempt,
+              delayMs,
+              errorCode: errorCode ?? null,
+              error: error instanceof Error ? error.message : String(error),
+            })}\n`,
+          );
+        },
       },
-    },
-  });
-} catch (err) {
-  await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
-  process.exit(1);
-}
+    });
+  } catch (err) {
+    await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
+    process.exit(1);
+  }
 
-try {
-  const effectiveBundle = bundle ?? buildInContainerBundle(env.agentPrompt);
+  try {
+    const effectiveBundle = bundle ?? buildInContainerBundle(env.agentPrompt);
 
-  // `buildMcpDirectFactories` registers `provider_call` (only when
-  // the bundle declares providers — empty enum is rejected by the
-  // SDK), `run_history`, and `recall_memory` in one shot.
-  const factories = await buildMcpDirectFactories({
-    bundle: effectiveBundle,
-    mcp: mcpClient,
-    runId: AGENT_RUN_ID,
-    // The workspace is the path-safety root for `provider_call`'s
-    // `{ fromFile }` / `{ multipart }` body resolution. The container
-    // injects bundle files into this directory at boot, and the agent
-    // can only write inside it — `resolveSafePath` refuses anything
-    // else.
-    workspace: WORKSPACE,
-    emitProvider: (event) => {
-      void bridgedSink.handle(event as RunEvent);
-    },
-    emit: (event) => {
-      void bridgedSink.handle(event as RunEvent);
-    },
-  });
-  extensionFactories.push(...factories);
+    // `buildMcpDirectFactories` registers `provider_call` (only when
+    // the bundle declares providers — empty enum is rejected by the
+    // SDK), `run_history`, and `recall_memory` in one shot.
+    const factories = await buildMcpDirectFactories({
+      bundle: effectiveBundle,
+      mcp: mcpClient,
+      runId: AGENT_RUN_ID,
+      // The workspace is the path-safety root for `provider_call`'s
+      // `{ fromFile }` / `{ multipart }` body resolution. The container
+      // injects bundle files into this directory at boot, and the agent
+      // can only write inside it — `resolveSafePath` refuses anything
+      // else.
+      workspace: WORKSPACE,
+      emitProvider: (event) => {
+        void bridgedSink.handle(event as RunEvent);
+      },
+      emit: (event) => {
+        void bridgedSink.handle(event as RunEvent);
+      },
+    });
+    extensionFactories.push(...factories);
 
-  // Wire the tool-side credentialed-call surface (4th `execute` arg). Same
-  // MCP path as the LLM-side `provider_call` — ADR-003 holds: credential
-  // is injected by the sidecar, never reaches the agent container.
-  const allowedProviderIds = new Set(readProviderRefs(effectiveBundle).map((r) => r.name));
-  const mcp = mcpClient;
+    // Wire the tool-side credentialed-call surface (4th `execute` arg). Same
+    // MCP path as the LLM-side `provider_call` — ADR-003 holds: credential
+    // is injected by the sidecar, never reaches the agent container.
+    const allowedProviderIds = new Set(readProviderRefs(effectiveBundle).map((r) => r.name));
+    const mcp = mcpClient;
+    appstrateRuntimeCtx = {
+      providerCall: async (providerId, args) => {
+        if (!allowedProviderIds.has(providerId)) {
+          throw new Error(
+            `Tool tried to call provider '${providerId}' which is not declared in the agent bundle's dependencies.providers[]. ` +
+              `Allowed: ${[...allowedProviderIds].join(", ") || "(none)"}`,
+          );
+        }
+        const result = await mcp.callTool({
+          name: "provider_call",
+          arguments: { providerId, ...args },
+        });
+        return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
+      },
+      readResource: async (uri) => {
+        const result = await mcp.readResource({ uri });
+        return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
+      },
+    };
+  } catch (err) {
+    await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
+    process.exit(1);
+  }
+
+  // --- 2d. Zero-knowledge enforcement ---
+  // The sidecar URL is a runtime implementation detail. Now that the
+  // MCP client owns the only path to the sidecar, remove the env var
+  // so the Pi bash extension cannot leak it via `echo $SIDECAR_URL` or
+  // similar. Safe: no downstream consumer in this process reads
+  // SIDECAR_URL past this point.
+  delete process.env.SIDECAR_URL;
+} else {
+  // No sidecar attached — wire a stub tool ctx that rejects any provider
+  // call. The bundle's manifest should not declare providers in this path
+  // (the platform's `pi.ts` only takes this branch when providers[] is
+  // empty), but a misconfigured bundle still gets a clear error rather
+  // than a null-deref.
   appstrateRuntimeCtx = {
-    providerCall: async (providerId, args) => {
-      if (!allowedProviderIds.has(providerId)) {
-        throw new Error(
-          `Tool tried to call provider '${providerId}' which is not declared in the agent bundle's dependencies.providers[]. ` +
-            `Allowed: ${[...allowedProviderIds].join(", ") || "(none)"}`,
-        );
-      }
-      const result = await mcp.callTool({
-        name: "provider_call",
-        arguments: { providerId, ...args },
-      });
-      return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
+    providerCall: async (providerId) => {
+      throw new Error(
+        `Tool tried to call provider '${providerId}' but this run was launched without a sidecar — ` +
+          `the bundle declared no providers in dependencies.providers[].`,
+      );
     },
     readResource: async (uri) => {
-      const result = await mcp.readResource({ uri });
-      return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
+      throw new Error(
+        `Tool tried to read MCP resource '${uri}' but this run was launched without a sidecar.`,
+      );
     },
   };
-} catch (err) {
-  await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
-  process.exit(1);
 }
-
-// --- 2d. Zero-knowledge enforcement ---
-// The sidecar URL is a runtime implementation detail. Now that the
-// MCP client owns the only path to the sidecar, remove the env var
-// so the Pi bash extension cannot leak it via `echo $SIDECAR_URL` or
-// similar. Safe: no downstream consumer in this process reads
-// SIDECAR_URL past this point.
-delete process.env.SIDECAR_URL;
 
 // --- 3. Model + system prompt from env ---
 
@@ -535,11 +556,11 @@ try {
     eventSink: bridgedSink,
   });
   heartbeat.stop();
-  await mcpClient.close().catch(() => {});
+  await mcpClient?.close().catch(() => {});
   process.exit(0);
 } catch (err) {
   heartbeat.stop();
-  await mcpClient.close().catch(() => {});
+  await mcpClient?.close().catch(() => {});
   const message = getErrorMessage(err);
   await emitError(message);
   try {
