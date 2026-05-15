@@ -718,6 +718,7 @@ async function persistEventAndAdvance(
   run: RunSinkContext,
   event: RunEvent,
   sequence: number,
+  opts: { allowGap?: boolean } = {},
 ): Promise<void> {
   // Claim the sequence atomically BEFORE dispatching. The CAS on the
   // previous sequence is the single point of serialisation across
@@ -737,11 +738,24 @@ async function persistEventAndAdvance(
   // duplicated rows just like a concurrent drain. Crash recovery for
   // un-acked events lives in the HttpSink retry layer on the runner
   // side (4 attempts, exponential backoff), not here.
+  //
+  // `allowGap`: relax the predecessor check to `lastEventSequence <
+  // sequence`. Used exclusively by the terminal drain in finalize when
+  // a fast-path POST never arrived for some intermediate sequence —
+  // without it, the strict `= sequence - 1` CAS rejects every buffered
+  // event past the missing one, drainBufferedEvents removes them from
+  // the buffer anyway, and the rows are silently lost. The relaxed CAS
+  // still serialises across concurrent drains: whoever wins jumps
+  // `lastEventSequence` to `sequence`, the loser sees `last >= sequence`
+  // and skips dispatch.
   const casT0 = Date.now();
+  const predicate = opts.allowGap
+    ? sql`${runs.lastEventSequence} < ${sequence}`
+    : eq(runs.lastEventSequence, sequence - 1);
   const claimed = await db
     .update(runs)
     .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-    .where(and(eq(runs.id, run.id), eq(runs.lastEventSequence, sequence - 1)))
+    .where(and(eq(runs.id, run.id), predicate))
     .returning({ id: runs.id });
   if (claimed.length === 0) {
     // Another concurrent ingestion path already claimed this sequence.
@@ -855,7 +869,14 @@ async function drainBufferedEvents(
         actualSequence: head.sequence,
         type: head.event.type,
       });
-      await persistEventAndAdvance(run, head.event, head.sequence);
+      // allowGap relaxes the CAS in persistEventAndAdvance so it accepts
+      // `lastEventSequence < sequence` instead of `= sequence - 1`. The
+      // strict CAS would otherwise reject every buffered event past the
+      // missing one, drainBufferedEvents would remove them from the
+      // buffer anyway, and they would silently never reach run_logs —
+      // the canonical "10 tool_execution_end rows missing on a bursty
+      // parallel turn" symptom this branch is meant to recover from.
+      await persistEventAndAdvance(run, head.event, head.sequence, { allowGap: true });
       await buffer.remove(run.id, head.sequence);
       drainedCount += 1;
       continue;

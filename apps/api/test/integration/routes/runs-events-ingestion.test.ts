@@ -226,6 +226,59 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(after?.lastEventSequence).toBe(2);
   });
 
+  // Regression for the silent-event-drop on bursty parallel turns.
+  //
+  // Symptom: on a 10-tool parallel turn, the 10 `tool_execution_end`
+  // rows were missing from `run_logs` even though the runner POSTed
+  // every event. The runner's HttpSink assigns sequence numbers
+  // synchronously but the fetch calls race, so events past the contiguous
+  // prefix land at the platform out of order and get buffered. When
+  // some intermediate sequence's POST never won the fast-path CAS,
+  // every later buffered event sat in the buffer until finalize's
+  // `drainBufferedEvents(allowGaps: true)`. The gap_fill branch called
+  // `persistEventAndAdvance(seq=56)` but the strict CAS predicate
+  // `lastEventSequence = seq - 1` rejected it (`last` was still 32),
+  // the buffer entry was removed regardless, and the row was silently
+  // lost. The fix relaxes the CAS to `lastEventSequence < seq` in
+  // allowGap mode so the jump is honoured.
+  it("finalize drains buffered events past a sequence gap (gap_fill regression)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    // Plant a 50-event burst entirely past a gap: seq=1 is missing,
+    // seq=2..51 all post out-of-order so they go to buffer.
+    for (const sequence of [3, 5, 4, 7, 6, 2, 9, 8, 11, 10]) {
+      const env = buildEnvelope(
+        runId,
+        "appstrate.progress",
+        { message: `gap-${sequence}`, timestamp: Date.now() },
+        sequence,
+      );
+      const res = await postEvent(runId, env);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { outcome: string }).outcome).toBe("buffered");
+    }
+
+    const [mid] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(mid?.lastEventSequence).toBe(0);
+
+    // Finalize triggers drainBufferedEvents(allowGaps: true). Without the
+    // gap_fill CAS fix, every seq=2..11 buffered event would be removed
+    // from the buffer with no dispatch — run_logs would have zero rows
+    // from this batch.
+    const res = await postFinalize(runId, { status: "success", durationMs: 100 });
+    expect(res.status).toBe(200);
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.lastEventSequence).toBe(11);
+    expect(after?.sinkClosedAt).not.toBeNull();
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const gapLogs = logs.filter(
+      (l) => typeof l.message === "string" && l.message.startsWith("gap-"),
+    );
+    expect(gapLogs.length).toBe(10);
+  });
+
   // Regression for the HttpSink off-by-one: the first event emitted by
   // HttpSink carries sequence=1 (not 0). With `last_event_sequence`
   // defaulting to 0, `sequence === last + 1` must accept 1 on the
