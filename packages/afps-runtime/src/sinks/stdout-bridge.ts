@@ -172,6 +172,15 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
   let finalizeCalled = false;
   let partial = "";
 
+  // Pending fire-and-forget POSTs kicked off by `dispatchLine` — the
+  // stdout JSONL pipe cannot await `sink.handle(event)` because the
+  // process.stdout.write monkey-patch is synchronous, so each dispatch
+  // is detached as a promise tracked here. Finalize awaits them before
+  // forwarding so the server-side sink closure (CAS in finalizeRun)
+  // doesn't 410 a late POST and silently drop the row. The Set is
+  // self-pruning: each promise removes itself on settle.
+  const pendingDispatches = new Set<Promise<void>>();
+
   const sink: EventSink = {
     async handle(event) {
       if (isStdoutEventLine(event)) foldEvent(aggregate, event);
@@ -183,6 +192,15 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
       // CAS-guarded, but we don't want to send the same payload twice).
       if (finalizeCalled) return;
       finalizeCalled = true;
+      // Drain dispatchLine fire-and-forget POSTs BEFORE forwarding
+      // finalize. Without this, an `output.emitted` POST kicked off
+      // 50 ms before finalize but still mid-HMAC arrives at the
+      // server AFTER finalizeRun has closed the sink — the platform
+      // returns 410, the dispatchLine catch swallows it, and the
+      // event silently never appears in run_logs.
+      if (pendingDispatches.size > 0) {
+        await Promise.allSettled([...pendingDispatches]);
+      }
       await opts.sink.finalize(mergeTerminalResult(aggregate, result));
     },
   };
@@ -207,7 +225,12 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
     const event: RunEvent = { ...(parsed as RunEvent), runId: opts.runId };
     // Fire-and-forget — the underlying sink owns its own retry/error
     // policy. Awaiting here would block stdout writes synchronously.
-    void sink.handle(event).catch(() => {});
+    // The promise is tracked in `pendingDispatches` so `finalize` can
+    // converge them before propagating to the underlying sink (see
+    // comment there).
+    const promise: Promise<void> = sink.handle(event).catch(() => {});
+    pendingDispatches.add(promise);
+    promise.finally(() => pendingDispatches.delete(promise));
     return true;
   }
 
