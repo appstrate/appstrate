@@ -28,7 +28,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  SidecarConfig,
+  SidecarLaunchSpec,
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
@@ -187,28 +187,31 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   async createSidecar(
     runId: string,
     _boundary: IsolationBoundary,
-    config: SidecarConfig,
+    spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
-    const port = await this.findAvailablePort();
+    const [port, platformApiUrl] = await Promise.all([
+      this.findAvailablePort(),
+      this.resolvePlatformApiUrl(),
+    ]);
     const id = `sidecar-${runId}`;
 
     const env: Record<string, string> = {
       ...cleanProcessEnv(),
       PORT: String(port),
-      PLATFORM_API_URL: config.platformApiUrl,
-      RUN_TOKEN: config.runToken,
+      PLATFORM_API_URL: platformApiUrl,
+      RUN_TOKEN: spec.runToken,
     };
-    if (config.proxyUrl) env.PROXY_URL = config.proxyUrl;
-    if (config.llm) {
-      if (config.llm.authMode === "oauth") {
+    if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
+    if (spec.llm) {
+      if (spec.llm.authMode === "oauth") {
         // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
-        // parses it into config.llm so handleOauthLlmRequest can run from
-        // boot (no /configure round-trip needed in process mode).
-        env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(config.llm);
+        // parses it into config.llm at boot so handleOauthLlmRequest can run
+        // from the first request.
+        env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
       } else {
-        env.PI_BASE_URL = config.llm.baseUrl;
-        env.PI_API_KEY = config.llm.apiKey;
-        env.PI_PLACEHOLDER = config.llm.placeholder;
+        env.PI_BASE_URL = spec.llm.baseUrl;
+        env.PI_API_KEY = spec.llm.apiKey;
+        env.PI_PLACEHOLDER = spec.llm.placeholder;
       }
     }
 

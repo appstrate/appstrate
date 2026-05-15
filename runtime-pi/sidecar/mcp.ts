@@ -5,7 +5,7 @@
  * MCP exposure of the sidecar's capabilities — the only agent-facing
  * surface after the migration.
  *
- * The sidecar's HTTP endpoints are `/health` and `/configure`; everything
+ * The sidecar's only first-party HTTP endpoint is `/health`; everything
  * the agent talks to (`provider_call`, `run_history`, `recall_memory`) is
  * dispatched here as MCP tools.
  *

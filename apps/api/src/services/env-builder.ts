@@ -5,7 +5,6 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
 import { getProvider } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
 import {
@@ -161,13 +160,6 @@ export async function buildRunContext(params: {
   }
 
   // Step 4: assemble AFPS execution context + platform plan
-  const apiEnv = getEnv();
-  const runApiUrl =
-    apiEnv.PLATFORM_API_URL ??
-    (apiEnv.RUN_ADAPTER === "process"
-      ? `http://localhost:${apiEnv.PORT}`
-      : `http://host.docker.internal:${apiEnv.PORT}`);
-
   const context: ExecutionContext = {
     runId,
     input: input ?? {},
@@ -189,7 +181,7 @@ export async function buildRunContext(params: {
     rawPrompt: agent.prompt,
     outputSchema: extractManifestSchemas(agent.manifest).output,
     llmConfig: modelResult,
-    runApi: { url: runApiUrl, token: signRunToken(runId) },
+    runToken: signRunToken(runId),
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,
     tokens,

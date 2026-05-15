@@ -9,9 +9,10 @@ The agent container has no platform credentials, no access to `host.docker.inter
 The sidecar's external HTTP surface is intentionally small:
 
 - `GET /health` — Readiness probe. Returns 200 when ready, 503 (`{ status: "degraded" }`) otherwise.
-- `POST /configure` — One-time runtime configuration for pool-pre-warmed sidecars (`runToken`, `platformApiUrl`, `proxyUrl`, optional `llm`). Authenticated via `Bearer ${CONFIG_SECRET}` and locked after first use. Permanently locked when the sidecar was started fresh with `RUN_TOKEN` already in the environment.
 - `ALL /llm/*` — LLM reverse proxy consumed by the in-container Pi SDK as `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The sidecar substitutes the per-run placeholder embedded in SDK-generated headers for the real LLM API key, then streams the upstream response back zero-copy. SSRF-blocked against private/metadata addresses; bound by `LLM_PROXY_TIMEOUT_MS`.
 - `ALL /mcp` — JSON-RPC entrypoint mounted by `mountMcp`. Per-request transport, no session affinity. Authenticated via `Authorization: Bearer ${runToken}`. The Host header is validated against `{sidecar, 127.0.0.1, localhost}` regardless of port (DNS-rebinding defence).
+
+Sidecars are spawned per-run with all runtime configuration (run token, platform URL, proxy URL, LLM config) injected via environment variables at container start. There is no runtime configuration endpoint.
 
 ## MCP tools
 
@@ -144,5 +145,5 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/provider-tool.ts`](../../packages/afps-runtime/src/resolvers/provider-tool.ts).
 - The `provider_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/provider-upload-resolver.ts`](../mcp/provider-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
-- Sidecar pool lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
+- Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
 - Provider auth modes (`oauth2` / `oauth1` / `api_key` / `basic` / `custom`) and the `credentialHeaderName` / `credentialHeaderPrefix` injection contract live in `@appstrate/connect`.

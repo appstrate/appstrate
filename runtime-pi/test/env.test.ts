@@ -25,6 +25,7 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
     expect(env.workspaceDir).toBe("/workspace");
     expect(env.heartbeatIntervalMs).toBe(30_000);
+    expect(env.mcpConnectDeadlineMs).toBe(60_000);
     expect(env.modelInput).toEqual(["text"]);
     expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     expect(env.modelContextWindow).toBe(128_000);
@@ -50,6 +51,7 @@ describe("parseRuntimeEnv — happy path", () => {
       AGENT_INPUT: '{"foo":"bar","n":1}',
       SIDECAR_URL: "http://sidecar:8080",
       APPSTRATE_HEARTBEAT_INTERVAL_MS: "10000",
+      APPSTRATE_MCP_CONNECT_DEADLINE_MS: "90000",
       OUTPUT_SCHEMA: '{"type":"object"}',
     });
     expect(env.workspaceDir).toBe("/agent");
@@ -63,6 +65,7 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.agentInput).toEqual({ foo: "bar", n: 1 });
     expect(env.sidecarUrl).toBe("http://sidecar:8080");
     expect(env.heartbeatIntervalMs).toBe(10_000);
+    expect(env.mcpConnectDeadlineMs).toBe(90_000);
     expect(env.outputSchemaRaw).toBe('{"type":"object"}');
   });
 

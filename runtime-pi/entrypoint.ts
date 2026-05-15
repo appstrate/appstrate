@@ -320,9 +320,39 @@ const providerResolver: ProviderResolver = { resolve: async () => [] };
 
 let mcpClient: AppstrateMcpClient;
 try {
+  // Retry the initial MCP handshake — the platform now starts the agent
+  // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+  // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
+  // still wiring its listener and the Docker DNS alias is propagating.
+  // AWS-style full jitter (50ms → 1s) absorbs the race without
+  // pessimising the warm-path; the default 60s deadline covers
+  // worst-case cold container pulls (#406 acceptance criteria: 20–45s
+  // boots are routine). Operators on slow registries can widen via
+  // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
   mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
     ...(env.runToken ? { bearerToken: env.runToken } : {}),
     clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+    retry: {
+      deadlineMs: env.mcpConnectDeadlineMs,
+      baseMs: 50,
+      capMs: 1_000,
+      onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
+        // pino-shaped JSON line — stdout is captured by the platform's
+        // container log buffer, so this lands on the same audit trail
+        // operators use for run diagnostics.
+        process.stdout.write(
+          `${JSON.stringify({
+            level: "warn",
+            event: "mcp_connect_retry",
+            url,
+            attempt,
+            delayMs,
+            errorCode: errorCode ?? null,
+            error: error instanceof Error ? error.message : String(error),
+          })}\n`,
+        );
+      },
+    },
   });
 } catch (err) {
   await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);

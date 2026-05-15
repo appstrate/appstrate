@@ -28,7 +28,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     called = true;
     setShuttingDown();
 
-    logger.info("Shutdown initiated, stopping sidecar pool...");
+    logger.info("Shutdown initiated, stopping container orchestrator...");
     stopUploadGc();
     await getOrchestrator().shutdown();
 

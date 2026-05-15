@@ -314,7 +314,6 @@ const envSchema = z
 
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
     RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
-    SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),

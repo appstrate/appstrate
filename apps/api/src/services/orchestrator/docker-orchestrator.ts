@@ -7,21 +7,15 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  SidecarConfig,
+  SidecarLaunchSpec,
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
 import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
-import * as sidecarPool from "../sidecar-pool.ts";
-import { getSidecarImage, startSidecarAndHealthCheck } from "../sidecar-pool.ts";
-import {
-  SIDECAR_MEMORY_BYTES,
-  SIDECAR_NANO_CPUS,
-  SIDECAR_EXPOSED_PORTS,
-  SIDECAR_PORT_BINDINGS,
-} from "./constants.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -33,15 +27,26 @@ class DockerWorkloadHandle implements WorkloadHandle {
 
 export class DockerOrchestrator implements ContainerOrchestrator {
   private egressNetworkId: string | null = null;
+  /**
+   * Set of sidecar container IDs whose exit is expected (run is being
+   * torn down). The {@link watchSidecarExit} watcher consults this set
+   * to suppress the "sidecar exited unexpectedly" log on the cleanup
+   * path. Added in {@link stopWorkload}, consumed by the watcher, and
+   * defensively cleared in {@link removeWorkload} / {@link shutdown}.
+   */
+  private expectedSidecarExits = new Set<string>();
 
   async initialize(): Promise<void> {
     // Ensure runtime images are present (may have been pruned by host cleanup).
-    // Use ensureImage (not pullImage) so locally-built / custom-tagged images aren't re-pulled.
+    // Use ensureImage (not pullImage) so locally-built / custom-tagged images
+    // aren't re-pulled. Pulling once at boot amortises a 20–45 s cold pull off
+    // the first run's critical path — the agent's own Bun cold start (~1 s)
+    // already masks the warm-image sidecar boot, so a pre-warmed pool buys
+    // nothing extra on the user-visible latency.
     const env = getEnv();
-    await Promise.all([docker.ensureImage(env.PI_IMAGE), docker.ensureImage(env.SIDECAR_IMAGE)]);
-
-    const [, , egressId] = await Promise.all([
-      sidecarPool.initSidecarPool(),
+    const [, , , egressId] = await Promise.all([
+      docker.ensureImage(env.PI_IMAGE),
+      docker.ensureImage(env.SIDECAR_IMAGE),
       docker.detectPlatformNetwork(),
       docker.createNetwork("appstrate-egress"),
     ]);
@@ -49,11 +54,14 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async shutdown(): Promise<void> {
-    await sidecarPool.shutdownSidecarPool();
     if (this.egressNetworkId) {
       await docker.removeNetwork(this.egressNetworkId).catch(() => {});
       this.egressNetworkId = null;
     }
+    // Drop any residual entries — long-lived API processes accumulate
+    // one per timed-out / aborted run because `removeWorkload` always
+    // re-adds after `stopWorkload` consumed the watcher's match.
+    this.expectedSidecarExits.clear();
   }
 
   async ensureImages(images: string[]): Promise<void> {
@@ -82,80 +90,43 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   async createSidecar(
     runId: string,
     boundary: IsolationBoundary,
-    config: SidecarConfig,
+    spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
-    const platformNetwork = await docker.detectPlatformNetwork();
+    const env = getEnv();
+    const [platformApiUrl, platformNetwork] = await Promise.all([
+      this.resolvePlatformApiUrl(),
+      docker.detectPlatformNetwork(),
+    ]);
 
-    // Resolve platform API URL. When we can talk to the platform over its
-    // Docker network, always prefer that: it keeps credential traffic inside
-    // the Docker bridge (no NAT, no public hop, no TLS overhead) and survives
-    // Coolify redeploys that rename the platform container.
-    const resolvedPlatformApiUrl = platformNetwork
-      ? `http://${platformNetwork.hostname}:${getEnv().PORT}`
-      : config.platformApiUrl;
-
-    const resolvedConfig = {
-      runToken: config.runToken,
-      platformApiUrl: resolvedPlatformApiUrl,
-      proxyUrl: config.proxyUrl,
-      llm: config.llm,
+    const sidecarEnv: Record<string, string> = {
+      PORT: "8080",
+      ...pickOperatorSidecarEnv(),
+      RUN_TOKEN: spec.runToken,
+      PLATFORM_API_URL: platformApiUrl,
     };
-
-    // 1. Try pool (fast path ~50-130ms)
-    const pooled = await sidecarPool.acquireSidecar(
-      runId,
-      boundary.id,
-      resolvedConfig,
-      platformNetwork,
-    );
-    if (pooled) {
-      // Connect pooled sidecar to egress network (internet access)
-      if (this.egressNetworkId) {
-        await docker.connectContainerToNetwork(this.egressNetworkId, pooled);
-      }
-      return new DockerWorkloadHandle(pooled, runId, "sidecar");
-    }
-
-    // 2. Fallback: fresh creation (~500-1500ms)
-    // Operator-tunable sidecar caps are read from the API host's
-    // process.env and forwarded into the spawned container so
-    // overrides apply to fresh sidecars (pooled sidecars pick up the
-    // value at pool creation time — see sidecar-pool.ts).
-    const sidecarEnv: Record<string, string> = { PORT: "8080", ...pickOperatorSidecarEnv() };
-    if (resolvedConfig.runToken) {
-      sidecarEnv.RUN_TOKEN = resolvedConfig.runToken;
-      sidecarEnv.PLATFORM_API_URL = resolvedConfig.platformApiUrl;
-    }
-    if (resolvedConfig.proxyUrl) {
-      sidecarEnv.PROXY_URL = resolvedConfig.proxyUrl;
-    }
-    if (resolvedConfig.llm) {
-      if (resolvedConfig.llm.authMode === "oauth") {
-        // OAuth wire format: ship the LlmProxyOauthConfig as JSON, matching
-        // process-orchestrator. server.ts in the sidecar parses it into
-        // config.llm at boot so handleOauthLlmRequest can serve /llm/* on the
-        // fresh-creation path without a /configure round-trip. Without this,
-        // /llm/* returns 503 "LLM proxy not configured" whenever the pool is
-        // empty / disabled / exhausted (cold start, SIDECAR_POOL_SIZE=0, …).
-        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(resolvedConfig.llm);
+    if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
+    if (spec.llm) {
+      if (spec.llm.authMode === "oauth") {
+        // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
+        // server.ts parses it into config.llm at boot. Without this,
+        // /llm/* returns 503 "LLM proxy not configured".
+        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
       } else {
-        sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
-        sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
-        sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
+        sidecarEnv.PI_BASE_URL = spec.llm.baseUrl;
+        sidecarEnv.PI_API_KEY = spec.llm.apiKey;
+        sidecarEnv.PI_PLACEHOLDER = spec.llm.placeholder;
       }
     }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.
     const containerId = await docker.createContainer(runId, sidecarEnv, {
-      image: getSidecarImage(),
+      image: env.SIDECAR_IMAGE,
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: this.egressNetworkId!,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
-      portBindings: SIDECAR_PORT_BINDINGS,
-      exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
 
     // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
@@ -165,9 +136,80 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
     }
 
-    await startSidecarAndHealthCheck(containerId);
+    // #406 — parallel boot. Start the sidecar but DO NOT block on its
+    // `/health` here. The agent (started in parallel by pi.ts) drives
+    // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
+    //   - ECONNREFUSED while the sidecar is wiring its listener
+    //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
+    // Sidecar exit detection still happens loudly: a non-blocking watcher
+    // races `waitForExit` against the run. If the sidecar dies before MCP
+    // connects, the watcher logs `exitCode` + buffered stderr/stdout, so
+    // operators see "sidecar exited 1 (npm not found)" rather than the
+    // agent's eventual "deadline exceeded" hand-wave.
+    await docker.startContainer(containerId);
+    this.watchSidecarExit(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
+  }
+
+  /**
+   * Non-blocking watcher: race the sidecar's exit against the run. The
+   * caller never awaits this — its only job is to surface a sidecar
+   * that crashes mid-handshake with a structured log line carrying the
+   * exit code + a snippet of the container's stderr. Without it, a
+   * dead-on-arrival sidecar manifests as an agent-side "MCP connect
+   * deadline exceeded after 30000ms" 30s later, with no platform-side
+   * evidence of root cause.
+   *
+   * Best-effort: errors are swallowed (the orchestrator's main lifecycle
+   * is the source of truth for failure surfaces). Errors here would only
+   * add noise to a path that's already going to fail loudly somewhere.
+   */
+  private watchSidecarExit(runId: string, containerId: string): void {
+    void (async () => {
+      try {
+        const exitCode = await docker.waitForExit(containerId);
+        // Cleanup path stops/removes the sidecar after the run terminates
+        // — those exits are expected and never indicate a problem.
+        if (this.expectedSidecarExits.has(containerId)) {
+          this.expectedSidecarExits.delete(containerId);
+          return;
+        }
+        if (exitCode !== 0) {
+          // Pull a short tail of logs — best-effort, bounded so we
+          // don't keep a generator open forever if logs are streamed.
+          // 2s window: on a busy Docker daemon the multiplexed-stream
+          // parser may not have emitted any complete lines under 500ms
+          // after the exit, which defeats the purpose of the watcher.
+          let tail = "";
+          try {
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), 2_000);
+            const lines: string[] = [];
+            for await (const line of docker.streamLogs(containerId, abort.signal)) {
+              lines.push(line);
+              if (lines.length >= 30) break;
+            }
+            clearTimeout(timer);
+            tail = lines.slice(-30).join("\n");
+          } catch {
+            // Swallow — diagnostic is best-effort.
+          }
+          logger.error("Sidecar exited before run completed", {
+            runId,
+            containerId,
+            exitCode,
+            ...(tail ? { tail } : {}),
+          });
+        }
+      } catch (err) {
+        logger.debug("Sidecar exit watcher errored", {
+          runId,
+          containerId,
+          error: getErrorMessage(err),
+        });
+      }
+    })();
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
@@ -193,11 +235,17 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
+    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
     await docker.stopContainer(handle.id, timeoutSeconds);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
+    // No `expectedSidecarExits.add` here: by the time we're removing the
+    // container its `waitForExit` watcher has already resolved (either
+    // through the happy path or via `stopWorkload`'s suppression). Adding
+    // again would leak one string per run for the process lifetime.
     await docker.removeContainer(handle.id);
+    if (handle.role === "sidecar") this.expectedSidecarExits.delete(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {

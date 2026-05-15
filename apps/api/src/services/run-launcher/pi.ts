@@ -42,7 +42,7 @@ import { isOAuthModelProvider, getModelProvider } from "../model-providers/regis
 import type {
   LlmProxyConfig,
   LlmProxyOauthConfig,
-  SidecarConfig,
+  SidecarLaunchSpec,
 } from "@appstrate/core/sidecar-types";
 
 /** Terminal state reported back to the caller once the container has exited. */
@@ -136,9 +136,8 @@ export async function runPlatformContainer(
       };
     }
 
-    const sidecarConfig: SidecarConfig = {
-      runToken: plan.runApi?.token ?? "",
-      platformApiUrl: plan.runApi?.url ?? "",
+    const sidecarSpec: SidecarLaunchSpec = {
+      runToken: plan.runToken ?? "",
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
     };
@@ -199,7 +198,7 @@ export async function runPlatformContainer(
     // Sidecar + agent setup in parallel (identical to the legacy path —
     // the only behavioural change is WHERE the agent's events end up).
     const [sidecar, agent] = await Promise.all([
-      orch.createSidecar(runId, boundary, sidecarConfig),
+      orch.createSidecar(runId, boundary, sidecarSpec),
       orch.createWorkload(
         {
           runId,

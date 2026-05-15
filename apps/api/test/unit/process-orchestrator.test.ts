@@ -220,7 +220,6 @@ describe("ProcessOrchestrator", () => {
         await expect(
           orchestrator.createSidecar("test-run-health-fail", boundary, {
             runToken: "tok",
-            platformApiUrl: "http://localhost:1",
           }),
         ).rejects.toThrow(/health check timed out/i);
       } finally {

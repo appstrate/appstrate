@@ -67,8 +67,13 @@ export interface AppstrateRunPlan {
   llmConfig: ResolvedModel;
 
   // --- Platform wiring ---
-  /** Callback URL + signed token for the agent container. Optional — runners that don't expose a callback API may omit it. */
-  runApi?: { url: string; token: string };
+  /**
+   * Signed run token authorising the sidecar's `/internal/*` calls back into
+   * the platform. Optional — runners that don't expose a callback API omit
+   * it. The platform URL is resolved by the container orchestrator at spawn
+   * time, not surfaced on this plan.
+   */
+  runToken?: string;
   /** Outbound HTTP proxy, if any. */
   proxyUrl?: string | null;
   /** Seconds cap on the container lifetime. */

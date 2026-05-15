@@ -29,7 +29,7 @@ import { encrypt } from "@appstrate/connect";
 import type {
   ContainerOrchestrator,
   IsolationBoundary,
-  SidecarConfig,
+  SidecarLaunchSpec,
   WorkloadHandle,
   WorkloadSpec,
   CleanupReport,
@@ -99,7 +99,7 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,
-      _sidecarConfig: SidecarConfig,
+      _spec: SidecarLaunchSpec,
     ): Promise<WorkloadHandle> {
       const w: FakeWorkload = {
         id: `sidecar_${runId}`,

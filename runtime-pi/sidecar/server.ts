@@ -23,8 +23,8 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   return undefined;
 }
 
-// Mutable config — can be set via env vars at startup or updated at runtime
-// via POST /configure (used by sidecar pool for pre-warmed containers).
+// Config is set once at startup via env vars — sidecars are spawned per-run
+// with credentials already baked in.
 const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   runToken: process.env.RUN_TOKEN || "",
@@ -64,11 +64,8 @@ async function refreshCredentials(providerId: string): Promise<CredentialsRespon
 
 const port = parseInt(process.env.PORT || "8080", 10);
 const proxy = createForwardProxy({ config, listenPort: port + 1 });
-const preConfigured = Boolean(process.env.RUN_TOKEN);
 // One cache per sidecar process — a sidecar serves a single run, so
-// cross-run pollution is impossible. The cache reads from the live
-// `config` object via getter functions so that tokens follow the
-// (potentially-pooled) runtime configuration after `/configure`.
+// cross-run pollution is impossible.
 const oauthTokenCache = new OAuthTokenCache({
   getPlatformApiUrl: () => config.platformApiUrl,
   getRunToken: () => config.runToken,
@@ -79,8 +76,6 @@ const app = createApp({
   refreshCredentials,
   cookieJar,
   isReady: () => proxy.readySync,
-  configSecret: process.env.CONFIG_SECRET || undefined,
-  preConfigured,
   oauthTokenCache,
 });
 

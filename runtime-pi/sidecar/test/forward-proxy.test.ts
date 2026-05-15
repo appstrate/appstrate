@@ -382,7 +382,7 @@ describe("platform host exemption", () => {
     const blocked = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/before`);
     expect(blocked.status).toBe(403);
 
-    // Mutate config (simulating POST /configure on a pooled sidecar)
+    // Mutate config to simulate a late platform-API resolution
     config.platformApiUrl = `http://127.0.0.1:${echo.port}`;
 
     const allowed = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/after`);
