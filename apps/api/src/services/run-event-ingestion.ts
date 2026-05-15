@@ -783,11 +783,26 @@ async function persistEventAndAdvance(
     // Another concurrent ingestion path already claimed this sequence.
     // Skip the dispatch — that path is responsible for inserting the
     // run_logs row exactly once.
+    //
+    // Refresh the in-memory snapshot from the DB. The caller (typically
+    // drainBufferedEvents) re-computes `next = run.lastEventSequence + 1`
+    // on every loop iteration; without the refresh it would keep using
+    // the stale pre-CAS value, conclude that the buffer head represents
+    // a gap (`head.sequence > next` when the gap was actually filled by
+    // the racing path), and bail out — leaving every subsequent buffered
+    // event stranded until finalize's gap_fill.
+    const [fresh] = await db
+      .select({ s: runs.lastEventSequence })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
     trace("persist.cas_lost", {
       runId: run.id,
       sequence,
       type: event.type,
       latencyMs: Date.now() - casT0,
+      refreshedLastSeq: run.lastEventSequence,
     });
     return;
   }
