@@ -1075,21 +1075,14 @@ function evaluateBudget(args: {
   }
   const estimated = args.tokenBudget.estimate(args.text);
   const decision = args.tokenBudget.tryReserve(estimated);
-  // Per-call decision log — info-level on spill so operators see the guard
-  // fire without grep'ing for the later "spilled to blob store" log, debug
-  // on inline so the common path doesn't drown out logs at info. Surfaces
-  // the post-record consumed snapshot so the running total is legible from
-  // a single line.
-  const logFn = decision.decision === "spill" ? logger.info : logger.debug;
-  logFn("token-budget decision", {
+  // Per-call trace at debug only. Spill events are already surfaced by
+  // the downstream "spilled to blob store" / "blob store full" / "no
+  // blob store configured" logs in spillToBlobStore.
+  logger.debug("token-budget decision", {
     decision: decision.decision,
     reason: decision.reason,
     estimatedTokens: estimated,
     consumedTokens: decision.consumedTokens,
-    inlineCapTokens: decision.inlineCapTokens,
-    runBudgetTokens: decision.runBudgetTokens,
-    contextWindowTokens: decision.contextWindowTokens,
-    reserveTokens: decision.reserveTokens,
   });
   return {
     shouldSpill: decision.decision === "spill",

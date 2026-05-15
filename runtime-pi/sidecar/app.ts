@@ -538,44 +538,26 @@ export function createApp(deps: AppDeps): Hono {
     "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
     DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   );
-  // Context-window guard (#464): when the launcher forwards the resolved
-  // model's window + reserve, the budget refuses to inline a
-  // `provider_call` output that would push `consumed + estimated` past
-  // `contextWindow - reserve`. Without these the budget falls back to the
-  // legacy inline-cap + run-budget guard, which a parallel fan-out can
-  // collectively defeat (each call fits inline, the sum blows the
-  // upstream model's hard limit).
-  // `reserveTokens` is only forwarded alongside `contextWindowTokens` —
-  // the TokenBudget constructor rejects the lone-reserve case loudly,
-  // and the launcher never emits maxTokens without the window in
-  // practice (both come from the same resolved-model row).
-  const contextWindowOpt =
-    config.modelContextWindow !== undefined
-      ? {
-          contextWindowTokens: config.modelContextWindow,
-          ...(config.modelMaxTokens !== undefined ? { reserveTokens: config.modelMaxTokens } : {}),
-        }
-      : {};
+  // Context-window guard (#464): when the launcher forwards both the
+  // resolved model's window + reserve, the budget refuses to inline a
+  // `provider_call` output that would push past `contextWindow - reserve`.
+  // The constructor rejects a lone `reserveTokens`; the launcher never
+  // emits `maxTokens` without `contextWindow` (same resolved-model row).
   const tokenBudget = new TokenBudget({
     inlineCapTokens,
     runBudgetTokens,
-    ...contextWindowOpt,
+    ...(config.modelContextWindow !== undefined
+      ? { contextWindowTokens: config.modelContextWindow }
+      : {}),
+    ...(config.modelMaxTokens !== undefined && config.modelContextWindow !== undefined
+      ? { reserveTokens: config.modelMaxTokens }
+      : {}),
   });
-  // Boot-time visibility into the budget config — operators can confirm
-  // the launcher actually forwarded the window/reserve pair (vs. silently
-  // falling back to the legacy two-tier guard). Reading the resolved
-  // fields off the budget itself avoids drift between the env values and
-  // what the constructor accepted.
   logger.info("token-budget configured", {
     inlineCapTokens: tokenBudget.inlineCapTokens,
     runBudgetTokens: tokenBudget.runBudgetTokens,
     contextWindowTokens: tokenBudget.contextWindowTokens,
     reserveTokens: tokenBudget.reserveTokens,
-    contextWindowGuardActive: tokenBudget.contextWindowTokens !== null,
-    spillThresholdTokens:
-      tokenBudget.contextWindowTokens !== null
-        ? tokenBudget.contextWindowTokens - tokenBudget.reserveTokens
-        : null,
   });
   // Fan-out cap on `provider_call`. Defaults to
   // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
