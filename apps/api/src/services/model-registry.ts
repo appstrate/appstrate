@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { modelCostSchema } from "@appstrate/shared-types";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
 // --- Types ---
@@ -27,7 +27,7 @@ export interface SystemModelProviderKeyDefinition {
   apiKey: string;
 }
 
-export interface ModelDefinition {
+export interface ModelDefinition extends ModelMetadata {
   id: string;
   /**
    * Optional. The resolver in `org-models.ts` falls back to the vendored
@@ -45,11 +45,6 @@ export interface ModelDefinition {
   modelId: string;
   apiKey: string;
   credentialId: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
   isDefault?: boolean;
   enabled?: boolean;
 }

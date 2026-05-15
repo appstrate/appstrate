@@ -16,7 +16,8 @@
  * trigger function bodies against the current schema.
  */
 
-import { describe, it, beforeAll, beforeEach } from "bun:test";
+import { describe, it, beforeAll, afterAll, beforeEach } from "bun:test";
+import { sql } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
@@ -28,6 +29,19 @@ describe("NOTIFY triggers (regression)", () => {
 
   beforeAll(async () => {
     await createNotifyTriggers(db);
+  });
+
+  // Drop the triggers we installed so they do not leak to other test files.
+  // The full suite (`bun test`) runs every file in a single Bun process; without
+  // this teardown, run-metric-broadcaster + run-metric-streaming + persisting-event-sink
+  // see runs_notify_trigger firing on every UPDATE the broadcaster issues to
+  // persist `cost`, deliver an extra `run_update` event to their subscribers,
+  // and trip `toHaveBeenCalledTimes(N)` assertions by one. The leak is order-
+  // sensitive (Bun's per-file ordering is not strict alphabetical) which is
+  // why CI flaked while local runs sometimes passed.
+  afterAll(async () => {
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_trigger ON runs`);
+    await db.execute(sql`DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs`);
   });
 
   beforeEach(async () => {

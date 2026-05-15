@@ -2,17 +2,15 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
+import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp } from "./mcp.ts";
-import {
-  DEFAULT_PROVIDER_CALL_CONCURRENCY,
-  Semaphore,
-  readPositiveConcurrencyEnv,
-} from "./semaphore.ts";
 import { BlobStore } from "./blob-store.ts";
 import {
+  DEFAULT_PROVIDER_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
   isBlockedUrl,
+  readPositiveIntEnv,
   type SidecarConfig,
   type CredentialsResponse,
   type LlmProxyOauthConfig,
@@ -601,16 +599,13 @@ export function createApp(deps: AppDeps): Hono {
   // Fan-out cap on `provider_call`. Defaults to
   // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
   // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
-  const providerCallSemaphore = new Semaphore(
-    readPositiveConcurrencyEnv(
-      "SIDECAR_PROVIDER_CALL_CONCURRENCY",
-      DEFAULT_PROVIDER_CALL_CONCURRENCY,
-    ),
+  const providerCallLimit: LimitFunction = pLimit(
+    readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
   );
   mountMcp(app, {
     blobStore,
     tokenBudget,
-    providerCallSemaphore,
+    providerCallLimit,
     proxyDeps: {
       config,
       cookieJar,
