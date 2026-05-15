@@ -11,11 +11,19 @@
  *   runtime-tools/
  *     <tool-slug>/
  *       tool.ts    ← descriptor (this type)
- *       TOOL.md    ← prose imported via Bun text-import
+ *       TOOL.md    ← prose loaded by the platform at prompt-build time
  *
- * The four fields are sufficient for both consumers:
- *   - The platform prompt builder uses `id`/`name`/`description`/`doc`
- *     to extend `availableTools` and `toolDocs`.
+ * The descriptor stays free of `doc` on purpose: `TOOL.md` is read by
+ * the consumer (the platform prompt builder, via `loadRuntimeToolDoc`),
+ * exactly like bundle tools where the platform reads `TOOL.md` from
+ * the package's file map (`pkg.files.get("TOOL.md")`). This keeps
+ * runtime-pi's bundled entrypoint slim — it never carries doc strings
+ * it doesn't use.
+ *
+ * The three fields below are sufficient for both consumers:
+ *   - The platform prompt builder uses `id`/`name`/`description` for
+ *     `availableTools` and pairs each tool with its `TOOL.md` via
+ *     `loadRuntimeToolDoc` when extending `toolDocs`.
  *   - The runtime container uses `name`/`description`/`parameters` to
  *     register a generic MCP-forwarding Pi tool via
  *     `runtime-tools/mcp-forward.ts:buildRuntimeToolFactories`.
@@ -39,14 +47,4 @@ export interface RuntimeInjectedTool {
    * the runtime wraps it with `Type.Unsafe(schema)` at registration.
    */
   readonly parameters: Readonly<Record<string, unknown>>;
-  /**
-   * `TOOL.md`-equivalent doc: a complete prose fragment that teaches
-   * the LLM how to use the tool — parameters, scoping, common
-   * patterns. Rendered alongside bundle `TOOL.md`s in the platform
-   * prompt's tool-doc area. Conventionally loaded from a co-located
-   * `TOOL.md` file via `readFileSync(new URL("./TOOL.md", import.meta.url))`
-   * at module-import time. Should start with a level-2 markdown
-   * heading (`## tool_name`) for visual parity with bundle docs.
-   */
-  readonly doc: string;
 }

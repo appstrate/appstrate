@@ -6,8 +6,10 @@
  *
  * The list is the single source of truth consumed by:
  *   - `runtime-pi/mcp/direct.ts` to register Pi tools that forward to MCP
- *   - `apps/api/services/adapters/prompt-builder.ts` to extend
- *     `availableTools` and `toolDocs` on the platform prompt
+ *   - `apps/api/services/run-launcher/prompt-builder.ts` to extend
+ *     `availableTools` and `toolDocs` on the platform prompt — `TOOL.md`
+ *     is loaded via `loadRuntimeToolDoc`, mirroring how bundle tools
+ *     expose their doc through `pkg.files.get("TOOL.md")`.
  *
  * The tests below lock the descriptor's invariants so that adding a new
  * entry to the list (the documented extension point) requires zero
@@ -23,6 +25,7 @@ import {
   RECALL_MEMORY_INJECTED_TOOL,
   RUN_HISTORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
+  loadRuntimeToolDoc,
   type RuntimeInjectedTool,
 } from "../src/runtime-tools/index.ts";
 
@@ -48,17 +51,15 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
       // Required by the MCP-forwarding factory in runtime-pi/mcp/direct.ts.
       expect(typeof tool.parameters).toBe("object");
       expect(tool.parameters).not.toBeNull();
-      // Required so the LLM learns the calling convention from the prompt.
-      expect(typeof tool.doc).toBe("string");
-      expect(tool.doc.length).toBeGreaterThan(0);
     }
   });
 
-  it("doc fragments start with a level-2 markdown heading matching the tool name", () => {
-    // The TOOL.md convention is `## tool_name`, so doc fragments
-    // rendered alongside bundle TOOL.mds match visually.
+  it("descriptors do NOT carry a `doc` field — TOOL.md is platform-resolved", () => {
+    // Locality contract: doc strings live in TOOL.md, never inlined
+    // into the descriptor module. Mirrors bundle tools, where
+    // `pkg.files.get("TOOL.md")` is the only doc resolution path.
     for (const tool of RUNTIME_INJECTED_TOOLS) {
-      expect(tool.doc).toMatch(new RegExp(`^## ${tool.name}\\b`));
+      expect((tool as { doc?: unknown }).doc).toBeUndefined();
     }
   });
 
@@ -91,7 +92,6 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
       name: "x",
       description: "x",
       parameters: { type: "object", properties: {} },
-      doc: "## x",
     };
     expect(_exhaustive.name).toBe("x");
   });
@@ -119,25 +119,32 @@ describe("runtime-tools directory layout", () => {
       await expect(stat(docFile)).resolves.toBeDefined();
     }
   });
+});
 
-  it("each tool's `TOOL.md` is the descriptor's `doc` (locality contract)", async () => {
-    // Loading the doc from a co-located file is the contract that
-    // mirrors bundle tools. If a tool inlines its prose into `tool.ts`
-    // instead, this test catches the regression.
-    const slugByName = new Map<string, string>([
-      ["run_history", "run-history"],
-      ["recall_memory", "recall-memory"],
-    ]);
+describe("loadRuntimeToolDoc", () => {
+  // The platform-side loader mirrors bundle tools' `pkg.files.get(
+  // "TOOL.md")`: a single resolution point that reads the co-located
+  // file at call time. The descriptor itself stays doc-free.
+  const slugByName = new Map<string, string>([
+    ["run_history", "run-history"],
+    ["recall_memory", "recall-memory"],
+  ]);
 
+  it("returns the exact bytes of the co-located TOOL.md", async () => {
     for (const tool of RUNTIME_INJECTED_TOOLS) {
       const slug = slugByName.get(tool.name);
       expect(slug).toBeDefined();
       const docPath = join(RUNTIME_TOOLS_DIR, slug!, "TOOL.md");
       const fileContent = await readFile(docPath, "utf8");
-      // Bun's `import doc from "./TOOL.md" with { type: "text" }`
-      // returns the file contents verbatim. The descriptor's `doc`
-      // must equal the file content (no inlining or re-templating).
-      expect(tool.doc).toBe(fileContent);
+      expect(loadRuntimeToolDoc(tool)).toBe(fileContent);
+    }
+  });
+
+  it("returned content starts with `## <tool_name>` (visual parity with bundle docs)", () => {
+    // The TOOL.md convention is `## tool_name`, so doc fragments
+    // rendered alongside bundle TOOL.mds match visually.
+    for (const tool of RUNTIME_INJECTED_TOOLS) {
+      expect(loadRuntimeToolDoc(tool)).toMatch(new RegExp(`^## ${tool.name}\\b`));
     }
   });
 });
