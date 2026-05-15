@@ -37,6 +37,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
+import { PI_DEFAULT_CONTEXT_WINDOW, PI_DEFAULT_RESERVE_TOKENS } from "@appstrate/core/pi-defaults";
 import {
   emptyRunResult,
   reduceEvents,
@@ -103,24 +104,12 @@ export interface PiRunnerOptions {
 }
 
 /**
- * Default response budget when the model carries no `maxTokens`.
- * 16384 covers the common "no thinking" Claude / GPT response shape;
- * models with larger budgets (Claude Sonnet thinking @ 64k) override
- * via `model.maxTokens` and `reserveTokens` follows.
- */
-const DEFAULT_RESERVE_TOKENS = 16384;
-/**
  * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
  * recent context (a few thousand tokens of recent tool calls + the last
  * user message) and starts replaying earlier turns. 20k is small enough
  * to fit even tiny context windows once `reserveTokens` is subtracted.
  */
 const MIN_KEEP_RECENT_TOKENS = 20_000;
-/**
- * Fallback context window when the model omits it. Matches the Claude
- * family's standard 200k window — the most common runtime target.
- */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
 /** Fraction of the context window to keep verbatim after a compaction pass. */
 const KEEP_RECENT_FRACTION = 0.1;
 
@@ -132,7 +121,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `model.maxTokens ?? 16384`             | Response budget. MUST be ≥ `max_tokens` or the first call post-compaction underflows and the upstream 400 ("prompt is too long") reappears. Critical for Claude Sonnet thinking mode (`maxTokens: 64000`). |
+ * | `reserveTokens`    | `model.maxTokens ?? PI_DEFAULT_RESERVE_TOKENS` | Response budget. MUST be ≥ `max_tokens` or the first call post-compaction underflows and the upstream 400 ("prompt is too long") reappears. Critical for Claude Sonnet thinking mode (`maxTokens: 64000`). Default lives in `@appstrate/core/pi-defaults` — keep in sync with the sidecar TokenBudget. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * Operators can disable compaction entirely with
@@ -145,8 +134,8 @@ export function derivePiCompactionSettings(
   env: Record<string, string | undefined> = process.env,
 ): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
   if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
-  const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-  const reserveTokens = model.maxTokens ?? DEFAULT_RESERVE_TOKENS;
+  const contextWindow = model.contextWindow ?? PI_DEFAULT_CONTEXT_WINDOW;
+  const reserveTokens = model.maxTokens ?? PI_DEFAULT_RESERVE_TOKENS;
   const keepRecentTokens = Math.max(
     MIN_KEEP_RECENT_TOKENS,
     Math.floor(contextWindow * KEEP_RECENT_FRACTION),

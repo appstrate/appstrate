@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*"
   },
   "peerDependencies": {

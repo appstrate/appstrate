@@ -63,6 +63,7 @@
  *   - LLM-backed summarisation of spilled blobs (separate feature).
  */
 
+import { PI_DEFAULT_RESERVE_TOKENS } from "@appstrate/core/pi-defaults";
 import { readPositiveIntEnv } from "./helpers.ts";
 
 /**
@@ -230,26 +231,21 @@ export interface TokenBudgetOptions {
 }
 
 /**
- * Floor on the derived `reserveTokens` when only `contextWindowTokens`
- * is supplied. Matches `DEFAULT_RESERVE_TOKENS` in
- * `packages/runner-pi/src/pi-runner.ts` — deliberate so the
- * platform-side compaction threshold and the sidecar-side spill guard
- * land on the same numbers for the same model. Bump both together.
- */
-const MIN_DERIVED_RESERVE_TOKENS = 16_384;
-
-/**
  * Fraction of the context window to reserve for the model's response
  * when no explicit `reserveTokens` (or `maxTokens` on the upstream
  * model) is supplied. 20 % covers Sonnet thinking @ 64 k on a 200 k
  * window without overshooting; smaller windows scale down naturally.
+ * The floor comes from {@link PI_DEFAULT_RESERVE_TOKENS} — same value
+ * the platform-side `derivePiCompactionSettings` uses when sizing Pi
+ * SDK compaction, so the spill guard and the compaction threshold
+ * agree on the response budget for the same model.
  */
 const DEFAULT_RESERVE_FRACTION = 0.2;
 
 function deriveReserveTokens(contextWindowTokens: number, explicit: number | undefined): number {
   if (explicit !== undefined) return explicit;
   return Math.max(
-    MIN_DERIVED_RESERVE_TOKENS,
+    PI_DEFAULT_RESERVE_TOKENS,
     Math.floor(contextWindowTokens * DEFAULT_RESERVE_FRACTION),
   );
 }

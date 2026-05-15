@@ -68,6 +68,7 @@
     "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
+    "./pi-defaults": "./src/pi-defaults.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts"
   },
