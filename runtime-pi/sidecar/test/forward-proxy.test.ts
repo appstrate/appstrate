@@ -54,6 +54,50 @@ function startEchoServer(): Promise<{ port: number; server: HttpServer }> {
   });
 }
 
+/**
+ * Start a fake upstream HTTP proxy that captures the target hosts it was
+ * asked to forward to and replies with a distinguishable response (header
+ * `X-Via-Upstream: true`). Use to prove that the forward proxy did — or did
+ * not — chain through the upstream for a given target.
+ *
+ * On CONNECT, replies `403 Forbidden` so the inner forward proxy surfaces
+ * an "upstream rejected" status to its caller; if the bypass worked the
+ * caller gets `200 Connection Established` directly from the target host.
+ */
+function startFakeUpstream(): Promise<{
+  port: number;
+  server: HttpServer;
+  receivedHttpHosts: string[];
+  receivedConnectTargets: string[];
+}> {
+  const receivedHttpHosts: string[] = [];
+  const receivedConnectTargets: string[] = [];
+  return new Promise((resolve) => {
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let host = "";
+      try {
+        host = new URL(req.url ?? "").hostname;
+      } catch {
+        /* ignore */
+      }
+      receivedHttpHosts.push(host);
+      res.writeHead(200, { "Content-Type": "application/json", "X-Via-Upstream": "true" });
+      res.end(JSON.stringify({ proxied: true, host }));
+    });
+    server.on("connect", (req, clientSocket) => {
+      receivedConnectTargets.push(req.url ?? "");
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.destroy();
+    });
+    servers.push(server);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" ? addr!.port : 0;
+      resolve({ port, server, receivedHttpHosts, receivedConnectTargets });
+    });
+  });
+}
+
 function makeProxy(overrides?: Parameters<typeof createForwardProxy>[0]): ForwardProxyResult {
   const result = createForwardProxy({
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
@@ -433,6 +477,119 @@ describe("platform host exemption", () => {
 
     const res = await connectViaProxy(port, "169.254.169.254:80");
     expect(res.statusCode).toBe(403);
+  });
+});
+
+// --- Upstream proxy bypass for platform host ---
+//
+// A residential / datacenter egress proxy configured via `config.proxyUrl`
+// (Decodo, Bright Data, …) typically refuses RFC1918 / docker-bridge
+// hostnames as "restricted targets" with a 403. Platform sink traffic must
+// keep flowing even when such a proxy is wired up, otherwise the agent
+// crashes at bootstrap (the very first POST to the sink would fail).
+
+describe("upstream proxy bypass for platform host", () => {
+  it("HTTP: platform host is reached directly, not via upstream proxy", async () => {
+    const echo = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/sink/events`);
+    expect(res.status).toBe(200);
+    // X-Via-Upstream is only set by the fake upstream → its absence proves bypass.
+    expect(res.headers["x-via-upstream"]).toBeUndefined();
+    const body = JSON.parse(res.body);
+    expect(body.url).toBe("/sink/events"); // came from echo directly
+    expect(upstream.receivedHttpHosts).toHaveLength(0);
+  });
+
+  it("HTTP: non-platform host is routed through the upstream proxy", async () => {
+    const target = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        // Platform points elsewhere — the target below is NOT the platform.
+        platformApiUrl: "http://platform-host:3000",
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${target.port}/external`);
+    expect(res.status).toBe(200);
+    expect(res.headers["x-via-upstream"]).toBe("true");
+    expect(upstream.receivedHttpHosts).toContain("127.0.0.1");
+  });
+
+  it("HTTP: platform-host bypass is case-insensitive", async () => {
+    const echo = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        // Mixed case platform host — comparison should lower-case both sides.
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
+    expect(res.status).toBe(200);
+    expect(upstream.receivedHttpHosts).toHaveLength(0);
+  });
+
+  it("CONNECT: platform host is tunneled directly, not chained through upstream proxy", async () => {
+    const echo = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${echo.port}`,
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
+    expect(res.statusCode).toBe(200); // direct TCP tunnel succeeded
+    expect(upstream.receivedConnectTargets).toHaveLength(0);
+  });
+
+  it("CONNECT: non-platform host is chained through the upstream proxy", async () => {
+    const echo = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://platform-host:3000",
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
+    // Fake upstream rejects CONNECT with 403 → forward proxy surfaces "Upstream Rejected".
+    expect(res.statusCode).toBe(403);
+    expect(upstream.receivedConnectTargets).toContain(`127.0.0.1:${echo.port}`);
   });
 });
 
