@@ -191,8 +191,12 @@ const baseProviderSchema = z.object({
       }),
     )
     .optional(),
-  // Password grant (ROPC, RFC 6749 §4.3) — required when authMode === "password"
-  passwordTokenUrl: z.string().optional(),
+  // Password grant (ROPC, RFC 6749 §4.3) — required when authMode === "password".
+  // `passwordTokenUrl` is parsed as a URL at the API boundary so an org admin
+  // can't point ROPC at a relative path or a non-URL string; the upstream POST
+  // sends username + password to this endpoint, so a malformed value is the
+  // single worst input we can accept here.
+  passwordTokenUrl: z.url().optional(),
   passwordScope: z.string().optional(),
 });
 

@@ -26,6 +26,7 @@ import {
   getProviderCredentialId,
   getConnection,
   RefreshError,
+  PasswordGrantError,
 } from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
@@ -387,7 +388,15 @@ export function createInternalRouter() {
       // other OAuth error codes) must not flag — the credential might still
       // be valid and the initial 401 that triggered this refresh may have
       // come from a malformed agent request, not a dead token.
-      if (err instanceof RefreshError && err.kind === "revoked") {
+      //
+      // Same rule for password-grant (ROPC) connections: a `PasswordGrantError`
+      // with kind `"revoked"` means either the stored username/password was
+      // rejected or both the refresh_token AND the re-bootstrap failed. Either
+      // way the connection is unusable and must be flagged.
+      const isRevoked =
+        (err instanceof RefreshError && err.kind === "revoked") ||
+        (err instanceof PasswordGrantError && err.kind === "revoked");
+      if (isRevoked) {
         await db
           .update(userProviderConnections)
           .set({ needsReconnection: true, updatedAt: new Date() })
@@ -404,18 +413,20 @@ export function createInternalRouter() {
           runId,
           providerId,
           connectionProfileId,
-          status: err.status,
+          status: err instanceof RefreshError ? err.status : (err as PasswordGrantError).status,
         });
 
         throw unauthorized(`Token refresh failed for provider '${providerId}': credential revoked`);
       }
 
+      const classifiedErr =
+        err instanceof RefreshError || err instanceof PasswordGrantError ? err : undefined;
       logger.warn("Transient refresh failure, connection left unchanged", {
         runId,
         providerId,
         connectionProfileId,
-        kind: err instanceof RefreshError ? err.kind : "unknown",
-        status: err instanceof RefreshError ? err.status : undefined,
+        kind: classifiedErr?.kind ?? "unknown",
+        status: classifiedErr?.status,
         error: getErrorMessage(err),
       });
 

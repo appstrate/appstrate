@@ -145,6 +145,30 @@ async function savePasswordGrantTokens(
 }
 
 /**
+ * In-memory concurrency lock: one bootstrap/refresh in flight per
+ * connection. Parallel `provider_call`s on a fresh password connection
+ * would otherwise POST the same username/password twice and race the
+ * resulting UPDATE — and some IdPs lock the account after N rapid
+ * bad-password requests. Mirrors `token-refresh.ts:inflightRefreshes`.
+ *
+ * Keyed by `connection.id` so the same lock covers both the lazy
+ * bootstrap (in `getCredentials`) and the explicit `forceRefresh` path.
+ */
+const inflightPasswordGrants = new Map<string, Promise<DecryptedCredentials>>();
+
+function coalescePasswordGrant(
+  connectionId: string,
+  fn: () => Promise<DecryptedCredentials>,
+): Promise<DecryptedCredentials> {
+  const inflight = inflightPasswordGrants.get(connectionId);
+  if (inflight) return inflight;
+  const promise = fn();
+  inflightPasswordGrants.set(connectionId, promise);
+  void promise.finally(() => inflightPasswordGrants.delete(connectionId));
+  return promise;
+}
+
+/**
  * Bootstrap a password-grant connection: exchange the stored username +
  * password for an access token (RFC 6749 §4.3) and persist the result.
  *
@@ -292,7 +316,9 @@ export async function getCredentials(
   // kind: "revoked") MUST surface to the caller so the connection is
   // flagged correctly.
   if (authMode === "password" && !decrypted.access_token) {
-    decrypted = await bootstrapPasswordGrantConnection(db, connection, decrypted, def);
+    decrypted = await coalescePasswordGrant(connection.id, () =>
+      bootstrapPasswordGrantConnection(db, connection, decrypted, def),
+    );
   }
 
   // Return current credentials as-is. The sidecar handles 401 → refresh → retry.
@@ -379,7 +405,9 @@ export async function forceRefreshCredentials(
       refreshContext,
     );
   } else if (authMode === "password") {
-    decrypted = await refreshOrBootstrapPasswordGrant(db, connection, def);
+    decrypted = await coalescePasswordGrant(connection.id, () =>
+      refreshOrBootstrapPasswordGrant(db, connection, def),
+    );
   } else {
     decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
   }

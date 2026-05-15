@@ -130,6 +130,12 @@ export type ToolManifest = z.infer<typeof toolManifestSchema>;
  * The AFPS v1 enum stays the source of truth for the other modes — only the
  * extra value is added here, so the platform tracks any future spec changes
  * by re-deriving from `afpsAuthModeEnum.options`.
+ *
+ * TODO(afps-spec): once `password` lands in the canonical AFPS authMode enum,
+ * drop the local extension and consume `afpsAuthModeEnum` directly. Until
+ * then, ZIP imports of provider manifests with `authMode: "password"` fail
+ * at the upstream AFPS validator layer — operators must create such providers
+ * through the dashboard, which uses this extended enum.
  */
 export const authModeEnum = z.enum([...afpsAuthModeEnum.options, "password"]);
 
