@@ -333,7 +333,6 @@ describe("TokenBudget — context-window guard (#464)", () => {
     expect(b.reserveTokens).toBe(0);
     const d = b.decide(8_000);
     expect(d.decision).toBe("inline");
-    expect(d.contextWindowTokens).toBeNull();
   });
 
   it("derives a conservative reserve when only contextWindowTokens is set", () => {
@@ -375,8 +374,6 @@ describe("TokenBudget — context-window guard (#464)", () => {
     const overflow = b.tryReserve(9_750);
     expect(overflow.decision).toBe("spill");
     expect(overflow.reason).toBe("exceeds_context_window");
-    expect(overflow.contextWindowTokens).toBe(200_000);
-    expect(overflow.reserveTokens).toBe(64_000);
   });
 
   it("models the issue #464 scenario: 10 parallel 7.5 K-token tool_results spill the late ones", () => {
@@ -459,17 +456,6 @@ describe("TokenBudget — context-window guard (#464)", () => {
           contextWindowTokens: 1.5,
         }),
     ).toThrow(/positive integer/);
-  });
-
-  it("rejects reserveTokens supplied without contextWindowTokens", () => {
-    expect(
-      () =>
-        new TokenBudget({
-          inlineCapTokens: 100,
-          runBudgetTokens: 1_000,
-          reserveTokens: 50,
-        }),
-    ).toThrow(/contextWindowTokens/);
   });
 
   it("rejects reserveTokens ≥ contextWindowTokens (would leave zero room for tools)", () => {

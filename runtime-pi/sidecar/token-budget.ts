@@ -63,8 +63,18 @@
  *   - LLM-backed summarisation of spilled blobs (separate feature).
  */
 
-import { PI_DEFAULT_RESERVE_TOKENS } from "@appstrate/core/pi-defaults";
 import { readPositiveIntEnv } from "./helpers.ts";
+
+/**
+ * Floor on the derived response reserve when only `contextWindowTokens`
+ * is supplied (no explicit `maxTokens` from the resolved model). 16384
+ * covers the common "no thinking" Claude / GPT response shape; larger
+ * budgets (Sonnet thinking @ 64 k) come through `reserveTokens` directly.
+ * Keep in sync with `packages/runner-pi/src/pi-runner.ts` —
+ * `derivePiCompactionSettings` uses the same default so the spill guard
+ * and Pi SDK's compaction threshold agree for the same model.
+ */
+const DEFAULT_RESERVE_FLOOR_TOKENS = 16_384;
 
 /**
  * Anthropic-recommended chars-per-token ratio for offline estimation.
@@ -178,15 +188,6 @@ export interface BudgetDecision {
   runBudgetTokens: number;
   /** Configured per-call inline cap. */
   inlineCapTokens: number;
-  /**
-   * Configured upstream context-window cap (tokens), or null when the
-   * budget is not wired with a model-level limit. Surfaced for
-   * observability — agents can read this from the `_meta` payload to
-   * surface "X / Y context tokens" in their own UI.
-   */
-  contextWindowTokens: number | null;
-  /** Configured reserve (response budget) within the context window. */
-  reserveTokens: number;
 }
 
 export interface TokenBudgetOptions {
@@ -235,17 +236,14 @@ export interface TokenBudgetOptions {
  * when no explicit `reserveTokens` (or `maxTokens` on the upstream
  * model) is supplied. 20 % covers Sonnet thinking @ 64 k on a 200 k
  * window without overshooting; smaller windows scale down naturally.
- * The floor comes from {@link PI_DEFAULT_RESERVE_TOKENS} — same value
- * the platform-side `derivePiCompactionSettings` uses when sizing Pi
- * SDK compaction, so the spill guard and the compaction threshold
- * agree on the response budget for the same model.
+ * Floored by {@link DEFAULT_RESERVE_FLOOR_TOKENS}.
  */
 const DEFAULT_RESERVE_FRACTION = 0.2;
 
 function deriveReserveTokens(contextWindowTokens: number, explicit: number | undefined): number {
   if (explicit !== undefined) return explicit;
   return Math.max(
-    PI_DEFAULT_RESERVE_TOKENS,
+    DEFAULT_RESERVE_FLOOR_TOKENS,
     Math.floor(contextWindowTokens * DEFAULT_RESERVE_FRACTION),
   );
 }
@@ -316,9 +314,6 @@ export class TokenBudget {
         );
       }
       const reserve = deriveReserveTokens(ctx, options.reserveTokens);
-      if (!Number.isFinite(reserve) || !Number.isInteger(reserve) || reserve <= 0) {
-        throw new Error(`TokenBudget: reserveTokens must be a positive integer, got ${reserve}`);
-      }
       if (reserve >= ctx) {
         throw new Error(
           `TokenBudget: reserveTokens (${reserve}) must be strictly less than contextWindowTokens (${ctx}).`,
@@ -326,13 +321,10 @@ export class TokenBudget {
       }
       this.contextWindowTokens = ctx;
       this.reserveTokens = reserve;
-    } else if (options.reserveTokens !== undefined) {
-      // `reserveTokens` is only meaningful alongside `contextWindowTokens` —
-      // surfacing the mismatch loudly beats silently dropping the value.
-      throw new Error(
-        "TokenBudget: reserveTokens supplied without contextWindowTokens — both must be set together.",
-      );
     } else {
+      // `reserveTokens` without `contextWindowTokens` is silently ignored —
+      // the reserve is only meaningful as the response budget within a
+      // configured window. The launcher only emits the two together.
       this.contextWindowTokens = null;
       this.reserveTokens = 0;
     }
@@ -450,8 +442,6 @@ export class TokenBudget {
       consumedTokens: this.consumed,
       runBudgetTokens: this.runBudgetTokens,
       inlineCapTokens: this.inlineCapTokens,
-      contextWindowTokens: this.contextWindowTokens,
-      reserveTokens: this.reserveTokens,
     };
   }
 }

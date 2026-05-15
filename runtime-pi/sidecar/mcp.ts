@@ -263,15 +263,6 @@ interface TokenBudgetMeta {
   runBudgetTokens: number;
   /** Configured per-call inline cap. */
   inlineCapTokens: number;
-  /**
-   * Configured upstream context-window cap (tokens), or null when the
-   * sidecar's budget is not wired with a model-level limit. Added in
-   * #464 — present even on inline decisions so agents can surface
-   * "X / Y context tokens" alongside the run-budget figure.
-   */
-  contextWindowTokens: number | null;
-  /** Reserve (tokens) within the context window for the model response. */
-  reserveTokens: number;
   /** What the budget tracker decided (after caller overrides). */
   decision: "inline" | "spill";
   /** Why it decided that way (machine-readable). */
@@ -1091,8 +1082,6 @@ function evaluateBudget(args: {
       consumedTokens: decision.consumedTokens,
       runBudgetTokens: decision.runBudgetTokens,
       inlineCapTokens: decision.inlineCapTokens,
-      contextWindowTokens: decision.contextWindowTokens,
-      reserveTokens: decision.reserveTokens,
       decision: decision.decision,
       reason: decision.reason,
     },
