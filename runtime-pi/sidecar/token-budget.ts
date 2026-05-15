@@ -63,6 +63,8 @@
  *   - LLM-backed summarisation of spilled blobs (separate feature).
  */
 
+import { readPositiveIntEnv } from "./helpers.ts";
+
 /**
  * Anthropic-recommended chars-per-token ratio for offline estimation.
  * Documented in the Claude API token-counting guide as
@@ -187,17 +189,12 @@ export interface TokenBudgetOptions {
 
 /**
  * Read a positive-integer token cap from an env var, falling back to
- * `defaultValue` when unset/empty. Mirrors `readPositiveByteEnv` in
- * `helpers.ts` so misconfiguration fails loud at boot.
+ * `defaultValue` when unset/empty. Delegates to {@link readPositiveIntEnv}
+ * from `helpers.ts` with `unit: "tokens"` so misconfiguration fails loud
+ * at boot.
  */
 export function readPositiveTokenEnv(name: string, defaultValue: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer (tokens), got ${JSON.stringify(raw)}.`);
-  }
-  return parsed;
+  return readPositiveIntEnv(name, defaultValue, { unit: "tokens" });
 }
 
 /**

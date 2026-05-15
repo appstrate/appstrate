@@ -15,6 +15,7 @@ import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   OUTBOUND_TIMEOUT_MS,
   readPositiveByteEnv,
+  readPositiveIntEnv,
 } from "../helpers.ts";
 
 // --- Constants ---
@@ -409,6 +410,159 @@ describe("readPositiveByteEnv", () => {
       // Above the custom ceiling — rejected even though far below the
       // module-level ABSOLUTE_BODY_CEILING.
       expect(() => readPositiveByteEnv(name, 100, 5000)).toThrow(/absolute ceiling/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+});
+
+// --- readPositiveIntEnv (unified helper) ---
+
+describe("readPositiveIntEnv", () => {
+  // Use a unique base to avoid leakage between parallel test files.
+  const NAME_BASE = "__APPSTRATE_TEST_INT_ENV";
+
+  it("returns the default when the env var is unset", () => {
+    const name = `${NAME_BASE}_UNSET`;
+    delete process.env[name];
+    expect(readPositiveIntEnv(name, 42)).toBe(42);
+  });
+
+  it("returns the default when the env var is empty", () => {
+    const name = `${NAME_BASE}_EMPTY`;
+    process.env[name] = "";
+    try {
+      expect(readPositiveIntEnv(name, 7)).toBe(7);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("returns the parsed value for a valid positive integer", () => {
+    const name = `${NAME_BASE}_VALID`;
+    process.env[name] = "99";
+    try {
+      expect(readPositiveIntEnv(name, 1)).toBe(99);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws on a negative value", () => {
+    const name = `${NAME_BASE}_NEGATIVE`;
+    process.env[name] = "-5";
+    try {
+      expect(() => readPositiveIntEnv(name, 1)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws on zero", () => {
+    const name = `${NAME_BASE}_ZERO`;
+    process.env[name] = "0";
+    try {
+      expect(() => readPositiveIntEnv(name, 1)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws on a non-integer float", () => {
+    const name = `${NAME_BASE}_FLOAT`;
+    process.env[name] = "3.14";
+    try {
+      expect(() => readPositiveIntEnv(name, 1)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws on a non-numeric string", () => {
+    const name = `${NAME_BASE}_NAN`;
+    process.env[name] = "abc";
+    try {
+      expect(() => readPositiveIntEnv(name, 1)).toThrow(/positive integer/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("throws when the value exceeds the ceiling", () => {
+    const name = `${NAME_BASE}_CEIL`;
+    process.env[name] = "1001";
+    try {
+      expect(() => readPositiveIntEnv(name, 1, { ceiling: 1000 })).toThrow(/absolute ceiling/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("accepts a value at exactly the ceiling", () => {
+    const name = `${NAME_BASE}_AT_CEIL`;
+    process.env[name] = "1000";
+    try {
+      expect(readPositiveIntEnv(name, 1, { ceiling: 1000 })).toBe(1000);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("includes the unit in the error message when provided", () => {
+    const name = `${NAME_BASE}_UNIT`;
+    process.env[name] = "bad";
+    try {
+      expect(() => readPositiveIntEnv(name, 1, { unit: "tokens" })).toThrow(/tokens/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("omits the unit qualifier when no unit is provided", () => {
+    const name = `${NAME_BASE}_NO_UNIT`;
+    process.env[name] = "bad";
+    try {
+      // Error should still mention "positive integer" but NOT "(tokens)" or "(bytes)".
+      const err = (() => {
+        try {
+          readPositiveIntEnv(name, 1);
+        } catch (e) {
+          return e instanceof Error ? e.message : "";
+        }
+        return "";
+      })();
+      expect(err).toContain("positive integer");
+      expect(err).not.toMatch(/\(tokens\)|\(bytes\)/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("ceiling error message references the ceiling value", () => {
+    const name = `${NAME_BASE}_CEIL_MSG`;
+    process.env[name] = "500";
+    try {
+      expect(() => readPositiveIntEnv(name, 1, { ceiling: 100 })).toThrow(/100/);
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("ceiling error message uses the provided unit, not a hard-coded one", () => {
+    const name = `${NAME_BASE}_CEIL_UNIT`;
+    process.env[name] = "1001";
+    try {
+      // Unit is "tokens" — ceiling message must say tokens, not bytes.
+      const msg = (() => {
+        try {
+          readPositiveIntEnv(name, 1, { unit: "tokens", ceiling: 1000 });
+          return "";
+        } catch (e) {
+          return e instanceof Error ? e.message : "";
+        }
+      })();
+      expect(msg).toContain("tokens");
+      expect(msg).not.toContain("bytes");
     } finally {
       delete process.env[name];
     }
