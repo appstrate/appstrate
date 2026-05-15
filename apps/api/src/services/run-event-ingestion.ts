@@ -156,6 +156,23 @@ export async function ingestRunEvent(input: IngestRunEventInput): Promise<Ingest
   });
   if (!claimed) return { status: "replay" };
 
+  try {
+    return await ingestInner(run, envelope);
+  } catch (err) {
+    // Release the replay key so the runner's retry (same webhook-id, fresh
+    // attempt over the wire) is not silently absorbed by the replay check.
+    // Best-effort: a failed DEL leaves the key sticky for `replayWindow`
+    // seconds — strictly worse than success but no worse than the
+    // pre-cleanup baseline. The original error wins regardless.
+    await cache.del(replayKey).catch(() => {});
+    throw err;
+  }
+}
+
+async function ingestInner(
+  run: RunSinkContext,
+  envelope: CloudEventEnvelope,
+): Promise<IngestOutcome> {
   const event = envelopeToRunEvent(envelope, run.id);
   const sequence = envelope.sequence;
 

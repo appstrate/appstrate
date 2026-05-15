@@ -478,6 +478,60 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     }
   });
 
+  // Regression: the replay-protection key must be released when ingestion
+  // throws so the runner's retry (same webhook-id, same body, same HMAC
+  // signature) is not silently absorbed as "replay" → 200 OK with the
+  // event never persisted. Models the production case where HttpSink
+  // retries a transient 5xx with the identical envelope.
+  it("releases the replay key when ingestion throws so a retry can succeed", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "__poison__", timestamp: Date.now() },
+      1,
+    );
+    const body = JSON.stringify(envelope);
+    const stickyHeaders = signedHeaders(RUN_SECRET, body);
+
+    await db.execute(
+      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
+    );
+
+    const first = await app.request(`/api/runs/${runId}/events`, {
+      method: "POST",
+      headers: stickyHeaders,
+      body,
+    });
+    expect(first.status).toBeGreaterThanOrEqual(500);
+
+    // Lift the transient failure and retry with the EXACT SAME envelope
+    // (same body, same webhook-id, same HMAC). Before the cleanup the
+    // replay key was sticky for `replayWindow` seconds and this retry
+    // would have been swallowed as "replay" with the event never
+    // persisted.
+    await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+
+    const second = await app.request(`/api/runs/${runId}/events`, {
+      method: "POST",
+      headers: stickyHeaders,
+      body,
+    });
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
+
+    // And the event actually landed in run_logs (proves the retry did
+    // real ingestion, not a stale-key passthrough).
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(1);
+    const logs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
+    expect(logs).toHaveLength(1);
+  });
+
   // End-to-end coverage for the `@appstrate/report` system tool.
   //
   // Why this lives at the route layer and not just in the sink unit test:
