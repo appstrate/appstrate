@@ -69,11 +69,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/mcp-transport` workspace package adapts the MCP SDK to the
   AFPS tool format (`createMcpServer`, `createInProcessPair`,
   `createMcpHttpClient`).
-  - Sidecar mounts `/mcp` (Streamable HTTP, stateless) alongside `/health`,
-    `/configure`, and `ALL /llm/*` (kept for in-container Pi SDK chat
-    completion streaming). Tool descriptor poisoning hardening (Unicode
-    strip, schema-property recursion) per CyberArk / Invariant Labs
-    advisories.
+  - Sidecar mounts `/mcp` (Streamable HTTP, stateless) alongside `/health`
+    and `ALL /llm/*` (kept for in-container Pi SDK chat completion
+    streaming). Tool descriptor poisoning hardening (Unicode strip,
+    schema-property recursion) per CyberArk / Invariant Labs advisories.
   - Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes
     `process.env.SIDECAR_URL` so even the bash extension cannot discover
     the sidecar. The legacy `/proxy` and `/run-history` HTTP routes are
@@ -211,6 +210,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Sidecar pre-warming pool** — empirical measurement after #406 (parallel
+  agent+sidecar boot with MCP retry) showed the agent's own Bun cold start
+  fully masks warm-image sidecar boot, so pre-warming bought no user-visible
+  latency. Cold-pull protection (20–45 s on first run after deploy) is now
+  handled by `DockerOrchestrator.initialize()` calling `ensureImage()` for
+  both images at API boot. Removed: `apps/api/src/services/sidecar-pool.ts`
+  (~280 LoC), `POST /configure` endpoint, `CONFIG_SECRET` auth, standby
+  network (`appstrate-sidecar-pool`), replenish loop, `preConfigured` flag,
+  `SIDECAR_POOL_SIZE` env var, and host-port bindings on the sidecar
+  container (agents reach the sidecar via the `sidecar` DNS alias on the
+  run network — no host port needed). Sidecars are now spawned per-run with
+  all runtime config injected via env vars at container start.
 - **Pre-prod legacy purge (#288)** — five surgical removals exploiting the
   absence of production data on this branch (net −312 LOC, 36 files):
   - v0 credential-encryption envelope (raw-base64 fallback) — only the v1

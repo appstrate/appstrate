@@ -120,10 +120,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   // In local dev the platform URL resolves to `host.docker.internal`, which
   // is in the SSRF blocklist — exempt that specific host so sink/finalize
   // traffic can reach the platform. Other internal hosts remain blocked.
-  //
-  // `config` is mutated at runtime via POST /configure (pool sidecars start
-  // with a placeholder URL and receive the real one on acquisition), so
-  // recompute the allowed platform host on every request.
   function getPlatformHost(): string | null {
     try {
       return new URL(config.platformApiUrl).hostname.toLowerCase();

@@ -511,11 +511,10 @@ export async function cleanupOrphanedContainers(): Promise<{
 }
 
 /**
- * List all Docker networks matching `appstrate-exec-*` or the shared infra
- * networks (`appstrate-sidecar-pool`, `appstrate-egress`) and remove them.
- * Only safe to call at startup because no runs should be running — the infra
- * networks it targets are actively reused across runs, so tearing them down
- * mid-operation can strand the sidecar pool or break egress routing.
+ * List all Docker networks matching `appstrate-exec-*` or the shared
+ * `appstrate-egress` infra network and remove them. Only safe to call at
+ * startup because no runs should be running — egress is actively reused
+ * across runs, so tearing it down mid-operation breaks egress routing.
  *
  * For opportunistic recovery during a live operation, use
  * {@link cleanupOrphanedRunNetworks} instead, which is strictly scoped to
@@ -523,10 +522,7 @@ export async function cleanupOrphanedContainers(): Promise<{
  */
 export async function cleanupOrphanedNetworks(): Promise<number> {
   return removeNetworksMatching(
-    (name) =>
-      name.startsWith(EXEC_NETWORK_PREFIX) ||
-      name === "appstrate-sidecar-pool" ||
-      name === "appstrate-egress",
+    (name) => name.startsWith(EXEC_NETWORK_PREFIX) || name === "appstrate-egress",
   );
 }
 

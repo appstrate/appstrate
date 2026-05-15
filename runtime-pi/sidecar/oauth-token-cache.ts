@@ -36,9 +36,8 @@ export const CACHE_TTL_MS = 30_000;
 
 export interface OAuthTokenCacheDeps {
   /**
-   * Returns the current platform API base URL. Wrapped in a getter so
-   * the cache picks up post-`/configure` mutations (the sidecar's runtime
-   * config can change after pool acquisition).
+   * Returns the current platform API base URL. Wrapped in a getter for
+   * consistency with the live `config` object (which is mutable in tests).
    */
   getPlatformApiUrl: () => string;
   /** Returns the current run token (Bearer authenticator for `/internal/*`). */

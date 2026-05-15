@@ -131,7 +131,7 @@ Tiers 0-2 run agents as Bun subprocesses — each concurrent run adds ~50-100 MB
 
 **Tier 0** is ideal for personal use, small devices (Raspberry Pi 4+, NAS), or getting started with zero dependencies. **Tiers 1-2** suit small teams and constrained servers. **Tier 3** is for production with full container isolation.
 
-> **Raspberry Pi**: Bun supports ARM64 natively. A Raspberry Pi 4 (4 GB) handles Tiers 0-1 with 2-3 concurrent runs. A Pi 5 (8 GB) can run Tier 2 comfortably or Tier 3 with `SIDECAR_POOL_SIZE=0` and sequential runs.
+> **Raspberry Pi**: Bun supports ARM64 natively. A Raspberry Pi 4 (4 GB) handles Tiers 0-1 with 2-3 concurrent runs. A Pi 5 (8 GB) can run Tier 2 comfortably or Tier 3 with sequential runs.
 
 **Tier 0** is the default — `bun run dev` works immediately after install. To scale up:
 
@@ -311,7 +311,6 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `PROXY_URL`                           | No       | —                                             | Outbound HTTP proxy for sidecar containers                                                            |
 | `LOG_LEVEL`                           | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                                                                |
 | `RUN_ADAPTER`                         | No       | `process`                                     | Execution backend: `docker` or `process`                                                              |
-| `SIDECAR_POOL_SIZE`                   | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                                                          |
 | `SIDECAR_MAX_REQUEST_BODY_BYTES`      | No       | `10485760` (10 MB)                            | Sidecar inbound POST size cap (hard ceiling 100 MB; loud-fail at boot if invalid)                     |
 | `SIDECAR_MAX_MCP_ENVELOPE_BYTES`      | No       | `16777216` (16 MB)                            | MCP envelope cap, sized for base64 inflation                                                          |
 | `PI_IMAGE`                            | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (slim — 313 MB)                                                 |

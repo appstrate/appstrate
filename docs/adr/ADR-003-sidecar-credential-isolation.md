@@ -16,7 +16,7 @@ The platform needs a mechanism to let agents make authenticated API calls withou
 
 ## Decision
 
-Use a **separate sidecar container** that runs alongside each agent container on an isolated Docker network. The sidecar is a Hono service (`runtime-pi/sidecar/`) that exposes a single application-protocol endpoint, `/mcp` (Streamable HTTP MCP, stateless, per-request transport), plus a `/health` probe and a one-shot `/configure` for sidecar-pool warm acquisitions. Through `tools/call` on `/mcp`, the sidecar:
+Use a **separate sidecar container** that runs alongside each agent container on an isolated Docker network. The sidecar is a Hono service (`runtime-pi/sidecar/`) that exposes a single application-protocol endpoint, `/mcp` (Streamable HTTP MCP, stateless, per-request transport), plus a `/health` probe. Through `tools/call` on `/mcp`, the sidecar:
 
 1. Looks up credentials from the platform via a signed execution token
 2. Injects credentials into request headers (via `credentialHeaderName`/`credentialHeaderPrefix`)
@@ -32,7 +32,7 @@ The agent container has no `RUN_TOKEN`, no `PLATFORM_API_URL`, and no `ExtraHost
 
 **LLM completion path.** The Pi SDK in the agent container makes its own chat-completion HTTP calls to `${MODEL_BASE_URL}/v1/chat/completions` (or the equivalent provider-specific path). The platform wires `MODEL_BASE_URL = ${SIDECAR_URL}/llm`, so those calls land on the sidecar's `ALL /llm/*` route, which substitutes the per-run placeholder embedded in the SDK-generated headers for the real LLM API key and streams the upstream response back zero-copy. This route is intentionally HTTP, not MCP — the SDK consumes the LLM provider's native streaming protocol unchanged. The agent never holds the real key, and SSRF protection blocks `baseUrl` values pointing at private/metadata addresses.
 
-A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid cold-start latency. Pool size is configurable via `SIDECAR_POOL_SIZE` (default: 2). Pooled sidecars are configured at acquisition time via `POST /configure`.
+Sidecars are spawned per-run (no pool). All runtime configuration (run token, platform URL, proxy URL, LLM config) is injected via environment variables at container start. To absorb cold-pull latency (20–45 s when the image is absent), `DockerOrchestrator.initialize()` calls `ensureImage()` on the PI and sidecar images at boot — this runs once per API process. After image pre-pull, fresh sidecar boot is fully masked by the agent's own Bun cold start when both containers are spawned in parallel (#406), so pre-warming added complexity without user-visible latency gains.
 
 ## Consequences
 
@@ -41,7 +41,7 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 - Zero-trust agent isolation: agents never see raw credentials (tokens, API keys, OAuth secrets)
 - Credential rotation happens without restarting agents (sidecar fetches fresh credentials per request)
 - URI allowlists enforced at the proxy layer, preventing agents from calling unauthorized endpoints
-- Sidecar pool eliminates container startup latency for most runs
+- Parallel sidecar+agent boot + agent's natural cold start mask sidecar startup; image pre-pull at API boot covers the cold-pull case
 - Response pass-through preserves upstream HTTP status codes and content types
 - Inline response cap (32 KB by default) keeps the agent's context window bounded — oversized or binary responses spill to the run-scoped `BlobStore` and surface as MCP `resource_link` blocks the agent reads on demand
 - Typed `provider_call` tool surface (one tool, `providerId` enum) gives structured observability (`provider.called` events carry `providerId`, `method`, `target`, `status`, `durationMs`) instead of opaque bash calls, and shortens the system prompt to a single `## Connected Providers` section
@@ -50,7 +50,6 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 
 - Additional container per execution increases resource usage
 - Adds network hop latency for every external API call
-- Sidecar pool consumes memory even when no flows are running
 - Debugging credential issues requires inspecting both sidecar logs and agent logs
 
 **Neutral:**

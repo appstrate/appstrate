@@ -106,7 +106,6 @@ services:
       - FS_STORAGE_PATH=/data/storage
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       - DOCKER_SOCKET=/var/run/docker.sock
-      - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}

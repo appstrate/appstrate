@@ -13,9 +13,9 @@
  * seed.
  *
  * Lookups during the request hot path (token resolver, llm-proxy,
- * sidecar `/configure`, refresh worker) MUST go through this registry —
- * never reach into a module's internal state directly. The provider id
- * is the only stable identifier between the DB row and the runtime.
+ * refresh worker) MUST go through this registry — never reach into a
+ * module's internal state directly. The provider id is the only stable
+ * identifier between the DB row and the runtime.
  *
  * Why a runtime registry and not "ask the module loader each time": the
  * loader returns a fresh array on each call (collation across all

@@ -178,9 +178,9 @@ The signing keypair for `1EF2FF084226C4FA` is already provisioned. Rotate only i
 ## Docker Network Pool Tuning
 
 Appstrate is network-heavy by design: the stack creates a few long-lived
-networks at boot (`appstrate-data`, `appstrate-public`,
-`appstrate-egress`, `appstrate-sidecar-pool`) and allocates one isolated
-bridge network per agent run (`appstrate-exec-<runId>`). On a host that
+networks at boot (`appstrate-data`, `appstrate-public`, `appstrate-egress`)
+and allocates one isolated bridge network per agent run
+(`appstrate-exec-<runId>`). On a host that
 already runs several Docker projects, that pressure is often enough to
 exhaust Docker's **default address pool** and produce:
 
@@ -301,17 +301,16 @@ Migrations run automatically on startup via the `appstrate-migrate` service.
 
 See `.env.example` for all available environment variables. Key settings:
 
-| Variable                                  | Description                                              |
-| ----------------------------------------- | -------------------------------------------------------- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                     |
-| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                    |
-| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)              |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                  |
-| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)            |
-| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                           |
-| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)     |
-| `SIDECAR_POOL_SIZE`                       | Pre-warmed sidecar containers (default: 2, 0 to disable) |
-| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`      |
+| Variable                                  | Description                                          |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                 |
+| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                |
+| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)          |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                              |
+| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)        |
+| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                       |
+| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array) |
+| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`  |
 
 ## Locking Down Signup (Closed Mode)
 
@@ -363,4 +362,3 @@ install dir itself, so use it only when you intend a full wipe.
 - Set `TRUSTED_ORIGINS` to your public domain
 - Use strong, unique secrets for all `*_SECRET` and `*_PASSWORD` variables
 - Consider backing up the `pgdata` volume regularly
-- Set `SIDECAR_POOL_SIZE=0` if memory is constrained and cold-start latency is acceptable

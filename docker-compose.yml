@@ -16,7 +16,7 @@
 #   POSTGRES_USER, MINIO_ROOT_USER, S3_BUCKET (default: appstrate),
 #   S3_REGION (default: us-east-1), APP_URL, TRUSTED_ORIGINS,
 #   SYSTEM_PROVIDER_KEYS, RUN_ADAPTER,
-#   SIDECAR_POOL_SIZE, APPSTRATE_VERSION, LOG_LEVEL
+#   APPSTRATE_VERSION, LOG_LEVEL
 
 name: appstrate
 
@@ -174,7 +174,6 @@ services:
       # from the effective container hostname. Forwarding `${PLATFORM_API_URL:-}`
       # injects an empty string, which bypasses the auto-detection path.
       # Set it only if you need to point sidecars at a different host.
-      - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
       # ── System config (JSON arrays) ──
