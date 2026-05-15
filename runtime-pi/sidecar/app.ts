@@ -14,12 +14,7 @@ import {
   type CredentialsResponse,
   type LlmProxyOauthConfig,
 } from "./helpers.ts";
-import {
-  DEFAULT_INLINE_OUTPUT_TOKENS,
-  DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
-  TokenBudget,
-  readPositiveTokenEnv,
-} from "./token-budget.ts";
+import { TokenBudget, deriveBudgetDefaults, readPositiveTokenEnv } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import {
   buildIdentityHeaders,
@@ -526,17 +521,21 @@ export function createApp(deps: AppDeps): Hono {
   // `provider_call` directly to `executeProviderCall` via the shared
   // `proxyDeps` (no header round-trip).
   const blobStore = new BlobStore(deps.runId ?? "unknown");
-  // Token-aware budgeting (issue #390): every tool output is gated by
-  // a per-call inline cap and a cumulative run-level ceiling. Both
-  // are configurable via env vars; defaults stay conservative for
-  // OSS / dev (200 K-token context window equivalent).
+  // Token-aware budgeting (issue #390 + model-aware defaults): every
+  // tool output is gated by a per-call inline cap and a cumulative
+  // run-level ceiling. When the launcher forwarded
+  // `modelContextWindow`, the defaults scale to fixed fractions of the
+  // window (4 % inline, 50 % run-budget, clamped) — so Gemini 1 M no
+  // longer gets the 200 K-tuned 100 K ceiling. Env vars take
+  // precedence over the derived value, preserving operator overrides.
+  const derived = deriveBudgetDefaults(config.modelContextWindow);
   const inlineCapTokens = readPositiveTokenEnv(
     "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
-    DEFAULT_INLINE_OUTPUT_TOKENS,
+    derived.inlineCapTokens,
   );
   const runBudgetTokens = readPositiveTokenEnv(
     "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
-    DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+    derived.runBudgetTokens,
   );
   // Context-window guard (#464): when the launcher forwards the resolved
   // model's window + reserve, the budget refuses to inline a
@@ -565,10 +564,16 @@ export function createApp(deps: AppDeps): Hono {
   // the launcher actually forwarded the window/reserve pair (vs. silently
   // falling back to the legacy two-tier guard). Reading the resolved
   // fields off the budget itself avoids drift between the env values and
-  // what the constructor accepted.
+  // what the constructor accepted. The `*Source` fields distinguish a
+  // model-aware derived cap from an explicit env override — useful when
+  // diagnosing why a particular run got the budget it got.
   logger.info("token-budget configured", {
     inlineCapTokens: tokenBudget.inlineCapTokens,
+    inlineCapTokensSource:
+      tokenBudget.inlineCapTokens === derived.inlineCapTokens ? "derived" : "env",
     runBudgetTokens: tokenBudget.runBudgetTokens,
+    runBudgetTokensSource:
+      tokenBudget.runBudgetTokens === derived.runBudgetTokens ? "derived" : "env",
     contextWindowTokens: tokenBudget.contextWindowTokens,
     reserveTokens: tokenBudget.reserveTokens,
     contextWindowGuardActive: tokenBudget.contextWindowTokens !== null,

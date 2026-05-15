@@ -18,6 +18,7 @@ import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
   TokenBudget,
+  deriveBudgetDefaults,
   estimateTokens,
   type TokenEstimator,
 } from "../token-budget.ts";
@@ -482,5 +483,54 @@ describe("TokenBudget — context-window guard (#464)", () => {
           reserveTokens: 1_000,
         }),
     ).toThrow(/strictly less than/);
+  });
+});
+
+describe("deriveBudgetDefaults", () => {
+  it("returns the legacy hand-tuned constants when contextWindow is unknown", () => {
+    expect(deriveBudgetDefaults(undefined)).toEqual({
+      inlineCapTokens: DEFAULT_INLINE_OUTPUT_TOKENS,
+      runBudgetTokens: DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+    });
+  });
+
+  it("matches the legacy 8K / 100K pair exactly on Sonnet 200K (rétro-compat invariant)", () => {
+    // Calibration target: the chosen fractions (4 %, 50 %) must produce
+    // the exact pre-model-aware defaults on the model both were tuned
+    // against. Breaking this invariant silently regresses every Sonnet
+    // run.
+    expect(deriveBudgetDefaults(200_000)).toEqual({
+      inlineCapTokens: 8_000,
+      runBudgetTokens: 100_000,
+    });
+  });
+
+  it("clamps the inline cap floor when scaling from a tiny context window", () => {
+    // 4 % × 32K = 1280 — below the 4K floor.
+    expect(deriveBudgetDefaults(32_000)).toEqual({
+      inlineCapTokens: 4_000,
+      runBudgetTokens: 50_000, // 50% × 32K = 16K, raised to floor 50K
+    });
+  });
+
+  it("scales linearly through the mid-range (Sonnet 400K / GPT-5)", () => {
+    expect(deriveBudgetDefaults(400_000)).toEqual({
+      inlineCapTokens: 16_000,
+      runBudgetTokens: 200_000,
+    });
+  });
+
+  it("clamps both caps at their ceilings on Gemini 1M", () => {
+    expect(deriveBudgetDefaults(1_000_000)).toEqual({
+      inlineCapTokens: 32_000, // 4 % × 1M = 40K → clamped to 32K
+      runBudgetTokens: 500_000, // 50 % × 1M = 500K → at ceiling
+    });
+  });
+
+  it("stays at the ceilings on Gemini 2M (no overshoot)", () => {
+    expect(deriveBudgetDefaults(2_000_000)).toEqual({
+      inlineCapTokens: 32_000,
+      runBudgetTokens: 500_000,
+    });
   });
 });

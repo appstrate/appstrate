@@ -97,12 +97,84 @@ export const DEFAULT_INLINE_OUTPUT_TOKENS = 8_000;
  * while preserving the spill-to-blob escape hatch for anything
  * heavier.
  *
- * Operators on 1 M-token Sonnet 4.6 deployments (or anyone whose
- * upstream model TPM accommodates more) raise this via
- * `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS`; OSS / dev defaults stay
- * conservative.
+ * This constant remains the fallback when the resolved model carries
+ * no `contextWindow` (env-driven setup without a populated catalog).
+ * When `contextWindow` is known, {@link deriveBudgetDefaults} scales
+ * the run budget to a fixed fraction of the window — so Gemini 1 M
+ * gets 500 K of run budget instead of being throttled to 100 K, and
+ * Sonnet 200 K continues to match this constant exactly.
  */
 export const DEFAULT_RUN_OUTPUT_BUDGET_TOKENS = 100_000;
+
+/**
+ * Fraction of the context window allocated to the per-call inline cap
+ * when {@link deriveBudgetDefaults} runs. 4 % reproduces the legacy
+ * 8 000 / 200 000 ratio on Sonnet — picking the same number deliberately
+ * so the model-aware default matches the hand-tuned constant for the
+ * model both were calibrated against.
+ */
+const INLINE_CAP_FRACTION = 0.04;
+const MIN_INLINE_CAP_TOKENS = 4_000;
+const MAX_INLINE_CAP_TOKENS = 32_000;
+
+/**
+ * Fraction of the context window allocated to the cumulative run budget
+ * when {@link deriveBudgetDefaults} runs. 50 % reproduces the legacy
+ * 100 000 / 200 000 ratio on Sonnet. Plafond at 500 K — past that even
+ * Gemini 2 M needle-in-haystack accuracy degrades sharply, and the
+ * spill-to-file escape hatch starts being more useful than larger
+ * inline budgets.
+ */
+const RUN_BUDGET_FRACTION = 0.5;
+const MIN_RUN_BUDGET_TOKENS = 50_000;
+const MAX_RUN_BUDGET_TOKENS = 500_000;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Derive per-call + run-level token caps from the upstream model's
+ * context window. When `contextWindowTokens` is unknown (no model
+ * metadata reached the sidecar), fall back to the legacy hand-tuned
+ * 8 K / 100 K pair — preserves the pre-model-aware behaviour for any
+ * caller that hasn't wired the catalog yet.
+ *
+ * The two fractions ({@link INLINE_CAP_FRACTION},
+ * {@link RUN_BUDGET_FRACTION}) and their clamps are tuned so that
+ * `deriveBudgetDefaults(200_000)` returns the exact legacy pair —
+ * which means upgrading to a model-aware setup is a no-op for any
+ * existing Sonnet 200 K run.
+ *
+ * Exported for testing; the production call site is in
+ * {@link `runtime-pi/sidecar/app.ts`}, where env vars
+ * (`SIDECAR_INLINE_TOOL_OUTPUT_TOKENS`,
+ * `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS`) override the derived value
+ * when the operator wants manual control.
+ */
+export function deriveBudgetDefaults(contextWindowTokens: number | undefined): {
+  inlineCapTokens: number;
+  runBudgetTokens: number;
+} {
+  if (contextWindowTokens === undefined) {
+    return {
+      inlineCapTokens: DEFAULT_INLINE_OUTPUT_TOKENS,
+      runBudgetTokens: DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+    };
+  }
+  return {
+    inlineCapTokens: clamp(
+      Math.floor(contextWindowTokens * INLINE_CAP_FRACTION),
+      MIN_INLINE_CAP_TOKENS,
+      MAX_INLINE_CAP_TOKENS,
+    ),
+    runBudgetTokens: clamp(
+      Math.floor(contextWindowTokens * RUN_BUDGET_FRACTION),
+      MIN_RUN_BUDGET_TOKENS,
+      MAX_RUN_BUDGET_TOKENS,
+    ),
+  };
+}
 
 /**
  * Pluggable token estimator. Receives a text payload, returns a
