@@ -458,15 +458,15 @@ jobs:
           echo "::group::minisign missing — APPSTRATE_NO_INSTALL_MINISIGN=1"
           OPTOUT_BIN="$GITHUB_WORKSPACE/no-minisign-with-apt"
           mkdir -p "$OPTOUT_BIN"
+          # apt-get IS available here (so `detect_minisign_installer` would
+          # otherwise return "apt"), but `minisign` is NOT — leaving the
+          # have_minisign check false. The opt-out env var must prevent the
+          # auto-install from firing even though a PM is detectable.
           for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf id apt-get; do
             if command -v "$b" >/dev/null 2>&1; then
               ln -sf "$(command -v "$b")" "$OPTOUT_BIN/$b" 2>/dev/null || true
             fi
           done
-          # Shadow `minisign` to /bin/false to force the missing-minisign
-          # branch even though the host has it (the dry-run installs
-          # minisign at the top of the job — see "Install minisign" step).
-          ln -sf /bin/false "$OPTOUT_BIN/minisign"
           set +e
           OPTOUT_OUT=$(PATH="$OPTOUT_BIN" \
             APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-optout" \
@@ -914,6 +914,11 @@ jobs:
           # `--network host` so the container can reach the host's Python
           # server at 127.0.0.1:8767. Linux runners only — fine for
           # ubuntu-latest.
+          #
+          # `set +e` wrap is load-bearing: the workflow runs under `bash -e`
+          # so a non-zero docker exit would kill the step before $OUT could
+          # be echoed, leaving no diagnostic. Capture rc explicitly instead.
+          set +e
           OUT=$(docker run --rm \
             --network host \
             --workdir /tmp \
@@ -934,6 +939,7 @@ jobs:
               echo "POST_BOOTSTRAP_BINARY=$(ls -la /tmp/appstrate-bin/appstrate 2>/dev/null || echo MISSING)"
             ' 2>&1)
           rc=$?
+          set -e
           echo "$OUT"
           test "$rc" -eq 0 \
             || { echo "::error::bootstrap exited $rc on ${{ matrix.name }}"; exit 1; }
