@@ -37,6 +37,11 @@
 #                                 PATH. Equivalent to uv's UV_NO_MODIFY_PATH.
 #   APPSTRATE_SKIP_VERIFY=1       Skip signature + checksum verification (CI
 #                                 debug only — do NOT set on user machines).
+#   APPSTRATE_NO_INSTALL_MINISIGN=1
+#                                 Do not attempt to auto-install `minisign` via
+#                                 the host package manager when it's missing.
+#                                 The script falls back to the original
+#                                 instructions-then-exit behaviour.
 
 set -euo pipefail
 
@@ -122,6 +127,106 @@ _appstrate_bootstrap() {
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
   have_shasum() { command -v shasum >/dev/null 2>&1; }
   have_minisign() { command -v minisign >/dev/null 2>&1; }
+
+  # ─── minisign auto-install (issue #470) ─────────────────────────────────────
+  #
+  # The one-liner one-step UX promise ("paste this, get a running Appstrate")
+  # breaks on every Debian-family box without minisign pre-installed: the
+  # verification gate is non-negotiable, so the script otherwise dies asking
+  # the user to apt-install a package and re-run. Detect the host package
+  # manager, install minisign ourselves, and proceed — same trust assumption
+  # as the `curl … | bash` step (user trusts get.appstrate.dev over TLS).
+  #
+  # Auto-install fires in three contexts without a prompt:
+  #   1. `--yes` arg present (advertised one-liner on the homepage)
+  #   2. CI=true|1|yes (any CI runner — non-interactive by definition)
+  #   3. No TTY available for a prompt (piped from another script, systemd…)
+  # In an interactive TTY without any of the above, a y/N prompt fires
+  # (defaults to Y — declining mirrors the legacy hint-and-exit behaviour).
+  #
+  # APPSTRATE_NO_INSTALL_MINISIGN=1 opts out entirely.
+
+  # Pick the first available package manager. We don't auto-install on
+  # distros we haven't validated (the install command differs and the wrong
+  # incantation against the wrong manager is worse than failing closed).
+  detect_minisign_installer() {
+    if [ "$OS" = "darwin" ]; then
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew'
+        return 0
+      fi
+    else
+      # `bin:name` pairs — bin we probe with `command -v`, name we emit.
+      # apt-get is the only case where the two differ (we surface it as
+      # "apt" because that's how the user knows it). Other distros: same.
+      for _mgr in apt-get:apt apk:apk dnf:dnf pacman:pacman zypper:zypper; do
+        _bin="${_mgr%:*}"
+        _name="${_mgr#*:}"
+        if command -v "$_bin" >/dev/null 2>&1; then
+          printf '%s' "$_name"
+          return 0
+        fi
+      done
+    fi
+    return 1
+  }
+
+  # Build the install command for `$1` (manager name). Prepends `sudo` only
+  # when not already root AND `sudo` is on PATH — keeps containerised installs
+  # (root, no sudo binary) working without a spurious "sudo: not found" trap.
+  minisign_install_cmd() {
+    _mgr="$1"
+    _sudo=""
+    if [ "$(id -u 2>/dev/null || echo 0)" != "0" ] && command -v sudo >/dev/null 2>&1; then
+      _sudo="sudo"
+    fi
+    case "$_mgr" in
+      brew) printf 'brew install minisign' ;;
+      apt) printf '%s DEBIAN_FRONTEND=noninteractive apt-get install -y minisign' "$_sudo" ;;
+      apk) printf '%s apk add --no-cache minisign' "$_sudo" ;;
+      dnf) printf '%s dnf install -y minisign' "$_sudo" ;;
+      pacman) printf '%s pacman -S --noconfirm minisign' "$_sudo" ;;
+      zypper) printf '%s zypper install -y minisign' "$_sudo" ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # apt-get install fails on a stale package cache (very common on fresh
+  # Ubuntu images — `/var/lib/apt/lists` is empty). Refresh once before
+  # the install attempt; ignore failures (the install step will surface a
+  # real error if the index actually can't be fetched).
+  apt_refresh_if_needed() {
+    _sudo=""
+    if [ "$(id -u 2>/dev/null || echo 0)" != "0" ] && command -v sudo >/dev/null 2>&1; then
+      _sudo="sudo"
+    fi
+    # `-qq` keeps the refresh quiet; the bootstrap is the only voice the
+    # user should hear in the happy path.
+    $_sudo apt-get update -qq >/dev/null 2>&1 || true
+  }
+
+  # Returns 0 if minisign got installed, non-zero otherwise. Caller decides
+  # how to react — we don't `exit` from here so the surrounding flow keeps
+  # owning the error UX.
+  try_install_minisign() {
+    _mgr="$(detect_minisign_installer)" || return 1
+    _cmd="$(minisign_install_cmd "$_mgr")" || return 1
+    log "Installing minisign via $_mgr (required for signature verification)"
+    log "  \$ $_cmd"
+    # apt needs a fresh package index on stock cloud-init / Docker images.
+    if [ "$_mgr" = "apt" ]; then apt_refresh_if_needed; fi
+    # `sh -c` rather than direct exec so the sudo prefix expands correctly
+    # and we never have to special-case the leading-empty-string case.
+    if ! sh -c "$_cmd"; then
+      err "Failed to install minisign via $_mgr."
+      return 1
+    fi
+    if ! have_minisign; then
+      err "minisign install reported success but the binary is still not on PATH."
+      return 1
+    fi
+    return 0
+  }
 
   # ─── Dual-install pre-check (issue #249, phase 4) ───────────────────────────
   #
@@ -293,15 +398,75 @@ _appstrate_bootstrap() {
     # took < 5s; installing minisign via the OS package manager costs
     # roughly the same.
     if ! have_minisign; then
-      err "minisign is required to verify the Appstrate CLI download."
-      err "  → macOS:   brew install minisign"
-      err "  → Debian:  sudo apt install minisign"
-      err "  → Alpine:  apk add minisign"
-      err "  → Other:   https://jedisct1.github.io/minisign/"
-      err ""
-      err "To override (NOT recommended, only for CI debug), re-run with"
-      err "  APPSTRATE_SKIP_VERIFY=1 curl -fsSL https://get.appstrate.dev | bash"
-      exit 1
+      # Decide between auto-install vs. prompt vs. fail-with-hint. We treat
+      # the same four signals that drive the launch decision below as
+      # "unattended": --yes arg, APPSTRATE_AUTO_INSTALL=1, CI=true|1|yes,
+      # and "no TTY on stdout". This keeps `curl … | bash -s -- --yes`
+      # truly one-step and prevents the prompt from firing in Dockerfile
+      # RUN, cron, or systemd contexts where there's nobody to answer.
+      _ms_wants_auto=0
+      case " $* " in *" --yes "*) _ms_wants_auto=1 ;; esac
+      if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _ms_wants_auto=1; fi
+      case "${CI:-}" in true | 1 | yes) _ms_wants_auto=1 ;; esac
+      if [ ! -t 1 ]; then _ms_wants_auto=1; fi
+
+      if [ "${APPSTRATE_NO_INSTALL_MINISIGN:-0}" = "1" ]; then
+        _ms_installer=""
+      else
+        _ms_installer="$(detect_minisign_installer || true)"
+      fi
+
+      _ms_should_install=0
+      if [ -n "$_ms_installer" ]; then
+        if [ "$_ms_wants_auto" = "1" ]; then
+          _ms_should_install=1
+        else
+          # Interactive prompt — fall back to /dev/tty if stdin is the
+          # curl pipe (same trick as the dual-install gate above).
+          _ms_tty=""
+          if [ -t 0 ]; then
+            _ms_tty="stdin"
+          elif [ -r /dev/tty ]; then
+            _ms_tty="/dev/tty"
+          fi
+          if [ -n "$_ms_tty" ]; then
+            warn "minisign is required to verify the Appstrate CLI download."
+            printf '\nInstall it now via %s? [Y/n] ' "$_ms_installer"
+            _ms_answer=""
+            if [ "$_ms_tty" = "/dev/tty" ]; then
+              IFS= read -r _ms_answer </dev/tty || _ms_answer=""
+            else
+              IFS= read -r _ms_answer || _ms_answer=""
+            fi
+            case "$_ms_answer" in
+              "" | y | Y | yes | YES) _ms_should_install=1 ;;
+              *) _ms_should_install=0 ;;
+            esac
+          fi
+        fi
+      fi
+
+      if [ "$_ms_should_install" = "1" ]; then
+        if ! try_install_minisign; then
+          err ""
+          err "Could not auto-install minisign. Install it manually and re-run:"
+          err "  → macOS:   brew install minisign"
+          err "  → Debian:  sudo apt install minisign"
+          err "  → Alpine:  apk add minisign"
+          err "  → Other:   https://jedisct1.github.io/minisign/"
+          exit 1
+        fi
+      else
+        err "minisign is required to verify the Appstrate CLI download."
+        err "  → macOS:   brew install minisign"
+        err "  → Debian:  sudo apt install minisign"
+        err "  → Alpine:  apk add minisign"
+        err "  → Other:   https://jedisct1.github.io/minisign/"
+        err ""
+        err "To override (NOT recommended, only for CI debug), re-run with"
+        err "  APPSTRATE_SKIP_VERIFY=1 curl -fsSL https://get.appstrate.dev | bash"
+        exit 1
+      fi
     fi
 
     log "Fetching release checksums + signature"
@@ -347,10 +512,15 @@ _appstrate_bootstrap() {
         err "  → Duplicate or malformed entries — do NOT execute."
         exit 1
       fi
+      # `--quiet` is GNU-only — BusyBox's sha256sum (Alpine) rejects it
+      # with "unrecognized option". Drop the flag and silence the "OK"
+      # confirmation line via `>/dev/null` instead, which is portable
+      # across GNU coreutils, BusyBox, and macOS BSD shasum. Exit code
+      # is what drives the gate; the suppressed line is just noise.
       if have_sha256sum; then
-        sha256sum -c --quiet checksums.local.txt
+        sha256sum -c checksums.local.txt >/dev/null
       elif have_shasum; then
-        shasum -a 256 -c --quiet checksums.local.txt
+        shasum -a 256 -c checksums.local.txt >/dev/null
       else
         err "Neither sha256sum nor shasum is available on this system."
         exit 1

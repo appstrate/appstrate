@@ -414,16 +414,22 @@ jobs:
           echo "::endgroup::"
           echo "✓ tampered-checksums path OK"
 
-          # ── Scenario 4: minisign missing from PATH (fail closed) ─────
-          echo "::group::minisign missing"
-          # Strip /usr/bin (where minisign lives on Ubuntu) but keep enough
-          # for curl + sh builtins + sha256sum (all in /usr/bin, so we also
-          # need to shadow minisign by pointing PATH elsewhere and relying
-          # on an explicit denylist). Simpler: create a PATH with only the
-          # minimum required tools, symlinked explicitly.
+          # ── Scenario 4: minisign auto-install fallback paths (issue #470) ─
+          # The happy auto-install path (apt-get/apk/brew available +
+          # minisign absent → install and proceed) is exercised end-to-end
+          # by `fresh-install-distros` on real distro images. Here we lock
+          # the two "fall back to the legacy fail-closed hint" branches —
+          # the ones the unit-style PATH sandbox can actually reproduce.
+
+          # ── 4a: no recognised package manager → legacy hint ──────────
+          # PATH stripped of every known PM (apt-get/apk/dnf/pacman/zypper
+          # /brew). detect_minisign_installer must return 1 and the script
+          # must surface the original "install minisign manually" message,
+          # not silently fail somewhere later in the verify chain.
+          echo "::group::minisign missing — no package manager"
           NOBIN="$GITHUB_WORKSPACE/no-minisign-path"
           mkdir -p "$NOBIN"
-          for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf; do
+          for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf id; do
             if command -v "$b" >/dev/null 2>&1; then
               ln -sf "$(command -v "$b")" "$NOBIN/$b" 2>/dev/null || true
             fi
@@ -435,12 +441,50 @@ jobs:
           set -e
           echo "$NOMINI_OUT"
           if [ "$rc" -eq 0 ]; then
-            echo "::error::bootstrap proceeded without minisign available"; exit 1
+            echo "::error::bootstrap proceeded without minisign + no PM available"; exit 1
           fi
           echo "$NOMINI_OUT" | grep -q "minisign is required" \
             || { echo "::error::bootstrap did not emit the minisign-missing hint"; exit 1; }
+          # Auto-install must NOT have fired (no recognised installer).
+          echo "$NOMINI_OUT" | grep -q "Installing minisign via" \
+            && { echo "::error::bootstrap tried to auto-install with no PM detected"; exit 1; }
           echo "::endgroup::"
-          echo "✓ missing-minisign path OK"
+          echo "✓ 4a: no-PM → legacy hint"
+
+          # ── 4b: APPSTRATE_NO_INSTALL_MINISIGN=1 opt-out (apt available) ─
+          # Operators who manage the dependency themselves opt out via env
+          # var. Even with apt-get on PATH, the script must skip the
+          # auto-install attempt and surface the legacy hint instead.
+          echo "::group::minisign missing — APPSTRATE_NO_INSTALL_MINISIGN=1"
+          OPTOUT_BIN="$GITHUB_WORKSPACE/no-minisign-with-apt"
+          mkdir -p "$OPTOUT_BIN"
+          # apt-get IS available here (so `detect_minisign_installer` would
+          # otherwise return "apt"), but `minisign` is NOT — leaving the
+          # have_minisign check false. The opt-out env var must prevent the
+          # auto-install from firing even though a PM is detectable.
+          for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf id apt-get; do
+            if command -v "$b" >/dev/null 2>&1; then
+              ln -sf "$(command -v "$b")" "$OPTOUT_BIN/$b" 2>/dev/null || true
+            fi
+          done
+          set +e
+          OPTOUT_OUT=$(PATH="$OPTOUT_BIN" \
+            APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-optout" \
+            APPSTRATE_NO_INSTALL_MINISIGN=1 \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$OPTOUT_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::opt-out bootstrap proceeded with broken minisign"; exit 1
+          fi
+          echo "$OPTOUT_OUT" | grep -q "minisign is required" \
+            || { echo "::error::opt-out did not surface the legacy hint"; exit 1; }
+          echo "$OPTOUT_OUT" | grep -q "Installing minisign via" \
+            && { echo "::error::APPSTRATE_NO_INSTALL_MINISIGN=1 still tried to auto-install"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ 4b: opt-out → legacy hint"
+          echo "✓ missing-minisign fallback paths OK"
 
           # ── Scenario 5: APPSTRATE_SKIP_VERIFY=1 + CI=true (warns + proceeds) ─
           # Skip is gated on CI=true to prevent social-engineered bypass on
@@ -767,3 +811,281 @@ jobs:
             || { echo "::error::rc modified despite BIN_DIR already on PATH"; exit 1; }
           echo "::endgroup::"
           echo "✓ already-on-PATH skip OK"
+
+  # End-to-end exercise of the bootstrap on a *real* fresh distro image
+  # (issue #470). Stages a fake signed release on the host, runs Python
+  # http.server, then `docker run --network host` per-distro with only
+  # `curl` (+ ca-certs/bash where needed) pre-installed — minisign is
+  # deliberately absent, so the auto-installer must drive it home.
+  #
+  # This is the test that would have caught #470 — the existing
+  # PATH-sandbox scenarios test "fail closed when no PM", but no job
+  # exercised the "apt-get available + minisign missing" happy path
+  # that the homepage one-liner hits on a fresh Ubuntu.
+  fresh-install-distros:
+    runs-on: ubuntu-latest
+    needs: [static, workflow-lint]
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            image: ubuntu:24.04
+            prep: apt-get update -qq && apt-get install -y -qq curl ca-certificates bash
+          - name: debian-bookworm
+            image: debian:bookworm-slim
+            prep: apt-get update -qq && apt-get install -y -qq curl ca-certificates bash
+          - name: alpine-3
+            image: alpine:3
+            prep: apk add --no-cache curl ca-certificates bash
+          - name: fedora-latest
+            image: fedora:latest
+            prep: dnf install -y -q curl ca-certificates bash >/dev/null
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install minisign on runner (for signing the fake release)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - name: Stage fake signed release + rewrite bootstrap.sh
+        run: |
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/served-${{ matrix.name }}"
+          mkdir -p "$ROOT/release"
+
+          cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
+          #!/usr/bin/env bash
+          echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
+          exit 0
+          CLI
+          chmod +x "$ROOT/release/appstrate-linux-x64"
+
+          # Also stage the arm64 asset — the matrix runs on ubuntu-latest
+          # (x64) but future self-hosted arm runners would otherwise miss.
+          cp "$ROOT/release/appstrate-linux-x64" "$ROOT/release/appstrate-linux-arm64"
+
+          (cd "$ROOT/release" && sha256sum appstrate-linux-x64 appstrate-linux-arm64 > checksums.txt)
+
+          umask 077
+          minisign -G -W -f -p /tmp/dry-${{ matrix.name }}.pub -s /tmp/dry-${{ matrix.name }}.key
+          minisign -S -s /tmp/dry-${{ matrix.name }}.key -t "fresh-install dry-run" \
+            -m "$ROOT/release/checksums.txt"
+
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry-${{ matrix.name }}.pub | head -1 | tr -d '\n')
+
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8767/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8767/release|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap.sh > /tmp/bootstrap-${{ matrix.name }}.sh
+          bash -n /tmp/bootstrap-${{ matrix.name }}.sh
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Serve fake release from host (Python http.server)
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          # Bind to 0.0.0.0 explicitly so `--network host` containers can
+          # reach it via 127.0.0.1 (Linux host-networking shares the
+          # runner's loopback). Port 8767 — distinct from the dry-run
+          # job's 8766 to avoid clashing if both run concurrently.
+          python3 -m http.server 8767 --bind 0.0.0.0 >/tmp/httpd.log 2>&1 &
+          echo $! > /tmp/httpd-${{ matrix.name }}.pid
+          # Brief wait for the port to come up; fail loudly if it doesn't.
+          for _ in 1 2 3 4 5; do
+            curl -fsS "http://127.0.0.1:8767/release/checksums.txt" >/dev/null && break
+            sleep 1
+          done
+          curl -fsS "http://127.0.0.1:8767/release/checksums.txt" >/dev/null
+
+      - name: Run bootstrap inside ${{ matrix.image }} (fresh distro, no minisign)
+        run: |
+          set -euo pipefail
+
+          # Use APPSTRATE_NO_LAUNCH=1 so the bootstrap stops AFTER verifying
+          # + dropping the binary, without exec'ing the fake CLI. That keeps
+          # the script's exit code meaningful and lets us inspect post-run
+          # state (binary on disk, minisign on PATH) from the host.
+          #
+          # `--network host` so the container can reach the host's Python
+          # server at 127.0.0.1:8767. Linux runners only — fine for
+          # ubuntu-latest.
+          #
+          # `set +e` wrap is load-bearing: the workflow runs under `bash -e`
+          # so a non-zero docker exit would kill the step before $OUT could
+          # be echoed, leaving no diagnostic. Capture rc explicitly instead.
+          set +e
+          OUT=$(docker run --rm \
+            --network host \
+            --workdir /tmp \
+            -e APPSTRATE_NO_LAUNCH=1 \
+            -e APPSTRATE_BIN_DIR=/tmp/appstrate-bin \
+            -v "/tmp/bootstrap-${{ matrix.name }}.sh:/tmp/bootstrap.sh:ro" \
+            "${{ matrix.image }}" \
+            sh -c '
+              set -e
+              ${{ matrix.prep }}
+              # Sanity: minisign must NOT be present before bootstrap runs.
+              if command -v minisign >/dev/null 2>&1; then
+                echo "TEST_SETUP_BROKEN: minisign already on PATH inside container" >&2
+                exit 99
+              fi
+              bash /tmp/bootstrap.sh
+              echo "POST_BOOTSTRAP_MINISIGN=$(command -v minisign || echo MISSING)"
+              echo "POST_BOOTSTRAP_BINARY=$(ls -la /tmp/appstrate-bin/appstrate 2>/dev/null || echo MISSING)"
+            ' 2>&1)
+          rc=$?
+          set -e
+          echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on ${{ matrix.name }}"; exit 1; }
+          echo "$OUT" | grep -q "Installing minisign via" \
+            || { echo "::error::bootstrap did not announce the auto-install on ${{ matrix.name }}"; exit 1; }
+          echo "$OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::verification chain did not complete on ${{ matrix.name }}"; exit 1; }
+          echo "$OUT" | grep -q "POST_BOOTSTRAP_MINISIGN=/" \
+            || { echo "::error::minisign not on PATH after bootstrap on ${{ matrix.name }}"; exit 1; }
+          echo "$OUT" | grep -q "POST_BOOTSTRAP_BINARY=.* /tmp/appstrate-bin/appstrate" \
+            || { echo "::error::appstrate binary not dropped on ${{ matrix.name }}"; exit 1; }
+          echo "✓ ${{ matrix.name }}: minisign auto-install + verify + drop OK"
+
+      - name: Stop the http server
+        if: always()
+        run: |
+          if [ -f "/tmp/httpd-${{ matrix.name }}.pid" ]; then
+            kill "$(cat /tmp/httpd-${{ matrix.name }}.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/dry-${{ matrix.name }}.key
+
+  # Same end-to-end exercise as `fresh-install-distros` but on a real
+  # macos-latest runner (Apple Silicon). We can't use Docker on macOS
+  # GHA runners — the bootstrap runs natively on the host. To simulate
+  # "fresh macOS without minisign" we `brew uninstall minisign` (the
+  # runner image ships it for the linux signing step elsewhere), then
+  # run the bootstrap and assert the brew auto-install fires.
+  #
+  # macos-latest minutes are 10× linux's. Only matrix-entry, no parallel
+  # fan-out — gates exactly the macOS code path that the linux matrix
+  # cannot reach.
+  fresh-install-macos:
+    runs-on: macos-latest
+    needs: [static, workflow-lint]
+    timeout-minutes: 15
+    env:
+      # Skip `brew update`'s formula-tap refresh — adds 30-60s on a
+      # cold runner and isn't needed for an installed-formula reinstall.
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Ensure minisign present on runner (for signing the fake release)
+        run: |
+          set -euo pipefail
+          if ! command -v minisign >/dev/null 2>&1; then
+            brew install minisign
+          fi
+          # Resolve the canonical path now; brew might be in /opt/homebrew/bin
+          # (Apple Silicon) or /usr/local/bin (Intel runners — legacy).
+          command -v minisign
+
+      - name: Stage fake signed release + rewrite bootstrap.sh
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/served-macos"
+          mkdir -p "$ROOT/release"
+
+          # macos-latest is Apple Silicon → uname -m=arm64 → darwin-arm64
+          # is the asset the bootstrap will request. Stage x64 too for
+          # forward compatibility with future Intel-runner pinning.
+          cat > "$ROOT/release/appstrate-darwin-arm64" <<'CLI'
+          #!/usr/bin/env bash
+          echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
+          exit 0
+          CLI
+          chmod +x "$ROOT/release/appstrate-darwin-arm64"
+          cp "$ROOT/release/appstrate-darwin-arm64" "$ROOT/release/appstrate-darwin-x64"
+
+          # macOS ships BSD `shasum`, not GNU `sha256sum` — use shasum to
+          # produce a manifest the bootstrap's `shasum -a 256 -c` branch
+          # will accept (same `<hash>  <file>` format).
+          (cd "$ROOT/release" && shasum -a 256 appstrate-darwin-arm64 appstrate-darwin-x64 > checksums.txt)
+
+          umask 077
+          minisign -G -W -f -p /tmp/dry-macos.pub -s /tmp/dry-macos.key
+          minisign -S -s /tmp/dry-macos.key -t "macos dry-run" \
+            -m "$ROOT/release/checksums.txt"
+
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry-macos.pub | head -1 | tr -d '\n')
+
+          # macOS sed needs `-i ''` for in-place edits, but we're piping
+          # to a fresh file so the GNU/BSD difference doesn't bite here.
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8768/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8768/release|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap.sh > /tmp/bootstrap-macos.sh
+          bash -n /tmp/bootstrap-macos.sh
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Serve fake release from runner (Python http.server)
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          python3 -m http.server 8768 --bind 0.0.0.0 >/tmp/httpd.log 2>&1 &
+          echo $! > /tmp/httpd-macos.pid
+          for _ in 1 2 3 4 5; do
+            curl -fsS "http://127.0.0.1:8768/release/checksums.txt" >/dev/null && break
+            sleep 1
+          done
+          curl -fsS "http://127.0.0.1:8768/release/checksums.txt" >/dev/null
+
+      - name: Uninstall minisign (simulate fresh macOS without it)
+        run: |
+          set -euo pipefail
+          # `brew uninstall` fully removes the keg + symlink, so the
+          # subsequent `brew install minisign` from try_install_minisign
+          # is a true install (not a no-op re-link). Without this the
+          # auto-install would print "already installed" and exit 0 while
+          # leaving nothing on PATH — exactly the silent-pass we want
+          # to guard against.
+          brew uninstall minisign
+          if command -v minisign >/dev/null 2>&1; then
+            echo "::error::brew uninstall left minisign on PATH ($(command -v minisign))"
+            exit 1
+          fi
+
+      - name: Run bootstrap on macOS (should auto-install minisign via brew)
+        run: |
+          set +e
+          OUT=$(APPSTRATE_NO_LAUNCH=1 \
+            APPSTRATE_BIN_DIR=/tmp/appstrate-bin \
+            bash /tmp/bootstrap-macos.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on macOS"; exit 1; }
+          echo "$OUT" | grep -q "Installing minisign via brew" \
+            || { echo "::error::macOS did not announce the brew auto-install"; exit 1; }
+          echo "$OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::macOS verification chain did not complete"; exit 1; }
+          command -v minisign >/dev/null 2>&1 \
+            || { echo "::error::minisign not on PATH after macOS bootstrap"; exit 1; }
+          test -x /tmp/appstrate-bin/appstrate \
+            || { echo "::error::appstrate binary not dropped on macOS"; exit 1; }
+          echo "✓ macOS: brew auto-install + verify + drop OK"
+
+      - name: Stop the http server
+        if: always()
+        run: |
+          if [ -f "/tmp/httpd-macos.pid" ]; then
+            kill "$(cat /tmp/httpd-macos.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/dry-macos.key
