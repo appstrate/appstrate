@@ -461,6 +461,86 @@ describe("POST /mcp — tools/call provider_call", () => {
     expect(meta.headers.etag).toBe('"bin-abc"');
   });
 
+  it("attaches sanitised finalUrl to _meta after a redirect chain (#471)", async () => {
+    // End-to-end: agent triggers an OAuth-style flow via provider_call
+    // and reads the terminal callback URL (with ?code=…) from
+    // _meta["appstrate/upstream"].finalUrl — without having to parse
+    // an empty/HTML body or rely on headers.location (which is the
+    // *next* hop, undefined on terminal 200/4xx).
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/authorize")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/login" },
+        });
+      }
+      if (u.endsWith("/login")) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            // Userinfo + fragment included to prove sidecar sanitises.
+            location: "https://user:secret@api.example.com/callback?code=ABC123#leaked",
+          },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://api.example.com/authorize",
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as {
+      _meta?: Record<string, unknown>;
+    };
+    const meta = result._meta!["appstrate/upstream"] as {
+      status: number;
+      finalUrl?: string;
+    };
+    expect(meta.status).toBe(200);
+    expect(meta.finalUrl).toBe("https://api.example.com/callback?code=ABC123");
+    // Defence-in-depth: userinfo + fragment never appear in the agent
+    // context regardless of what the upstream Location header carried.
+    expect(meta.finalUrl).not.toContain("user");
+    expect(meta.finalUrl).not.toContain("secret");
+    expect(meta.finalUrl).not.toContain("leaked");
+    expect(meta.finalUrl).not.toContain("#");
+  });
+
+  it("does NOT attach finalUrl on preflight failure (no upstream contact)", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "provider_call",
+        arguments: {
+          providerId: "test-provider",
+          target: "https://not-allowed.example.com/x",
+        },
+      },
+    });
+    const result = res.json.result as {
+      isError?: boolean;
+      _meta?: Record<string, unknown>;
+    };
+    expect(result.isError).toBe(true);
+    const meta = result._meta!["appstrate/upstream"] as {
+      status: number;
+      headers: Record<string, string>;
+      finalUrl?: string;
+    };
+    expect(meta.status).toBe(0);
+    expect(meta.finalUrl).toBeUndefined();
+  });
+
   it("spills non-text upstream responses to a resource_link", async () => {
     // Binary upstream responses are stored in a run-scoped blob cache
     // and returned as a `resource_link` that the agent can read on

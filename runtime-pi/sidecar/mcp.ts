@@ -827,12 +827,15 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         ...(blobStore ? { blobStore } : {}),
         ...(tokenBudget ? { tokenBudget } : {}),
         source: `provider:${args.providerId}`,
-        // Attach upstream `{ status, headers }` to the CallToolResult
-        // `_meta` payload so the agent-side resolver can surface real
-        // HTTP status / response headers (Location, ETag,
-        // Upload-Offset, …) to chunked-upload protocols. Always on for
-        // `provider_call` — the runtime parser requires it.
+        // Attach upstream `{ status, headers, finalUrl }` to the
+        // CallToolResult `_meta` payload so the agent-side resolver
+        // can surface real HTTP status / response headers (Location,
+        // ETag, Upload-Offset, …) to chunked-upload protocols, plus
+        // the post-redirect terminal URL for OAuth/CAS/magic-link
+        // callback extraction. Always on for `provider_call` — the
+        // runtime parser requires it.
         attachUpstreamMeta: true,
+        upstreamFinalUrl: result.finalUrl,
       });
     }
   }
@@ -1028,18 +1031,29 @@ interface ResponseToToolResultOptions {
    */
   inlineThresholdBytes?: number;
   /**
-   * When true, attach upstream `{ status, headers }` to the
+   * When true, attach upstream `{ status, headers, finalUrl }` to the
    * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
    * Required for protocols where the agent must read response
    * headers (`Location:` for resumable uploads, `ETag:` for S3
-   * multipart, `Upload-Offset:` for tus). Headers are filtered
-   * server-side via the allowlist in `./upstream-meta.ts`.
+   * multipart, `Upload-Offset:` for tus) or the post-redirect
+   * terminal URL (OAuth Authorization Code, CAS ticket, magic-link).
+   * Headers are filtered server-side via the allowlist in
+   * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
+   * stripped) before serialisation.
    *
    * Defaults to false on the legacy `provider_call` path so an
    * existing agent connection sees no wire-format change. The new
    * `provider_upload` Pi tool always passes `true`.
    */
   attachUpstreamMeta?: boolean;
+  /**
+   * URL the response was eventually served from after any redirect
+   * follow. Forwarded to {@link buildUpstreamMeta} which sanitises it
+   * before serialisation. Omitted when no redirect happened (the
+   * sidecar passes `result.finalUrl` from {@link executeProviderCall}
+   * regardless — equals the resolved target URL when no chain).
+   */
+  upstreamFinalUrl?: string;
 }
 
 /**
@@ -1136,7 +1150,7 @@ async function responseToToolResult(
   // but resolving the meta up-front keeps the code path linear and
   // documents the dependency: meta is independent of content.
   const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
-    ? buildUpstreamMeta(res)
+    ? buildUpstreamMeta(res, options.upstreamFinalUrl)
     : undefined;
 
   // Budget meta accumulates per-response: estimated cost + the

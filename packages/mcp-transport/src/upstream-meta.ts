@@ -105,4 +105,21 @@ export interface UpstreamMeta {
   status: number;
   /** Lowercased, allowlisted upstream response headers. */
   headers: Record<string, string>;
+  /**
+   * URL the response was eventually served from, after the sidecar
+   * followed any 30x chain internally. Distinct from `headers.location`
+   * which is the *next hop* on a non-terminal redirect — undefined on
+   * the terminal hop. Omitted on preflight failures (no upstream
+   * contact).
+   *
+   * Sanitised per WHATWG Fetch: userinfo (`user:pass@`) and fragment
+   * (`#…`) are stripped before serialisation. Defence-in-depth: the
+   * sidecar refuses redirects to non-allowlisted hosts, so the value
+   * is always inside the provider's declared trust boundary.
+   *
+   * Use to extract callback query params (`?code=…`, `?ticket=…`,
+   * `?state=…`) from multi-step OAuth Authorization Code / CAS /
+   * magic-link flows that terminate via redirect on a 200/4xx.
+   */
+  finalUrl?: string;
 }

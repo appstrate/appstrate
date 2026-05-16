@@ -102,15 +102,16 @@ The download counterpart (`responseMode.toFile`) is the same in reverse: the res
 
 ## Upstream response-header propagation
 
-`provider_call` ships upstream HTTP `status` + an allowlist of response headers back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
+`provider_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
 
 ```jsonc
 {
   "content": [{ "type": "text", "text": "<upstream body>" }],
   "_meta": {
     "appstrate/upstream": {
-      "status": 308,
-      "headers": { "location": "https://...", "content-range": "bytes=0-4194303" },
+      "status": 200,
+      "headers": { "content-type": "application/json" },
+      "finalUrl": "https://api.example.com/callback?code=ABC123",
     },
   },
 }
@@ -118,9 +119,27 @@ The download counterpart (`responseMode.toFile`) is the same in reverse: the res
 
 The allowlist is defined in [`runtime-pi/sidecar/upstream-meta.ts`](./upstream-meta.ts) and includes every header the four chunked-upload protocols depend on (`Location`, `ETag`, `Content-Range`, `Upload-Offset`, `Upload-Length`, `Tus-Resumable`, …) plus standard caching headers (`Cache-Control`, `Last-Modified`, `Vary`, `Retry-After`). Credential-bearing headers (`Set-Cookie`, `Authorization`, `WWW-Authenticate`) are deliberately excluded.
 
+`finalUrl` is the URL the response was eventually served from after the sidecar's redirect follower terminated. Distinct from `headers.location` (which is the _next hop_ on a non-terminal 30x — undefined on the terminal 200/4xx). Sanitised per WHATWG Fetch: userinfo (`user:pass@`) and fragment (`#…`) are stripped before serialisation. Use for OAuth Authorization Code / CAS `?ticket=…` / magic-link flows where the agent needs to extract callback query params from the terminal hop. Omitted on preflight failures (no upstream contact).
+
 Old MCP clients ignore unknown `_meta` keys per spec — the propagation is wire-compatible.
 
 The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-meta.ts) re-applies the allowlist defensively, so a compromised sidecar can't slip an extra header through.
+
+## Redirect handling
+
+`provider_call` follows 30x redirects manually (`redirect: "manual"`) on the buffered path so `Set-Cookie` from intermediate hops is captured into the per-provider jar (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Three defence-in-depth rules apply to every hop:
+
+1. **Per-hop SSRF blocklist** — every candidate hop is checked against the same blocklist as the initial URL (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`). Applies regardless of `allowAllUris` — a compromised upstream cannot pivot the proxy into `http://169.254.169.254/…`.
+2. **Per-hop `authorizedUris`** — when the provider declared `authorizedUris`, every hop must match. Off-allowlist redirects fail closed with a structured `403 Redirect blocked (unauthorized)` and the raw hop URL never appears in the error message (defence against capability-bearing redirect URLs).
+3. **Hybrid credential strip** — with an `authorizedUris` allowlist, every surviving hop is inside the trust boundary by construction so the injected credential header (and `Authorization`) is forwarded — multi-host APIs like Dropbox (`api.dropboxapi.com` ⇄ `content.dropboxapi.com`) or Twilio (`api` ⇄ `lookups` ⇄ `verify`) work without special-casing. With `allowAllUris: true` (no declared trust boundary), credentials are stripped on cross-origin hops per WHATWG fetch.
+
+Additional hardening: userinfo and fragment are stripped from every redirect `Location` before policy checks and before re-issuing the fetch. A compromised upstream cannot inject attacker-controlled basic-auth (`https://attacker:pwn@target/`) on the next hop.
+
+Streaming bodies (`ReadableStream`) skip the manual follower (bodies cannot be replayed across hops) and fall back to Bun's native `redirect: "follow"`. The initial-URL allowlist check still bounds the surface; per-hop validation is unavailable on this path by construction.
+
+Cap: `MAX_REDIRECTS = 10` (mirrors Bun's native default).
+
+**Provider-author guidance**: if your API redirects between hosts (DigitalOcean Spaces signed URLs, Dropbox API ⇄ content, multi-region failover), declare every host in `authorizedUris`. The Bearer survives intra-allowlist hops; cross-allowlist redirects are refused.
 
 ## Chunked uploads (`provider_upload`)
 

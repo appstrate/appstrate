@@ -41,14 +41,40 @@ export function projectAllowedHeaders(source: Headers): Record<string, string> {
 }
 
 /**
+ * Strip userinfo and fragment from a URL before exposing it on
+ * `_meta`. Mirrors WHATWG Fetch `Response.url` semantics — both are
+ * dropped to "avoid leaking information about redirects". Returns
+ * `undefined` if the URL is unparseable so a malformed upstream
+ * `Location` cannot poison the envelope.
+ */
+function sanitizeFinalUrl(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    u.username = "";
+    u.password = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Build the `_meta` payload for a CallToolResult given an upstream
  * `Response`. The Response body is NOT consumed — the caller still
  * owns it for `content[]` materialization.
+ *
+ * `finalUrl` is the URL the response was eventually served from after
+ * the sidecar's redirect follower (manual or Bun native). Sanitised
+ * here (userinfo + fragment stripped) so callers cannot accidentally
+ * leak basic-auth credentials into the agent's context window.
  */
-export function buildUpstreamMeta(response: Response): UpstreamMeta {
+export function buildUpstreamMeta(response: Response, finalUrl?: string): UpstreamMeta {
+  const sanitised = finalUrl !== undefined ? sanitizeFinalUrl(finalUrl) : undefined;
   return {
     status: response.status,
     headers: projectAllowedHeaders(response.headers),
+    ...(sanitised !== undefined ? { finalUrl: sanitised } : {}),
   };
 }
 
