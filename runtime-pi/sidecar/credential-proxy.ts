@@ -43,55 +43,36 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 
-/**
- * Max redirect hops we will follow manually. Matches Bun's native
- * `fetch` default. Beyond this we surface a clear error instead of
- * letting the chain loop silently.
- */
 const MAX_REDIRECTS = 10;
 
-/**
- * Merge a list of `Set-Cookie` header values into the per-provider
- * jar. Attributes (Path, Expires, Domain, SameSite, …) are stripped —
- * the jar is per-provider-per-run, so finer-grained scoping is not
- * needed for the proxied call model. Cookies are deduped by name, so
- * a rotated value from upstream replaces the prior one.
- */
+/** Dedup by cookie name; strip attributes (Path, Expires, Domain, SameSite, …). */
 function mergeSetCookieIntoJar(
   setCookieHeaders: string[],
   cookieJar: Map<string, string[]>,
   providerId: string,
 ): void {
   if (!setCookieHeaders.length) return;
-  const cookieValues = setCookieHeaders.map((h) => h.split(";")[0]!.trim());
-  const existing = cookieJar.get(providerId) ?? [];
   const byName = new Map<string, string>();
-  for (const ck of existing) byName.set(ck.split("=")[0]!, ck);
-  for (const ck of cookieValues) byName.set(ck.split("=")[0]!, ck);
+  for (const ck of cookieJar.get(providerId) ?? []) byName.set(ck.split("=")[0]!, ck);
+  for (const h of setCookieHeaders) {
+    const ck = h.split(";")[0]!.trim();
+    byName.set(ck.split("=")[0]!, ck);
+  }
   cookieJar.set(providerId, [...byName.values()]);
 }
 
 /**
- * Manually follow 3xx redirects, capturing `Set-Cookie` headers from
- * **every** hop into the per-provider jar and re-injecting the growing
- * jar as `Cookie` on each next hop.
+ * Manually follow 3xx redirects so we can capture `Set-Cookie` from
+ * **every** hop into the per-provider jar — Bun's native fetch only
+ * surfaces the final hop's `Set-Cookie`, which breaks multi-step
+ * OAuth/CAS flows where the session cookie lands on an intermediate
+ * 302 (see #473).
  *
- * Why this exists: Bun's native `fetch` follows redirects automatically
- * but `Response.headers.getSetCookie()` on the final response only
- * surfaces the **last hop's** `Set-Cookie` headers — cookies set by
- * intermediate hops are silently dropped. That breaks multi-step
- * login flows (CAS + OAuth/OIDC, enterprise SSO chains) where the
- * session cookie is set on a non-final 302.
- *
- * Streaming request bodies use the native `fetch` redirect follower
- * instead (their bodies can't be replayed across 307/308 hops) — for
- * those, last-hop-only cookie capture remains the unavoidable
- * behaviour.
- *
- * RFC 9110 redirect semantics:
- *   - 301/302/303 → method becomes GET, body + Content-Length /
- *                    Content-Type dropped
- *   - 307/308     → method + body preserved verbatim
+ * On cross-origin hops we strip `Authorization` and the provider's
+ * injected credential header to match WHATWG fetch behaviour — without
+ * this, the credential proxy could leak the Bearer token to any origin
+ * a redirect points at. Streaming bodies skip this path entirely
+ * (caller falls back to native fetch — bodies can't be replayed).
  */
 async function fetchFollowingRedirectsCapturingCookies(
   url: string,
@@ -99,6 +80,7 @@ async function fetchFollowingRedirectsCapturingCookies(
   fetchFn: typeof fetch,
   cookieJar: Map<string, string[]>,
   providerId: string,
+  injectedCredentialHeader: string | null,
 ): Promise<Response> {
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
@@ -111,7 +93,12 @@ async function fetchFollowingRedirectsCapturingCookies(
     const location = response.headers.get("location");
     if (!location) return response;
 
+    // 301/302/303 → method becomes GET, body + content-{length,type} dropped.
+    // 307/308     → method + body preserved verbatim.
     const dropBody = response.status === 301 || response.status === 302 || response.status === 303;
+    const nextUrl = new URL(location, currentUrl).toString();
+    const crossOrigin = new URL(nextUrl).origin !== new URL(currentUrl).origin;
+
     const headers = new Headers(currentInit.headers as HeadersInit | undefined);
     headers.delete("cookie");
     const stored = cookieJar.get(providerId);
@@ -120,6 +107,10 @@ async function fetchFollowingRedirectsCapturingCookies(
       headers.delete("content-length");
       headers.delete("content-type");
     }
+    if (crossOrigin) {
+      headers.delete("authorization");
+      if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
+    }
 
     currentInit = {
       ...currentInit,
@@ -127,7 +118,7 @@ async function fetchFollowingRedirectsCapturingCookies(
       body: dropBody ? undefined : currentInit.body,
       headers,
     };
-    currentUrl = new URL(location, currentUrl).toString();
+    currentUrl = nextUrl;
   }
 
   throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${url}`);
@@ -383,12 +374,10 @@ export async function executeProviderCall(
       proxy: args.proxyUrl || undefined,
     };
     if (init.body instanceof ReadableStream) {
-      // Required by fetch when sending a streaming request body.
+      // Streaming bodies can't be replayed across hops — fall back to
+      // native fetch (intermediate-hop Set-Cookie lost, step 8 captures
+      // the final hop only).
       init.duplex = "half";
-      // Streaming bodies cannot be replayed across redirect hops, so
-      // we let the native fetch follower handle 3xx — intermediate-hop
-      // Set-Cookie headers are unavoidably lost on this path. Step 8
-      // captures the final hop's cookies for the streaming case.
       return fetchFn(resolvedUrl, init);
     }
     return fetchFollowingRedirectsCapturingCookies(
@@ -397,6 +386,7 @@ export async function executeProviderCall(
       fetchFn,
       cookieJar,
       providerId,
+      activeCreds.credentialHeaderName?.toLowerCase() ?? null,
     );
   };
 
@@ -439,13 +429,9 @@ export async function executeProviderCall(
     }
   }
 
-  // 8. Capture Set-Cookie headers from the terminal response into the
-  //    per-provider jar. For buffered/formData/none bodies the manual
-  //    redirect follower has already merged every hop (including this
-  //    terminal one) — calling merge again is a no-op since it dedups
-  //    by name. For streaming bodies (native fetch redirect follower)
-  //    this is the only capture point; intermediate-hop cookies are
-  //    unavoidably lost.
+  // 8. Terminal-hop Set-Cookie capture. No-op for buffered (the
+  //    follower already merged every hop); load-bearing for streaming
+  //    (final hop only — bodies can't be replayed).
   mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, providerId);
 
   // 9. Log persistent auth failures locally (once per provider per

@@ -392,7 +392,10 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     expect(observed[1]!.body).toBeDefined();
   });
 
-  it("throws on redirect chains exceeding MAX_REDIRECTS", async () => {
+  it("caps redirect chains at MAX_REDIRECTS hops", async () => {
+    // MAX_REDIRECTS = 10 → exactly 11 fetch attempts before the throw
+    // (hops 0..10 inclusive). Asserting the call count proves the cap
+    // is doing the work — `wrapFetchError` masks the thrown message.
     const fetchFn = mock(
       async () =>
         new Response(null, {
@@ -411,9 +414,61 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       },
       deps,
     );
-    // Surfaces as a structured upstream failure (wrapped by wrapFetchError).
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(502);
+    expect(fetchFn).toHaveBeenCalledTimes(11);
+  });
+
+  it("strips Authorization + injected credential header on cross-origin redirect", async () => {
+    const authHeadersSeen: { auth: string | null; apiKey: string | null }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      const headers = new Headers(init?.headers);
+      authHeadersSeen.push({
+        auth: headers.get("authorization"),
+        apiKey: headers.get("x-api-key"),
+      });
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://evil.attacker.com/steal" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "secret-token" },
+        // The follower only validates the initial URL — the destination
+        // origin is whatever the attacker-controlled redirect points at.
+        // We rely on cross-origin header stripping for defence in depth.
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: true,
+        credentialHeaderName: "X-Api-Key",
+        credentialHeaderPrefix: "",
+        credentialFieldName: "access_token",
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { authorization: "Bearer caller-token" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(authHeadersSeen.length).toBe(2);
+    // Hop 1 (same origin): both headers present.
+    expect(authHeadersSeen[0]!.apiKey).toBe("secret-token");
+    // Hop 2 (cross-origin): Authorization + injected credential stripped.
+    expect(authHeadersSeen[1]!.auth).toBeNull();
+    expect(authHeadersSeen[1]!.apiKey).toBeNull();
   });
 
   it("streaming bodies still use native fetch and only capture final-hop cookies", async () => {
