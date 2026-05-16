@@ -512,10 +512,15 @@ _appstrate_bootstrap() {
         err "  → Duplicate or malformed entries — do NOT execute."
         exit 1
       fi
+      # `--quiet` is GNU-only — BusyBox's sha256sum (Alpine) rejects it
+      # with "unrecognized option". Drop the flag and silence the "OK"
+      # confirmation line via `>/dev/null` instead, which is portable
+      # across GNU coreutils, BusyBox, and macOS BSD shasum. Exit code
+      # is what drives the gate; the suppressed line is just noise.
       if have_sha256sum; then
-        sha256sum -c --quiet checksums.local.txt
+        sha256sum -c checksums.local.txt >/dev/null
       elif have_shasum; then
-        shasum -a 256 -c --quiet checksums.local.txt
+        shasum -a 256 -c checksums.local.txt >/dev/null
       else
         err "Neither sha256sum nor shasum is available on this system."
         exit 1
