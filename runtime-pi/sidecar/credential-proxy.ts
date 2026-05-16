@@ -33,6 +33,7 @@ import {
   isBlockedUrl,
   matchesAuthorizedUri,
   normalizeAuthScheme,
+  stripUserInfoAndFragment,
   substituteVars,
   findUnresolvedPlaceholders,
   OUTBOUND_TIMEOUT_MS,
@@ -44,6 +45,31 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 
 const MAX_REDIRECTS = 10;
+
+/**
+ * Per-hop redirect refusal. Caught by {@link executeProviderCall} and
+ * surfaced as 403 (vs the 502 reserved for network faults). The host
+ * is exposed for logs only — a redirect target may itself encode
+ * capabilities (`?token=…`) we don't want in the agent's error.
+ */
+class RedirectBlockedError extends Error {
+  constructor(
+    public readonly reason: "ssrf" | "unauthorized",
+    public readonly hopUrl: string,
+  ) {
+    super(`Redirect blocked (${reason})`);
+    this.name = "RedirectBlockedError";
+  }
+}
+
+/** Extract hostname for audit logs, never throwing. */
+function redactHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "<unparseable>";
+  }
+}
 
 /** Dedup by cookie name; strip attributes (Path, Expires, Domain, SameSite, …). */
 function mergeSetCookieIntoJar(
@@ -80,6 +106,21 @@ interface RedirectFollowOptions {
   providerId: string;
   /** Lowercased name of the credential header server-injected by the proxy. */
   injectedCredentialHeader: string | null;
+  /**
+   * Provider's declared trust boundary. Each candidate redirect hop is
+   * checked against this allowlist; off-allowlist hops throw
+   * {@link RedirectBlockedError} instead of being followed. Empty or
+   * undefined → no allowlist gate, origin-based credential strip
+   * applies (mirroring WHATWG fetch).
+   */
+  authorizedUris?: string[];
+  /**
+   * When true, every URL matches the "allowlist" — the per-hop
+   * allowlist gate is bypassed and credential strip falls back to
+   * origin equality. The per-hop SSRF blocklist still applies (no
+   * `allowAllUris` ever lets a redirect target loopback / RFC1918).
+   */
+  allowAllUris?: boolean;
 }
 
 /**
@@ -89,21 +130,51 @@ interface RedirectFollowOptions {
  * OAuth/CAS flows where the session cookie lands on an intermediate
  * 302 (see #473).
  *
- * On cross-origin hops we strip `Authorization` and the provider's
- * injected credential header to match WHATWG fetch behaviour — without
- * this, the credential proxy could leak the Bearer token to any origin
- * a redirect points at. Streaming bodies skip this path entirely
- * (caller falls back to native fetch — bodies can't be replayed).
+ * Defence-in-depth for redirect chains (see #475):
+ *
+ *   - **Per-hop SSRF blocklist** — every candidate hop is checked
+ *     against `isBlockedUrl` (loopback, RFC1918, link-local, cloud
+ *     metadata) regardless of `allowAllUris`. A compromised upstream
+ *     can no longer pivot the proxy to `http://169.254.169.254/...`.
+ *   - **Per-hop allowlist** — when the provider declared
+ *     `authorizedUris`, every hop must match. Off-allowlist redirects
+ *     are refused with a structured 403 rather than silently followed
+ *     into attacker-controlled hosts.
+ *   - **Hybrid credential strip** — when an allowlist is declared,
+ *     surviving hops are inside the trust boundary by construction so
+ *     credentials are forwarded (lets multi-host APIs like Dropbox
+ *     `api.dropboxapi.com` ⇄ `content.dropboxapi.com` work). With
+ *     `allowAllUris: true` (no declared boundary) we fall back to
+ *     WHATWG-style origin-based strip.
+ *
+ * Streaming bodies skip this path entirely (caller falls back to
+ * native fetch — bodies can't be replayed across hops). The initial-
+ * URL allowlist check still bounds the SSRF surface for that path.
  *
  * Caller-supplied cookies are preserved across hops (Bun's native
  * follower propagates the request `Cookie` header all the way). The
  * jar wins on name conflict so server-rotated values replace stale
  * caller-supplied ones.
+ *
+ * Returns the terminal `Response` plus the URL it was served from so
+ * callers driving redirect-chain flows (OAuth code, CAS ticket,
+ * magic-link) can extract callback query params without parsing
+ * bodies (see #471).
  */
 async function fetchFollowingRedirectsCapturingCookies(
   opts: RedirectFollowOptions,
-): Promise<Response> {
-  const { url, init, fetchFn, cookieJar, providerId, injectedCredentialHeader } = opts;
+): Promise<{ response: Response; finalUrl: string }> {
+  const {
+    url,
+    init,
+    fetchFn,
+    cookieJar,
+    providerId,
+    injectedCredentialHeader,
+    authorizedUris,
+    allowAllUris,
+  } = opts;
+  const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
   const callerCookies = parseCookieHeader(
     new Headers(init.headers as HeadersInit | undefined).get("cookie"),
   );
@@ -115,9 +186,11 @@ async function fetchFollowingRedirectsCapturingCookies(
     const response = await fetchFn(currentUrl, currentInit);
     mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, providerId);
 
-    if (response.status < 300 || response.status >= 400) return response;
+    if (response.status < 300 || response.status >= 400) {
+      return { response, finalUrl: currentUrl };
+    }
     const location = response.headers.get("location");
-    if (!location) return response;
+    if (!location) return { response, finalUrl: currentUrl };
 
     // Per WHATWG fetch (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
     //   - 301/302 downgrade POST → GET (other methods preserved)
@@ -127,8 +200,43 @@ async function fetchFollowingRedirectsCapturingCookies(
     const dropBody =
       ((response.status === 301 || response.status === 302) && method === "POST") ||
       (response.status === 303 && method !== "GET" && method !== "HEAD");
-    const nextUrl = new URL(location, currentUrl).toString();
+    // Resolve, then strip userinfo + fragment. Userinfo in a Location
+    // would arrive as basic-auth on the next hop (credential confusion);
+    // fragment is HTTP-irrelevant. Stripping keeps the allowlist matcher
+    // host-based (not userinfo-spoofable). Input is post-`new URL()` so
+    // the `?? raw` fallback is defensive — never hit in practice.
+    const raw = new URL(location, currentUrl).toString();
+    const nextUrl = stripUserInfoAndFragment(raw) ?? raw;
+
+    // Per-hop SSRF + allowlist validation. The initial-URL checks in
+    // executeProviderCall step 4 only see the operator-supplied target
+    // — a redirect chain could pivot to internal targets or off-
+    // allowlist hosts without these guards.
+    if (isBlockedUrl(nextUrl)) {
+      logger.warn("Redirect refused (SSRF blocklist)", {
+        providerId,
+        hop,
+        host: redactHost(nextUrl),
+      });
+      throw new RedirectBlockedError("ssrf", nextUrl);
+    }
+    if (hasAllowlist && !allowAllUris && !matchesAuthorizedUri(nextUrl, authorizedUris!)) {
+      logger.warn("Redirect refused (not in authorizedUris)", {
+        providerId,
+        hop,
+        host: redactHost(nextUrl),
+      });
+      throw new RedirectBlockedError("unauthorized", nextUrl);
+    }
+
+    // Hybrid credential strip:
+    //   - Declared allowlist (and not allowAllUris) → every surviving
+    //     hop is in-allowlist by construction, credentials are safe to
+    //     forward (multi-host APIs like Dropbox work).
+    //   - allowAllUris / no allowlist → no declared trust boundary, fall
+    //     back to WHATWG origin-based strip.
     const crossOrigin = new URL(nextUrl).origin !== new URL(currentUrl).origin;
+    const stripCred = (!hasAllowlist || !!allowAllUris) && crossOrigin;
 
     const headers = new Headers(currentInit.headers as HeadersInit | undefined);
     headers.delete("cookie");
@@ -140,7 +248,7 @@ async function fetchFollowingRedirectsCapturingCookies(
       headers.delete("content-length");
       headers.delete("content-type");
     }
-    if (crossOrigin) {
+    if (stripCred) {
       headers.delete("authorization");
       if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
     }
@@ -206,6 +314,15 @@ export interface ProviderCallArgs {
 export interface ProviderCallSuccess {
   ok: true;
   response: Response;
+  /**
+   * URL the response was eventually served from after any redirect
+   * follow. Equals the resolved target URL when no redirect happened.
+   * Propagated to `_meta["appstrate/upstream"].finalUrl` (sanitised
+   * for userinfo + fragment) by the MCP handler so agents driving
+   * OAuth Authorization Code / CAS / magic-link flows can extract
+   * callback query params from the terminal hop.
+   */
+  finalUrl: string;
   /**
    * `true` when a 401 triggered a credential refresh. On the buffered
    * path the body was replayed and this is a no-op signal (the
@@ -365,9 +482,15 @@ export async function executeProviderCall(
 
   /**
    * One outbound attempt. Re-runs header + body substitution against
-   * the supplied creds so 401-retry sees the refreshed token.
+   * the supplied creds so 401-retry sees the refreshed token. Returns
+   * both the upstream `Response` and the URL it was served from — the
+   * streaming path reads it off `Response.url` (Bun populates this
+   * after native redirect:"follow"), the manual-follow path threads
+   * the terminal-hop URL through the loop.
    */
-  const doUpstreamRequest = async (activeCreds: CredentialsResponse): Promise<Response> => {
+  const doUpstreamRequest = async (
+    activeCreds: CredentialsResponse,
+  ): Promise<{ response: Response; finalUrl: string }> => {
     const resolvedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(callerHeaders)) {
       resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
@@ -409,9 +532,13 @@ export async function executeProviderCall(
     if (init.body instanceof ReadableStream) {
       // Streaming bodies can't be replayed across hops — fall back to
       // native fetch (intermediate-hop Set-Cookie lost, step 8 captures
-      // the final hop only).
+      // the final hop only). Per-hop SSRF/allowlist validation is NOT
+      // applied on this path: bytes have already flown before the
+      // sidecar can see the 30x. The initial-URL allowlist check at
+      // step 4 bounds the surface.
       init.duplex = "half";
-      return fetchFn(resolvedUrl, init);
+      const response = await fetchFn(resolvedUrl, init);
+      return { response, finalUrl: response.url || resolvedUrl };
     }
     return fetchFollowingRedirectsCapturingCookies({
       url: resolvedUrl,
@@ -420,16 +547,21 @@ export async function executeProviderCall(
       cookieJar,
       providerId,
       injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
+      authorizedUris: creds.authorizedUris ?? undefined,
+      allowAllUris: creds.allowAllUris,
     });
   };
 
   // 7. First outbound request. Network/timeout errors surface as a
   //    structured failure rather than a raw exception.
   let upstream: Response;
+  let upstreamFinalUrl: string = resolvedUrl;
   try {
-    upstream = await doUpstreamRequest(creds);
+    const r = await doUpstreamRequest(creds);
+    upstream = r.response;
+    upstreamFinalUrl = r.finalUrl;
   } catch (err) {
-    return wrapFetchError(err, "Upstream request failed", resolvedUrl);
+    return wrapRequestError(err, resolvedUrl);
   }
 
   let authRefreshed = false;
@@ -448,9 +580,11 @@ export async function executeProviderCall(
       const refreshed = await refreshCredentials(providerId);
       if (body.kind !== "streaming") {
         try {
-          upstream = await doUpstreamRequest(refreshed);
+          const r = await doUpstreamRequest(refreshed);
+          upstream = r.response;
+          upstreamFinalUrl = r.finalUrl;
         } catch (err) {
-          return wrapFetchError(err, "Upstream request failed", resolvedUrl);
+          return wrapRequestError(err, resolvedUrl);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401
@@ -476,7 +610,7 @@ export async function executeProviderCall(
     logger.warn("Upstream returned 401 after retry", { providerId });
   }
 
-  return { ok: true, response: upstream, authRefreshed };
+  return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
 }
 
 function wrapFetchError(err: unknown, label: string, url: string): ProviderCallFailure {
@@ -488,4 +622,28 @@ function wrapFetchError(err: unknown, label: string, url: string): ProviderCallF
   const suffix = code ? `: ${code}` : "";
   const domainHint = domain ? ` (${domain})` : "";
   return { ok: false, status: 502, error: `${label}${suffix}${domainHint}` };
+}
+
+/**
+ * Demultiplex outbound-request errors into structured failures:
+ *
+ *   - {@link RedirectBlockedError} → 403 (upstream tried to pivot to
+ *     a non-allowlisted or SSRF-blocked host — this is a policy
+ *     decision, not a network fault).
+ *   - everything else (timeout, ECONNREFUSED, ENOTFOUND) → 502 via
+ *     {@link wrapFetchError}.
+ *
+ * Redacts the target host into the error message; the full URL stays
+ * out because a redirect target may itself encode capabilities
+ * (`?token=…`) we don't want surfaced to the agent.
+ */
+function wrapRequestError(err: unknown, resolvedUrl: string): ProviderCallFailure {
+  if (err instanceof RedirectBlockedError) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Redirect blocked (${err.reason}): host=${redactHost(err.hopUrl)}`,
+    };
+  }
+  return wrapFetchError(err, "Upstream request failed", resolvedUrl);
 }

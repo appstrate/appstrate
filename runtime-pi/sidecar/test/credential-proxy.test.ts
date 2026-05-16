@@ -584,22 +584,24 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     ]);
   });
 
-  it("treats HTTPS→HTTP downgrade as cross-origin (strips credentials)", async () => {
-    const authSeen: (string | null)[] = [];
-    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      authSeen.push(new Headers(init?.headers).get("authorization"));
+  it("refuses HTTPS→HTTP downgrade redirects when allowlist is https-only (#475)", async () => {
+    // makeDeps declares authorizedUris: ["https://api.example.com/**"]
+    // — the matcher is scheme-sensitive, so http://… does NOT match.
+    // Pre-#475: hop 2 was issued cross-origin with credentials stripped.
+    // Post-#475: per-hop allowlist gate refuses the hop entirely, never
+    // exposing the agent's request timing/IP to the downgraded target.
+    const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.startsWith("https://api.example.com")) {
         return new Response(null, {
           status: 302,
-          // Same host, protocol downgrade — origin differs per WHATWG.
           headers: { location: "http://api.example.com/insecure" },
         });
       }
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    await executeProviderCall(
+    const result = await executeProviderCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -609,8 +611,14 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       },
       deps,
     );
-    expect(authSeen[0]).toBe("Bearer tok-123");
-    expect(authSeen[1]).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+      expect(result.error).toContain("api.example.com");
+    }
+    // Hop 2 never issued — only the initial fetch happened.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("preserves PUT method + body on 301/302 (spec: only POST is downgraded)", async () => {
@@ -706,5 +714,439 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     // 307 preserves method + body — FormData replayed on hop 1.
     expect(bodyOnHop1).toBeInstanceOf(FormData);
     expect((bodyOnHop1 as FormData).get("field")).toBe("value");
+  });
+});
+
+describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
+  /**
+   * The initial-URL allowlist check only sees the operator-supplied
+   * target. A compromised or misconfigured upstream that 302s into
+   * cloud-metadata / loopback / RFC1918 would have been silently
+   * followed before #475 — the per-hop SSRF guard refuses regardless
+   * of `allowAllUris` so finalUrl can never become an internal-network
+   * oracle.
+   */
+  // One per representative family in isBlockedHost (IPv4 numeric,
+  // hostname, IPv6); the rest is covered by the ssrf.ts unit tests.
+  for (const target of [
+    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+    "http://localhost/admin",
+    "http://[::1]/",
+  ]) {
+    it(`refuses redirect to SSRF-blocked target (${target})`, async () => {
+      const fetchFn = mock(async (url: string | URL) => {
+        const u = typeof url === "string" ? url : url.toString();
+        if (u.startsWith("https://api.example.com")) {
+          return new Response(null, { status: 302, headers: { location: target } });
+        }
+        return new Response("leaked", { status: 200 });
+      });
+      // allowAllUris: true to prove the SSRF gate fires even without
+      // an allowlist refusing the target.
+      const fetchCredentials = mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: null,
+          allowAllUris: true,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        }),
+      );
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials,
+      });
+      const result = await executeProviderCall(
+        {
+          providerId: "demo",
+          targetUrl: "https://api.example.com/start",
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(403);
+        expect(result.error).toMatch(/Redirect blocked \(ssrf\)/);
+      }
+      // The blocked hop was never issued — only the initial fetch.
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it("refuses redirects to off-allowlist hosts even when reachable", async () => {
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://evil.attacker.com/steal" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+      expect(result.error).toContain("evil.attacker.com");
+      // The raw URL path/query never appears (defence against capability
+      // leakage via redirect-encoded tokens).
+      expect(result.error).not.toContain("/steal");
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("hybrid: preserves credentials on cross-host redirect inside allowlist", async () => {
+    // Multi-host APIs (Dropbox api ⇄ content, PayPal sandbox ⇄ live,
+    // Google googleapis ⇄ youtube) declare every host in authorizedUris
+    // and used to lose creds at the cross-host hop. With #475, the
+    // allowlist becomes the trust boundary for credential propagation.
+    const authSeen: { url: string; auth: string | null; apiKey: string | null }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      const headers = new Headers(init?.headers);
+      authSeen.push({
+        url: u,
+        auth: headers.get("authorization"),
+        apiKey: headers.get("x-api-key"),
+      });
+      if (u.startsWith("https://api.dropboxapi.com")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://content.dropboxapi.com/files/download?id=42" },
+        });
+      }
+      return new Response("payload", { status: 200 });
+    });
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "dbx-token" },
+        authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "dropbox",
+        targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(authSeen.length).toBe(2);
+    // Hop 1 (initial): Bearer injected.
+    expect(authSeen[0]!.auth).toBe("Bearer dbx-token");
+    // Hop 2 (cross-host, intra-allowlist): Bearer preserved (the fix).
+    expect(authSeen[1]!.auth).toBe("Bearer dbx-token");
+    expect(authSeen[1]!.url).toContain("content.dropboxapi.com");
+  });
+
+  it("fallback: allowAllUris uses origin-based strip on cross-origin", async () => {
+    // No declared allowlist → no upstream trust boundary → fall back
+    // to WHATWG-style origin strip. Preserves the safety property of
+    // the pre-#475 behaviour for `allowAllUris: true` providers
+    // (webhooks, woocommerce, wordpress, activecampaign).
+    const authSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      authSeen.push(new Headers(init?.headers).get("authorization"));
+      if (u.startsWith("https://hook.example.com")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://second.example.com/landing" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "secret" },
+        authorizedUris: null,
+        allowAllUris: true,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "webhooks",
+        targetUrl: "https://hook.example.com/trigger",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(authSeen[0]).toBe("Bearer secret");
+    // Cross-origin under allowAllUris → still stripped (fallback path).
+    expect(authSeen[1]).toBeNull();
+  });
+
+  it("strips userinfo from redirect Location before re-issuing the fetch", async () => {
+    // A compromised upstream could 302 to https://attacker:pwn@api.example.com/…
+    // to inject attacker-controlled basic-auth on the next hop. Strip it.
+    const urlsSeen: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      urlsSeen.push(u);
+      if (u.endsWith("/start")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://evil:pwn@api.example.com/next?q=1#frag" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(urlsSeen.length).toBe(2);
+    // Hop 2 issued WITHOUT userinfo and WITHOUT fragment.
+    expect(urlsSeen[1]).toBe("https://api.example.com/next?q=1");
+    expect(urlsSeen[1]).not.toContain("evil");
+    expect(urlsSeen[1]).not.toContain("pwn");
+    expect(urlsSeen[1]).not.toContain("#frag");
+  });
+
+  it("hybrid: keeps credentials on same-origin redirect (allowlist mode)", async () => {
+    // Sanity check — the hybrid branch shouldn't strip on same-origin.
+    const authSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      authSeen.push(new Headers(init?.headers).get("authorization"));
+      if (u.endsWith("/start")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/end" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(authSeen[0]).toBe("Bearer tok-123");
+    expect(authSeen[1]).toBe("Bearer tok-123");
+  });
+});
+
+describe("executeProviderCall — finalUrl exposure (#471)", () => {
+  /**
+   * Agents driving redirect-chain flows (OAuth Authorization Code,
+   * CAS `?ticket=…`, magic-link redemption) need to read the URL the
+   * sidecar's redirect follower terminated on. `_meta.headers.location`
+   * is the *next hop* on non-terminal 30x — undefined on the terminal
+   * 200/4xx. `result.finalUrl` plugs that gap.
+   */
+  it("returns the resolved target URL when no redirect happens", async () => {
+    const deps = makeDeps();
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://api.example.com/messages",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/messages");
+  });
+
+  it("returns the terminal hop URL after a 302 chain ending on 200", async () => {
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/authorize")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/login?ReturnUrl=/callback" },
+        });
+      }
+      if (u.includes("/login")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/callback?code=ABC123" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/authorize",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The OAuth use case: extract ?code= from the terminal URL.
+      expect(result.finalUrl).toBe("https://api.example.com/callback?code=ABC123");
+    }
+  });
+
+  it("returns the no-location 30x hop URL (chain terminates mid-flight)", async () => {
+    // 302 without Location is malformed but RFC-permitted — the
+    // follower must stop and surface the URL the response was served
+    // from rather than the next hop (which doesn't exist).
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/a")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/b" },
+        });
+      }
+      // Hop 2: 302 with no Location → terminal.
+      return new Response("limbo", { status: 302 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/a",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/b");
+  });
+
+  it("returns response.url on the streaming path (Bun native follow)", async () => {
+    // Streaming bodies use Bun's native redirect: "follow" which
+    // populates Response.url. The sidecar must surface it as finalUrl.
+    const fetchFn = mock(async (_url: string | URL, _init?: RequestInit) => {
+      // Simulate Bun's behaviour after following a redirect: the
+      // Response carries the post-follow URL.
+      const res = new Response("uploaded", { status: 200 });
+      Object.defineProperty(res, "url", {
+        value: "https://api.example.com/uploaded?key=final",
+      });
+      return res;
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array([1]));
+        c.close();
+      },
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/upload",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "streaming", stream },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.finalUrl).toBe("https://api.example.com/uploaded?key=final");
+    }
+  });
+
+  it("returns the post-refresh URL after a 401 retry that followed redirects", async () => {
+    // 401 retry path must update finalUrl from the replayed call —
+    // not stick with the pre-retry value.
+    let call = 0;
+    const fetchFn = mock(async (url: string | URL) => {
+      call += 1;
+      const u = typeof url === "string" ? url : url.toString();
+      if (call === 1) return new Response("expired", { status: 401 });
+      // Call 2 = retry. Issues a redirect to /retry-target.
+      if (u.endsWith("/x")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/retry-target?ok=1" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const refreshCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-fresh" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.response.status).toBe(200);
+      expect(result.finalUrl).toBe("https://api.example.com/retry-target?ok=1");
+    }
   });
 });
