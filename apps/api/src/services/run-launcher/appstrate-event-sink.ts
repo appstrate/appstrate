@@ -222,7 +222,7 @@ export async function persistRunEvent(
       // is best-effort by its own contract (see writeRunnerLedgerRow's
       // try/catch) so it never aborts the surrounding transaction.
       if (opts.writeLedger) {
-        await writeRunnerLedgerRow(scope, runId, { cost, usage });
+        await writeRunnerLedgerRow(scope, runId, { cost, usage }, executor);
         // Best-effort live broadcast — never blocks the ingestion hot
         // path nor fails it. The broadcaster throttles per-run to
         // avoid flooding SSE subscribers under bursty metric emission
@@ -339,13 +339,14 @@ export async function writeRunnerLedgerRow(
     cost: number | null;
     usage: TokenUsage | null;
   },
+  executor: Db = db,
 ): Promise<void> {
   // Skip degenerate events with neither usage nor cost — nothing to bill
   // or audit.
   if (row.cost === null && !row.usage) return;
 
   try {
-    await db
+    await executor
       .insert(llmUsage)
       .values({
         source: "runner",
