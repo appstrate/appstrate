@@ -960,3 +960,132 @@ jobs:
             kill "$(cat /tmp/httpd-${{ matrix.name }}.pid)" 2>/dev/null || true
           fi
           rm -f /tmp/dry-${{ matrix.name }}.key
+
+  # Same end-to-end exercise as `fresh-install-distros` but on a real
+  # macos-latest runner (Apple Silicon). We can't use Docker on macOS
+  # GHA runners — the bootstrap runs natively on the host. To simulate
+  # "fresh macOS without minisign" we `brew uninstall minisign` (the
+  # runner image ships it for the linux signing step elsewhere), then
+  # run the bootstrap and assert the brew auto-install fires.
+  #
+  # macos-latest minutes are 10× linux's. Only matrix-entry, no parallel
+  # fan-out — gates exactly the macOS code path that the linux matrix
+  # cannot reach.
+  fresh-install-macos:
+    runs-on: macos-latest
+    needs: [static, workflow-lint]
+    timeout-minutes: 15
+    env:
+      # Skip `brew update`'s formula-tap refresh — adds 30-60s on a
+      # cold runner and isn't needed for an installed-formula reinstall.
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Ensure minisign present on runner (for signing the fake release)
+        run: |
+          set -euo pipefail
+          if ! command -v minisign >/dev/null 2>&1; then
+            brew install minisign
+          fi
+          # Resolve the canonical path now; brew might be in /opt/homebrew/bin
+          # (Apple Silicon) or /usr/local/bin (Intel runners — legacy).
+          command -v minisign
+
+      - name: Stage fake signed release + rewrite bootstrap.sh
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/served-macos"
+          mkdir -p "$ROOT/release"
+
+          # macos-latest is Apple Silicon → uname -m=arm64 → darwin-arm64
+          # is the asset the bootstrap will request. Stage x64 too for
+          # forward compatibility with future Intel-runner pinning.
+          cat > "$ROOT/release/appstrate-darwin-arm64" <<'CLI'
+          #!/usr/bin/env bash
+          echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
+          exit 0
+          CLI
+          chmod +x "$ROOT/release/appstrate-darwin-arm64"
+          cp "$ROOT/release/appstrate-darwin-arm64" "$ROOT/release/appstrate-darwin-x64"
+
+          # macOS ships BSD `shasum`, not GNU `sha256sum` — use shasum to
+          # produce a manifest the bootstrap's `shasum -a 256 -c` branch
+          # will accept (same `<hash>  <file>` format).
+          (cd "$ROOT/release" && shasum -a 256 appstrate-darwin-arm64 appstrate-darwin-x64 > checksums.txt)
+
+          umask 077
+          minisign -G -W -f -p /tmp/dry-macos.pub -s /tmp/dry-macos.key
+          minisign -S -s /tmp/dry-macos.key -t "macos dry-run" \
+            -m "$ROOT/release/checksums.txt"
+
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry-macos.pub | head -1 | tr -d '\n')
+
+          # macOS sed needs `-i ''` for in-place edits, but we're piping
+          # to a fresh file so the GNU/BSD difference doesn't bite here.
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8768/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8768/release|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap.sh > /tmp/bootstrap-macos.sh
+          bash -n /tmp/bootstrap-macos.sh
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Serve fake release from runner (Python http.server)
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          python3 -m http.server 8768 --bind 0.0.0.0 >/tmp/httpd.log 2>&1 &
+          echo $! > /tmp/httpd-macos.pid
+          for _ in 1 2 3 4 5; do
+            curl -fsS "http://127.0.0.1:8768/release/checksums.txt" >/dev/null && break
+            sleep 1
+          done
+          curl -fsS "http://127.0.0.1:8768/release/checksums.txt" >/dev/null
+
+      - name: Uninstall minisign (simulate fresh macOS without it)
+        run: |
+          set -euo pipefail
+          # `brew uninstall` fully removes the keg + symlink, so the
+          # subsequent `brew install minisign` from try_install_minisign
+          # is a true install (not a no-op re-link). Without this the
+          # auto-install would print "already installed" and exit 0 while
+          # leaving nothing on PATH — exactly the silent-pass we want
+          # to guard against.
+          brew uninstall minisign
+          if command -v minisign >/dev/null 2>&1; then
+            echo "::error::brew uninstall left minisign on PATH ($(command -v minisign))"
+            exit 1
+          fi
+
+      - name: Run bootstrap on macOS (should auto-install minisign via brew)
+        run: |
+          set +e
+          OUT=$(APPSTRATE_NO_LAUNCH=1 \
+            APPSTRATE_BIN_DIR=/tmp/appstrate-bin \
+            bash /tmp/bootstrap-macos.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on macOS"; exit 1; }
+          echo "$OUT" | grep -q "Installing minisign via brew" \
+            || { echo "::error::macOS did not announce the brew auto-install"; exit 1; }
+          echo "$OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::macOS verification chain did not complete"; exit 1; }
+          command -v minisign >/dev/null 2>&1 \
+            || { echo "::error::minisign not on PATH after macOS bootstrap"; exit 1; }
+          test -x /tmp/appstrate-bin/appstrate \
+            || { echo "::error::appstrate binary not dropped on macOS"; exit 1; }
+          echo "✓ macOS: brew auto-install + verify + drop OK"
+
+      - name: Stop the http server
+        if: always()
+        run: |
+          if [ -f "/tmp/httpd-macos.pid" ]; then
+            kill "$(cat /tmp/httpd-macos.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/dry-macos.key
