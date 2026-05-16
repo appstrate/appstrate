@@ -613,6 +613,69 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     expect(authSeen[1]).toBeNull();
   });
 
+  it("preserves PUT method + body on 301/302 (spec: only POST is downgraded)", async () => {
+    const observed: { method: string; body: unknown }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      observed.push({ method: init?.method ?? "GET", body: init?.body });
+      if (u.endsWith("/old")) {
+        return new Response(null, {
+          status: 301,
+          headers: { location: "https://api.example.com/new" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/old",
+        method: "PUT",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode('{"x":1}').buffer as ArrayBuffer,
+          text: '{"x":1}',
+        },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(observed[0]!.method).toBe("PUT");
+    // Pre-spec-fix: would have been "GET" with undefined body.
+    expect(observed[1]!.method).toBe("PUT");
+    expect(observed[1]!.body).toBeDefined();
+  });
+
+  it("preserves HEAD on 303 (spec: only non-GET/HEAD is downgraded)", async () => {
+    const observed: string[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      observed.push(init?.method ?? "GET");
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/check")) {
+        return new Response(null, {
+          status: 303,
+          headers: { location: "https://api.example.com/result" },
+        });
+      }
+      return new Response(null, { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/check",
+        method: "HEAD",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(observed).toEqual(["HEAD", "HEAD"]);
+  });
+
   it("replays FormData body across 307 redirects", async () => {
     let bodyOnHop1: unknown;
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {

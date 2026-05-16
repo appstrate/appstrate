@@ -119,9 +119,14 @@ async function fetchFollowingRedirectsCapturingCookies(
     const location = response.headers.get("location");
     if (!location) return response;
 
-    // 301/302/303 → method becomes GET, body + content-{length,type} dropped.
-    // 307/308     → method + body preserved verbatim.
-    const dropBody = response.status === 301 || response.status === 302 || response.status === 303;
+    // Per WHATWG fetch (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
+    //   - 301/302 downgrade POST → GET (other methods preserved)
+    //   - 303     downgrade everything-except-GET/HEAD → GET (HEAD preserved)
+    //   - 307/308 preserve method + body verbatim
+    const method = (currentInit.method ?? "GET").toUpperCase();
+    const dropBody =
+      ((response.status === 301 || response.status === 302) && method === "POST") ||
+      (response.status === 303 && method !== "GET" && method !== "HEAD");
     const nextUrl = new URL(location, currentUrl).toString();
     const crossOrigin = new URL(nextUrl).origin !== new URL(currentUrl).origin;
 
