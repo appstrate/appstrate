@@ -502,4 +502,146 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     expect(init.redirect).not.toBe("manual");
     expect(deps.cookieJar.get("demo")).toEqual(["final=F"]);
   });
+
+  it("propagates caller-supplied Cookie header across all hops (jar wins on dup)", async () => {
+    const cookieHeadersSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      cookieHeadersSeen.push(new Headers(init?.headers).get("cookie"));
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/a")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/b", "set-cookie": "session=server-v1" },
+        });
+      }
+      if (u.endsWith("/b")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/c" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/a",
+        method: "GET",
+        // Caller passes two cookies — one will be rotated by upstream, one won't.
+        callerHeaders: { cookie: "tracking=xyz; session=caller-v0" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookieHeadersSeen.length).toBe(3);
+    // Hop 0: caller cookies as-is (no jar yet).
+    expect(cookieHeadersSeen[0]).toContain("tracking=xyz");
+    expect(cookieHeadersSeen[0]).toContain("session=caller-v0");
+    // Hop 1+: tracking preserved (not in jar), session replaced by server value.
+    expect(cookieHeadersSeen[1]).toContain("tracking=xyz");
+    expect(cookieHeadersSeen[1]).toContain("session=server-v1");
+    expect(cookieHeadersSeen[1]).not.toContain("session=caller-v0");
+    expect(cookieHeadersSeen[2]).toContain("tracking=xyz");
+    expect(cookieHeadersSeen[2]).toContain("session=server-v1");
+  });
+
+  it("resolves relative Location headers against the current hop URL", async () => {
+    const urlsSeen: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      urlsSeen.push(u);
+      if (u === "https://api.example.com/v1/login") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/v1/callback" }, // relative path
+        });
+      }
+      if (u === "https://api.example.com/v1/callback") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "../v2/home" }, // relative with parent traversal
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/v1/login",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(urlsSeen).toEqual([
+      "https://api.example.com/v1/login",
+      "https://api.example.com/v1/callback",
+      "https://api.example.com/v2/home",
+    ]);
+  });
+
+  it("treats HTTPS→HTTP downgrade as cross-origin (strips credentials)", async () => {
+    const authSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      authSeen.push(new Headers(init?.headers).get("authorization"));
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, {
+          status: 302,
+          // Same host, protocol downgrade — origin differs per WHATWG.
+          headers: { location: "http://api.example.com/insecure" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(authSeen[0]).toBe("Bearer tok-123");
+    expect(authSeen[1]).toBeNull();
+  });
+
+  it("replays FormData body across 307 redirects", async () => {
+    let bodyOnHop1: unknown;
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/upload")) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://api.example.com/upload-final" },
+        });
+      }
+      bodyOnHop1 = init?.body;
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const form = new FormData();
+    form.set("field", "value");
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/upload",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "formData", build: () => form },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    // 307 preserves method + body — FormData replayed on hop 1.
+    expect(bodyOnHop1).toBeInstanceOf(FormData);
+    expect((bodyOnHop1 as FormData).get("field")).toBe("value");
+  });
 });

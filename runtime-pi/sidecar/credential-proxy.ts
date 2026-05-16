@@ -61,6 +61,27 @@ function mergeSetCookieIntoJar(
   cookieJar.set(providerId, [...byName.values()]);
 }
 
+/** Parse a `Cookie:` header value into name→pair entries, deduped by name. */
+function parseCookieHeader(value: string | null): Map<string, string> {
+  const byName = new Map<string, string>();
+  if (!value) return byName;
+  for (const part of value.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed) byName.set(trimmed.split("=")[0]!, trimmed);
+  }
+  return byName;
+}
+
+interface RedirectFollowOptions {
+  url: string;
+  init: RequestInit;
+  fetchFn: typeof fetch;
+  cookieJar: Map<string, string[]>;
+  providerId: string;
+  /** Lowercased name of the credential header server-injected by the proxy. */
+  injectedCredentialHeader: string | null;
+}
+
 /**
  * Manually follow 3xx redirects so we can capture `Set-Cookie` from
  * **every** hop into the per-provider jar — Bun's native fetch only
@@ -73,15 +94,20 @@ function mergeSetCookieIntoJar(
  * this, the credential proxy could leak the Bearer token to any origin
  * a redirect points at. Streaming bodies skip this path entirely
  * (caller falls back to native fetch — bodies can't be replayed).
+ *
+ * Caller-supplied cookies are preserved across hops (Bun's native
+ * follower propagates the request `Cookie` header all the way). The
+ * jar wins on name conflict so server-rotated values replace stale
+ * caller-supplied ones.
  */
 async function fetchFollowingRedirectsCapturingCookies(
-  url: string,
-  init: RequestInit,
-  fetchFn: typeof fetch,
-  cookieJar: Map<string, string[]>,
-  providerId: string,
-  injectedCredentialHeader: string | null,
+  opts: RedirectFollowOptions,
 ): Promise<Response> {
+  const { url, init, fetchFn, cookieJar, providerId, injectedCredentialHeader } = opts;
+  const callerCookies = parseCookieHeader(
+    new Headers(init.headers as HeadersInit | undefined).get("cookie"),
+  );
+
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
 
@@ -101,8 +127,10 @@ async function fetchFollowingRedirectsCapturingCookies(
 
     const headers = new Headers(currentInit.headers as HeadersInit | undefined);
     headers.delete("cookie");
-    const stored = cookieJar.get(providerId);
-    if (stored?.length) headers.set("cookie", stored.join("; "));
+    // Compose Cookie from caller-supplied + jar (jar wins on dup name).
+    const merged = new Map(callerCookies);
+    for (const ck of cookieJar.get(providerId) ?? []) merged.set(ck.split("=")[0]!, ck);
+    if (merged.size) headers.set("cookie", [...merged.values()].join("; "));
     if (dropBody) {
       headers.delete("content-length");
       headers.delete("content-type");
@@ -380,14 +408,14 @@ export async function executeProviderCall(
       init.duplex = "half";
       return fetchFn(resolvedUrl, init);
     }
-    return fetchFollowingRedirectsCapturingCookies(
-      resolvedUrl,
+    return fetchFollowingRedirectsCapturingCookies({
+      url: resolvedUrl,
       init,
       fetchFn,
       cookieJar,
       providerId,
-      activeCreds.credentialHeaderName?.toLowerCase() ?? null,
-    );
+      injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
+    });
   };
 
   // 7. First outbound request. Network/timeout errors surface as a
