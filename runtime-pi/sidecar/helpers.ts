@@ -179,3 +179,23 @@ import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
 export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
   return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
 }
+
+/**
+ * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL. Mirrors
+ * WHATWG Fetch `Response.url` sanitisation. Used on every redirect hop
+ * before policy checks / re-fetch (block attacker-injected basic-auth,
+ * keep allowlist matcher host-based) and on the `finalUrl` envelope
+ * field (no credential or implicit-flow-fragment leakage to agents).
+ * Returns `undefined` on parse failure so callers can omit the field.
+ */
+export function stripUserInfoAndFragment(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    u.username = "";
+    u.password = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}

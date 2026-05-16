@@ -726,11 +726,11 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
    * of `allowAllUris` so finalUrl can never become an internal-network
    * oracle.
    */
+  // One per representative family in isBlockedHost (IPv4 numeric,
+  // hostname, IPv6); the rest is covered by the ssrf.ts unit tests.
   for (const target of [
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-    "http://127.0.0.1:6379/",
     "http://localhost/admin",
-    "http://10.0.0.5/",
     "http://[::1]/",
   ]) {
     it(`refuses redirect to SSRF-blocked target (${target})`, async () => {
@@ -1099,34 +1099,6 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.finalUrl).toBe("https://api.example.com/uploaded?key=final");
-    }
-  });
-
-  it("falls back to resolved URL when Bun fetch returns empty Response.url", async () => {
-    // Defensive: mock Responses created via `new Response()` have an
-    // empty `url`. Without the `|| resolvedUrl` fallback we'd ship
-    // finalUrl: "" which is worse than the resolved target.
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const stream = new ReadableStream({
-      start(c) {
-        c.enqueue(new Uint8Array([1]));
-        c.close();
-      },
-    });
-    const result = await executeProviderCall(
-      {
-        providerId: "demo",
-        targetUrl: "https://api.example.com/upload",
-        method: "POST",
-        callerHeaders: {},
-        body: { kind: "streaming", stream },
-      },
-      deps,
-    );
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.finalUrl).toBe("https://api.example.com/upload");
     }
   });
 

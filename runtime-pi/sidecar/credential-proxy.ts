@@ -33,6 +33,7 @@ import {
   isBlockedUrl,
   matchesAuthorizedUri,
   normalizeAuthScheme,
+  stripUserInfoAndFragment,
   substituteVars,
   findUnresolvedPlaceholders,
   OUTBOUND_TIMEOUT_MS,
@@ -46,16 +47,10 @@ import { logger } from "./logger.ts";
 const MAX_REDIRECTS = 10;
 
 /**
- * Thrown by {@link fetchFollowingRedirectsCapturingCookies} when a
- * 30x points at a host that fails the per-hop SSRF blocklist or the
- * provider's `authorizedUris`. Caught by {@link executeProviderCall}
- * and surfaced as a structured 403 (rather than a generic 502 network
- * error) so callers can distinguish "upstream misbehaved" from
- * "network died".
- *
- * The host is exposed for log/audit only — the raw URL with
- * query/path is NOT included in the public error message because a
- * redirect target may itself encode capabilities (`?token=…`).
+ * Per-hop redirect refusal. Caught by {@link executeProviderCall} and
+ * surfaced as 403 (vs the 502 reserved for network faults). The host
+ * is exposed for logs only — a redirect target may itself encode
+ * capabilities (`?token=…`) we don't want in the agent's error.
  */
 class RedirectBlockedError extends Error {
   constructor(
@@ -73,41 +68,6 @@ function redactHost(url: string): string {
     return new URL(url).hostname;
   } catch {
     return "<unparseable>";
-  }
-}
-
-/**
- * Strip userinfo + fragment from a redirect target before policy
- * checks and before re-issuing the fetch. Two reasons:
- *
- *   - Userinfo in a redirect `Location` would be sent as basic-auth
- *     on the next hop, defeating the credential-proxy's "we own the
- *     credentials" invariant. An attacker controlling a 30x response
- *     could pivot to a same-host endpoint with attacker-chosen
- *     `Authorization: Basic …`.
- *   - The allowlist matcher is host-based; a URL with userinfo
- *     (`https://x@host/p`) would fail to match `https://host/**`
- *     because the string includes `x@` before the host. The matcher
- *     should not be userinfo-spoofable.
- *
- * Fragment is dropped because HTTP fetches never send it and it is
- * client-side state — keeping it across hops can leak intermediate
- * Identity-Provider implementations (e.g. an upstream returning the
- * access token in a fragment for legacy implicit-flow callbacks).
- *
- * Input is already a well-formed URL (just round-tripped through
- * `new URL(location, base).toString()`); returns the cleaned form
- * verbatim on parse failure (cannot happen in practice).
- */
-function stripUserInfoAndFragment(url: string): string {
-  try {
-    const u = new URL(url);
-    u.username = "";
-    u.password = "";
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return url;
   }
 }
 
@@ -241,11 +201,12 @@ async function fetchFollowingRedirectsCapturingCookies(
       ((response.status === 301 || response.status === 302) && method === "POST") ||
       (response.status === 303 && method !== "GET" && method !== "HEAD");
     // Resolve, then strip userinfo + fragment. Userinfo in a Location
-    // header would be sent as basic-auth on the next hop (credential
-    // confusion); fragment is HTTP-irrelevant and can leak legacy
-    // implicit-flow tokens. Stripping also makes the allowlist matcher
-    // (host-based) immune to userinfo-spoofing strings.
-    const nextUrl = stripUserInfoAndFragment(new URL(location, currentUrl).toString());
+    // would arrive as basic-auth on the next hop (credential confusion);
+    // fragment is HTTP-irrelevant. Stripping keeps the allowlist matcher
+    // host-based (not userinfo-spoofable). Input is post-`new URL()` so
+    // the `?? raw` fallback is defensive — never hit in practice.
+    const raw = new URL(location, currentUrl).toString();
+    const nextUrl = stripUserInfoAndFragment(raw) ?? raw;
 
     // Per-hop SSRF + allowlist validation. The initial-URL checks in
     // executeProviderCall step 4 only see the operator-supplied target
@@ -586,9 +547,6 @@ export async function executeProviderCall(
       cookieJar,
       providerId,
       injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
-      // creds.authorizedUris is string[] | null — coerce null to undefined
-      // so the optional field stays absent when the provider declared no
-      // allowlist (the loop treats both as "no allowlist gate").
       authorizedUris: creds.authorizedUris ?? undefined,
       allowAllUris: creds.allowAllUris,
     });
