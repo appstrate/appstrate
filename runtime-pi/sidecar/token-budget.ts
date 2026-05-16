@@ -66,6 +66,17 @@
 import { readPositiveIntEnv } from "./helpers.ts";
 
 /**
+ * Floor on the derived response reserve when only `contextWindowTokens`
+ * is supplied (no explicit `maxTokens` from the resolved model). 16384
+ * covers the common "no thinking" Claude / GPT response shape; larger
+ * budgets (Sonnet thinking @ 64 k) come through `reserveTokens` directly.
+ * Keep in sync with `packages/runner-pi/src/pi-runner.ts` —
+ * `derivePiCompactionSettings` uses the same default so the spill guard
+ * and Pi SDK's compaction threshold agree for the same model.
+ */
+const DEFAULT_RESERVE_FLOOR_TOKENS = 16_384;
+
+/**
  * Anthropic-recommended chars-per-token ratio for offline estimation.
  * Documented in the Claude API token-counting guide as
  * "1 token ≈ 3.5 English characters". Conservative for JSON / code
@@ -145,16 +156,30 @@ export interface BudgetDecision {
   /**
    * - `inline`  — agent receives the full content as a `text` block.
    * - `spill`   — agent receives a `resource_link`; bytes are stashed
-   *               in the blob store. Triggered by per-call size or
-   *               by cumulative budget pressure.
+   *               in the blob store. Triggered by per-call size,
+   *               cumulative run-budget pressure, or upstream
+   *               context-window pressure (when wired).
    */
   decision: "inline" | "spill";
   /**
    * Discriminated reason for the decision. Always set, including on
    * `inline` — observability and tests both depend on the reason
    * being explicit rather than implied by `decision === "inline"`.
+   *
+   * - `exceeds_context_window` is emitted only when the budget is
+   *   wired with {@link TokenBudgetOptions.contextWindowTokens}: a
+   *   call that would push `consumed + estimated` past
+   *   `contextWindow - reserveTokens` spills even if it would fit
+   *   under the inline cap and the run-level ceiling. Added in #464
+   *   to handle parallel tool-call fan-outs that individually fit
+   *   but collectively blow past the upstream model's hard limit
+   *   before Pi SDK's turn-boundary compaction fires.
    */
-  reason: "under_inline_cap" | "exceeds_inline_cap" | "exceeds_run_budget";
+  reason:
+    | "under_inline_cap"
+    | "exceeds_inline_cap"
+    | "exceeds_run_budget"
+    | "exceeds_context_window";
   /** Estimated tokens for *this* response. */
   estimatedTokens: number;
   /** Cumulative tokens consumed by tool outputs so far in this run. */
@@ -179,12 +204,48 @@ export interface TokenBudgetOptions {
    */
   runBudgetTokens?: number;
   /**
+   * Upstream model's total context window (tokens). When set, adds a
+   * pre-flight guard: a response that would push
+   * `consumed + estimated` past `contextWindowTokens - reserveTokens`
+   * spills regardless of the run-budget ceiling. Defends against the
+   * "10 parallel tool_results, each fits inline, sum blows the model's
+   * hard limit" failure mode (#464). When unset, the legacy two-tier
+   * (inline cap + run budget) guard remains the only check.
+   */
+  contextWindowTokens?: number;
+  /**
+   * Reserve (tokens) the upstream model keeps for its response. Only
+   * meaningful in combination with {@link contextWindowTokens}.
+   * Defaults to `max(16384, floor(contextWindowTokens × 0.2))` — the
+   * same heuristic the runner uses for Pi SDK compaction sizing, kept
+   * in sync deliberately so a missing `maxTokens` cascades to the same
+   * conservative fallback in both places.
+   */
+  reserveTokens?: number;
+  /**
    * Optional override of the token-counting function. Defaults to
    * {@link estimateTokens} (the chars/3.5 heuristic). Operators who
    * need exact counts can inject a real tokenizer here at the cost
    * of a per-call hop.
    */
   estimate?: TokenEstimator;
+}
+
+/**
+ * Fraction of the context window to reserve for the model's response
+ * when no explicit `reserveTokens` (or `maxTokens` on the upstream
+ * model) is supplied. 20 % covers Sonnet thinking @ 64 k on a 200 k
+ * window without overshooting; smaller windows scale down naturally.
+ * Floored by {@link DEFAULT_RESERVE_FLOOR_TOKENS}.
+ */
+const DEFAULT_RESERVE_FRACTION = 0.2;
+
+function deriveReserveTokens(contextWindowTokens: number, explicit: number | undefined): number {
+  if (explicit !== undefined) return explicit;
+  return Math.max(
+    DEFAULT_RESERVE_FLOOR_TOKENS,
+    Math.floor(contextWindowTokens * DEFAULT_RESERVE_FRACTION),
+  );
 }
 
 /**
@@ -226,6 +287,8 @@ export function readPositiveTokenEnv(name: string, defaultValue: number): number
 export class TokenBudget {
   readonly inlineCapTokens: number;
   readonly runBudgetTokens: number;
+  readonly contextWindowTokens: number | null;
+  readonly reserveTokens: number;
   private readonly estimator: TokenEstimator;
   private consumed = 0;
 
@@ -242,6 +305,28 @@ export class TokenBudget {
       throw new Error(
         `TokenBudget: inlineCapTokens (${inlineCap}) cannot exceed runBudgetTokens (${runBudget}).`,
       );
+    }
+    const ctx = options.contextWindowTokens;
+    if (ctx !== undefined) {
+      if (!Number.isFinite(ctx) || !Number.isInteger(ctx) || ctx <= 0) {
+        throw new Error(
+          `TokenBudget: contextWindowTokens must be a positive integer when set, got ${ctx}`,
+        );
+      }
+      const reserve = deriveReserveTokens(ctx, options.reserveTokens);
+      if (reserve >= ctx) {
+        throw new Error(
+          `TokenBudget: reserveTokens (${reserve}) must be strictly less than contextWindowTokens (${ctx}).`,
+        );
+      }
+      this.contextWindowTokens = ctx;
+      this.reserveTokens = reserve;
+    } else {
+      // `reserveTokens` without `contextWindowTokens` is silently ignored —
+      // the reserve is only meaningful as the response budget within a
+      // configured window. The launcher only emits the two together.
+      this.contextWindowTokens = null;
+      this.reserveTokens = 0;
     }
     this.inlineCapTokens = inlineCap;
     this.runBudgetTokens = runBudget;
@@ -280,6 +365,17 @@ export class TokenBudget {
   decide(estimatedTokens: number): BudgetDecision {
     if (estimatedTokens > this.inlineCapTokens) {
       return this.snapshot("spill", "exceeds_inline_cap", estimatedTokens);
+    }
+    // Context-window guard runs BEFORE the run-budget check: the
+    // upstream model's hard limit is the load-bearing constraint —
+    // exceeding the run budget is a soft signal we'd rather tighten,
+    // exceeding the context window is a guaranteed 400 from the LLM
+    // provider on the next call.
+    if (
+      this.contextWindowTokens !== null &&
+      this.consumed + estimatedTokens > this.contextWindowTokens - this.reserveTokens
+    ) {
+      return this.snapshot("spill", "exceeds_context_window", estimatedTokens);
     }
     if (this.consumed + estimatedTokens > this.runBudgetTokens) {
       return this.snapshot("spill", "exceeds_run_budget", estimatedTokens);

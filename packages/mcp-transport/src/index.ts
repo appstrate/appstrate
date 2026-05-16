@@ -221,9 +221,18 @@ export async function createInProcessPair(
   options: {
     serverInfo?: Implementation;
     clientInfo?: Implementation;
+    /**
+     * Optional resource provider — when supplied, the server advertises
+     * the `resources` capability and answers `resources/list` /
+     * `resources/read` through the provider's hooks. Forwarded verbatim
+     * to {@link createMcpServer}.
+     */
+    resources?: AppstrateResourceProvider;
   } = {},
 ): Promise<InProcessMcpPair> {
-  const server = createMcpServer(tools, options.serverInfo);
+  const server = createMcpServer(tools, options.serverInfo, {
+    ...(options.resources ? { resources: options.resources } : {}),
+  });
   const client = new Client(
     options.clientInfo ?? { name: "appstrate-mcp-client", version: "0.0.0" },
   );

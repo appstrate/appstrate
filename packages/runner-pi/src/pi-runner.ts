@@ -105,10 +105,16 @@ export interface PiRunnerOptions {
 /**
  * Default response budget when the model carries no `maxTokens`.
  * 16384 covers the common "no thinking" Claude / GPT response shape;
- * models with larger budgets (Claude Sonnet thinking @ 64k) override
- * via `model.maxTokens` and `reserveTokens` follows.
+ * larger budgets (Sonnet thinking @ 64 k) override via `model.maxTokens`.
+ * Keep in sync with `runtime-pi/sidecar/token-budget.ts` — both surfaces
+ * must agree so the spill guard and the compaction threshold do not drift.
  */
-const DEFAULT_RESERVE_TOKENS = 16384;
+const DEFAULT_RESERVE_TOKENS = 16_384;
+/**
+ * Fallback context window when the model omits it. Matches the Claude
+ * family's standard 200 k window — the most common runtime target.
+ */
+const DEFAULT_CONTEXT_WINDOW = 200_000;
 /**
  * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
  * recent context (a few thousand tokens of recent tool calls + the last
@@ -116,11 +122,6 @@ const DEFAULT_RESERVE_TOKENS = 16384;
  * to fit even tiny context windows once `reserveTokens` is subtracted.
  */
 const MIN_KEEP_RECENT_TOKENS = 20_000;
-/**
- * Fallback context window when the model omits it. Matches the Claude
- * family's standard 200k window — the most common runtime target.
- */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
 /** Fraction of the context window to keep verbatim after a compaction pass. */
 const KEEP_RECENT_FRACTION = 0.1;
 
@@ -338,6 +339,71 @@ export class PiRunner implements Runner {
     } else {
       await promptPromise;
     }
+
+    // #464 — Pi SDK's auto-compaction recovery is fire-and-forget: an
+    // `agent_end` event with overflow status triggers a background
+    // `_runAutoCompaction(...)` that `session.prompt()` does NOT await.
+    // Without this wait, the entrypoint can `process.exit(0)` before
+    // the compaction LLM call has a chance to start, and the next run
+    // turn re-encounters the same prompt-too-long 400. Polling
+    // `isCompacting` here lets that recovery actually drain.
+    await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
+  }
+}
+
+/**
+ * Maximum time to wait for a fire-and-forget Pi SDK compaction pass
+ * before falling through. Compaction is a single LLM call against the
+ * summarisation model — 60 s covers a 200 k-token Anthropic round-trip
+ * with a comfortable margin. Beyond this, the platform's outer run
+ * timeout (#PLATFORM_RUN_LIMITS.timeout_ceiling_seconds, default 1800 s)
+ * remains the authoritative ceiling.
+ */
+const COMPACTION_WAIT_TIMEOUT_MS = 60_000;
+/** Poll cadence for {@link waitForCompactionToSettle}. */
+const COMPACTION_POLL_INTERVAL_MS = 100;
+
+/**
+ * Drain Pi SDK's fire-and-forget compaction pass before the caller
+ * returns. The SDK schedules `_runAutoCompaction` from `_handleAgentEvent`
+ * — a queued promise nobody awaits — so `session.prompt()` resolves
+ * the moment the agent loop yields, leaving compaction (if any) racing
+ * the next `process.exit`. We poll `session.isCompacting` here with a
+ * bounded timeout; the upstream run timeout remains the authoritative
+ * ceiling beyond that.
+ *
+ * Exported for unit testing — production callers go through
+ * `PiRunner.executeSession` which feeds the SDK session in directly.
+ *
+ * @internal
+ */
+export async function waitForCompactionToSettle(
+  session: { isCompacting?: boolean },
+  signal?: AbortSignal,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<void> {
+  if (typeof session.isCompacting !== "boolean") return; // SDK older than 0.70 — best-effort no-op.
+  if (!session.isCompacting) return;
+  const timeoutMs = options.timeoutMs ?? COMPACTION_WAIT_TIMEOUT_MS;
+  const pollMs = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (session.isCompacting) {
+    if (signal?.aborted) return;
+    if (Date.now() >= deadline) {
+      // Only surface a line on the surprising path — happy-path
+      // compactions resolve silently. runner-pi intentionally avoids
+      // a logger dep, so the existing console.error convention from
+      // sink-heartbeat applies.
+      console.error(
+        JSON.stringify({
+          level: "warn",
+          msg: "[pi-runner] compaction wait timed out",
+          timeoutMs,
+        }),
+      );
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
 

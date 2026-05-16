@@ -325,3 +325,148 @@ describe("TokenBudget — defaults reflect SOTA expectations", () => {
     expect(DEFAULT_INLINE_OUTPUT_TOKENS).toBeLessThan(DEFAULT_RUN_OUTPUT_BUDGET_TOKENS);
   });
 });
+
+describe("TokenBudget — context-window guard (#464)", () => {
+  it("defaults to no window guard when contextWindowTokens is unset", () => {
+    const b = new TokenBudget({ inlineCapTokens: 10_000, runBudgetTokens: 1_000_000 });
+    expect(b.contextWindowTokens).toBeNull();
+    expect(b.reserveTokens).toBe(0);
+    const d = b.decide(8_000);
+    expect(d.decision).toBe("inline");
+  });
+
+  it("derives a conservative reserve when only contextWindowTokens is set", () => {
+    // 200 K context → reserve = max(16384, 200000 × 0.2) = 40 000
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 500_000,
+      contextWindowTokens: 200_000,
+    });
+    expect(b.contextWindowTokens).toBe(200_000);
+    expect(b.reserveTokens).toBe(40_000);
+  });
+
+  it("honors explicit reserveTokens (mirrors the model's maxTokens)", () => {
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 500_000,
+      contextWindowTokens: 200_000,
+      reserveTokens: 64_000, // Claude Haiku 4.5 maxTokens
+    });
+    expect(b.reserveTokens).toBe(64_000);
+  });
+
+  it("spills with exceeds_context_window when cumulative + estimated would breach window − reserve", () => {
+    // 200 K window, 64 K reserve → threshold = 136 K. Run-budget set
+    // high enough (500 K) that only the context-window guard fires.
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 500_000,
+      contextWindowTokens: 200_000,
+      reserveTokens: 64_000,
+    });
+    // Pump in 14 × 9750 tokens ≈ 136.5 K, still under threshold.
+    for (let i = 0; i < 13; i++) {
+      const d = b.tryReserve(9_750);
+      expect(d.decision).toBe("inline");
+    }
+    // 13 × 9750 = 126 750. Next 9750 → 136 500 > 136 000 threshold.
+    const overflow = b.tryReserve(9_750);
+    expect(overflow.decision).toBe("spill");
+    expect(overflow.reason).toBe("exceeds_context_window");
+  });
+
+  it("models the issue #464 scenario: 10 parallel 7.5 K-token tool_results spill the late ones", () => {
+    // Haiku 4.5 — 200 K window, 64 K reserve. 10 calls × 7500 tokens
+    // each (the issue's repro) total 75 K — fits under the inline cap
+    // (8 K is too tight, but raising to 10 K reflects an operator
+    // setup willing to inline medium responses). The legacy run-budget
+    // is permissive (100 K) — without the window guard, all 10 would
+    // inline and the 11th LLM call would 400.
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 200_000,
+      contextWindowTokens: 200_000,
+      reserveTokens: 64_000,
+    });
+    const perCall = 7_500;
+    let inline = 0;
+    let windowSpills = 0;
+    const TOTAL = 20;
+    for (let i = 0; i < TOTAL; i++) {
+      const d = b.tryReserve(perCall);
+      if (d.decision === "inline") {
+        inline++;
+      } else if (d.reason === "exceeds_context_window") {
+        windowSpills++;
+      }
+    }
+    // Threshold = 200 K − 64 K = 136 K. 18 calls × 7500 = 135 K fits;
+    // the 19th would push to 142.5 K and spills. The guard kicks in
+    // BEFORE the upstream hard limit, leaving room for the model
+    // response — exactly the failure mode #464 describes.
+    expect(windowSpills).toBeGreaterThan(0);
+    expect(inline + windowSpills).toBe(TOTAL);
+    expect(inline).toBeLessThanOrEqual(18);
+  });
+
+  it("inline-cap check still takes priority over the context-window check", () => {
+    const b = new TokenBudget({
+      inlineCapTokens: 100,
+      runBudgetTokens: 500_000,
+      contextWindowTokens: 200_000,
+      reserveTokens: 64_000,
+    });
+    // Single call > inline cap AND would also breach the window.
+    b.record(150_000); // saturate near threshold
+    const d = b.decide(200); // > inlineCap
+    expect(d.reason).toBe("exceeds_inline_cap");
+  });
+
+  it("context-window check fires before run-budget check (window is the load-bearing limit)", () => {
+    // Window threshold (136 K) lower than run budget (200 K). A call
+    // pushing past both should surface the window reason — the
+    // actionable signal is the imminent upstream 400.
+    const b = new TokenBudget({
+      inlineCapTokens: 10_000,
+      runBudgetTokens: 200_000,
+      contextWindowTokens: 200_000,
+      reserveTokens: 64_000,
+    });
+    b.record(130_000); // close to the 136 K threshold
+    const d = b.decide(8_000); // 130 K + 8 K = 138 K > 136 K, < 200 K
+    expect(d.decision).toBe("spill");
+    expect(d.reason).toBe("exceeds_context_window");
+  });
+
+  it("rejects contextWindowTokens that is not a positive integer", () => {
+    expect(
+      () =>
+        new TokenBudget({
+          inlineCapTokens: 100,
+          runBudgetTokens: 1_000,
+          contextWindowTokens: 0,
+        }),
+    ).toThrow(/positive integer/);
+    expect(
+      () =>
+        new TokenBudget({
+          inlineCapTokens: 100,
+          runBudgetTokens: 1_000,
+          contextWindowTokens: 1.5,
+        }),
+    ).toThrow(/positive integer/);
+  });
+
+  it("rejects reserveTokens ≥ contextWindowTokens (would leave zero room for tools)", () => {
+    expect(
+      () =>
+        new TokenBudget({
+          inlineCapTokens: 100,
+          runBudgetTokens: 1_000,
+          contextWindowTokens: 1_000,
+          reserveTokens: 1_000,
+        }),
+    ).toThrow(/strictly less than/);
+  });
+});

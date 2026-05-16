@@ -246,6 +246,7 @@ type TokenBudgetMetaReason =
   | "under_inline_cap"
   | "exceeds_inline_cap"
   | "exceeds_run_budget"
+  | "exceeds_context_window"
   | "blob_store_full"
   | "no_blob_store_configured";
 
@@ -1065,6 +1066,15 @@ function evaluateBudget(args: {
   }
   const estimated = args.tokenBudget.estimate(args.text);
   const decision = args.tokenBudget.tryReserve(estimated);
+  // Per-call trace at debug only. Spill events are already surfaced by
+  // the downstream "spilled to blob store" / "blob store full" / "no
+  // blob store configured" logs in spillToBlobStore.
+  logger.debug("token-budget decision", {
+    decision: decision.decision,
+    reason: decision.reason,
+    estimatedTokens: estimated,
+    consumedTokens: decision.consumedTokens,
+  });
   return {
     shouldSpill: decision.decision === "spill",
     meta: {

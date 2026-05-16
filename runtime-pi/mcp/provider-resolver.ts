@@ -228,7 +228,22 @@ export class McpProviderResolver implements ProviderResolver {
     }
 
     if (block.type === "resource_link") {
-      // Binary or oversize text — bytes live in the sidecar's BlobStore.
+      // Binary or oversize text — sidecar decided to spill to its
+      // BlobStore (token-budget threshold or non-text upstream). The
+      // sidecar's decision is the right boundary for "too big to
+      // inline into the LLM context"; honoring it means we must NOT
+      // route the bytes back through `serializeFetchResponse`'s text
+      // path (which would inline anything below `defaultInlineLimit`
+      // = 256 KB and re-bloat the prompt — the failure mode of #464).
+      //
+      // Instead, we always materialise to a workspace file. The LLM
+      // receives a `kind: "file"` response it can read with the same
+      // `read` tool it uses for any other workspace artefact. If the
+      // agent supplied `responseMode.toFile`, we honor that path;
+      // otherwise we default to `responses/<toolCallId>.<ext>` —
+      // the same convention the auto-spill path of
+      // `serializeFetchResponse` already documents in the platform
+      // prompt.
       const resource = await this.mcp.readResource({ uri: block.uri }, { signal: ctx.signal });
       const part = resource.contents[0];
       if (!part) {
@@ -255,7 +270,25 @@ export class McpProviderResolver implements ProviderResolver {
         };
       }
       const fake = synthesiseUpstreamResponse(bytes, upstream, mimeType);
-      return await serializeFetchResponse(fake, this.serializeCtx(req, ctx));
+      // Override `responseMode.toFile` only when the agent didn't
+      // already supply one. The auto-derived path matches the existing
+      // auto-spill convention so the LLM sees the same shape regardless
+      // of whether spillover happened upstream (sidecar) or downstream
+      // (serializeFetchResponse byte-size threshold).
+      const ctxToUse =
+        typeof req.responseMode?.toFile === "string" && req.responseMode.toFile.length > 0
+          ? this.serializeCtx(req, ctx)
+          : this.serializeCtx(
+              {
+                ...req,
+                responseMode: {
+                  ...(req.responseMode ?? {}),
+                  toFile: `responses/${ctx.toolCallId}`,
+                },
+              },
+              ctx,
+            );
+      return await serializeFetchResponse(fake, ctxToUse);
     }
 
     // resource (inline) and image blocks are not produced by the

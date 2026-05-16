@@ -51,7 +51,9 @@ interface Captured {
 }
 
 async function makeServer(opts: {
-  responseBlock?: { type: "text"; text: string };
+  responseBlock?:
+    | { type: "text"; text: string }
+    | { type: "resource_link"; uri: string; name?: string; mimeType?: string };
   isError?: boolean;
   /**
    * `_meta` payload surfaced alongside the result. The runtime parser
@@ -630,6 +632,164 @@ describe("McpProviderResolver — upstream meta propagation", () => {
       expect(parsed.headers["retry-after"]).toBe("60");
     } finally {
       await pair.close();
+    }
+  });
+});
+
+describe("McpProviderResolver — resource_link auto-materialisation (#464)", () => {
+  /**
+   * The sidecar's TokenBudget spills oversize text responses to a
+   * blob store and returns a `resource_link`. We mirror that decision
+   * end-to-end by writing the blob to a workspace file the LLM can
+   * read with the standard `read` tool — never inlining the bytes
+   * back into the tool result, which would re-bloat the model
+   * context and reproduce the #464 failure mode.
+   *
+   * The default path is `responses/<toolCallId>.<ext>` with the
+   * extension derived from the sidecar's mimeType (the auto-spill
+   * convention documented in the platform prompt). An explicit
+   * `responseMode.toFile` always wins.
+   */
+
+  /**
+   * Mock MCP server that registers a `resources/*` provider so the
+   * resolver can read the spilled blob. The local `makeServer` helper
+   * registers tools only, so we build a tailored pair here to keep
+   * those existing tests unchanged.
+   */
+  async function makeServerWithResources(opts: {
+    responseBlock: { type: "resource_link"; uri: string; name?: string; mimeType?: string };
+    resourceBytes: string;
+    resourceMime?: string;
+    meta?: Record<string, unknown>;
+  }) {
+    const block = opts.responseBlock;
+    const tool: AppstrateToolDefinition = {
+      descriptor: {
+        name: "provider_call",
+        description: "mock",
+        inputSchema: { type: "object" },
+      },
+      handler: (async () => ({
+        content: [block],
+        _meta: opts.meta ?? { "appstrate/upstream": { status: 200, headers: {} } },
+      })) as never,
+    };
+    const pair = await createInProcessPair([tool], {
+      resources: {
+        list: async () => [],
+        read: async (uri: string) => ({
+          contents: [
+            {
+              uri,
+              mimeType: opts.resourceMime ?? "application/json",
+              text: opts.resourceBytes,
+            },
+          ],
+        }),
+      },
+    });
+    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
+    return { mcp, close: () => pair.close() };
+  }
+
+  it("auto-spills the blob to `responses/<toolCallId>` and returns a file body", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ123";
+    const body = JSON.stringify({ items: Array.from({ length: 500 }, (_, i) => ({ i })) });
+    const { mcp, close } = await makeServerWithResources({
+      responseBlock: {
+        type: "resource_link",
+        uri,
+        name: "@appstrate/gmail",
+        mimeType: "application/json",
+      },
+      resourceBytes: body,
+      resourceMime: "application/json",
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.status).toBe(200);
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("responses/tc_1");
+      expect(parsed.body.mimeType).toBe("application/json");
+      expect(parsed.body.size).toBe(body.length);
+      const fs = await import("node:fs/promises");
+      const written = await fs.readFile(join(workspace, "responses/tc_1"), "utf8");
+      expect(written).toBe(body);
+    } finally {
+      await close();
+    }
+  });
+
+  it("honors an explicit responseMode.toFile path", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ456";
+    const body = "x".repeat(2048);
+    const { mcp, close } = await makeServerWithResources({
+      responseBlock: { type: "resource_link", uri, name: "blob", mimeType: "text/plain" },
+      resourceBytes: body,
+      resourceMime: "text/plain",
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        {
+          method: "GET",
+          target: "https://api.example.com/items",
+          responseMode: { toFile: "downloads/report.txt" },
+        },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("downloads/report.txt");
+    } finally {
+      await close();
+    }
+  });
+
+  it("uses the same extensionless path regardless of content type", async () => {
+    const uri = "appstrate://provider-response/run_test/01HXYZ789";
+    const { mcp, close } = await makeServerWithResources({
+      responseBlock: { type: "resource_link", uri, name: "blob" },
+      resourceBytes: "raw",
+      resourceMime: "application/x-custom",
+    });
+    try {
+      const resolver = new McpProviderResolver(mcp);
+      const [tool] = await resolver.resolve(
+        [{ name: "@test/echo", version: "^1.0.0" }],
+        makeBundle(),
+      );
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-resolver-"));
+      const result = await tool!.execute(
+        { method: "GET", target: "https://api.example.com/items" },
+        ctxBase(workspace),
+      );
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.body.kind).toBe("file");
+      expect(parsed.body.path).toBe("responses/tc_1");
+      // mimeType is the authoritative content descriptor — sniffing may
+      // upgrade `application/x-custom` to a recognised type, so we just
+      // assert the field is present rather than pinning a specific
+      // value (the auto-spill path runs mime-sniff on unknown types).
+      expect(typeof parsed.body.mimeType).toBe("string");
+    } finally {
+      await close();
     }
   });
 });
