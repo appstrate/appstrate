@@ -36,8 +36,24 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const SOCKET_IDLE_TIMEOUT_MS = 120_000; // 2 min idle → destroy tunnel
   const MAX_CONNECT_HEADER_SIZE = 16_384; // 16 KB — CONNECT response headers should be tiny
 
-  function getUpstreamProxy(): { host: string; port: number; auth: string | null } | null {
+  function getUpstreamProxy(
+    targetHost?: string,
+  ): { host: string; port: number; auth: string | null } | null {
     if (!config.proxyUrl) return null;
+    // Bypass the upstream proxy when the target is the platform host.
+    // Same rationale as isAllowedHost() below: platform traffic is internal,
+    // trusted by construction (HMAC-signed run events scoped to a single
+    // run). Residential / datacenter egress proxies (Decodo, Bright Data,
+    // Smartproxy, …) typically refuse RFC1918 or docker-bridge hostnames
+    // as "restricted targets" with a 403 — which would crash the agent at
+    // bootstrap, since `emitRuntimeReady` POSTs to the platform sink as
+    // its very first action. Keeping platform traffic off the upstream
+    // proxy preserves the proxy's purpose (mask outbound IP for tracked
+    // upstreams) without breaking internal comms.
+    if (targetHost) {
+      const platformHost = getPlatformHost();
+      if (platformHost && targetHost.toLowerCase() === platformHost) return null;
+    }
     try {
       const url = new URL(config.proxyUrl);
       // HTTPS upstream proxies are not supported — the forward proxy connects via plain TCP.
@@ -144,8 +160,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       return;
     }
 
-    const upstream = getUpstreamProxy();
-
     let parsed: URL;
     try {
       parsed = new URL(targetUrl);
@@ -162,6 +176,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       res.end("Blocked: internal network");
       return;
     }
+
+    // Resolve the upstream proxy with the target hostname — internal platform
+    // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
+    const upstream = getUpstreamProxy(parsed.hostname);
 
     const cleaned = forwardHeaders(req.headers);
 
@@ -253,7 +271,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       return;
     }
 
-    const upstream = getUpstreamProxy();
+    // Resolve the upstream proxy with the target hostname — internal platform
+    // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
+    const upstream = getUpstreamProxy(host);
 
     if (upstream) {
       // Chain through authenticated upstream proxy
