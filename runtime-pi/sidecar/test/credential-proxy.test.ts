@@ -225,3 +225,226 @@ describe("executeProviderCall — 401 retry path", () => {
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () => {
+  /**
+   * Bug repro: in multi-step OAuth/CAS flows the session cookie is
+   * often dropped on an intermediate 302. With Bun's native
+   * `redirect: "follow"` only the final hop's Set-Cookie is exposed,
+   * so the jar misses the mid-hop session cookie. After the fix we
+   * follow redirects manually and merge cookies from every hop.
+   */
+  it("captures Set-Cookie from intermediate hops", async () => {
+    let calls = 0;
+    const fetchFn = mock(async (url: string | URL) => {
+      calls += 1;
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/login")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/callback", "set-cookie": "step1=A" },
+        });
+      }
+      if (u.endsWith("/callback")) {
+        // Intermediate hop — its cookie is the one that used to be lost.
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/home", "set-cookie": "session=XYZ" },
+        });
+      }
+      return new Response("ok", {
+        status: 200,
+        headers: { "set-cookie": "last=Z" },
+      });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "kijiji",
+        targetUrl: "https://api.example.com/login",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(200);
+    expect(calls).toBe(3);
+    const jar = deps.cookieJar.get("kijiji");
+    // Pre-fix: ["step1=A", "last=Z"] — session=XYZ is missing.
+    // Post-fix: all three cookies merged into the jar.
+    expect(jar).toContain("step1=A");
+    expect(jar).toContain("session=XYZ");
+    expect(jar).toContain("last=Z");
+  });
+
+  it("re-injects the growing jar as Cookie header on each next hop", async () => {
+    const cookieHeadersSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      const headers = new Headers(init?.headers);
+      cookieHeadersSeen.push(headers.get("cookie"));
+      if (u.endsWith("/a")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/b", "set-cookie": "first=1" },
+        });
+      }
+      if (u.endsWith("/b")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/c", "set-cookie": "second=2" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/a",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookieHeadersSeen.length).toBe(3);
+    expect(cookieHeadersSeen[0]).toBeNull();
+    expect(cookieHeadersSeen[1]).toBe("first=1");
+    // Both cookies sent on the third hop (jar grew across hops).
+    expect(cookieHeadersSeen[2]).toContain("first=1");
+    expect(cookieHeadersSeen[2]).toContain("second=2");
+  });
+
+  it("downgrades method to GET and drops body on 301/302/303", async () => {
+    const observed: { method: string; body: unknown; contentType: string | null }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      const headers = new Headers(init?.headers);
+      observed.push({
+        method: init?.method ?? "GET",
+        body: init?.body,
+        contentType: headers.get("content-type"),
+      });
+      if (u.endsWith("/post")) {
+        return new Response(null, {
+          status: 303,
+          headers: { location: "https://api.example.com/result" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/post",
+        method: "POST",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode('{"x":1}').buffer as ArrayBuffer,
+          text: '{"x":1}',
+        },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(observed[0]!.method).toBe("POST");
+    expect(observed[1]!.method).toBe("GET");
+    expect(observed[1]!.body).toBeUndefined();
+    expect(observed[1]!.contentType).toBeNull();
+  });
+
+  it("preserves method and body on 307/308", async () => {
+    const observed: { method: string; body: unknown }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      observed.push({ method: init?.method ?? "GET", body: init?.body });
+      if (u.endsWith("/post")) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://api.example.com/result" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/post",
+        method: "POST",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode('{"x":1}').buffer as ArrayBuffer,
+          text: '{"x":1}',
+        },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(observed[0]!.method).toBe("POST");
+    expect(observed[1]!.method).toBe("POST");
+    expect(observed[1]!.body).toBeDefined();
+  });
+
+  it("throws on redirect chains exceeding MAX_REDIRECTS", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/loop" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/loop",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    // Surfaces as a structured upstream failure (wrapped by wrapFetchError).
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(502);
+  });
+
+  it("streaming bodies still use native fetch and only capture final-hop cookies", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response("ok", {
+          status: 200,
+          headers: { "set-cookie": "final=F" },
+        }),
+    );
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array([1, 2, 3]));
+        c.close();
+      },
+    });
+    const result = await executeProviderCall(
+      {
+        providerId: "demo",
+        targetUrl: "https://api.example.com/upload",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "streaming", stream },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    // Native fetch called once with redirect: "follow" (default).
+    const init = fetchFn.mock.calls[0]![1] as RequestInit;
+    expect(init.redirect).not.toBe("manual");
+    expect(deps.cookieJar.get("demo")).toEqual(["final=F"]);
+  });
+});
