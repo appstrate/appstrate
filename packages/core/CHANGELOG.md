@@ -5,6 +5,37 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] — 2026-05-16
+
+### Added
+
+- `@appstrate/core/sidecar-types` — `TokenBudget` gains
+  `contextWindowTokens` + `reserveTokens` fields, enabling a pre-flight
+  context-window guard for parallel tool-call outputs. A
+  `provider_call` output that would push `consumed + estimated` past
+  `contextWindow − reserve` now spills with reason
+  `exceeds_context_window`, even when it fits under the per-call inline
+  cap and the run-budget ceiling. Fixes a class of parallel-fan-out
+  failures where a batch of individually-safe outputs blew past the
+  model's context window before turn-boundary auto-compaction could
+  fire (e.g. Claude Haiku 4.5 + Gmail parallel fetch).
+
+- `@appstrate/core/sidecar-types` — `RuntimeReady` event surface
+  formalised for the platform's `runtime-ready` event-pipeline
+  contract, alongside the parallel agent/sidecar boot reorganisation
+  in `runtime-pi`. No new top-level export — the contract lives on the
+  existing `sidecar-types` surface that runtime-pi consumes.
+
+### Changed
+
+- `@appstrate/core/module` + `@appstrate/core/platform-types` — minor
+  shape refinements around the `pricing catalog` + `providerId`
+  hardening landed in #439 (Portkey migration epic, net −1860 LoC).
+  Module init context types align with the new pricing-catalog read
+  path. No public API renames; existing module authors are unaffected
+  unless they used the previously-internal `apiShape`/`baseUrl` model
+  fields, which were dropped in the same PR (see migration `0022`).
+
 ## [2.18.0] — 2026-04-27
 
 ### Changed
