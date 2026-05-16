@@ -221,6 +221,15 @@ _appstrate_bootstrap() {
       err "Failed to install minisign via $_mgr."
       return 1
     fi
+    # Homebrew edge case (#479): `brew install` on an already-installed-but-
+    # unlinked keg exits 0 with a "not linked" warning on stderr, leaving the
+    # binary off PATH. The keg is already on disk — just re-create the
+    # symlinks. `brew link` (no flags) is the documented remediation;
+    # minisign isn't keg-only, so no --force, and we don't overwrite.
+    if [ "$_mgr" = "brew" ] && ! have_minisign; then
+      log "  \$ brew link minisign"
+      brew link minisign >/dev/null 2>&1 || true
+    fi
     if ! have_minisign; then
       err "minisign install reported success but the binary is still not on PATH."
       return 1
@@ -271,6 +280,16 @@ _appstrate_bootstrap() {
     fi
     printf '%s/%s' "$_real_dir" "$_base"
   }
+
+  # Test-only escape hatch: when set, return before any side-effecting work
+  # (network, install, dual-install probe). Bash nested-function bodies are
+  # only registered globally once the enclosing function runs at least
+  # once, so callers source this script with APPSTRATE_BOOTSTRAP_SOURCE_ONLY=1
+  # to make the helpers above (`try_install_minisign`, `have_minisign`, …)
+  # visible to a test harness without triggering the install flow.
+  if [ "${APPSTRATE_BOOTSTRAP_SOURCE_ONLY:-0}" = "1" ]; then
+    return 0
+  fi
 
   EXISTING_APPSTRATE="$(command -v appstrate 2>/dev/null || true)"
   if [ -n "$EXISTING_APPSTRATE" ] && [ "${APPSTRATE_FORCE_DUAL:-0}" != "1" ]; then
