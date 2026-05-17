@@ -121,18 +121,44 @@
         },
         "entryPoint": { "type": "string", "minLength": 1 },
         "package": {
-          "type": "object",
-          "properties": {
-            "registryType": { "type": "string", "const": "oci" },
-            "identifier": { "type": "string", "minLength": 1 },
-            "digest": {
-              "type": "string",
-              "pattern": "^sha256:[a-f0-9]{64}$"
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "registryType": { "type": "string", "const": "oci" },
+                "identifier": { "type": "string", "minLength": 1 },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "registryBaseUrl": { "type": "string" }
+              },
+              "required": ["registryType", "identifier", "digest"],
+              "additionalProperties": {}
             },
-            "registryBaseUrl": { "type": "string" }
-          },
-          "required": ["registryType", "identifier", "digest"],
-          "additionalProperties": {}
+            {
+              "type": "object",
+              "properties": {
+                "registryType": { "type": "string", "const": "npm" },
+                "identifier": { "type": "string", "minLength": 1 },
+                "version": { "type": "string", "minLength": 1 },
+                "registryBaseUrl": { "type": "string" }
+              },
+              "required": ["registryType", "identifier", "version"],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "registryType": { "type": "string", "const": "pypi" },
+                "identifier": { "type": "string", "minLength": 1 },
+                "version": { "type": "string", "minLength": 1 },
+                "registryBaseUrl": { "type": "string" }
+              },
+              "required": ["registryType", "identifier", "version"],
+              "additionalProperties": {}
+            }
+          ]
         },
         "url": { "type": "string" },
         "variables": {

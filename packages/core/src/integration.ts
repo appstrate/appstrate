@@ -71,14 +71,46 @@ const httpClientSchema = z.object({
   caTrustEnv: caTrustEnvEnum,
 });
 
-const packageRefSchema = z.object({
-  registryType: z.enum(["oci"]),
+const ociPackageRefSchema = z.object({
+  registryType: z.literal("oci"),
   identifier: z.string().min(1),
   digest: z.string().regex(/^sha256:[a-f0-9]{64}$/, {
     error: "server.package.digest must be a sha256 digest (sha256:<64 hex>)",
   }),
   registryBaseUrl: z.string().optional(),
 });
+
+/**
+ * Author-sugar package ref for `server.type: "npx"`. The bundler
+ * (`afps bundle`, Phase 1.05) resolves `version` against the npm
+ * registry, vendors the package + its deps into `./server/`, captures
+ * the sha512 `dist.integrity` in `_meta.sourceResolution`, and
+ * rewrites `server` to `{ type: "node", entryPoint: "./server/<bin>" }`.
+ */
+const npmPackageRefSchema = z.object({
+  registryType: z.literal("npm"),
+  identifier: z.string().min(1),
+  version: z.string().min(1),
+  registryBaseUrl: z.string().optional(),
+});
+
+/**
+ * Author-sugar package ref for `server.type: "uvx"`. Same lifecycle
+ * as the npm variant, against the pypi registry; rewritten to
+ * `{ type: "uv", entryPoint: "./server/bin/<script>" }`.
+ */
+const pypiPackageRefSchema = z.object({
+  registryType: z.literal("pypi"),
+  identifier: z.string().min(1),
+  version: z.string().min(1),
+  registryBaseUrl: z.string().optional(),
+});
+
+const packageRefSchema = z.discriminatedUnion("registryType", [
+  ociPackageRefSchema,
+  npmPackageRefSchema,
+  pypiPackageRefSchema,
+]);
 
 const mcpConfigSchema = z.object({
   command: z.string().min(1).optional(),
@@ -114,9 +146,7 @@ const serverSchema = z
       case "bun":
       case "python":
       case "uv":
-      case "binary":
-      case "npx":
-      case "uvx": {
+      case "binary": {
         if (!hasEntry) {
           ctx.addIssue({
             code: "custom",
@@ -133,12 +163,70 @@ const serverSchema = z
         }
         break;
       }
+      // Author sugars: accept `entryPoint` (bundler input that already
+      // points at a file) OR `package(npm|pypi)` (bundler resolves +
+      // vendors). Exactly one is required.
+      case "npx": {
+        if (hasEntry === hasPackage) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.type "npx" requires exactly one of { entryPoint, package(npm) }',
+            path: hasPackage ? ["package"] : ["entryPoint"],
+          });
+        }
+        if (hasPackage && server.package?.registryType !== "npm") {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.package.registryType must be "npm" when server.type is "npx"',
+            path: ["package", "registryType"],
+          });
+        }
+        if (hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.url forbidden when server.type is "npx"',
+            path: ["url"],
+          });
+        }
+        break;
+      }
+      case "uvx": {
+        if (hasEntry === hasPackage) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.type "uvx" requires exactly one of { entryPoint, package(pypi) }',
+            path: hasPackage ? ["package"] : ["entryPoint"],
+          });
+        }
+        if (hasPackage && server.package?.registryType !== "pypi") {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.package.registryType must be "pypi" when server.type is "uvx"',
+            path: ["package", "registryType"],
+          });
+        }
+        if (hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.url forbidden when server.type is "uvx"',
+            path: ["url"],
+          });
+        }
+        break;
+      }
       case "docker": {
         if (!hasPackage) {
           ctx.addIssue({
             code: "custom",
             message: 'server.package is required when server.type is "docker"',
             path: ["package"],
+          });
+        }
+        if (hasPackage && server.package?.registryType !== "oci") {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.package.registryType must be "oci" when server.type is "docker"',
+            path: ["package", "registryType"],
           });
         }
         if (hasEntry || hasUrl) {

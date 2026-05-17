@@ -50,6 +50,7 @@
     "./errors": "./src/errors.ts",
     "./validation": "./src/validation.ts",
     "./integration": "./src/integration.ts",
+    "./integration-bundle": "./src/integration-bundle/index.ts",
     "./zip": "./src/zip.ts",
     "./naming": "./src/naming.ts",
     "./dependencies": "./src/dependencies.ts",

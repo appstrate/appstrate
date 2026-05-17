@@ -81,7 +81,13 @@ describe("integrationManifestSchema — happy paths", () => {
     });
     const parsed = integrationManifestSchema.parse(m);
     expect(parsed.server.type).toBe("docker");
-    expect(parsed.server.package?.digest).toMatch(/^sha256:/);
+    const pkg = parsed.server.package;
+    expect(pkg).toBeDefined();
+    if (pkg?.registryType === "oci") {
+      expect(pkg.digest).toMatch(/^sha256:/);
+    } else {
+      throw new Error("expected oci registryType");
+    }
   });
 
   it("accepts a remote http manifest", () => {
@@ -185,6 +191,92 @@ describe("integrationManifestSchema — happy paths", () => {
       },
     });
     expect(() => integrationManifestSchema.parse(m)).not.toThrow();
+  });
+});
+
+describe("integrationManifestSchema — author sugars (npx/uvx)", () => {
+  it("accepts npx with package(npm) — bundler input", () => {
+    const m = baseManifest({
+      server: {
+        type: "npx",
+        package: {
+          registryType: "npm",
+          identifier: "@modelcontextprotocol/server-filesystem",
+          version: "^1.0.0",
+        },
+      },
+    });
+    const parsed = integrationManifestSchema.parse(m);
+    expect(parsed.server.type).toBe("npx");
+    expect(parsed.server.package?.registryType).toBe("npm");
+  });
+
+  it("accepts npx with entryPoint — bundler output (intermediate)", () => {
+    const m = baseManifest({
+      server: { type: "npx", entryPoint: "./server/dist/index.js" },
+    });
+    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
+  });
+
+  it("rejects npx with both entryPoint and package", () => {
+    const m = baseManifest({
+      server: {
+        type: "npx",
+        entryPoint: "./server/x.js",
+        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects npx with neither entryPoint nor package", () => {
+    const m = baseManifest({ server: { type: "npx" } });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects npx with a pypi package", () => {
+    const m = baseManifest({
+      server: {
+        type: "npx",
+        package: { registryType: "pypi", identifier: "x", version: "1.0.0" },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts uvx with package(pypi)", () => {
+    const m = baseManifest({
+      server: {
+        type: "uvx",
+        package: { registryType: "pypi", identifier: "mcp-server-git", version: "0.6.2" },
+      },
+    });
+    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
+  });
+
+  it("rejects uvx with an npm package", () => {
+    const m = baseManifest({
+      server: {
+        type: "uvx",
+        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects docker with an npm package", () => {
+    const m = baseManifest({
+      server: {
+        type: "docker",
+        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
   });
 });
 
