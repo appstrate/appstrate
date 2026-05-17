@@ -374,6 +374,96 @@ describe("bootstrapIntegrationRuntime — exposes caBundle for the MITM listener
   });
 });
 
+describe("bootstrapIntegrationRuntime — enableMitmListener wire-up", () => {
+  it("when enabled, the listener URL overrides proxyUrl in the spawn env", async () => {
+    const fs = recordingFs();
+    const spawn = recordingSpawn();
+    const stubCredSource = {
+      current: () => ({ auths: [], missingRequiredAuthKeys: [] }),
+      deliveryPlans: () => ({}),
+    };
+    const integ: IntegrationToSpawn = {
+      ...makeIntegration("a"),
+      credentialSource: stubCredSource,
+    };
+    const ctrl = await bootstrapIntegrationRuntime({
+      runId: "run-mitm-1",
+      integrations: [integ],
+      certGenerator: fakeCertGenerator(),
+      proxyUrl: "http://shared-proxy.unused:1",
+      fs,
+      spawnOptions: { spawn: spawn.fn },
+      tmpfsRoot: "/tmp",
+      enableMitmListener: true,
+    });
+    const listener = ctrl.listenerFor("a");
+    expect(listener).toBeDefined();
+    const listenerUrl = listener!.proxyUrl();
+    expect(listenerUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    // Spawn env HTTPS_PROXY MUST point at the listener, not the
+    // controller-level fallback.
+    expect(spawn.calls[0]!.env.HTTPS_PROXY).toBe(listenerUrl);
+    expect(spawn.calls[0]!.env.https_proxy).toBe(listenerUrl);
+    await ctrl.shutdown();
+  });
+
+  it("integrations without credentialSource keep the shared proxyUrl", async () => {
+    const fs = recordingFs();
+    const spawn = recordingSpawn();
+    const stubCredSource = {
+      current: () => ({ auths: [], missingRequiredAuthKeys: [] }),
+      deliveryPlans: () => ({}),
+    };
+    const withCreds: IntegrationToSpawn = {
+      ...makeIntegration("with"),
+      credentialSource: stubCredSource,
+    };
+    const withoutCreds = makeIntegration("without");
+    const ctrl = await bootstrapIntegrationRuntime({
+      runId: "run-mitm-2",
+      integrations: [withCreds, withoutCreds],
+      certGenerator: fakeCertGenerator(),
+      proxyUrl: "http://shared-proxy.example:1234",
+      fs,
+      spawnOptions: { spawn: spawn.fn },
+      tmpfsRoot: "/tmp",
+      enableMitmListener: true,
+    });
+    expect(ctrl.listenerFor("with")).toBeDefined();
+    expect(ctrl.listenerFor("without")).toBeUndefined();
+    const listenerUrl = ctrl.listenerFor("with")!.proxyUrl();
+    expect(spawn.calls[0]!.env.HTTPS_PROXY).toBe(listenerUrl);
+    expect(spawn.calls[1]!.env.HTTPS_PROXY).toBe("http://shared-proxy.example:1234");
+    await ctrl.shutdown();
+  });
+
+  it("when disabled, no listeners are started even with credentialSource present", async () => {
+    const fs = recordingFs();
+    const spawn = recordingSpawn();
+    const stubCredSource = {
+      current: () => ({ auths: [], missingRequiredAuthKeys: [] }),
+      deliveryPlans: () => ({}),
+    };
+    const integ: IntegrationToSpawn = {
+      ...makeIntegration("a"),
+      credentialSource: stubCredSource,
+    };
+    const ctrl = await bootstrapIntegrationRuntime({
+      runId: "run-mitm-3",
+      integrations: [integ],
+      certGenerator: fakeCertGenerator(),
+      proxyUrl: "http://shared-proxy.example:1234",
+      fs,
+      spawnOptions: { spawn: spawn.fn },
+      tmpfsRoot: "/tmp",
+      // enableMitmListener: false (default)
+    });
+    expect(ctrl.listenerFor("a")).toBeUndefined();
+    expect(spawn.calls[0]!.env.HTTPS_PROXY).toBe("http://shared-proxy.example:1234");
+    await ctrl.shutdown();
+  });
+});
+
 describe("bootstrapIntegrationRuntime — childFor()", () => {
   it("exposes the live SpawnedChildHandle per integration", async () => {
     const fs = recordingFs();

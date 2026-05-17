@@ -210,6 +210,11 @@ export type {
   PlanCaBundleOptions,
 } from "./proxy-ca-planner.ts";
 
+// Pure MITM action planner — drives the per-integration HTTPS proxy
+// listener (§4.1.4 strip/inject/retry logic).
+export { pickAuthForUrl, planMitmAction } from "./integration-mitm-planner.ts";
+export type { MitmAction, MitmRequestContext } from "./integration-mitm-planner.ts";
+
 // ─── AFPS integration runtime (Phase 1.2b) ─────────────────────────────
 // RFC 7591 Dynamic Client Registration.
 export { DcrError, registerClient } from "./dynamic-client-registration.ts";

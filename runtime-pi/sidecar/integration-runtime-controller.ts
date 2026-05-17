@@ -51,6 +51,13 @@ import {
   type SpawnIntegrationOptions,
   type SpawnedChildHandle,
 } from "./integration-spawner.ts";
+import {
+  createIntegrationMitmListener,
+  type MitmCredentialSource,
+  type MitmListenerEvent,
+  type MitmListenerHandle,
+} from "./integration-mitm-listener.ts";
+import { createCertMinter, type CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
 // Public types
@@ -82,6 +89,15 @@ export interface IntegrationToSpawn {
   extraEnv?: Record<string, string>;
   /** Override per-integration kill grace. */
   killTimeoutMs?: number;
+  /**
+   * Per-integration credential source — when set AND the controller's
+   * `enableMitmListener` flag is on, the controller starts a dedicated
+   * MITM listener for this integration and feeds its `http://…` URL
+   * into the spawn's HTTPS_PROXY 6-tuple. Without this, the
+   * integration spawns against the controller-level `proxyUrl`
+   * (typically the shared sidecar forward-proxy — pre-1.2d behaviour).
+   */
+  credentialSource?: MitmCredentialSource;
 }
 
 export interface FsWriter {
@@ -122,6 +138,26 @@ export interface BootstrapIntegrationRuntimeOptions {
   onEvent?: (event: IntegrationOrchestratorEvent) => void;
   /** Custom clock (passed to planCaBundle for `generatedAt`). */
   now?: () => Date;
+  /**
+   * When `true`, the controller starts one {@link createIntegrationMitmListener}
+   * per integration that supplied a `credentialSource`. The listener's URL
+   * overrides the controller-level `proxyUrl` for that integration's spawn
+   * env. Default `false` keeps 1.2c behaviour (no MITM, integrations share
+   * the caller-supplied `proxyUrl`).
+   *
+   * The same per-run CA bundle drives every listener — the run CA must
+   * already be in the integration's trust store via {@link buildProxyEnvInjection}
+   * so the minted leaf certs validate inside the subprocess.
+   */
+  enableMitmListener?: boolean;
+  /**
+   * Maximum number of distinct SNI hosts a single listener will cache
+   * leaf certs for. Defaults to 256 (one per upstream host the
+   * integration calls — typical real-world bound is much smaller).
+   */
+  mitmListenerHostCapacity?: number;
+  /** Telemetry sink for listener events (per-integration callbacks share this). */
+  onMitmEvent?: (integrationId: string, event: MitmListenerEvent) => void;
 }
 
 export interface IntegrationRuntimeController {
@@ -133,6 +169,8 @@ export interface IntegrationRuntimeController {
   readonly running: ReadonlyArray<RunningIntegrationView>;
   /** Look up the live SpawnedChildHandle for an integration. */
   childFor(integrationId: string): SpawnedChildHandle | undefined;
+  /** Look up the MITM listener handle for an integration, if any. */
+  listenerFor(integrationId: string): MitmListenerHandle | undefined;
   /** Re-fire SIGHUP at every afpsAware integration. */
   refreshCredentials(targets?: ReadonlyArray<string>): Promise<{
     sent: string[];
@@ -190,14 +228,43 @@ export async function bootstrapIntegrationRuntime(
     await fs.writeFile(w.path, w.content, w.mode);
   }
 
-  // ─── Step 2: spawn every integration in parallel ───
+  // ─── Step 2a: bring up per-integration MITM listeners (optional) ───
+  const listeners = new Map<string, MitmListenerHandle>();
+  let sharedMinter: CertMinter | null = null;
+  if (options.enableMitmListener) {
+    sharedMinter = createCertMinter({
+      caCertPem: caBundle.pems.caCertPem,
+      caKeyPem: caBundle.pems.caKeyPem,
+      ...(options.mitmListenerHostCapacity
+        ? { cacheCapacity: options.mitmListenerHostCapacity }
+        : {}),
+    });
+    for (const integ of options.integrations) {
+      if (!integ.credentialSource) continue;
+      const listener = createIntegrationMitmListener({
+        caBundle,
+        minter: sharedMinter,
+        credentials: integ.credentialSource,
+        ...(options.onMitmEvent
+          ? {
+              onEvent: (event) => options.onMitmEvent?.(integ.integrationId, event),
+            }
+          : {}),
+      });
+      await listener.ready;
+      listeners.set(integ.integrationId, listener);
+    }
+  }
+
+  // ─── Step 2b: spawn every integration in parallel ───
   const live = new Map<string, SpawnedChildHandle>();
   const spawnRequests: IntegrationSpawnRequest[] = [];
 
   for (const integ of options.integrations) {
     const target = resolveIntegrationServer(integ.manifest.server, integ.bundleRoot);
+    const effectiveProxyUrl = listeners.get(integ.integrationId)?.proxyUrl() ?? options.proxyUrl;
     const proxyEnv = buildProxyEnvInjection({
-      proxyUrl: options.proxyUrl,
+      proxyUrl: effectiveProxyUrl,
       caCertPath: caBundle.caCertPath,
       ...(options.noProxy ? { noProxy: options.noProxy } : {}),
     } satisfies ProxyEnvInjectionInput);
@@ -249,7 +316,14 @@ export async function bootstrapIntegrationRuntime(
       ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
   } catch (err) {
-    // Wipe the CA tmpfs — nothing's using it now.
+    // Tear down the listeners + wipe CA tmpfs — nothing's using them now.
+    for (const listener of listeners.values()) {
+      try {
+        await listener.close();
+      } catch {
+        // ignore
+      }
+    }
     await safeRm(fs, writes);
     throw err;
   }
@@ -272,6 +346,9 @@ export async function bootstrapIntegrationRuntime(
     childFor(integrationId) {
       return live.get(integrationId);
     },
+    listenerFor(integrationId) {
+      return listeners.get(integrationId);
+    },
     async refreshCredentials(targets) {
       return orchestrator.signalCredentialRefresh(targets);
     },
@@ -279,6 +356,14 @@ export async function bootstrapIntegrationRuntime(
       try {
         await orchestrator.shutdown();
       } finally {
+        for (const listener of listeners.values()) {
+          try {
+            await listener.close();
+          } catch {
+            // ignore
+          }
+        }
+        listeners.clear();
         await safeRm(fs, writes);
       }
     },
