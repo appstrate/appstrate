@@ -381,6 +381,17 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
       }
     },
   },
+  // Phase 1.0 — no CRUD routes yet; integrations land via the bundle
+  // import pipeline (`POST /api/packages/import-bundle`). This entry
+  // keeps the Record exhaustive so the type system catches missing
+  // wiring as soon as Phase 1.3 starts adding routes.
+  integration: {
+    cfg: CONFIG_BY_TYPE.integration,
+    path: "integrations",
+    parseOpts: { requiredFile: null, contentFileExt: null },
+    storageFileName: () => "manifest.json",
+    jsonBodyCreate: false,
+  },
 };
 
 // --- Handler factories ---

@@ -80,6 +80,14 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles("agents", orgId, packageId, files);
   }
 
+  if (packageType === "integration" && Object.keys(files).length > 0) {
+    // Vendored MCP server code (`server/`), the manifest, and the
+    // optional INTEGRATION.md companion all live alongside each other
+    // in the AFPS bundle — store the whole tree under integrations/.
+    // Phase 1.2a's resolver consumes the same payload at spawn time.
+    await uploadPackageFiles("integrations", orgId, packageId, files);
+  }
+
   try {
     await createVersionAndUpload({
       packageId,

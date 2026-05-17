@@ -128,6 +128,13 @@ function validatePackage(
     });
   }
 
+  // Phase 1.0 — `integration` is a known type whose schema lives in
+  // `@appstrate/core/integration` (not yet upstreamed to @afps-spec).
+  // afps-runtime treats it as opaque: structure is enforced by the
+  // platform-side parser (`parsePackageZip`) at import time, so we
+  // just skip schema validation here without flagging UNSUPPORTED_TYPE.
+  if (rawType === "integration") return;
+
   const schema = schemaForType(rawType);
   if (!schema) {
     if (!isRoot) {

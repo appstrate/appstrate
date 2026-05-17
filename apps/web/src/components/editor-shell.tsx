@@ -14,6 +14,10 @@ const emojiMap: Record<PackageType, string> = {
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
+  // Phase 1.0 — integrations have no editor route; this entry keeps
+  // the Record exhaustive so the package-type enum can grow without
+  // hand-cascading every UI lookup. UI lands in Phase 1.3.
+  integration: "🧩",
 };
 
 const breadcrumbNewKeys: Record<PackageType, string> = {
@@ -21,6 +25,7 @@ const breadcrumbNewKeys: Record<PackageType, string> = {
   skill: "editor.breadcrumbNewSkill",
   tool: "editor.breadcrumbNewTool",
   provider: "editor.breadcrumbNewProvider",
+  integration: "editor.breadcrumbNew",
 };
 
 const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
@@ -28,6 +33,8 @@ const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
   skill: { key: "packages.type.skills", ns: "settings" },
   tool: { key: "packages.type.tools", ns: "settings" },
   provider: { key: "packages.type.providers", ns: "settings" },
+  // Falls back to the package id until i18n entries are added in Phase 1.3.
+  integration: { key: "packages.type.integrations", ns: "settings" },
 };
 
 interface EditorTab {

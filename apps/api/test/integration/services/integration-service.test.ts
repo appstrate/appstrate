@@ -1,0 +1,297 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Integration tests for `integration-service.ts` — INTEGRATIONS_PROPOSAL
+ * Phase 1.0 read path. Covers org/system scoping, manifest validation
+ * fallback, version lookup, and the installed-in-app join used by the
+ * future runtime resolver.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
+import {
+  getIntegration,
+  listIntegrations,
+  getIntegrationVersion,
+  isIntegrationInstalled,
+  parseIntegrationManifest,
+  safeManifestFromRow,
+} from "../../../src/services/integration-service.ts";
+
+function validIntegrationManifest(name = "@official/gmail"): Record<string, unknown> {
+  return {
+    manifestVersion: "1.1",
+    type: "integration",
+    name,
+    version: "1.0.0",
+    displayName: "Gmail",
+    server: { type: "node", entryPoint: "./server/index.js" },
+  };
+}
+
+describe("integration-service", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "testorg" });
+  });
+
+  describe("getIntegration", () => {
+    it("returns null when no row matches", async () => {
+      const out = await getIntegration(ctx.orgId, "@nothing/here");
+      expect(out).toBeNull();
+    });
+
+    it("returns the row when org-owned with a valid manifest", async () => {
+      const manifest = validIntegrationManifest("@official/gmail");
+      await seedPackage({
+        id: "@official/gmail",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: manifest,
+      });
+      const out = await getIntegration(ctx.orgId, "@official/gmail");
+      expect(out).not.toBeNull();
+      expect(out!.id).toBe("@official/gmail");
+      expect(out!.manifest.displayName).toBe("Gmail");
+      expect(out!.source).toBe("local");
+    });
+
+    it("returns the row when it's a system package (orgId: null)", async () => {
+      const manifest = validIntegrationManifest("@official/system-int");
+      await seedPackage({
+        id: "@official/system-int",
+        orgId: null,
+        source: "system",
+        type: "integration",
+        draftManifest: manifest,
+      });
+      const out = await getIntegration(ctx.orgId, "@official/system-int");
+      expect(out).not.toBeNull();
+      expect(out!.source).toBe("system");
+    });
+
+    it("rejects a row owned by another org", async () => {
+      const otherCtx = await createTestContext({ orgSlug: "otherorg" });
+      await seedPackage({
+        id: "@other/secret",
+        orgId: otherCtx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@other/secret"),
+      });
+      const out = await getIntegration(ctx.orgId, "@other/secret");
+      expect(out).toBeNull();
+    });
+
+    it("returns null (not 500) when the manifest fails validation", async () => {
+      // Corrupted manifest: missing required fields. The service should
+      // log + treat as missing, not crash callers.
+      await seedPackage({
+        id: "@official/broken",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: { type: "integration", name: "@official/broken" },
+      });
+      const out = await getIntegration(ctx.orgId, "@official/broken");
+      expect(out).toBeNull();
+    });
+
+    it("does not return non-integration packages", async () => {
+      await seedPackage({
+        id: "@official/agent-x",
+        orgId: ctx.orgId,
+        type: "agent",
+      });
+      const out = await getIntegration(ctx.orgId, "@official/agent-x");
+      expect(out).toBeNull();
+    });
+  });
+
+  describe("listIntegrations", () => {
+    it("returns an empty array when no integrations exist", async () => {
+      const out = await listIntegrations(ctx.orgId);
+      expect(out).toEqual([]);
+    });
+
+    it("returns org + system integrations together, sorted by id stability", async () => {
+      await seedPackage({
+        id: "@official/a",
+        orgId: null,
+        source: "system",
+        type: "integration",
+        draftManifest: validIntegrationManifest("@official/a"),
+      });
+      await seedPackage({
+        id: "@official/b",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@official/b"),
+      });
+      const out = await listIntegrations(ctx.orgId);
+      expect(out.length).toBe(2);
+      const ids = out.map((r) => r.id).sort();
+      expect(ids).toEqual(["@official/a", "@official/b"]);
+    });
+
+    it("excludes non-integration packages from the listing", async () => {
+      await seedPackage({
+        id: "@official/agent",
+        orgId: ctx.orgId,
+        type: "agent",
+      });
+      await seedPackage({
+        id: "@official/skill",
+        orgId: ctx.orgId,
+        type: "skill",
+      });
+      await seedPackage({
+        id: "@official/int",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@official/int"),
+      });
+      const out = await listIntegrations(ctx.orgId);
+      expect(out.length).toBe(1);
+      expect(out[0]!.id).toBe("@official/int");
+    });
+
+    it("skips broken rows without aborting the whole list", async () => {
+      await seedPackage({
+        id: "@official/good",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@official/good"),
+      });
+      await seedPackage({
+        id: "@official/broken",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: { type: "integration", name: "@official/broken" },
+      });
+      const out = await listIntegrations(ctx.orgId);
+      expect(out.length).toBe(1);
+      expect(out[0]!.id).toBe("@official/good");
+    });
+
+    it("isolates orgs", async () => {
+      const otherCtx = await createTestContext({ orgSlug: "otherorg" });
+      await seedPackage({
+        id: "@other/leak",
+        orgId: otherCtx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@other/leak"),
+      });
+      const out = await listIntegrations(ctx.orgId);
+      expect(out).toEqual([]);
+    });
+  });
+
+  describe("getIntegrationVersion", () => {
+    it("returns the persisted version row", async () => {
+      const manifest = validIntegrationManifest("@official/gmail");
+      await seedPackage({
+        id: "@official/gmail",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({
+        packageId: "@official/gmail",
+        version: "1.0.0",
+        integrity: "sha256-deadbeef",
+        artifactSize: 2048,
+        manifest,
+      });
+      const v = await getIntegrationVersion(ctx.orgId, "@official/gmail", "1.0.0");
+      expect(v).not.toBeNull();
+      expect(v!.version).toBe("1.0.0");
+      expect(v!.integrity).toBe("sha256-deadbeef");
+      expect(v!.manifest.displayName).toBe("Gmail");
+    });
+
+    it("returns null for an unknown version", async () => {
+      await seedPackage({
+        id: "@official/gmail",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest(),
+      });
+      const v = await getIntegrationVersion(ctx.orgId, "@official/gmail", "9.9.9");
+      expect(v).toBeNull();
+    });
+
+    it("returns null when the package is not an integration", async () => {
+      await seedPackage({
+        id: "@official/agent",
+        orgId: ctx.orgId,
+        type: "agent",
+      });
+      await seedPackageVersion({
+        packageId: "@official/agent",
+        version: "1.0.0",
+        integrity: "sha256-x",
+        artifactSize: 1,
+        manifest: { type: "agent", name: "@official/agent", version: "1.0.0" },
+      });
+      const v = await getIntegrationVersion(ctx.orgId, "@official/agent", "1.0.0");
+      expect(v).toBeNull();
+    });
+  });
+
+  describe("isIntegrationInstalled", () => {
+    it("returns false before installation, true after", async () => {
+      await seedPackage({
+        id: "@official/gmail",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest(),
+      });
+      const before = await isIntegrationInstalled(ctx.defaultAppId, "@official/gmail");
+      expect(before).toBe(false);
+
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@official/gmail",
+      );
+
+      const after = await isIntegrationInstalled(ctx.defaultAppId, "@official/gmail");
+      expect(after).toBe(true);
+    });
+  });
+
+  describe("parseIntegrationManifest", () => {
+    it("validates a well-formed manifest", () => {
+      const r = parseIntegrationManifest(validIntegrationManifest());
+      expect(r.valid).toBe(true);
+    });
+
+    it("surfaces field-level errors on a broken manifest", () => {
+      const r = parseIntegrationManifest({
+        type: "integration",
+        name: "broken",
+        version: "1.0.0",
+      });
+      expect(r.valid).toBe(false);
+      if (!r.valid) {
+        expect(r.errors.length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("safeManifestFromRow", () => {
+    it("returns null for empty JSONB", () => {
+      expect(safeManifestFromRow({})).toBeNull();
+      expect(safeManifestFromRow(null)).toBeNull();
+    });
+
+    it("narrows a valid raw manifest", () => {
+      const m = safeManifestFromRow(validIntegrationManifest());
+      expect(m).not.toBeNull();
+      expect(m!.type).toBe("integration");
+    });
+  });
+});

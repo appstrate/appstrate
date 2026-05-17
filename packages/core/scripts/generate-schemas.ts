@@ -57,11 +57,13 @@ const appstrateSchemas = [
 // Generate
 // ─────────────────────────────────────────────
 
-// Clear and recreate OUTPUT_DIR — Bun.$ shells out to /bin/rm + mkdir, so
-// we use the standard $ template (Bun's recommended pathing primitive)
-// instead of `node:fs/promises`.
-await Bun.$`rm -rf ${OUTPUT_DIR}`.quiet();
+// Only delete files we own. `integration.schema.json` is hand-written
+// (Phase 1.0 — proposal §4.1.1; not yet upstreamed in @afps-spec/schema)
+// and must survive a regeneration.
 await Bun.$`mkdir -p ${OUTPUT_DIR}`.quiet();
+for (const entry of appstrateSchemas) {
+  await Bun.$`rm -f ${OUTPUT_DIR}/${entry.filename}`.quiet();
+}
 
 for (const entry of appstrateSchemas) {
   const jsonSchema = toJSONSchema(entry.schema, {

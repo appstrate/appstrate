@@ -68,7 +68,15 @@ export const invitationStatusEnum = pgEnum("invitation_status", invitationStatus
 export const zInvitationStatusEnum = z.enum(invitationStatusValues);
 export type InvitationStatus = z.infer<typeof zInvitationStatusEnum>;
 
-export const packageTypeValues = ["agent", "skill", "tool", "provider"] as const;
+export const packageTypeValues = [
+  "agent",
+  "skill",
+  "tool",
+  "provider",
+  // Phase 1.0 (INTEGRATIONS_PROPOSAL §4.1). Migration 0023 adds the
+  // 'integration' value to the `package_type` PG enum.
+  "integration",
+] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
 export const zPackageTypeEnum = z.enum(packageTypeValues);
 export type PackageType = z.infer<typeof zPackageTypeEnum>;

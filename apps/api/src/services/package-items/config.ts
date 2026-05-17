@@ -8,7 +8,7 @@ import type { PackageType } from "@appstrate/core/validation";
 
 export interface PackageTypeConfig {
   type: PackageType;
-  storageFolder: "agents" | "skills" | "tools" | "providers";
+  storageFolder: "agents" | "skills" | "tools" | "providers" | "integrations";
   label: string;
 }
 
@@ -17,6 +17,8 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   skill: { type: "skill", storageFolder: "skills", label: "Skills" },
   tool: { type: "tool", storageFolder: "tools", label: "Tools" },
   provider: { type: "provider", storageFolder: "providers", label: "Providers" },
+  // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
+  integration: { type: "integration", storageFolder: "integrations", label: "Integrations" },
 };
 
 /** Resolve the S3 storage folder for a package type (e.g. "tool" → "tools"). */

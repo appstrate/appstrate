@@ -12,6 +12,7 @@ const emojiMap: Record<PackageType, string> = {
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
+  integration: "🧩",
 };
 
 interface SharedHeaderDetail {

@@ -76,6 +76,20 @@ function validProviderManifest() {
   });
 }
 
+function validIntegrationManifest() {
+  return JSON.stringify({
+    manifestVersion: "1.1",
+    type: "integration",
+    name: "@test/my-integration",
+    version: "1.0.0",
+    displayName: "My Integration",
+    server: {
+      type: "node",
+      entryPoint: "./server/index.js",
+    },
+  });
+}
+
 const validToolSource = `
 export default function(pi) {
   pi.registerTool({
@@ -142,6 +156,47 @@ describe("parsePackageZip", () => {
     expect(result.type).toBe("provider");
     expect(result.content).toBe(providerDoc);
     expect(result.manifest.name).toBe("@test/my-provider");
+  });
+
+  it("valid integration ZIP (manifest-only)", () => {
+    const zip = makeZip({
+      "manifest.json": validIntegrationManifest(),
+      "server/index.js": "/* vendored MCP server */",
+    });
+    const result = parsePackageZip(zip);
+    expect(result.type).toBe("integration");
+    expect(result.manifest.name).toBe("@test/my-integration");
+    // No INTEGRATION.md present → content falls back to manifest text.
+    expect(result.content).toContain("@test/my-integration");
+  });
+
+  it("valid integration ZIP with INTEGRATION.md companion", () => {
+    const doc = "# Integration agent-facing doc\n\nWhat this MCP server does.\n";
+    const zip = makeZip({
+      "manifest.json": validIntegrationManifest(),
+      "INTEGRATION.md": doc,
+      "server/index.js": "/* vendored */",
+    });
+    const result = parsePackageZip(zip);
+    expect(result.type).toBe("integration");
+    expect(result.content).toBe(doc);
+  });
+
+  it("rejects an integration manifest missing required fields", () => {
+    const incomplete = JSON.stringify({
+      manifestVersion: "1.1",
+      type: "integration",
+      name: "@test/broken",
+      version: "1.0.0",
+      // missing displayName + server
+    });
+    const zip = makeZip({ "manifest.json": incomplete });
+    expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
+    try {
+      parsePackageZip(zip);
+    } catch (e) {
+      expect((e as PackageZipError).code).toBe("INVALID_MANIFEST");
+    }
   });
 
   it("ZIP too large", () => {
@@ -236,15 +291,17 @@ describe("parsePackageZip", () => {
     });
 
     const result = parsePackageZip(zip);
+    // Manifest is narrowed by `type === "agent"` here — cast for field access.
+    const agentManifest = result.manifest as Record<string, unknown>;
 
     // Raw manifest preserved — no Zod defaults injected
     expect(result.manifest).toEqual(manifest);
 
-    expect(result.manifest.dependencies).toBeUndefined();
-    expect(result.manifest.providersConfiguration).toBeUndefined();
+    expect(agentManifest.dependencies).toBeUndefined();
+    expect(agentManifest.providersConfiguration).toBeUndefined();
 
     // Custom field preserved
-    expect(result.manifest.customField).toBe("must-survive");
+    expect(agentManifest.customField).toBe("must-survive");
   });
 });
 

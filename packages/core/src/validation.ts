@@ -16,6 +16,9 @@ import {
   credentialTransformEncodingEnum as afpsCredentialTransformEncodingEnum,
   uploadProtocolEnum as afpsUploadProtocolEnum,
 } from "@afps-spec/schema";
+import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
+
+export { integrationManifestSchema, type IntegrationManifest };
 
 // ─────────────────────────────────────────────
 // Base manifest schema — common fields for all package types
@@ -24,9 +27,9 @@ import {
 /** Regex matching scoped package names in the format `@scope/package-name`. */
 export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
 
-/** Zod enum for the four supported AFPS package types. */
-export const packageTypeEnum = z.enum(["agent", "skill", "tool", "provider"]);
-/** Union type of supported package types: "agent" | "skill" | "tool" | "provider". */
+/** Zod enum for supported AFPS package types (Phase 1.0 adds `integration`). */
+export const packageTypeEnum = z.enum(["agent", "skill", "tool", "provider", "integration"]);
+/** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
 export const PACKAGE_TYPES = packageTypeEnum.options;
@@ -37,6 +40,7 @@ export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
   skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
   tool: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
   provider: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
+  integration: "https://afps.dev/schema/v1/integration.schema.json",
 };
 
 /** Base Zod schema for package manifests — common fields shared by all package types. */
@@ -54,6 +58,10 @@ export const manifestSchema = z.looseObject({
       skills: z.record(z.string(), z.string()).optional(),
       tools: z.record(z.string(), z.string()).optional(),
       providers: z.record(z.string(), z.string()).optional(),
+      // Phase 1.0 — proposal §4.2.3. Additive: legacy `providers`
+      // remains valid; the manifest may reference both sets while
+      // legacy types are still being migrated.
+      integrations: z.record(z.string(), z.string()).optional(),
     })
     .optional(),
 });
@@ -65,7 +73,10 @@ export type Manifest = z.infer<typeof manifestSchema>;
 // Agent manifest schema — extends AFPS with core enhancements
 // ─────────────────────────────────────────────
 
-/** Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts. */
+/**
+ * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
+ * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
+ */
 export const agentManifestSchema = afpsAgentManifestSchema.extend({
   // All standard fields (name, version, schemaVersion, dependencies,
   // displayName, providersConfiguration, input/output/config, timeout) inherited from AFPS.
@@ -76,6 +87,18 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
   keywords: z.array(z.string()).optional(),
   license: z.string().optional(),
   repository: z.string().optional(),
+  // Phase 1.0 — additive sibling of `dependencies.providers`. Keys must
+  // be scoped package names; values are semver ranges. The AFPS agent
+  // schema already accepts `dependencies` via `looseObject`, but we
+  // narrow `integrations` here so the type system surfaces it.
+  dependencies: z
+    .looseObject({
+      skills: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
+      tools: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
+      providers: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
+      integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
+    })
+    .optional(),
 });
 
 /** Inferred type from the agent manifest schema. */
@@ -434,7 +457,13 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest: Manifest | AgentManifest | SkillManifest | ToolManifest | ProviderManifest;
+      manifest:
+        | Manifest
+        | AgentManifest
+        | SkillManifest
+        | ToolManifest
+        | ProviderManifest
+        | IntegrationManifest;
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
@@ -444,7 +473,8 @@ function parseWithSchema(
     | typeof agentManifestSchema
     | typeof skillManifestSchema
     | typeof toolManifestSchema
-    | typeof providerManifestSchema,
+    | typeof providerManifestSchema
+    | typeof integrationManifestSchema,
   raw: unknown,
 ): ValidateManifestResult {
   const result = schema.safeParse(raw);
@@ -465,7 +495,7 @@ function parseWithSchema(
 
 /**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
- * Determines the schema from the `type` field (agent, skill, tool, provider) and validates accordingly.
+ * Determines the schema from the `type` field (agent, skill, tool, provider, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
@@ -481,7 +511,9 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
             ? providerManifestSchema
             : type === "tool"
               ? toolManifestSchema
-              : manifestSchema;
+              : type === "integration"
+                ? integrationManifestSchema
+                : manifestSchema;
     return parseWithSchema(schema, raw);
   }
   // No `type` field — run the base schema so every missing-field error is

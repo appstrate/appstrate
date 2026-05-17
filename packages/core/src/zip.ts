@@ -10,6 +10,7 @@ import {
   type ToolManifest,
   type PackageType,
   type ProviderManifest,
+  type IntegrationManifest,
 } from "./validation.ts";
 
 export type { Zippable };
@@ -143,7 +144,7 @@ export function stripWrapperPrefix(
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | ProviderManifest;
+  manifest: Manifest | AgentManifest | ProviderManifest | IntegrationManifest;
   /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
   content: string;
   /** All files in the ZIP archive (path to content). */
@@ -290,6 +291,16 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       // Provider packages require manifest.json; PROVIDER.md is an optional companion file
       const providerRaw = files["PROVIDER.md"];
       content = providerRaw ? new TextDecoder().decode(providerRaw) : manifestText;
+      break;
+    }
+    case "integration": {
+      // Integration packages (proposal §4.1.2). Phase 1.0 bundles carry
+      // manifest.json as authoritative; INTEGRATION.md is an optional
+      // agent-facing documentation companion. Vendored server code lives
+      // under `server/` and is left untouched by this parser — the
+      // runtime resolver (Phase 1.2a) consumes it directly.
+      const integrationRaw = files["INTEGRATION.md"];
+      content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
       break;
     }
     default:

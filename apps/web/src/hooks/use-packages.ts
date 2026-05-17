@@ -27,6 +27,11 @@ const PACKAGE_CONFIG = {
   skill: { path: "skills" },
   tool: { path: "tools" },
   provider: { path: "providers" },
+  // Phase 1.0 — read-only surface (proposal §4.1). UI for browse +
+  // connect lands in Phase 1.3; this stub keeps the package-type
+  // factory exhaustive so adding the enum value didn't fan out
+  // into "missing key" errors across the dashboard.
+  integration: { path: "integrations" },
 } as const;
 
 type PackageDetailMap = {
@@ -34,6 +39,7 @@ type PackageDetailMap = {
   skill: OrgPackageItemDetail;
   tool: OrgPackageItemDetail;
   provider: OrgPackageItemDetail;
+  integration: OrgPackageItemDetail;
 };
 
 function usePackageList(type: PackageType) {

@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Appstrate Integration Manifest",
+  "description": "AFPS integration manifest — proposal §4.1.1. Adopts a subset of MCPB on the server side, adds first-class `auths` + `delivery` + `transport`. Phase 1.0 schema; runtime side (proxy, MCP Router) lands in Phase 1.2a.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "manifestVersion": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9]\\d*)$"
+    },
+    "type": {
+      "type": "string",
+      "const": "integration"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "author": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "email": { "type": "string" },
+            "url": { "type": "string" }
+          },
+          "required": ["name"],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "repository": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "minLength": 1 }
+          },
+          "required": ["type", "url"],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "privacyPolicy": {
+      "type": "string"
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "icon": {
+      "type": "string"
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "afps": { "type": "string" },
+        "mcp": { "type": "string" }
+      },
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "type": "object",
+      "additionalProperties": {}
+    },
+    "server": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "node",
+            "bun",
+            "python",
+            "uv",
+            "binary",
+            "docker",
+            "http",
+            "npx",
+            "uvx"
+          ]
+        },
+        "httpClient": {
+          "type": "object",
+          "properties": {
+            "proxyEnv": { "type": "string", "minLength": 1 },
+            "caTrustEnv": {
+              "type": "string",
+              "enum": [
+                "SSL_CERT_FILE",
+                "NODE_EXTRA_CA_CERTS",
+                "CURL_CA_BUNDLE",
+                "REQUESTS_CA_BUNDLE",
+                "NONE"
+              ]
+            }
+          },
+          "required": ["caTrustEnv"],
+          "additionalProperties": {}
+        },
+        "entryPoint": { "type": "string", "minLength": 1 },
+        "package": {
+          "type": "object",
+          "properties": {
+            "registryType": { "type": "string", "const": "oci" },
+            "identifier": { "type": "string", "minLength": 1 },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "registryBaseUrl": { "type": "string" }
+          },
+          "required": ["registryType", "identifier", "digest"],
+          "additionalProperties": {}
+        },
+        "url": { "type": "string" },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "isRequired": { "type": "boolean" },
+              "description": { "type": "string" },
+              "default": { "type": "string" }
+            },
+            "additionalProperties": {}
+          }
+        },
+        "mcpConfig": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "additionalProperties": {}
+        },
+        "toolsDynamic": { "type": "boolean" }
+      },
+      "required": ["type"],
+      "additionalProperties": {}
+    },
+    "transport": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["stdio", "streamable-http", "sse"]
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "serverAuth": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "const": "oauth2-mcp" },
+        "resource": { "type": "string", "minLength": 1 },
+        "discovery": {
+          "oneOf": [
+            { "type": "string", "const": "auto" },
+            {
+              "type": "object",
+              "properties": {
+                "protectedResourceMetadataUrl": { "type": "string", "minLength": 1 }
+              },
+              "required": ["protectedResourceMetadataUrl"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["type", "resource", "discovery"],
+      "additionalProperties": false
+    },
+    "auths": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["oauth2", "oauth1", "api_key", "basic", "custom"]
+          },
+          "required": { "type": "boolean" },
+          "authorizationUrl": { "type": "string" },
+          "tokenUrl": { "type": "string" },
+          "refreshUrl": { "type": "string" },
+          "revokeUrl": { "type": "string" },
+          "discovery": {
+            "type": "object",
+            "properties": {
+              "protectedResourceMetadataUrl": { "type": "string", "minLength": 1 }
+            },
+            "required": ["protectedResourceMetadataUrl"],
+            "additionalProperties": false
+          },
+          "audience": { "type": "string" },
+          "scopes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "scopeSeparator": { "type": "string" },
+          "pkceEnabled": { "type": "boolean" },
+          "tokenAuthMethod": {
+            "type": "string",
+            "enum": ["client_secret_post", "client_secret_basic", "none"]
+          },
+          "extractTokenIdentity": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "requiredIdentityClaims": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "authorizedUris": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "credentials": {
+            "type": "object",
+            "properties": {
+              "schema": { "type": "object", "additionalProperties": {} }
+            },
+            "required": ["schema"],
+            "additionalProperties": {}
+          },
+          "delivery": {
+            "type": "object",
+            "properties": {
+              "http": {
+                "type": "object",
+                "properties": {
+                  "headerName": { "type": "string", "minLength": 1 },
+                  "headerPrefix": { "type": "string" },
+                  "valueFrom": {
+                    "oneOf": [
+                      { "type": "string", "minLength": 1 },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "template": { "type": "string", "minLength": 1 },
+                          "encoding": { "type": "string", "enum": ["base64"] }
+                        },
+                        "required": ["template"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "allowServerOverride": { "type": "boolean" }
+                },
+                "additionalProperties": false
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "from": { "type": "string", "minLength": 1 },
+                    "sensitive": { "type": "boolean" }
+                  },
+                  "required": ["from"],
+                  "additionalProperties": false
+                }
+              },
+              "files": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "from": { "type": "string", "minLength": 1 },
+                    "mode": { "type": "string", "pattern": "^0[0-7]{3}$" }
+                  },
+                  "required": ["from"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "authorizedUris", "delivery"],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "manifestVersion",
+    "type",
+    "name",
+    "version",
+    "displayName",
+    "server"
+  ],
+  "additionalProperties": {}
+}

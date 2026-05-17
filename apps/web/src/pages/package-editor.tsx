@@ -564,6 +564,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     );
   }
 
+  // Phase 1.0 — integration editor lands in Phase 1.3. Until then,
+  // bounce edit attempts back to the home page (integrations are
+  // import-only via `POST /api/packages/import-bundle`).
+  if (type === "integration") {
+    return <Navigate to="/" replace />;
+  }
+
   // Skill/Tool editor (agent/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 

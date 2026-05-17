@@ -15,6 +15,8 @@ const emojiMap: Record<PackageType, string> = {
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
+  // Phase 1.0 — see use-packages.ts comment.
+  integration: "🧩",
 };
 
 export function ItemTab({

@@ -1,0 +1,385 @@
+// Copyright 2025-2026 Appstrate
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * AFPS Integration manifest — Zod schema and TypeScript types.
+ *
+ * Implements §4.1.1 of `docs/architecture/INTEGRATIONS_PROPOSAL.md`
+ * (Phase 1.0). The runtime side (spawn, credential proxy, MCP Router)
+ * lives downstream in Phase 1.2a; this module only validates the
+ * manifest shape so bundles can be imported into the DB.
+ *
+ * The schema is intentionally local to `@appstrate/core` rather than
+ * upstreamed to `@afps-spec/schema` for Phase 1.0 — it can be promoted
+ * once the AFPS spec itself is amended (proposal §4.3). Keeping it
+ * here avoids requiring an afps-spec release for every Appstrate-side
+ * iteration on Phase 1.x.
+ */
+
+import { z } from "zod";
+import { SLUG_PATTERN } from "./naming.ts";
+
+// Local copy to avoid a circular import with `./validation.ts`.
+// Equivalent to `scopedNameRegex` exported from validation.ts.
+const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
+
+// `manifestVersion` mirrors MCPB (`1.0` / `1.1`). Allow any 1.x.
+const manifestVersionRegex = /^1\.(0|[1-9]\d*)$/;
+
+// ─────────────────────────────────────────────
+// Server runtime — closed enum + author sugars
+// ─────────────────────────────────────────────
+
+/**
+ * Runtime server types accepted in a published integration manifest.
+ * `npx` / `uvx` are author-time sugars that the AFPS bundler converts
+ * to `node` / `uv` before publish (proposal D31, §4.1.2). They are
+ * accepted here so authoring CLIs can validate pre-bundle manifests.
+ */
+export const integrationServerTypeEnum = z.enum([
+  "node",
+  "bun",
+  "python",
+  "uv",
+  "binary",
+  "docker",
+  "http",
+  // Author-time sugars — converted by `afps bundle` (Phase 1.05).
+  "npx",
+  "uvx",
+]);
+
+export type IntegrationServerType = z.infer<typeof integrationServerTypeEnum>;
+
+/**
+ * CA-trust env var enum for `server.type: "binary"` (D32 §4.1.1).
+ * `NONE` flags a binary with no env-based CA trust mechanism — the
+ * installer refuses unless the user opts into "egress unobservable".
+ */
+export const caTrustEnvEnum = z.enum([
+  "SSL_CERT_FILE",
+  "NODE_EXTRA_CA_CERTS",
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE",
+  "NONE",
+]);
+
+export type CaTrustEnv = z.infer<typeof caTrustEnvEnum>;
+
+const httpClientSchema = z.object({
+  proxyEnv: z.string().min(1).optional(),
+  caTrustEnv: caTrustEnvEnum,
+});
+
+const packageRefSchema = z.object({
+  registryType: z.enum(["oci"]),
+  identifier: z.string().min(1),
+  digest: z.string().regex(/^sha256:[a-f0-9]{64}$/, {
+    error: "server.package.digest must be a sha256 digest (sha256:<64 hex>)",
+  }),
+  registryBaseUrl: z.string().optional(),
+});
+
+const mcpConfigSchema = z.object({
+  command: z.string().min(1).optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+});
+
+const serverVariableSchema = z.object({
+  isRequired: z.boolean().optional(),
+  description: z.string().optional(),
+  default: z.string().optional(),
+});
+
+const serverSchema = z
+  .object({
+    type: integrationServerTypeEnum,
+    httpClient: httpClientSchema.optional(),
+    entryPoint: z.string().min(1).optional(),
+    package: packageRefSchema.optional(),
+    url: z.string().optional(),
+    variables: z.record(z.string(), serverVariableSchema).optional(),
+    mcpConfig: mcpConfigSchema.optional(),
+    toolsDynamic: z.boolean().optional(),
+  })
+  .superRefine((server, ctx) => {
+    // Exactly one of {entryPoint, package, url} per type
+    const hasEntry = server.entryPoint !== undefined;
+    const hasPackage = server.package !== undefined;
+    const hasUrl = server.url !== undefined;
+
+    switch (server.type) {
+      case "node":
+      case "bun":
+      case "python":
+      case "uv":
+      case "binary":
+      case "npx":
+      case "uvx": {
+        if (!hasEntry) {
+          ctx.addIssue({
+            code: "custom",
+            message: `server.entryPoint is required when server.type is "${server.type}"`,
+            path: ["entryPoint"],
+          });
+        }
+        if (hasPackage || hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: `server.package/url forbidden when server.type is "${server.type}"`,
+            path: hasPackage ? ["package"] : ["url"],
+          });
+        }
+        break;
+      }
+      case "docker": {
+        if (!hasPackage) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.package is required when server.type is "docker"',
+            path: ["package"],
+          });
+        }
+        if (hasEntry || hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.entryPoint/url forbidden when server.type is "docker"',
+            path: hasEntry ? ["entryPoint"] : ["url"],
+          });
+        }
+        break;
+      }
+      case "http": {
+        if (!hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.url is required when server.type is "http"',
+            path: ["url"],
+          });
+        }
+        if (hasEntry || hasPackage) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.entryPoint/package forbidden when server.type is "http"',
+            path: hasEntry ? ["entryPoint"] : ["package"],
+          });
+        }
+        break;
+      }
+    }
+
+    // D32: caTrustEnv is required for binaries.
+    if (server.type === "binary" && !server.httpClient) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          'server.httpClient.caTrustEnv is required when server.type is "binary" (D32). ' +
+          'Set caTrustEnv: "NONE" to declare egress is not observable (requires user opt-in at install).',
+        path: ["httpClient"],
+      });
+    }
+  });
+
+// ─────────────────────────────────────────────
+// Transport (stdio | streamable-http | sse)
+// ─────────────────────────────────────────────
+
+const transportSchema = z.object({
+  type: z.enum(["stdio", "streamable-http", "sse"]),
+});
+
+// ─────────────────────────────────────────────
+// Server auth (Runtime → MCP server HTTP, distinct from upstream `auths`)
+// ─────────────────────────────────────────────
+
+const discoveryExplicitSchema = z.object({
+  protectedResourceMetadataUrl: z.string().min(1),
+});
+
+const serverAuthSchema = z.object({
+  type: z.literal("oauth2-mcp"),
+  resource: z.string().min(1),
+  discovery: z.union([z.literal("auto"), discoveryExplicitSchema]),
+});
+
+// ─────────────────────────────────────────────
+// Auths — upstream API credentials (multi)
+// ─────────────────────────────────────────────
+
+const deliveryHttpSchema = z.object({
+  headerName: z.string().min(1).optional(),
+  headerPrefix: z.string().optional(),
+  valueFrom: z
+    .union([
+      z.string().min(1),
+      z.object({
+        template: z.string().min(1),
+        encoding: z.enum(["base64"]).optional(),
+      }),
+    ])
+    .optional(),
+  allowServerOverride: z.boolean().optional(),
+});
+
+const deliveryEnvEntrySchema = z.object({
+  from: z.string().min(1),
+  sensitive: z.boolean().optional(),
+});
+
+const deliveryFilesEntrySchema = z.object({
+  from: z.string().min(1),
+  mode: z
+    .string()
+    .regex(/^0[0-7]{3}$/, { error: "files mode must be a 4-digit octal like 0400" })
+    .optional(),
+});
+
+const deliverySchema = z
+  .object({
+    http: deliveryHttpSchema.optional(),
+    env: z.record(z.string(), deliveryEnvEntrySchema).optional(),
+    files: z.record(z.string(), deliveryFilesEntrySchema).optional(),
+  })
+  .refine((d) => d.http !== undefined || d.env !== undefined || d.files !== undefined, {
+    message: "delivery must declare at least one of: http, env, files",
+  });
+
+const authTypeEnum = z.enum(["oauth2", "oauth1", "api_key", "basic", "custom"]);
+
+const credentialsSchemaObject = z.object({
+  schema: z.looseObject({}),
+});
+
+const authSchema = z
+  .object({
+    type: authTypeEnum,
+    required: z.boolean().optional(),
+
+    // Endpoints — Mode A (explicit)
+    authorizationUrl: z.string().optional(),
+    tokenUrl: z.string().optional(),
+    refreshUrl: z.string().optional(),
+    revokeUrl: z.string().optional(),
+
+    // Endpoints — Mode B (RFC 9728 discovery)
+    discovery: discoveryExplicitSchema.optional(),
+
+    audience: z.string().optional(),
+    scopes: z.array(z.string()).optional(),
+    scopeSeparator: z.string().optional(),
+    pkceEnabled: z.boolean().optional(),
+    tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic", "none"]).optional(),
+
+    extractTokenIdentity: z.record(z.string(), z.string()).optional(),
+    requiredIdentityClaims: z.array(z.string()).optional(),
+
+    authorizedUris: z.array(z.string()).min(1, {
+      error: "auths.{key}.authorizedUris must declare at least one URI pattern",
+    }),
+
+    credentials: credentialsSchemaObject.optional(),
+
+    delivery: deliverySchema,
+  })
+  .superRefine((auth, ctx) => {
+    if (auth.type === "oauth2") {
+      const hasExplicit = auth.authorizationUrl && auth.tokenUrl;
+      const hasDiscovery = auth.discovery !== undefined;
+      if (!hasExplicit && !hasDiscovery) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "oauth2 auth requires either (authorizationUrl + tokenUrl) or discovery.protectedResourceMetadataUrl",
+          path: ["authorizationUrl"],
+        });
+      }
+    }
+    if (
+      (auth.type === "api_key" || auth.type === "basic" || auth.type === "custom") &&
+      !auth.credentials
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${auth.type} auth requires credentials.schema declaring the field shape`,
+        path: ["credentials"],
+      });
+    }
+  });
+
+// ─────────────────────────────────────────────
+// Integration manifest (root)
+// ─────────────────────────────────────────────
+
+export const integrationManifestSchema = z
+  .object({
+    $schema: z.string().optional(),
+    manifestVersion: z.string().regex(manifestVersionRegex, {
+      error: "manifestVersion must match 1.X",
+    }),
+    type: z.literal("integration"),
+    name: z.string().regex(scopedNameRegex, {
+      error: "name must follow @scope/package-name",
+    }),
+    version: z.string().min(1),
+    displayName: z.string().min(1),
+    description: z.string().optional(),
+    license: z.string().optional(),
+    author: z
+      .union([
+        z.string().min(1),
+        z.object({
+          name: z.string().min(1),
+          email: z.string().optional(),
+          url: z.string().optional(),
+        }),
+      ])
+      .optional(),
+    repository: z
+      .union([
+        z.string().min(1),
+        z.object({
+          type: z.string().min(1),
+          url: z.string().min(1),
+        }),
+      ])
+      .optional(),
+    privacyPolicy: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    icon: z.string().optional(),
+    compatibility: z
+      .object({
+        afps: z.string().optional(),
+        mcp: z.string().optional(),
+      })
+      .optional(),
+    _meta: z.looseObject({}).optional(),
+
+    server: serverSchema,
+    transport: transportSchema.optional(),
+    serverAuth: serverAuthSchema.optional(),
+    auths: z
+      .record(
+        z.string().regex(/^[a-z][a-z0-9_]*$/, {
+          error: "auth keys must match /^[a-z][a-z0-9_]*$/",
+        }),
+        authSchema,
+      )
+      .optional(),
+  })
+  .superRefine((m, ctx) => {
+    // `serverAuth` only makes sense for remote transports.
+    if (m.serverAuth) {
+      const transportType = m.transport?.type ?? "stdio";
+      if (transportType === "stdio") {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'serverAuth is only valid when transport.type is "streamable-http" or "sse" (stdio servers do not have an HTTP transport to authenticate against)',
+          path: ["serverAuth"],
+        });
+      }
+    }
+  });
+
+export type IntegrationManifest = z.infer<typeof integrationManifestSchema>;
