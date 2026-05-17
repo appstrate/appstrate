@@ -9,8 +9,14 @@ export function isValidVersion(v: string): boolean {
 }
 
 /** Check whether `v` is a valid semver range string. */
-function isValidRange(v: string): boolean {
+export function isValidRange(v: string): boolean {
   return semver.validRange(v) !== null;
+}
+
+/** Coerce a loose version-ish string into a semver-shaped string ("1.2" → "1.2.0"). */
+export function coerceVersion(v: string): string | null {
+  const c = semver.coerce(v);
+  return c ? c.version : null;
 }
 
 /** Comparator for sorting versions in descending order (highest first). */

@@ -138,3 +138,101 @@ export type {
   EnvDeliveryEntry,
   FileDeliveryEntry,
 } from "./integration-credentials.ts";
+
+// ─── AFPS integration runtime (Phase 1.2a) ─────────────────────────────
+// Pure spawn-side helpers — server resolver, command builder, proxy env.
+export {
+  IntegrationRuntimeError,
+  buildProxyEnvInjection,
+  buildSpawnCommand,
+  resolveIntegrationServer,
+  validateIntegrationServer,
+  validateRuntimeCompatibility,
+} from "./integration-runtime.ts";
+export type {
+  IntegrationRuntimeErrorCode,
+  ProxyEnvInjectionInput,
+  ResolvedDockerSpawnTarget,
+  ResolvedLocalSpawnTarget,
+  ResolvedSpawnTarget,
+  SpawnCommandPlan,
+} from "./integration-runtime.ts";
+
+// Restart-with-backoff supervisor (proposal §5.4.2).
+export { superviseProcess } from "./restart-supervisor.ts";
+export type {
+  ChildExit,
+  ChildHandle,
+  SupervisedProcess,
+  SupervisorEvent,
+  SupervisorOptions,
+  SupervisorOutcome,
+} from "./restart-supervisor.ts";
+
+// Top-level spawn orchestrator + SIGHUP cred-refresh signal dispatch.
+export { SpawnFailureError, spawnIntegrations } from "./integration-orchestrator.ts";
+export type {
+  IntegrationOrchestrator,
+  IntegrationOrchestratorEvent,
+  IntegrationSpawnRequest,
+  RunningIntegration,
+  SignalDispatcher,
+  SpawnIntegrationsOptions,
+} from "./integration-orchestrator.ts";
+
+// toolsDynamic runtime re-discovery + drift detection (§5.4.6).
+export {
+  DEFAULT_TOOLS_DISCOVERY_TTL_MS,
+  buildConnectedAuthsKey,
+  clearToolsDiscoveryCache,
+  diffToolsAgainstLock,
+  discoverToolsForUser,
+  invalidateToolsForIntegration,
+  invalidateToolsForUser,
+  toolsDiscoveryCacheSize,
+} from "./tools-discovery.ts";
+export type {
+  DiscoveredTools,
+  Tool,
+  ToolsDiff,
+  ToolsDiscoveryOptions,
+  ToolsDiscoveryRequest,
+} from "./tools-discovery.ts";
+
+// CA cert planner for the HTTPS credential proxy (§5.4.1).
+export { bundleToFsWrites, makeGeneratorIdentity, planCaBundle } from "./proxy-ca-planner.ts";
+export type {
+  CaBundle,
+  CaGenerationOutput,
+  CaGenerationRequest,
+  CertGenerator,
+  FsWriteEntry,
+  PlanCaBundleOptions,
+} from "./proxy-ca-planner.ts";
+
+// ─── AFPS integration runtime (Phase 1.2b) ─────────────────────────────
+// RFC 7591 Dynamic Client Registration.
+export { DcrError, registerClient } from "./dynamic-client-registration.ts";
+export type {
+  ClientRegistrationRequest,
+  ClientRegistrationResponse,
+  DcrErrorCode,
+  DcrFetchFn,
+  RegisterClientOptions,
+} from "./dynamic-client-registration.ts";
+
+// MCP HTTP transport OAuth 2.1 wrapper.
+export {
+  AuthLoopExceededError,
+  StepUpFailedError,
+  buildAuthorizationUrl,
+  executeWithBearer,
+  parseWwwAuthenticateChallenge,
+} from "./mcp-http-auth.ts";
+export type {
+  BearerCredential,
+  BuildAuthorizationUrlInput,
+  ExecuteWithBearerOptions,
+  ExecuteWithBearerResult,
+  WwwAuthenticateChallenge,
+} from "./mcp-http-auth.ts";

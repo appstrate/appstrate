@@ -78,21 +78,53 @@ describe("McpHost — registration", () => {
     }
   });
 
-  it("rejects duplicate namespaces", async () => {
-    const fs = await makeUpstream(fsTool());
+  it("disambiguates a colliding namespace with a numeric suffix (§5.4.5)", async () => {
+    const a = await makeUpstream(fsTool());
+    const b = await makeUpstream(notionTool());
+    try {
+      const events: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => events.push(e) });
+      await host.register({ namespace: "gmail", client: a.client });
+      // Same slug, different upstream (e.g. @official/gmail vs @vendor/gmail).
+      await host.register({ namespace: "gmail", client: b.client });
+      const names = host
+        .buildTools()
+        .map((t) => t.descriptor.name)
+        .sort();
+      // First registration keeps the bare slug; the second is suffixed.
+      expect(names).toEqual(["gmail_2__search_pages", "gmail__read_file", "gmail__write_file"]);
+      const dis = events.find(
+        (e) => (e.data as { event?: string }).event === "namespace_disambiguated",
+      );
+      expect(dis).toBeDefined();
+      expect((dis!.data as { allocated: string }).allocated).toBe("gmail_2");
+      expect((dis!.data as { base: string }).base).toBe("gmail");
+    } finally {
+      await a.pair.close();
+      await b.pair.close();
+    }
+  });
+
+  it("disambiguates a third collision with _3", async () => {
+    const a = await makeUpstream(fsTool());
+    const b = await makeUpstream(notionTool());
+    const c = await makeUpstream([
+      {
+        descriptor: { name: "third", description: "x", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text", text: "third" }] }),
+      },
+    ]);
     try {
       const host = new McpHost();
-      await host.register({ namespace: "fs", client: fs.client });
-      let caught: unknown;
-      try {
-        await host.register({ namespace: "fs", client: fs.client });
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(Error);
-      expect((caught as Error).message).toContain("already registered");
+      await host.register({ namespace: "gmail", client: a.client });
+      await host.register({ namespace: "gmail", client: b.client });
+      await host.register({ namespace: "gmail", client: c.client });
+      const prefixes = new Set(host.buildTools().map((t) => t.descriptor.name.split("__")[0]));
+      expect(prefixes).toEqual(new Set(["gmail", "gmail_2", "gmail_3"]));
     } finally {
-      await fs.pair.close();
+      await a.pair.close();
+      await b.pair.close();
+      await c.pair.close();
     }
   });
 

@@ -83,12 +83,28 @@ export class McpHost {
    */
   async register(upstream: McpHostUpstream): Promise<void> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
-    if (this.upstreams.has(upstream.namespace)) {
-      throw new Error(`McpHost: namespace '${upstream.namespace}' already registered`);
-    }
-    const normalisedNs = normaliseNamespace(upstream.namespace);
-    if (!normalisedNs) {
+    const baseNamespace = normaliseNamespace(upstream.namespace);
+    if (!baseNamespace) {
       throw new Error(`McpHost: namespace '${upstream.namespace}' is empty after normalisation`);
+    }
+    // Per integrations spec §5.4.5: collision between two integrations
+    // sharing the same last-segment slug (e.g. `@official/gmail` vs
+    // `@vendor/gmail`) → auto-suffix `_2`, `_3`, … with an audit log,
+    // instead of throwing. Throwing would let one badly-named package
+    // gate every install of any other package sharing its slug.
+    const normalisedNs = this.allocateNamespace(baseNamespace, upstream.namespace);
+    const effectiveUpstream: McpHostUpstream = { ...upstream, namespace: normalisedNs };
+    if (normalisedNs !== baseNamespace) {
+      this.options.onLog?.({
+        source: `host:${normalisedNs}`,
+        level: "warn",
+        data: {
+          event: "namespace_disambiguated",
+          requestedNamespace: upstream.namespace,
+          base: baseNamespace,
+          allocated: normalisedNs,
+        },
+      });
     }
 
     // Capture the upstream's MCP `initialize` snapshot so operator
@@ -97,10 +113,10 @@ export class McpHost {
     // we can skip `tools/list` against a server that didn't advertise
     // the `tools` capability — JSON-RPC error round-trips on every
     // register would otherwise add a per-server failure mode.
-    const serverVersion = upstream.client.getServerVersion();
-    const capabilities = upstream.client.getServerCapabilities();
+    const serverVersion = effectiveUpstream.client.getServerVersion();
+    const capabilities = effectiveUpstream.client.getServerCapabilities();
     this.options.onLog?.({
-      source: `host:${upstream.namespace}`,
+      source: `host:${normalisedNs}`,
       level: "info",
       data: {
         event: "upstream_registered",
@@ -111,11 +127,11 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      this.upstreams.set(upstream.namespace, upstream);
+      this.upstreams.set(normalisedNs, effectiveUpstream);
       return;
     }
 
-    const { tools } = await upstream.client.listTools();
+    const { tools } = await effectiveUpstream.client.listTools();
     for (const tool of tools) {
       // Strip hidden Unicode, cap field lengths, defeat tool poisoning
       // before any third-party descriptor reaches
@@ -125,7 +141,7 @@ export class McpHost {
       const sanitised = sanitiseToolDescriptor(tool);
       if (!sanitised) {
         this.options.onLog?.({
-          source: `host:${upstream.namespace}`,
+          source: `host:${normalisedNs}`,
           level: "warn",
           data: {
             event: "tool_rejected",
@@ -140,12 +156,30 @@ export class McpHost {
       const finalName = isValidToolNameForExisting(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
-      this.toolToNamespace.set(finalName, upstream.namespace);
+      this.toolToNamespace.set(finalName, normalisedNs);
       this.originalToolNames.set(finalName, tool.name);
       this.toolDescriptors.push({ ...sanitised, name: finalName });
     }
 
-    this.upstreams.set(upstream.namespace, upstream);
+    this.upstreams.set(normalisedNs, effectiveUpstream);
+  }
+
+  /**
+   * Find a free namespace slot. The base slug is tried first; if it is
+   * already in use we suffix `_2`, `_3`, … until we find an unused slot.
+   * The chosen slot is what every subsequent index ({@link toolToNamespace},
+   * {@link upstreams}) keys against, so the caller's preferred namespace
+   * is only used for the audit log.
+   */
+  private allocateNamespace(base: string, _requested: string): string {
+    if (!this.upstreams.has(base)) return base;
+    for (let suffix = 2; suffix < 1000; suffix += 1) {
+      const candidate = `${base}_${suffix}`;
+      if (!this.upstreams.has(candidate)) return candidate;
+    }
+    // 998 collisions on the same namespace is operator error, not a
+    // condition the host should silently paper over with a 4-digit suffix.
+    throw new Error(`McpHost: exhausted disambiguation suffixes for namespace '${base}'`);
   }
 
   /** Total number of upstream-advertised tools currently known. */
