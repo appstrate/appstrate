@@ -87,3 +87,54 @@ export {
 // `ProxyCredentialsPayload` is re-exported from `./credentials.ts` above —
 // it physically lives in `proxy-primitives.ts` so the sidecar can consume
 // it without pulling @appstrate/db. Single type, shared by both paths.
+
+// ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
+// RFC 8707 audience binding (no DB / network).
+export {
+  appendResourceToTokenBody,
+  buildAuthorizeResourceQuery,
+  categorizeAudienceResponse,
+} from "./audience-binding.ts";
+export type {
+  AudienceInput,
+  AudienceResponseCategory,
+  OAuthErrorResponse,
+} from "./audience-binding.ts";
+
+// RFC 9728 / RFC 8414 discovery cascade.
+export {
+  discoverEndpoints,
+  selectAuthorizationServer,
+  buildAsMetadataUrl,
+  clearDiscoveryCache,
+  DiscoveryError,
+  DEFAULT_DISCOVERY_TTL_MS,
+} from "./oauth-discovery.ts";
+export type {
+  ResolvedAuthorizationEndpoints,
+  ProtectedResourceMetadata,
+  AuthorizationServerMetadata,
+  FetchJsonFn,
+  ClockFn,
+  DiscoverEndpointsOptions,
+  DiscoveryErrorCode,
+} from "./oauth-discovery.ts";
+
+// Multi-auth credential resolver + delivery planners.
+export {
+  ALIAS_MAP,
+  resolveIntegrationCredentials,
+  readCredentialField,
+  resolveHttpDelivery,
+  resolveEnvDelivery,
+  resolveFilesDelivery,
+  routeRequestToAuth,
+} from "./integration-credentials.ts";
+export type {
+  ResolvedAuthCredentials,
+  IntegrationCredentialsPayload,
+  AuthCredentialBundle,
+  HttpDeliveryPlan,
+  EnvDeliveryEntry,
+  FileDeliveryEntry,
+} from "./integration-credentials.ts";

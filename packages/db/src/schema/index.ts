@@ -8,6 +8,7 @@ export * from "./profiles.ts";
 export * from "./packages.ts";
 export * from "./runs.ts";
 export * from "./connections.ts";
+export * from "./integrations.ts";
 export * from "./uploads.ts";
 export * from "./audit.ts";
 export * from "./types.ts";
