@@ -152,6 +152,12 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "credential-proxy:call",
   // LLM proxy (remote-backed CLI execution — see API_KEY_ALLOWED_SCOPES note below)
   "llm-proxy:call",
+  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
+  "integrations:read",
+  "integrations:install",
+  "integrations:uninstall",
+  "integrations:connect",
+  "integrations:disconnect",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -184,6 +190,10 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "connections:read",
   "connections:connect",
   "connections:disconnect",
+  // Integrations (members can browse + self-connect; install/uninstall is admin)
+  "integrations:read",
+  "integrations:connect",
+  "integrations:disconnect",
   // Profiles (personal)
   "profiles:read",
   "profiles:write",
@@ -218,6 +228,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "proxies:read",
   "applications:read",
   "end-users:read",
+  "integrations:read",
 ]);
 
 /** Role → core-permissions mapping. Module contributions are layered on top via the provider hook below. */
@@ -278,6 +289,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "connections:read",
   "connections:connect",
   "connections:disconnect",
+  // Integrations (browse catalog + install/connect via API key for headless flows)
+  "integrations:read",
+  "integrations:install",
+  "integrations:uninstall",
+  "integrations:connect",
+  "integrations:disconnect",
   // Applications & End-Users
   "applications:read",
   "applications:write",

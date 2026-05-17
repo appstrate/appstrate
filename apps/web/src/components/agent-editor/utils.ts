@@ -180,7 +180,7 @@ export const setProviderEntries = writeManifestProviders;
 
 export function getResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools",
+  type: "skills" | "tools" | "integrations",
 ): ResourceEntry[] {
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
@@ -189,7 +189,7 @@ export function getResourceEntries(
 
 export function setResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools",
+  type: "skills" | "tools" | "integrations",
   entries: ResourceEntry[],
 ): void {
   if (!m.dependencies) m.dependencies = { providers: {} };

@@ -26,7 +26,7 @@ export interface DepEntry {
   /** Package name without scope (e.g. "my-tool"). */
   depName: string;
   /** The dependency category. */
-  depType: "skill" | "tool" | "provider";
+  depType: "skill" | "tool" | "provider" | "integration";
   /** Semver version range (e.g. "^1.0.0"). */
   versionRange: string;
 }
@@ -44,6 +44,7 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
         skills?: Record<string, string>;
         tools?: Record<string, string>;
         providers?: Record<string, string>;
+        integrations?: Record<string, string>;
       }
     | undefined;
 
@@ -51,12 +52,13 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
 
   const deps: DepEntry[] = [];
 
-  const { skills = {}, tools = {}, providers = {} } = dependencies;
+  const { skills = {}, tools = {}, providers = {}, integrations = {} } = dependencies;
 
   const maps: [Record<string, string>, DepEntry["depType"]][] = [
     [skills, "skill"],
     [tools, "tool"],
     [providers, "provider"],
+    [integrations, "integration"],
   ];
 
   for (const [map, depType] of maps) {

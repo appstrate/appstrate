@@ -81,6 +81,11 @@ export interface CoreResources {
   "end-users": "read" | "write" | "delete";
   "credential-proxy": "call";
   "llm-proxy": "call";
+  // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
+  // Read = browse catalog. Install/uninstall = manage per-app
+  // installation. Connect/disconnect = manage credentials per declared
+  // `auths.{key}`.
+  integrations: "read" | "install" | "uninstall" | "connect" | "disconnect";
 }
 
 /** Core resource names. */
@@ -126,6 +131,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "end-users",
   "credential-proxy",
   "llm-proxy",
+  "integrations",
 ]);
 
 /**

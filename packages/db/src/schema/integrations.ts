@@ -104,3 +104,52 @@ export const integrationConnections = pgTable(
     ),
   ],
 );
+
+/**
+ * Phase 1.3 — per-application OAuth2 client registration for integration
+ * auths (proposal §4.1.6.1 + spec gap addressed by 1.3 UI).
+ *
+ * Many integration `auths.{key}` of type `oauth2` need a clientId/secret
+ * registered against the upstream IdP before any user can perform the
+ * authorization flow. Administrators provide these values once per
+ * application via the marketplace detail page; the user-facing connect
+ * button then drives the standard PKCE exchange against the manifest's
+ * declared `authorizationUrl` / `tokenUrl`.
+ *
+ * For `tokenAuthMethod = "none"` (public clients), `client_secret` is
+ * stored as the empty string — encryption still applies for shape
+ * uniformity with private clients. PKCE is mandatory for public clients
+ * (enforced at the connect-flow layer).
+ *
+ * Lifecycle: created by admin on first OAuth setup, optionally rotated,
+ * deleted when the integration is uninstalled (FK cascade).
+ */
+export const integrationOauthClients = pgTable(
+  "integration_oauth_clients",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    integrationPackageId: text("integration_package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    authKey: text("auth_key").notNull(),
+    clientId: text("client_id").notNull(),
+    /** v1 envelope ciphertext over `{ client_secret: "..." }`. Empty for public clients. */
+    clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+    /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
+    redirectUri: text("redirect_uri"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_integration_oauth_clients_unique").on(
+      table.applicationId,
+      table.integrationPackageId,
+      table.authKey,
+    ),
+    index("idx_integration_oauth_clients_app").on(table.applicationId),
+    index("idx_integration_oauth_clients_package").on(table.integrationPackageId),
+  ],
+);

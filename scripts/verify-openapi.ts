@@ -114,6 +114,21 @@ const expectedEndpoints = [
   "GET /api/connections/callback",
   "DELETE /api/connections/{scope}/{name}",
 
+  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
+  "GET /api/integrations",
+  "GET /api/integrations/installed",
+  "GET /api/integrations/callback",
+  "GET /api/integrations/{packageId}",
+  "POST /api/integrations/{packageId}/install",
+  "DELETE /api/integrations/{packageId}/install",
+  "GET /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "PUT /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "DELETE /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
+  "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
+  "GET /api/integrations/{packageId}/connections",
+  "DELETE /api/integrations/{packageId}/connections/{connectionId}",
+
   // Providers
   "GET /api/providers",
   "POST /api/providers",

@@ -48,6 +48,28 @@ export interface OAuthStateRecord {
   expiresAt: string;
   authMode: string;
   oauthTokenSecret?: string;
+  /**
+   * Phase 1.3 — when the state was issued from an integration auth
+   * (`POST /api/integrations/:pkgId/auths/:authKey/connect/oauth2`), the
+   * callback dispatcher uses this discriminator to route the exchange to
+   * the integration handler rather than the legacy provider handler.
+   * `providerId` carries a sentinel string in that case but the real
+   * truth lives here.
+   */
+  integration?: {
+    packageId: string;
+    authKey: string;
+    /** Explicit token URL — Mode A endpoints come from the manifest. */
+    tokenUrl: string;
+    /** Optional RFC 8707 `resource` parameter for the token exchange. */
+    audience?: string;
+    /** OAuth2 token endpoint client auth method declared on the auth. */
+    tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+    /** Optional explicit client_id (DCR or user-supplied). */
+    clientId?: string;
+    /** Optional explicit client_secret (omitted for `none`). */
+    clientSecret?: string;
+  };
 }
 
 /**

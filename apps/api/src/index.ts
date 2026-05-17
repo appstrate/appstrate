@@ -35,6 +35,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
+import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
@@ -186,6 +187,7 @@ const CORE_APP_SCOPED_PREFIXES = [
   "/api/packages",
   "/api/providers",
   "/api/connections",
+  "/api/integrations",
   "/api/app-profiles",
   "/api/uploads",
 ];
@@ -290,6 +292,7 @@ app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/connections", createConnectionsRouter());
+app.route("/api/integrations", createIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
 app.route("/api/llm-proxy", createLlmProxyRouter());
 

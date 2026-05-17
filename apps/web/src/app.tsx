@@ -44,6 +44,8 @@ import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
+import { IntegrationsPage } from "./pages/integrations-page";
+import { IntegrationDetailPage } from "./pages/integration-detail";
 import { AppProfileDetailPage } from "./pages/app-profile-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
@@ -383,6 +385,8 @@ export function App() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/integrations" element={<IntegrationsPage />} />
+            <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
             <Route
               path="/app-profiles"
               element={<Navigate to="/org-settings/app/profiles" replace />}

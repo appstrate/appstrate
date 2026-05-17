@@ -66,6 +66,7 @@ type GenericEditorTab =
   | "schema"
   | "skills"
   | "tools"
+  | "integrations"
   | "content"
   | "source"
   | "json";
@@ -214,6 +215,7 @@ function AgentEditorInner({
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "tools", label: t("editor.tabTools") },
+    { id: "integrations", label: t("editor.tabIntegrations") },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -324,6 +326,23 @@ function AgentEditorInner({
             }}
           />
         </>
+      )}
+      {activeTab === "integrations" && (
+        <ResourceSection
+          type="integration"
+          title={t("editor.tabIntegrations")}
+          emptyLabel={t("editor.integrationsEmpty")}
+          selectedEntries={getResourceEntries(state.manifest, "integrations")}
+          onChange={(updater) => {
+            setState((s) => {
+              const prev = getResourceEntries(s.manifest, "integrations");
+              const next = typeof updater === "function" ? updater(prev) : updater;
+              const m = { ...s.manifest };
+              setResourceEntries(m, "integrations", next);
+              return { ...s, manifest: m };
+            });
+          }}
+        />
       )}
       {activeTab === "json" && (
         <JsonEditor

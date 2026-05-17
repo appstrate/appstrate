@@ -36,6 +36,8 @@ const CORE_TABLES = [
   "app_profile_provider_bindings",
   "user_provider_connections",
   "application_provider_credentials",
+  "integration_connections",
+  "integration_oauth_clients",
   "package_schedules",
   "org_models",
   "model_provider_credentials",

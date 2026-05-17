@@ -215,6 +215,20 @@ export type {
 export { pickAuthForUrl, planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmAction, MitmRequestContext } from "./integration-mitm-planner.ts";
 
+// Phase 1.3 — OAuth2 user-facing connect flow for integration auths
+// (used by the marketplace UI; mirrors `./oauth.ts` but parameterised
+// by manifest endpoints + admin-registered client credentials).
+export {
+  initiateIntegrationOAuth,
+  handleIntegrationOAuthCallback,
+  integrationProviderIdSentinel,
+} from "./integration-oauth.ts";
+export type {
+  InitiateIntegrationOAuthInput,
+  InitiateIntegrationOAuthResult,
+  IntegrationOAuthCallbackResult,
+} from "./integration-oauth.ts";
+
 // ─── AFPS integration runtime (Phase 1.2b) ─────────────────────────────
 // RFC 7591 Dynamic Client Registration.
 export { DcrError, registerClient } from "./dynamic-client-registration.ts";

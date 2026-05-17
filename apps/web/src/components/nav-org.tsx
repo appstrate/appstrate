@@ -13,6 +13,7 @@ import {
   Webhook,
   Loader2,
   Users,
+  Boxes,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -62,6 +63,7 @@ export function NavOrg() {
 
   const integrationItems = [
     { path: "/providers", label: t("nav.connectors"), icon: Plug },
+    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
     ...(isAdmin && features.webhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),

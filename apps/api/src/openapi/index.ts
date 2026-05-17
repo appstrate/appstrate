@@ -25,6 +25,7 @@ import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
 import { connectionsPaths } from "./paths/connections.ts";
+import { integrationsPaths } from "./paths/integrations.ts";
 import { providersPaths } from "./paths/providers.ts";
 import { modelsPaths } from "./paths/models.ts";
 import { modelProviderCredentialsPaths } from "./paths/model-provider-credentials.ts";
@@ -57,6 +58,7 @@ const corePaths = {
   ...realtimePaths,
   ...schedulesPaths,
   ...connectionsPaths,
+  ...integrationsPaths,
   ...providersPaths,
   ...modelsPaths,
   ...modelProviderCredentialsPaths,

@@ -65,6 +65,7 @@ import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
+import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
@@ -185,6 +186,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/packages",
     "/api/providers",
     "/api/connections",
+    "/api/integrations",
     "/api/app-profiles",
     ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
@@ -251,6 +253,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/connections", createConnectionsRouter());
+  app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route("/api/llm-proxy", createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
