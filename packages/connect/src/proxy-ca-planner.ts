@@ -115,7 +115,12 @@ export async function planCaBundle(options: PlanCaBundleOptions): Promise<CaBund
       `planCaBundle: runId must be a non-empty path-safe string (got '${options.runId}')`,
     );
   }
-  const tmpfsRoot = (options.tmpfsRoot ?? "/run/afps").replace(/\/+$/, "");
+  // Strip trailing slashes without a polynomial regex (CodeQL js/redos):
+  // walk back manually so a pathological `////…` input is linear in length.
+  const rawTmpfs = options.tmpfsRoot ?? "/run/afps";
+  let trimEnd = rawTmpfs.length;
+  while (trimEnd > 0 && rawTmpfs.charCodeAt(trimEnd - 1) === 47 /* '/' */) trimEnd -= 1;
+  const tmpfsRoot = rawTmpfs.slice(0, trimEnd);
   const serverCommonName = options.serverCommonName ?? "localhost";
   const notAfterSeconds = options.notAfterSeconds ?? 3600;
   const now = (options.now ?? (() => new Date()))();

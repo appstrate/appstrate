@@ -141,8 +141,13 @@ export async function resolveNpmVersion(
 ): Promise<{ version: string; integrity: string; tarball?: string }> {
   const fetchRegistry = deps.fetchRegistry ?? defaultFetchRegistry;
   const base = (input.registryBaseUrl ?? DEFAULT_NPM_REGISTRY).replace(/\/$/, "");
+  // Scoped npm names have exactly one `/` (e.g. `@scope/name`), so a
+  // single replace is functionally correct — but `replaceAll` is clearer
+  // and silences the CodeQL "incomplete string escaping" warning, which
+  // catches the broader anti-pattern even when the input shape happens
+  // to make it safe.
   const escapedId = input.identifier.startsWith("@")
-    ? input.identifier.replace("/", "%2F")
+    ? input.identifier.replaceAll("/", "%2F")
     : input.identifier;
   const url = `${base}/${escapedId}/${encodeURIComponent(input.versionRange)}`;
 
