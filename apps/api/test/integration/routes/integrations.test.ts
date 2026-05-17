@@ -400,3 +400,30 @@ describe("OAuth2 connect initiate", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /api/integrations/callback (public — no session required)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("is reachable without auth and renders popup-close HTML on missing params", async () => {
+    // The IdP redirects the browser back to this URL without sending the
+    // platform's session cookie reliably (cross-site `SameSite=Lax` may strip
+    // it for top-level navigations from third-party origins). The route MUST
+    // be in `skipAuth`'s public-paths allowlist; without that the popup is
+    // dead-ended on a 401 problem+json instead of closing cleanly.
+    const res = await app.request("/api/integrations/callback");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") ?? "").toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("window.close");
+  });
+
+  it("renders an error HTML when the IdP returns ?error=access_denied (still unauthenticated)", async () => {
+    const res = await app.request("/api/integrations/callback?error=access_denied");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("window.close");
+    expect(body).toContain("access_denied");
+  });
+});
