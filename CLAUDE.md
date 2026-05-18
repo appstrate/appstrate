@@ -416,6 +416,25 @@ Agent-side, `dependencies.integrations[id]` now accepts either the legacy bare s
 
 Phase 0 is schema-only. All six phases (0-6) of the niveau 2 scope model are now landed.
 
+### AFPS Integrations — Phase 7: remote HTTP MCP support
+
+Integrations can declare `server.type: "http"` + `server.url: "https://…/mcp/v1"` to be backed by a remote Streamable HTTP MCP server (e.g. Google's `gmailmcp.googleapis.com/mcp/v1`, Anthropic-hosted MCPs, Composio, Linear, …). The sidecar then opens a Streamable HTTP MCP client directly via `createMcpHttpClient` (`@appstrate/mcp-transport`) instead of spawning a runner container — no bundle to fetch, no MITM listener, no CA cert. Credentials flow: `integration-credentials-source` (cache + `refreshOnUnauthorized`) → custom `fetch` wrapper that reads the current `access_token` and injects `Authorization: Bearer <token>` per request, retrying once on 401 after a force-refresh. Implementation in `runtime-pi/sidecar/integrations-boot.ts:connectRemoteHttpIntegration`; spawn-side propagation in `apps/api/src/services/integration-spawn-resolver.ts` (drops `httpDeliveryAuths` + `toolUrlEnvelope` for `isRemoteHttp`).
+
+Trade-off vs. local stdio runners — defence-in-depth coverage:
+
+| Niveau 2 phase             | stdio runner (Phase 1.4/1.5) | Remote HTTP MCP (Phase 7)                                                                                                        |
+| -------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — install validation     | ✅                           | ✅ (same path)                                                                                                                   |
+| 2 — OAuth scope union      | ✅                           | ✅ (same path)                                                                                                                   |
+| 3 — `tools/list` allowlist | ✅ McpHost filter            | ✅ McpHost filter                                                                                                                |
+| 4 — MITM URL envelope      | ✅ per-tool granularity      | ❌ N/A — every tool transits `/mcp/v1`, no per-tool URL discrimination; upstream MCP's own RBAC + OAuth scope are the only gates |
+| 5/5b — UI                  | ✅                           | ✅ (same path)                                                                                                                   |
+| 6 — refresh-time shrink    | ✅                           | ✅ (same path)                                                                                                                   |
+
+Other deltas: no `.afps-bundle` signing surface, every tool call exits the perimeter (no air-gapped self-host), the per-call audit trail collapses from "raw upstream HTTP" to "MCP tool call". Operators pick per integration based on trust model — `server.type: "http"` is the right choice for managed/upstream-trusted MCPs; `node|python|binary` stays the right choice for sandboxed local execution where the MITM gives you a meaningful security boundary.
+
+Reference integration: `@appstrate/gmail-mcp@2.0.0` (in `scripts/system-packages/integration-gmail-mcp-2.0.0/`) — Gmail backed by Google's official remote MCP. Same 10-tool catalog as Google's hosted server, with per-tool `requiredScopes` driving the niveau 2 scope inference (gmail.readonly | compose | labels | modify spread across the catalog).
+
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 
 `packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` handshake on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:

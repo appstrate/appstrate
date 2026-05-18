@@ -37,6 +37,7 @@ import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
+  createMcpHttpClient,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -150,6 +151,12 @@ export interface IntegrationManifestLite {
   server: {
     type: string;
     entryPoint?: string;
+    /**
+     * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
+     * `"http"`. The sidecar opens a Streamable HTTP MCP client against
+     * this URL instead of spawning a runner via the runtime adapter.
+     */
+    url?: string;
   };
   transport?: { type: string };
 }
@@ -246,6 +253,97 @@ async function extractBundle(bytes: Uint8Array, namespace: string): Promise<stri
     await writeFile(dest, contents);
   }
   return root;
+}
+
+/**
+ * Phase 7 — connect to a remote Streamable HTTP MCP server using the
+ * actor's live credentials. Auth-type-agnostic: reads the resolved
+ * `HttpDeliveryPlan` per request from the credentials source so the same
+ * code path handles OAuth2 (refresh-aware Bearer), api_key (static PAT
+ * via `Authorization: Bearer …` or any configured header), basic, etc.
+ *
+ * Per-request flow:
+ *   1. Read `source.snapshot().deliveryPlans[authKey]` — fresh after any
+ *      refresh because the source replaces the whole payload in place.
+ *   2. Inject `{ headerName: `${headerPrefix}${value}` }` on the outbound.
+ *   3. On 401, call `refreshOnUnauthorized(authKey)` (no-op for static
+ *      credentials — the source's per-authKey cooldown protects the
+ *      platform endpoint from refresh storms) and retry once.
+ *
+ * Auth selection: prefers an oauth2 auth (canonical Bearer + refresh),
+ * otherwise picks the first auth that has a non-null delivery plan.
+ * Throws when no auth produces an injectable header — Phase 7 can't run
+ * an MCP client without authentication (every public hosted MCP today
+ * gates `tools/call` behind some credential).
+ */
+async function connectRemoteHttpIntegration(
+  spec: IntegrationSpawnSpec,
+  bundleFetchOpts: BundleFetchOptions,
+): Promise<{ client: AppstrateMcpClient; authKey: string }> {
+  const serverUrl = spec.manifest.server.url;
+  if (!serverUrl) {
+    throw new Error(`integration ${spec.packageId} declares server.type="http" but no server.url`);
+  }
+
+  const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+
+  // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);
+  // otherwise the first auth with a resolved plan. The credentials
+  // resolver populates `deliveryPlans[authKey]` for every auth declaring
+  // `delivery.http` — including `{}` (empty), which defaults per
+  // `AUTH_TYPE_HTTP_DEFAULTS` (oauth2 → Bearer, api_key → X-Api-Key, …).
+  const oauthAuth = initial.auths.find(
+    (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
+  );
+  const fallbackAuth = oauthAuth
+    ? null
+    : initial.auths.find((a) => initial.deliveryPlans[a.authKey]);
+  const pickedAuth = oauthAuth ?? fallbackAuth;
+  if (!pickedAuth) {
+    throw new Error(
+      `integration ${spec.packageId} server.type="http" has no auth with a resolvable delivery.http plan`,
+    );
+  }
+  const authKey = pickedAuth.authKey;
+
+  const source = createIntegrationCredentialsSource({
+    packageId: spec.packageId,
+    platformApiUrl: bundleFetchOpts.platformApiUrl,
+    runToken: bundleFetchOpts.runToken,
+    initialPayload: initial,
+  });
+
+  // Per-request header reader. Reading from the snapshot on every call
+  // means an OAuth refresh (which swaps `payload` in place) is picked up
+  // automatically — no MCP transport restart needed. Static creds
+  // (api_key) just return the same value forever.
+  const readHeader = (): { name: string; value: string } | null => {
+    const plan = source.snapshot().deliveryPlans[authKey];
+    if (!plan) return null;
+    return { name: plan.headerName, value: `${plan.headerPrefix}${plan.value}` };
+  };
+
+  const customFetch: typeof fetch = async (input, init) => {
+    const send = async (): Promise<Response> => {
+      const headers = new Headers(init?.headers);
+      const h = readHeader();
+      if (h) headers.set(h.name, h.value);
+      return fetch(input, { ...init, headers });
+    };
+    let res = await send();
+    if (res.status === 401 && source.refreshOnUnauthorized) {
+      const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
+      if (refreshed) res = await send();
+    }
+    return res;
+  };
+
+  const client = await createMcpHttpClient(serverUrl, {
+    fetch: customFetch,
+    clientInfo: { name: "appstrate-sidecar-remote-integration", version: "0.1.0" },
+    retry: { deadlineMs: 30_000 },
+  });
+  return { client, authKey };
 }
 
 /**
@@ -355,6 +453,41 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     try {
+      // ─── Phase 7 — remote HTTP MCP path ───
+      // When the manifest declares `server.type: "http"` the integration
+      // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
+      // No bundle to fetch, no runner to spawn, no MITM listener — the
+      // sidecar opens a Streamable HTTP client directly and injects the
+      // Bearer token per-request from the credentials source. Trade-off:
+      // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
+      // upstream URLs through a hosted MCP — the upstream decides).
+      if (spec.manifest.server.type === "http") {
+        const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
+        const sizeBefore = host.size();
+        await host.register({
+          namespace: spec.namespace,
+          client,
+          // Phase 3 tool allowlist still applies — McpHost filters
+          // tools/list before exposing them to the agent.
+          ...(spec.toolAllowlist ? { allowedTools: spec.toolAllowlist } : {}),
+        });
+        const added = host.size() - sizeBefore;
+        clients.push(client);
+        spawned.push({
+          packageId: spec.packageId,
+          namespace: spec.namespace,
+          toolCount: added,
+        });
+        logger.info("integration registered (remote http)", {
+          packageId: spec.packageId,
+          namespace: spec.namespace,
+          serverUrl: spec.manifest.server.url,
+          authKey,
+          toolCount: added,
+        });
+        continue;
+      }
+
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
 

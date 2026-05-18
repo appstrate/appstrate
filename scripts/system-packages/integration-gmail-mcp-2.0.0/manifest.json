@@ -1,0 +1,105 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/gmail-mcp",
+  "version": "2.0.0",
+  "displayName": "Gmail",
+  "description": "Gmail integration backed by Google's official remote MCP server (gmailmcp.googleapis.com/mcp/v1). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, Google handles tool execution. Niveau 2 enforcement: install-time scope validation (Phase 1), OAuth scope union (Phase 2), agent-author tool/scope allowlist (Phase 3/5b), refresh-time scope-shrink awareness (Phase 6). Phase 4 (per-tool URL envelope) is N/A — every tool transits the same /mcp/v1 endpoint, the upstream's RBAC is the only URL gate.",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "iconUrl": "gmail",
+  "categories": ["email", "productivity"],
+  "server": {
+    "type": "http",
+    "url": "https://gmailmcp.googleapis.com/mcp/v1"
+  },
+  "transport": {
+    "type": "streamable-http"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose"
+      ],
+      "scopeSeparator": " ",
+      "tokenAuthMethod": "client_secret_post",
+      "authorizedUris": ["https://gmailmcp.googleapis.com/**"],
+      "availableScopes": [
+        {
+          "value": "openid",
+          "label": "Identity (OpenID)",
+          "description": "Required by Google's MCP server to identify the calling principal for IAM checks (without it, all tools/call return \"permission denied\")."
+        },
+        {
+          "value": "email",
+          "label": "Email address",
+          "description": "Required alongside openid to bind the OAuth token to a Google IAM principal so the MCP server can authorise tool calls."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.readonly",
+          "label": "Read-only access",
+          "description": "List, read, and search messages, threads, drafts, and labels."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.compose",
+          "label": "Compose drafts",
+          "description": "Create, read, update, and send drafts."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.labels",
+          "label": "Manage labels",
+          "description": "Create, list, and delete labels."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.modify",
+          "label": "Modify messages & threads",
+          "description": "Apply/remove labels on messages and threads (no permanent deletion)."
+        }
+      ],
+      "delivery": {
+        "http": {}
+      }
+    }
+  },
+  "tools": {
+    "search_threads": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    },
+    "get_thread": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    },
+    "list_drafts": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    },
+    "list_labels": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    },
+    "create_draft": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.compose"]
+    },
+    "create_label": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.labels"]
+    },
+    "label_message": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    },
+    "unlabel_message": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    },
+    "label_thread": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    },
+    "unlabel_thread": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    }
+  }
+}

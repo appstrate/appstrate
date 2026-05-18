@@ -172,7 +172,16 @@ async function resolveOne(
   // selected tool declared non-empty `urlPatterns` (otherwise we'd
   // refuse legitimate traffic from an under-declared tool, so we leave
   // the field unset and fall back to the per-auth `authorizedUris`).
-  const toolUrlEnvelope = computeToolUrlEnvelope(manifest, agentToolSelection);
+  //
+  // Skipped entirely for `server.type === "http"` (Phase 7 remote MCP):
+  // there is no per-integration MITM listener on the runner side because
+  // there is no runner — the sidecar speaks MCP directly to the managed
+  // upstream. The upstream's tool-level RBAC + OAuth scope are the only
+  // gates that apply, by design.
+  const isRemoteHttp = manifest.server.type === "http";
+  const toolUrlEnvelope = isRemoteHttp
+    ? undefined
+    : computeToolUrlEnvelope(manifest, agentToolSelection);
 
   return {
     packageId,
@@ -183,11 +192,21 @@ async function resolveOne(
       server: {
         type: manifest.server.type,
         ...(manifest.server.entryPoint ? { entryPoint: manifest.server.entryPoint } : {}),
+        // Phase 7 — propagate the remote MCP URL so the sidecar can open
+        // a Streamable HTTP client against it. Mutually exclusive with
+        // `entryPoint` (enforced by `integrationManifestSchema`).
+        ...(manifest.server.url ? { url: manifest.server.url } : {}),
       },
       ...(manifest.transport ? { transport: { type: manifest.transport.type } } : {}),
     },
     spawnEnv: deliveries.spawnEnv,
-    ...(deliveries.httpDeliveryAuths ? { httpDeliveryAuths: deliveries.httpDeliveryAuths } : {}),
+    // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
+    // sidecar's HTTP path reads the access token directly from the
+    // credentials source and injects it into the outbound MCP request,
+    // bypassing the per-integration MITM listener (which doesn't exist).
+    ...(deliveries.httpDeliveryAuths && !isRemoteHttp
+      ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
+      : {}),
     // Niveau 2 Phase 3 — when the agent declared a tools[] selection
     // for this integration, propagate it to the sidecar's McpHost so
     // `tools/list` is pre-filtered. `undefined` (legacy dep or rich

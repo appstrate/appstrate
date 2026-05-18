@@ -91,7 +91,17 @@ export interface IntegrationSpawnSpec {
   manifest: {
     name: string;
     version: string;
-    server: { type: string; entryPoint?: string };
+    server: {
+      type: string;
+      entryPoint?: string;
+      /**
+       * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
+       * `"http"`. The sidecar opens a Streamable HTTP MCP client against
+       * this URL instead of spawning a runner. Mutually exclusive with
+       * `entryPoint` (enforced by `integrationManifestSchema`).
+       */
+      url?: string;
+    };
     transport?: { type: string };
   };
   /**
