@@ -435,6 +435,16 @@ Other deltas: no `.afps-bundle` signing surface, every tool call exits the perim
 
 Reference integration: `@appstrate/gmail-mcp@2.0.0` (in `scripts/system-packages/integration-gmail-mcp-2.0.0/`) — Gmail backed by Google's official remote MCP. Same 10-tool catalog as Google's hosted server, with per-tool `requiredScopes` driving the niveau 2 scope inference (gmail.readonly | compose | labels | modify spread across the catalog).
 
+### AFPS Integrations — connection model & single-auth invariant
+
+The connect lifecycle for integrations is **agent-driven** (not integration-driven), because OAuth scopes are inferred per-agent from `tools[]` selection. The integration detail page (`/integrations/:scope/:name`) is **admin-leaning**: install/uninstall, OAuth client (`integration_oauth_clients`) registration, read-only auth declarations + connection list, and a passive `RequiredScopesPanel` diff for audit. It does NOT surface user-facing connect/disconnect.
+
+User-facing connect/upgrade lives on agent surfaces (`AgentConnectionsSection` + `MissingConnectionsModal` on the run-kickoff 412). Both render `<InlineConnectButton>` from `components/integration-connect/` which picks OAuth popup vs api_key/basic/custom fields modal based on `auth.type` and forwards the agent's per-tool scope inference (`requiredScopes`) to the OAuth kickoff so consent asks for the minimum required.
+
+**Single-auth-per-(integration, actor, application) invariant**: a multi-auth manifest (e.g. GitHub MCP declaring `oauth` + `pat`) lets the integration _document_ multiple methods, but only one connection per actor can exist at a time. Enforced server-side in `saveIntegrationConnection` (`apps/api/src/services/integration-connections.ts`) — the insert branch refuses a second connection on a different `authKey` with `409 integration_other_auth_connected`. Switch path: actor disconnects via the unlink button on the agent's `AgentIntegrationsBlock` card, then reconnects via the inline button.
+
+**CI / automation pattern**: a single human who wants OAuth interactively _and_ a PAT for CI uses the headless platform's actor model — create an end-user (`POST /api/end-users`), connect _its_ GitHub via PAT, run agents from CI via an API key with `Appstrate-User: eu_…` impersonation. The `(integration, actor, application)` tuple keeps the two connections completely separate. No multi-auth-per-actor required.
+
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 
 `packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` handshake on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:

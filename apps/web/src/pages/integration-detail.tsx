@@ -496,6 +496,15 @@ export function IntegrationDetailPage() {
             <Boxes size={16} />
             {t("integration.section.auths")}
           </h3>
+          {detail.auths.length > 1 && (
+            <div
+              className="border-border bg-muted/40 rounded-md border p-3 text-xs"
+              data-testid="multi-auth-banner"
+            >
+              <p className="mb-1 font-semibold">{t("integration.multiAuth.title")}</p>
+              <p className="text-muted-foreground">{t("integration.multiAuth.description")}</p>
+            </div>
+          )}
           {detail.auths.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               {/* Integration declares no auths — nothing to connect. */}—

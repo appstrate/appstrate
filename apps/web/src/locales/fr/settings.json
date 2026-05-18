@@ -887,6 +887,8 @@
   "integration.section.about": "À propos",
   "integration.section.capabilities": "Capacités",
   "integration.section.auths": "Authentifications",
+  "integration.multiAuth.title": "Cette intégration propose plusieurs méthodes d'authentification",
+  "integration.multiAuth.description": "Chaque utilisateur ne peut se connecter qu'avec une seule méthode à la fois. Pour la CI ou des cas automatisés, créez un end-user dédié (POST /api/end-users) avec sa propre connexion — les deux peuvent coexister.",
   "integration.section.oauthClient": "Client OAuth (admin)",
   "integration.section.connections": "Mes connexions",
   "integration.section.metadata": "Métadonnées",
