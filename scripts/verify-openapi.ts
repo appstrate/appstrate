@@ -311,6 +311,7 @@ const expectedEndpoints = [
   "POST /internal/credentials/{scope}/{name}/refresh",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
+  "GET /internal/integration-bundle/{scope}/{name}",
 
   // Meta
   "GET /api/openapi.json",

@@ -329,4 +329,39 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/integration-bundle/{scope}/{name}": {
+    get: {
+      operationId: "getIntegrationBundle",
+      tags: ["Internal"],
+      summary: "Fetch the AFPS bundle bytes for an installed integration",
+      description:
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise the integration's MCP server before spawning a runner container. The endpoint verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "AFPS bundle bytes (ZIP).",
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description:
+            "Agent does not declare this integration as a dependency OR the integration is not installed on this application.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
 } as const;
