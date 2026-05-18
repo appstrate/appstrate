@@ -293,6 +293,7 @@ async function triggerScheduledRun(
         agent,
         applicationId,
         orgId,
+        actor,
         defaultUserProfileId,
         appProfileId,
       });

@@ -147,8 +147,13 @@ export async function computeRequiredScopes(
  * (or implicit) tool selection. Filters by `tools.{name}.requiredAuthKey`
  * — tools tied to a different auth on this multi-auth integration don't
  * contribute to the current authKey's scope envelope.
+ *
+ * Exported for the run-kickoff dependency validator
+ * ({@link validateAgentIntegrations}) which needs the SINGLE-agent
+ * inference (vs `computeRequiredScopes` which walks every installed
+ * agent for the OAuth-kickoff incremental-consent flow).
  */
-function scopesContributedByTools(input: {
+export function scopesContributedByTools(input: {
   manifest: IntegrationManifest;
   authKey: string;
   agentTools: readonly string[] | undefined;

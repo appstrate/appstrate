@@ -6,13 +6,17 @@
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { collectDependencyErrors } from "./dependency-validation.ts";
+import {
+  collectDependencyErrors,
+  collectIntegrationDependencyErrors,
+} from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
+import type { Actor } from "../lib/actor.ts";
 import type {
   ReadinessProviderEntry,
   ReadinessReason,
@@ -27,6 +31,14 @@ export interface AgentReadinessParams {
   orgId: string;
   config?: Record<string, unknown>;
   applicationId: string;
+  /**
+   * Actor whose integration connections we validate. When `null`/omitted,
+   * integration gating is skipped (preserves legacy callers that didn't
+   * own an actor context — e.g. pure provider readiness probes). Run
+   * kickoff paths must pass an actor so missing or under-scoped
+   * connections produce a 412 before the run is created.
+   */
+  actor?: Actor | null;
   /**
    * Skip individual checks already performed by an upstream validator. Used
    * by the inline-run preflight, which validates `prompt` via the manifest
@@ -47,7 +59,7 @@ export interface AgentReadinessParams {
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, providerProfiles, orgId, config, applicationId, skip } = params;
+  const { agent, providerProfiles, orgId, config, applicationId, actor, skip } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -91,6 +103,15 @@ export async function collectAgentReadinessErrors(
     ...(await collectDependencyErrors(manifestProviders, providerProfiles, orgId, applicationId)),
   );
 
+  if (actor) {
+    const { fieldErrors } = await collectIntegrationDependencyErrors(
+      manifest as Record<string, unknown>,
+      actor,
+      { orgId, applicationId },
+    );
+    errors.push(...fieldErrors);
+  }
+
   if (!skip?.config && config) {
     const { config: configSchema } = extractManifestSchemas(manifest);
     const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
@@ -119,6 +140,22 @@ export async function collectAgentReadinessErrors(
 export async function validateAgentReadiness(params: AgentReadinessParams): Promise<void> {
   const errors = await collectAgentReadinessErrors(params);
   if (errors.length === 0) return;
+
+  // Integration errors get their own 412 envelope with every integration
+  // failure populated on `errors[]` so the dashboard's MissingConnections
+  // modal can render the full list in one round trip.
+  const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
+  if (integrationErrors.length > 0) {
+    const first = integrationErrors[0]!;
+    throw new ApiError({
+      status: 412,
+      code: "missing_integration_connection",
+      title: "Missing Integration Connection",
+      detail: first.message,
+      errors: integrationErrors,
+    });
+  }
+
   const first = errors[0]!;
   throw new ApiError({
     status: 400,

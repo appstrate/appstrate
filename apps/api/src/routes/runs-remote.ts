@@ -244,6 +244,7 @@ export function createRunsRemoteRouter() {
           orgId,
           config: effectiveConfig,
           applicationId,
+          actor,
         });
       } else {
         // Inline path — the runner ships a manifest+prompt blob. Validate

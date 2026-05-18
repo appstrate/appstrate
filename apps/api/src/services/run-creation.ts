@@ -174,6 +174,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       orgId,
       config,
       applicationId,
+      actor,
     });
   } catch (err) {
     return {

@@ -221,6 +221,7 @@ export async function runInlinePreflight(params: {
         orgId,
         config: effectiveConfig,
         applicationId,
+        actor,
       });
     } else {
       push(
@@ -230,6 +231,7 @@ export async function runInlinePreflight(params: {
           orgId,
           config: effectiveConfig,
           applicationId,
+          actor,
           skip: { config: true },
         }),
       );

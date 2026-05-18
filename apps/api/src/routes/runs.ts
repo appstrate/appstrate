@@ -265,6 +265,7 @@ export function createRunsRouter() {
         agent: effectiveAgent,
         applicationId: c.get("applicationId"),
         orgId,
+        actor,
         defaultUserProfileId,
         userProviderOverrides,
         appProfileId: agentAppProfile?.id ?? null,
