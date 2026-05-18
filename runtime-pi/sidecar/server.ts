@@ -5,6 +5,8 @@ import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
+import { bootIntegrations, readIntegrationSpecsFromEnv } from "./integrations-boot.ts";
+import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
@@ -87,6 +89,36 @@ const oauthTokenCache = new OAuthTokenCache({
   getPlatformApiUrl: () => config.platformApiUrl,
   getRunToken: () => config.runToken,
 });
+
+// Phase 1.4 — bootstrap declared integrations IN THE BACKGROUND so the
+// sidecar's `/mcp` listener comes up immediately (the agent retries the
+// MCP handshake; the per-integration spawn + listTools handshake can
+// take several seconds for a fresh node_modules tree). The agent's
+// first `tools/list` call then briefly awaits this promise via the
+// lazy tools provider below.
+let integrationTools: AppstrateToolDefinition[] = [];
+const specs = readIntegrationSpecsFromEnv();
+const integrationBootPromise =
+  specs && specs.length > 0
+    ? bootIntegrations(specs, {
+        platformApiUrl: config.platformApiUrl,
+        runToken: config.runToken,
+      })
+        .then((result) => {
+          integrationTools = result.tools;
+          logger.info("Integrations bootstrapped", {
+            spawned: result.spawned,
+            failed: result.failed,
+            toolCount: result.tools.length,
+          });
+        })
+        .catch((err) => {
+          logger.error("Integration boot raised; continuing without them", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+    : Promise.resolve();
+
 const app = createApp({
   config,
   fetchCredentials,
@@ -94,9 +126,11 @@ const app = createApp({
   cookieJar,
   isReady: () => proxy.readySync,
   oauthTokenCache,
+  additionalMcpToolsProvider: () => integrationTools,
+  integrationBootPromise,
 });
 
-logger.info("Sidecar proxy listening", { port });
+logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });
 
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound

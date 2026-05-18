@@ -5,7 +5,17 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, runs, userProviderConnections } from "@appstrate/db/schema";
+import {
+  applicationPackages,
+  modelProviderCredentials,
+  packageVersions,
+  runs,
+  userProviderConnections,
+} from "@appstrate/db/schema";
+import { sql } from "drizzle-orm";
+import { asRecord } from "@appstrate/core/safe-json";
+import { downloadVersionZip } from "../services/package-storage.ts";
+import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -453,6 +463,75 @@ export function createInternalRouter() {
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+  });
+
+  // GET /internal/integration-bundle/:scope/:name — Phase 1.4
+  // Returns the integration's .afps bundle bytes. Authorised by the same
+  // Bearer run-token as the credentials surface; additionally verifies
+  // the run's agent declares this integration as a dependency so a
+  // leaked run token can't enumerate arbitrary integration source.
+  router.get("/integration-bundle/:scope{@[^/]+}/:name", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+
+    // Pin: agent must declare this integration as a dep.
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    if (!agent) throw notFound("Agent not found");
+    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const integrations = asRecord(deps.integrations);
+    if (!(packageId in integrations)) {
+      logger.warn("Integration bundle request rejected — not declared by agent", {
+        runId,
+        packageId,
+        agentId: agent.id,
+      });
+      throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
+    }
+
+    // Pin: must be installed in the run's application.
+    const [installRow] = await db
+      .select({ packageId: applicationPackages.packageId })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, run.applicationId),
+          eq(applicationPackages.packageId, packageId),
+        ),
+      )
+      .limit(1);
+    if (!installRow) {
+      throw notFound(`Integration '${packageId}' is not installed in this application`);
+    }
+
+    // Resolve bytes: system package from in-memory map, local from S3
+    const sys = getSystemPackages().get(packageId);
+    if (sys?.zipBuffer) {
+      logger.info("Integration bundle delivered (system)", {
+        runId,
+        packageId,
+        bytes: sys.zipBuffer.length,
+      });
+      return new Response(Buffer.from(sys.zipBuffer), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    }
+    const [latest] = await db
+      .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+      .from(packageVersions)
+      .where(and(eq(packageVersions.packageId, packageId), sql`${packageVersions.yanked} = false`))
+      .orderBy(sql`${packageVersions.createdAt} DESC`)
+      .limit(1);
+    if (!latest) throw notFound(`No published version for '${packageId}'`);
+    const bytes = await downloadVersionZip(packageId, latest.version, latest.integrity);
+    if (!bytes) throw notFound(`Bundle bytes unavailable for '${packageId}'`);
+    logger.info("Integration bundle delivered (storage)", {
+      runId,
+      packageId,
+      version: latest.version,
+      bytes: bytes.length,
+    });
+    return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });
   });
 
   return router;

@@ -94,8 +94,14 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 # Runtime dependencies:
 #   - libstdc++, libgcc  glibc-like symbols the Bun-compiled binary links against
 #   - ca-certificates    TLS trust store for outbound provider calls
+#   - docker-cli         used to spawn per-integration runner containers
+#                        (`appstrate-mcp-runner-{node,python,binary}`) when
+#                        a manifest declares `server.type: <runtime>`. The
+#                        sidecar shells out to `docker run -i ...` and pipes
+#                        stdio through to the runner; the runner image carries
+#                        the language interpreter, never the sidecar itself.
 # `wget` ships with busybox in Alpine → HEALTHCHECK adds no install cost.
-RUN apk add --no-cache libstdc++ libgcc ca-certificates
+RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 

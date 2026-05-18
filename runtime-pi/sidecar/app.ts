@@ -3,6 +3,7 @@
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp } from "./mcp.ts";
+import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import {
   DEFAULT_PROVIDER_CALL_CONCURRENCY,
@@ -63,6 +64,20 @@ export interface AppDeps {
    * for tests; production sets it via the platform on container create.
    */
   runId?: string;
+  /**
+   * Lazy provider for additional MCP tool definitions. Called on every
+   * `/mcp` request so integrations that finish booting after the
+   * sidecar's HTTP listener comes up still appear on the next call.
+   * The integration runtime (Phase 1.4) wires `McpHost.buildTools` here.
+   */
+  additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
+  /**
+   * Promise that resolves once `bootIntegrations` has finished its
+   * initial pass. `tools/list` awaits this briefly (with a hard
+   * timeout) so the agent's first call sees all declared integration
+   * tools even though the sidecar's HTTP listener came up first.
+   */
+  integrationBootPromise?: Promise<void>;
 }
 
 /**
@@ -577,6 +592,10 @@ export function createApp(deps: AppDeps): Hono {
       ...(deps.refreshCredentials ? { refreshCredentials: deps.refreshCredentials } : {}),
       reportedAuthFailures,
     },
+    ...(deps.additionalMcpToolsProvider
+      ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
+      : {}),
+    ...(deps.integrationBootPromise ? { integrationBootPromise: deps.integrationBootPromise } : {}),
   });
 
   return app;

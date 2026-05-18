@@ -27,9 +27,11 @@
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { Type } from "@mariozechner/pi-ai";
 import {
   buildProviderCallExtensionFactory,
   buildRuntimeToolFactories,
+  callToolResultToPi,
   readProviderRefs,
   RUNTIME_INJECTED_TOOLS,
   type ProviderEventEmitter,
@@ -143,5 +145,70 @@ export async function buildMcpDirectFactories(
       emit: opts.emit,
     }),
   );
+  // Phase 1.4 — integration tools. The sidecar's McpHost multiplexes
+  // each spawned `type: integration` MCP server's tools as namespaced
+  // entries (`{ns}__{tool}`). We mirror them as Pi tools that forward
+  // verbatim to the sidecar's MCP `tools/call`. Any name we already
+  // wired above (provider_call / run_history / recall_memory / the
+  // optional provider_upload) is skipped.
+  const claimedNames = new Set<string>([
+    PROVIDER_CALL_TOOL_NAME,
+    ...RUNTIME_INJECTED_TOOLS.map((t) => t.name),
+    // provider_upload is registered above when uploadFactories is non-empty
+    "provider_upload",
+  ]);
+  factories.push(...buildIntegrationToolFactories(tools, claimedNames, opts));
+  return factories;
+}
+
+/**
+ * Wrap every non-first-party tool advertised by the sidecar's MCP host
+ * as a Pi extension that forwards to `mcp.callTool` verbatim. This is
+ * how `{namespace}__{tool}` entries from spawned integration MCP servers
+ * become callable from the LLM side (Phase 1.4).
+ */
+function buildIntegrationToolFactories(
+  advertised: ReadonlyArray<{ name: string; description?: string; inputSchema?: unknown }>,
+  claimed: ReadonlySet<string>,
+  opts: BuildMcpDirectFactoriesOptions,
+): ExtensionFactory[] {
+  const factories: ExtensionFactory[] = [];
+  for (const tool of advertised) {
+    if (claimed.has(tool.name)) continue;
+    factories.push((pi) => {
+      pi.registerTool({
+        name: tool.name,
+        label: tool.name,
+        description: tool.description ?? `Integration tool: ${tool.name}`,
+        parameters: Type.Unsafe<Record<string, unknown>>(
+          (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+        ),
+        async execute(toolCallId, params, signal) {
+          const startedAt = Date.now();
+          opts.emit({
+            type: `integration_tool.called`,
+            runId: opts.runId,
+            tool: tool.name,
+            toolCallId,
+            timestamp: startedAt,
+          });
+          const result = await opts.mcp.callTool(
+            { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
+            { ...(signal ? { signal } : {}) },
+          );
+          opts.emit({
+            type: `integration_tool.completed`,
+            runId: opts.runId,
+            tool: tool.name,
+            toolCallId,
+            durationMs: Date.now() - startedAt,
+            isError: result.isError === true,
+            timestamp: Date.now(),
+          });
+          return callToolResultToPi(result);
+        },
+      });
+    });
+  }
   return factories;
 }

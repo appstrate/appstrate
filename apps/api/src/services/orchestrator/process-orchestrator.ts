@@ -220,6 +220,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
         env.PI_PLACEHOLDER = spec.llm.placeholder;
       }
     }
+    // Phase 1.4 — integrations the sidecar will spawn + multiplex.
+    if (spec.integrations && spec.integrations.length > 0) {
+      env.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
+    }
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
@@ -227,6 +231,11 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       stderr: "pipe",
     });
     this.drainStderr(proc, id);
+    // The sidecar's `info`-level lines go to stdout; drain them too so
+    // the buffer never fills up (Bun pipes hang at ~64KB without a
+    // reader, freezing whatever was about to be written next — e.g. the
+    // integration-runtime's spawn progress logs).
+    this.drainStderr(proc, id, undefined, "stdout");
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
@@ -458,8 +467,13 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
    * agent-exit error log even when the process dies before the live
    * warn lines reach the user's filtered view.
    */
-  private drainStderr(proc: BunProcess, label: string, tail?: string[]): void {
-    const stderr = proc.stderr;
+  private drainStderr(
+    proc: BunProcess,
+    label: string,
+    tail?: string[],
+    stream: "stderr" | "stdout" = "stderr",
+  ): void {
+    const stderr = stream === "stderr" ? proc.stderr : proc.stdout;
     if (!stderr || typeof stderr === "number") return;
 
     const reader = (stderr as ReadableStream<Uint8Array>).getReader();
@@ -467,7 +481,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     let buf = "";
 
     const append = (line: string) => {
-      logger.warn(`[process:${label}:stderr] ${line}`);
+      logger.warn(`[process:${label}:${stream}] ${line}`);
       if (tail) {
         tail.push(line);
         if (tail.length > 50) tail.shift();

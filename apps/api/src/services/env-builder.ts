@@ -22,6 +22,8 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
+import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -176,6 +178,18 @@ export async function buildRunContext(params: {
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
 
+  // Phase 1.4 — resolve any declared `dependencies.integrations` into
+  // ready-to-spawn specs (manifest + bundle bytes + delivery env with
+  // live credentials). Failures here are per-integration warnings; the
+  // run proceeds with the surviving subset.
+  const integrationDeps = (asRecord(asRecord(agent.manifest).dependencies).integrations ??
+    undefined) as Record<string, string> | undefined;
+  const integrationSpawns = await resolveIntegrationSpawns({
+    applicationId,
+    actor,
+    integrationDeps,
+  });
+
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
@@ -187,6 +201,7 @@ export async function buildRunContext(params: {
     tokens,
     providers: providerDefs,
     files,
+    ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };
 
   return {

@@ -56,6 +56,50 @@ export interface SidecarLaunchSpec {
   modelContextWindow?: number;
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
+  /**
+   * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
+   * declares an `type: integration` AFPS package the agent depends on —
+   * the sidecar extracts the bundle, spawns the integration's MCP
+   * server, and multiplexes its tools onto the agent-facing `/mcp`
+   * surface. Empty / omitted = no integrations.
+   *
+   * Serialised by the orchestrator as the
+   * `INTEGRATIONS_TO_SPAWN_JSON` env var read by
+   * `runtime-pi/sidecar/server.ts`.
+   */
+  integrations?: ReadonlyArray<IntegrationSpawnSpec>;
+}
+
+/**
+ * Per-integration spec consumed by the sidecar. The platform launcher
+ * resolves the chain `agent.dependencies.integrations[id] →
+ * applicationPackages → integration_connections` and emits one entry
+ * per installed-and-connected integration.
+ *
+ * Bundle bytes are NOT inlined — they would blow past the Linux env
+ * size limit (~1 MB) on real-world integrations (the Gmail MCP server
+ * + its npm deps is ~5 MB). The sidecar fetches them at boot from
+ * `GET /internal/integration-bundle/:scope/:name` using the same
+ * Bearer run-token as the credentials surface.
+ */
+export interface IntegrationSpawnSpec {
+  /** Package id (e.g. `@appstrate/gmail-mcp`). */
+  packageId: string;
+  /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
+  namespace: string;
+  /** Validated `type: integration` manifest (server, transport, auths). */
+  manifest: {
+    name: string;
+    version: string;
+    server: { type: string; entryPoint?: string };
+    transport?: { type: string };
+  };
+  /**
+   * Env vars to inject on the spawned subprocess. Resolved from
+   * `manifest.auths.{key}.delivery.env` by the platform — values are
+   * the live OAuth access_token / API key. Sensitive: never logged.
+   */
+  spawnEnv: Record<string, string>;
 }
 
 /**

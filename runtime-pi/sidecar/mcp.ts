@@ -1468,11 +1468,43 @@ export interface MountMcpOptions {
    * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
    */
   providerCallLimit?: LimitFunction;
+  /**
+   * Lazy provider for additional MCP tool definitions to merge alongside
+   * the first-party sidecar tools (provider_call, run_history, recall_memory).
+   * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
+   * before integration MCP servers finish their initial handshake. The
+   * integration runtime (Phase 1.4) wires `McpHost.buildTools` here:
+   * tools registered after the sidecar started serving become visible on
+   * the next `tools/list` without restarting anything. First-party
+   * names take precedence.
+   */
+  additionalToolsProvider?: () => AppstrateToolDefinition[];
+  /**
+   * Promise that resolves once the integration runtime has finished its
+   * initial bootstrap pass. The first `/mcp` request awaits it (capped
+   * at 10s) so the agent's initial `tools/list` sees all declared
+   * integration tools, even though the sidecar's HTTP listener came up
+   * first. Subsequent requests skip the wait (the promise is already
+   * resolved).
+   */
+  integrationBootPromise?: Promise<void>;
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const tools = buildSidecarTools(options);
+  const firstParty = buildSidecarTools(options);
+  const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
+  // Cache the await so only the first `/mcp` request pays the wait —
+  // every subsequent request sees an already-resolved promise.
+  let bootReady = options.integrationBootPromise;
+  if (bootReady) {
+    bootReady = Promise.race([
+      bootReady.then(() => {
+        bootReady = undefined; // resolved — skip the race on later requests
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 10_000).unref?.()),
+    ]);
+  }
 
   app.all("/mcp", async (c) => {
     // Host header validation (DNS-rebinding defence). Done here, not by
@@ -1535,6 +1567,17 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       });
     }
 
+    // Wait for the integration runtime to finish its first bootstrap
+    // pass (max 10s). The wait is amortised: only the first `/mcp`
+    // request pays it; once the promise resolves we drop the reference
+    // so subsequent requests skip the await entirely.
+    if (bootReady) await bootReady;
+    // Resolve tools per-request so integrations that finish booting AFTER
+    // the sidecar's HTTP listener is up still surface on the next call.
+    const dynamicExtras = (options.additionalToolsProvider?.() ?? []).filter(
+      (t) => !firstPartyNames.has(t.descriptor.name),
+    );
+    const tools = [...firstParty, ...dynamicExtras];
     const server = createMcpServer(
       tools,
       { name: "appstrate-sidecar", version: "1" },

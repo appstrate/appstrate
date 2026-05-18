@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+#
+# Appstrate MCP Runner — Node.js
+#
+# Spawned per-integration by the sidecar (`runtime-pi/sidecar/integrations-boot.ts`)
+# when an AFPS integration manifest declares `server.type: "node"`. The
+# sidecar `docker create`s this image, `docker cp`s the integration bundle
+# into `/bundle`, and `docker start -ai`s the container — stdio is piped
+# verbatim to the spawning MCP client.
+#
+# Why a dedicated image (vs. baking node into the sidecar): a `python`
+# integration would otherwise demand `apk add python3` in the sidecar
+# (then ruby, deno, …). Per-runtime images keep the sidecar minimal and
+# let operators pull only the runtimes they actually use.
+#
+# Build (linux/amd64 required to match the sidecar's `docker run` target):
+#
+#   docker build --platform linux/amd64 \
+#     -t appstrate-mcp-runner-node:latest \
+#     -f runtime-pi/runners/node/Dockerfile \
+#     runtime-pi/runners/node
+
+ARG RUNTIME_IMAGE=alpine:3.21.3
+FROM ${RUNTIME_IMAGE} AS runtime
+
+ARG BUILD_VERSION=unknown
+ARG BUILD_REVISION=unknown
+ARG BUILD_CREATED
+
+LABEL org.opencontainers.image.title="Appstrate MCP Runner (Node)" \
+      org.opencontainers.image.description="Per-integration Node.js runner for AFPS server.type=\"node\"" \
+      org.opencontainers.image.source="https://github.com/appstrate/appstrate" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.vendor="Appstrate" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.revision="${BUILD_REVISION}" \
+      org.opencontainers.image.created="${BUILD_CREATED}"
+
+# nodejs       — runtime for the integration server
+# ca-certificates — TLS trust store for outbound API calls (Gmail, etc.)
+# /bundle is the conventional mount point — sidecar `docker cp`s the
+# extracted bundle here before `docker start`.
+RUN apk add --no-cache nodejs ca-certificates && \
+    mkdir -p /bundle && \
+    chown nobody:nobody /bundle
+
+USER nobody:nobody
+WORKDIR /bundle
+
+# `node` is the entrypoint; the CMD (passed by the sidecar as the
+# absolute path inside the container, e.g. `/bundle/server/index.js`)
+# provides the script to execute.
+ENTRYPOINT ["node"]

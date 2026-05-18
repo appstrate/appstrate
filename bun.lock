@@ -221,7 +221,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.19.0",
+      "version": "2.20.0",
       "dependencies": {
         "@afps-spec/schema": "^1.5.0",
         "ajv": "^8.20.0",
@@ -381,6 +381,7 @@
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "fflate": "^0.8.2",
         "hono": "^4.12.15",
         "p-limit": "^7.3.0",
       },

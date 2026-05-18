@@ -92,11 +92,13 @@ appstrate/
 │
 ├── apps/cli/                 # @appstrate/cli — channel-aware install (curl/bun/bunx), self-update, doctor, dual-install warning
 │
-├── system-packages/           # System package ZIPs (providers, skills, tools, agents — loaded at boot)
+├── system-packages/           # System package ZIPs (providers, skills, tools, agents, integrations — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK (313 MB slim, OCI-labelled)
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents → POST /api/runs/:runId/events
-│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, recall_memory) on /mcp + ALL /llm/* passthrough
+│   ├── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, recall_memory + spawned-integration tools) on /mcp + ALL /llm/* passthrough
+│   ├── sidecar/integrations-boot.ts  # Phase 1.4 boot: fetches integration bundles + spawns one runner container per integration (or subprocess in process-mode), aggregates tools on an `McpHost`
+│   └── runners/{node,python,binary}/Dockerfile  # Per-language MCP runner images — sidecar `docker create`s + `docker cp`s the bundle + `docker start -ai`s for stdio. Mapping: `server.type` → image.
 │
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
@@ -147,6 +149,11 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |            │    - provider_call: credential injection    │
      |            │    - run_history                            │
      |            │    - recall_memory                          │
+     |            │    - {ns}__{tool}: spawned-integration tools│
+     |            │      (one runner container per integration  │
+     |            │       — node|python|binary; sidecar gets    │
+     |            │       /var/run/docker.sock + root only      │
+     |            │       when integrations.length > 0)         │
      |            │  - ExtraHosts → host.docker.internal only   │
      |            │    when platform network not auto-detected  │
      |            ├─────────────────────────────────────────────┤
@@ -278,8 +285,8 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 ### Sidecar Protocol (details beyond the architecture diagram)
 
 - **Sidecar lifecycle**: One fresh sidecar container per run, spawned in parallel with the agent. `DockerOrchestrator.initialize()` calls `ensureImage()` for the PI + sidecar images at boot to amortise cold-pull (20–45 s) off the first run's critical path. There is no sidecar pool — empirical measurement showed the agent's own Bun cold start (~1 s) already masks warm-image sidecar boot, so pre-warming offered no user-visible latency win while carrying meaningful complexity (`/configure` endpoint, `CONFIG_SECRET`, standby network, replenish loop).
-- **Parallel startup**: `pi.ts` runs sidecar setup in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`. `DockerOrchestrator.createSidecar` does not await `/health` — it returns once the container is created + started, and the agent's MCP handshake retries on ECONNREFUSED / ENOTFOUND / ECONNRESET with AWS full-jitter backoff (50ms→1s, 30s deadline) until the sidecar's listener comes up (#406). A non-blocking watcher races the sidecar's exit code so a sidecar that dies on boot surfaces as a structured error log (with tail of stderr) rather than a 30s MCP timeout.
-- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool by `runtime-pi/extensions/mcp-direct.ts`. The agent LLM only ever sees three tools — `provider_call`, `run_history`, `recall_memory` — and never sees the sidecar URL.
+- **Parallel startup**: `pi.ts` runs sidecar setup in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`. `DockerOrchestrator.createSidecar` does not await `/health` — it returns once the container is created + started, and the agent's MCP handshake retries on connection-level errors (both Node's `ECONNREFUSED` / `ENOTFOUND` / `ECONNRESET` and Bun's `ConnectionRefused` / `DNSNotFound` / `ConnectionTimeout` — see "MCP transport retry" below) with AWS full-jitter backoff (50ms→1s, 60s deadline) until the sidecar's listener comes up (#406). A non-blocking watcher races the sidecar's exit code so a sidecar that dies on boot surfaces as a structured error log (with tail of stderr) rather than a 30s MCP timeout.
+- **Agent-facing surface**: every sidecar-backed capability is registered as a typed Pi tool by `runtime-pi/mcp/direct.ts`. The LLM sees the canonical first-party set — `provider_call`, `run_history`, `recall_memory` (+ optional `provider_upload` when any provider declares `definition.uploadProtocols`) — plus any tool advertised by a spawned AFPS integration, exposed under a `{namespace}__{tool}` prefix (Phase 1.4, see "AFPS Integrations runtime" below). The agent never sees the sidecar URL.
   - `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy. The `providerId` enum is sourced from `dependencies.providers[]` on the bundle manifest. Tool description, schema, and execution are all served by the sidecar's MCP `tools/call` handler, which delegates to `executeProviderCall` (the same pure helper that used to back the retired HTTP `/proxy` route).
   - `run_history({ limit?, fields? })` — recent past-run metadata. Dispatched to the sidecar's MCP handler, which reads from the platform's internal run-history endpoint via the per-run token.
   - `recall_memory({ query?, limit? })` — search the agent's memory archive (rows in `package_persistence` written via the `note(content)` system tool). Same MCP path; scoped to the caller's actor.
@@ -293,6 +300,52 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 - **Prompt building**: `renderPlatformPrompt()` (in `@appstrate/afps-runtime`) generates the 9-section preamble (User Input, Configuration, Pinned slots, …) + appends raw `prompt.md`. No Handlebars. Memory archive and run history are NOT rendered as prompt sections — they are exposed as MCP tools (`recall_memory`, `run_history`) whose descriptions self-document the capability.
 - **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-run, AJV validates the result against `output.schema` (replace-on-emit semantics, `tool-output@2.0.0`). On mismatch, the run is marked **failed** (no silent warning).
 - **Unified memory surface (ADR-011/012/013, #273)**: a single `package_persistence` table (Drizzle) with `(actor_type, actor_id)` scope (`member` / `end_user` / `shared`) and two orthogonal attributes `(key, pinned)` covering 3 quadrants: archive (key=null, pinned=false — written via `note(content)` system tool, read via `recall_memory` MCP tool), pinned memo (key=null, pinned=true), and pinned named slot (key=`<string>`, pinned=true — written via `pin(key, content)` system tool, read by the prompt builder). The platform exposes `pinned: Record<string, PinnedSlot>` on `RunResult`; `runs.checkpoint` (DB) is preserved but only as the per-run snapshot consumed by the `run_history` MCP tool. Legacy `runs.state` + `package_memories` table + the standalone `/memories` REST surface + the `memories:read|delete` permission are gone — superseded by `package_persistence` and the unified `persistence:read|delete` permission. REST surface: `GET /api/agents/{scope}/{name}/persistence?kind=pinned|memory` (list/aggregator), `DELETE …/persistence?kind=…` (bulk), and `DELETE …/persistence/memories/:id` + `DELETE …/persistence/pinned/:id` (per-row).
+
+### AFPS Integrations runtime (Phase 1.4, env-delivery + container-per-integration)
+
+AFPS integrations declare a `server.type` (`node` | `python` | `binary` — MCPB-compatible naming) and an `entryPoint`. The platform validates the agent's `dependencies.integrations[id]`, looks up the installed package + the per-application `integration_connections` row, decrypts the credential blob, and builds a `spawnEnv` from `manifest.auths.{key}.delivery.env` (`apps/api/src/services/integration-spawn-resolver.ts`). The resolved spawn plan is serialized into `INTEGRATIONS_TO_SPAWN_JSON` on the sidecar container's env at create time — the sidecar fetches each bundle via the internal `GET /internal/integration-bundle/:scope/:name` endpoint (authenticated with the run token, dep + install double-check) so we don't fight Linux env-var size limits.
+
+The sidecar's `integrations-boot.ts` then spawns one MCP server **per integration** in its own runner container:
+
+```
+sidecar (Bun, +docker-cli, /var/run/docker.sock mounted, runs as root only when integrations.length > 0)
+  ├─ readIntegrationSpecsFromEnv()                  ← INTEGRATIONS_TO_SPAWN_JSON
+  ├─ fetchBundleBytes()                             ← platform /internal/integration-bundle/...
+  ├─ extractBundle() → /tmp/afps-integ-{ns}-XXX/    ← fflate unzip in-sidecar
+  ├─ isDockerAvailable()                            ← `docker info`; falls back to host subprocess in process mode
+  ├─ planIntegrationContainer():                    ← `RUNNER_IMAGE_BY_TYPE[server.type]`
+  │     node   → appstrate-mcp-runner-node:latest    (75 MB)
+  │     python → appstrate-mcp-runner-python:latest  (49 MB)
+  │     binary → appstrate-mcp-runner-binary:latest  (11 MB)
+  ├─ docker create --rm -i --cap-drop ALL --memory 256m --pids-limit 128 \
+  │       -e <spawnEnv...> --label appstrate.run=$RUN_ID --label appstrate.managed=true \
+  │       <image> /bundle/<entryPoint>
+  ├─ docker cp /tmp/afps-integ-{ns}-XXX/. <id>:/bundle/
+  ├─ SubprocessTransport(["docker","start","-ai",<id>]) ← MCP stdio piped through docker attach
+  ├─ Client.connect → initialize → tools/list       ← MCP handshake
+  └─ McpHost.register({ namespace, client })        ← tools exposed to the agent as {ns}__{tool}
+```
+
+Key invariants:
+
+- **Sidecar minimal by design**: no `node`, no `python` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` — the sidecar image (132 MB) doesn't grow.
+- **Docker socket gated by need**: `docker-orchestrator.createSidecar` only adds `binds: ["/var/run/docker.sock"]` + `user: "0:0"` when `spec.integrations.length > 0`. Runs without integrations keep the default `nobody:nobody` user with no socket.
+- **Bundle delivery is HTTP, not env**: `INTEGRATIONS_TO_SPAWN_JSON` carries only manifest metadata + decrypted spawn env. Bundle bytes (potentially several MB) ship out-of-band via `GET /internal/integration-bundle/:scope/:name`.
+- **Auto-cleanup**: `docker create --rm` auto-removes the container when stdio closes; explicit `docker kill` in the sidecar's `bootIntegrations().shutdown()` covers misbehaving servers; orphan reaper sweeps anything missed by `appstrate.managed=true appstrate.run=<runId>`.
+- **Process-mode fallback**: when `docker info` fails (sidecar running as a host subprocess in dev), `bootIntegrations` falls back to `Bun.spawn(["node"|"python3", entry])` against the host PATH — same MCP wire, no container isolation. Tests run in this mode.
+- **MCPB compatibility preserved**: `server.type` matches the MCPB standard exactly. `.afps` integration bundles are installable as `.mcpb` extensions elsewhere and vice-versa.
+- **Tools surfaced to the LLM**: the sidecar's `McpHost` multiplexes spawned tools under a namespaced prefix (`{namespace}__{tool}`). The agent's `runtime-pi/mcp/direct.ts` discovers them via `tools/list` and registers one Pi extension per advertised non-first-party tool that forwards verbatim to `mcp.callTool`.
+
+Phase 1.5 (not yet implemented): in-run credential refresh on SIGHUP via `integration-runtime-controller.ts` (the broader controller that also handles `delivery.http` MITM + CA bundle minting). Today's path injects credentials at spawn time only — a `delivery.env` token that expires mid-run results in 401s from upstream until the next run respawns the integration. The platform's `OAUTH_REFRESH_WORKER_ENABLED` BullMQ worker mitigates by proactively refreshing tokens before their lead window, but is opt-in.
+
+### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
+
+`packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` handshake on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:
+
+- **Node / undici**: E-prefix UPPER_SNAKE_CASE (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, …)
+- **Bun fetch**: PascalCase, no E-prefix (`ConnectionRefused`, `ConnectionTimeout`, `DNSNotFound`, …)
+
+Missing Bun aliases means `isFatalConnectError()` would classify a Bun-side `ConnectionRefused` as fatal (the `TypeError` fallback fires when no recognised retryable code is found) and bypass the retry loop entirely. The agent container would then fail its very first MCP handshake against a still-booting sidecar instead of riding through the warm-path race window (~50-200ms). The container-per-integration path made this race much more visible because spawning a runner container before answering the agent's `tools/list` extended the sidecar's warm-up window.
 
 ## Testing
 

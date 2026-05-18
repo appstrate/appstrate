@@ -92,4 +92,13 @@ export interface AppstrateRunPlan {
   inputFiles?: UploadedFile[];
   /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
   agentPackage?: Buffer | null;
+
+  // --- Integrations (Phase 1.4) ---
+  /**
+   * Integrations to spawn inside the sidecar. Built by
+   * `resolveIntegrationSpawns` — one entry per declared, installed,
+   * and connected integration the agent depends on. Empty when the
+   * agent declares no integrations or none are connected.
+   */
+  integrations?: ReadonlyArray<import("@appstrate/core/sidecar-types").IntegrationSpawnSpec>;
 }

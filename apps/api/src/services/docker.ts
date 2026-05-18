@@ -121,6 +121,25 @@ export interface CreateContainerOptions {
   portBindings?: Record<string, Array<{ HostPort: string }>>;
   exposedPorts?: Record<string, object>;
   labels?: Record<string, string>;
+  /**
+   * Docker `HostConfig.Binds` entries (`/host/path:/container/path[:ro]`).
+   * Used by the sidecar to receive the host's Docker socket so it can
+   * `docker run` per-integration runner containers (Phase 1.4+). Empty by
+   * default for every other workload — agent containers never get this.
+   */
+  binds?: string[];
+  /**
+   * Docker `HostConfig.GroupAdd` — supplementary GIDs the container's
+   * primary user joins. Used to grant socket access (e.g. the `docker`
+   * group on Linux daemons) without dropping to root.
+   */
+  groupAdd?: string[];
+  /**
+   * Override `User` set in the image. Used by the sidecar to run as
+   * root only when it has Docker socket access — keeps the default
+   * `USER nobody:nobody` image directive intact for every other path.
+   */
+  user?: string;
 }
 
 export async function createContainer(
@@ -156,7 +175,10 @@ export async function createContainer(
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
       PortBindings: options.portBindings,
+      ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
+      ...(options.groupAdd && options.groupAdd.length > 0 ? { GroupAdd: options.groupAdd } : {}),
     },
+    ...(options.user ? { User: options.user } : {}),
     NetworkingConfig: {
       EndpointsConfig: Object.keys(networkingConfig).length > 0 ? networkingConfig : undefined,
     },

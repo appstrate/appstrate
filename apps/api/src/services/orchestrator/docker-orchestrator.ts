@@ -102,6 +102,10 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       PORT: "8080",
       ...pickOperatorSidecarEnv(),
       RUN_TOKEN: spec.runToken,
+      // Phase 1.4 — exposed so the sidecar can stamp `appstrate.run=<runId>`
+      // on integration runner containers it spawns, letting the platform's
+      // orphan reaper match them back to the parent run.
+      RUN_ID: runId,
       PLATFORM_API_URL: platformApiUrl,
     };
     if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
@@ -123,9 +127,26 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         sidecarEnv.PI_PLACEHOLDER = spec.llm.placeholder;
       }
     }
+    // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+    // the agent's MCP surface. Each entry carries the bundle bytes +
+    // resolved spawn env (with live OAuth tokens / API keys).
+    if (spec.integrations && spec.integrations.length > 0) {
+      sidecarEnv.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
+    }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.
+    //
+    // When the run declares AFPS integrations, the sidecar needs to spawn
+    // per-integration runner containers (`appstrate-mcp-runner-{node,python,
+    // binary}`). It shells out to the Docker daemon via the mounted socket
+    // + `docker-cli` baked into the sidecar image. Running as root is the
+    // simplest portable way to access the socket (group GIDs vary across
+    // hosts: Docker Desktop on macOS exposes a 0-owned socket, Linux a
+    // `docker`-group one, rootless Docker uses the calling UID). We only
+    // grant it when the run actually has integrations — otherwise we keep
+    // the sidecar locked down with the image's default `nobody:nobody`.
+    const hasIntegrations = spec.integrations !== undefined && spec.integrations.length > 0;
     const containerId = await docker.createContainer(runId, sidecarEnv, {
       image: env.SIDECAR_IMAGE,
       adapterName: "sidecar",
@@ -133,6 +154,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: this.egressNetworkId!,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
+      ...(hasIntegrations
+        ? {
+            binds: ["/var/run/docker.sock:/var/run/docker.sock"],
+            user: "0:0",
+          }
+        : {}),
     });
 
     // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)

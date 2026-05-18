@@ -47,7 +47,7 @@ interface PiToolResult {
  * text pointers (`[resource <uri>]`) so the LLM still sees the URI and
  * can fetch the resource via `resources/read` if it cares.
  */
-function callToolResultToPi(result: CallToolResult): PiToolResult {
+export function callToolResultToPi(result: CallToolResult): PiToolResult {
   const content: PiToolContent[] = result.content.map((c) => {
     if (c.type === "text") return { type: "text", text: c.text };
     if (c.type === "image") return { type: "image", data: c.data, mimeType: c.mimeType };

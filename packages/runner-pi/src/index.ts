@@ -55,6 +55,7 @@ export {
 
 export {
   buildRuntimeToolFactories,
+  callToolResultToPi,
   type BuildRuntimeToolFactoriesOptions,
   type RuntimeToolEventEmitter,
 } from "./runtime-tools/mcp-forward.ts";

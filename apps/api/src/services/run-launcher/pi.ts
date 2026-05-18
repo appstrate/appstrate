@@ -112,11 +112,15 @@ export async function runPlatformContainer(
       : deriveKeyPlaceholder(llmApiKey);
 
     // Skip the sidecar entirely when the run declares no providers AND
-    // uses a static API key. The sidecar's sole purpose is credential
-    // injection (provider_call) + LLM passthrough for OAuth; an API-key
-    // model with no providers needs neither. Saves a subprocess spawn +
-    // MCP handshake + forward-proxy bind on every run.
-    const skipSidecar = plan.providers.length === 0 && !!llmConfig.apiKey && !isOauthCredential;
+    // no integrations AND uses a static API key. The sidecar's sole
+    // purposes are credential injection (provider_call), integration MCP
+    // multiplexing (Phase 1.4), and LLM passthrough for OAuth; an
+    // API-key model with neither providers nor integrations needs none
+    // of them. Saves a subprocess spawn + MCP handshake + forward-proxy
+    // bind on every run.
+    const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
+    const skipSidecar =
+      plan.providers.length === 0 && !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -155,6 +159,12 @@ export async function runPlatformContainer(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+      // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+      // the agent-facing `/mcp` surface. Resolved upstream by
+      // `resolveIntegrationSpawns` (env-builder).
+      ...(plan.integrations && plan.integrations.length > 0
+        ? { integrations: plan.integrations }
+        : {}),
     };
 
     const hasOutputSchema =
