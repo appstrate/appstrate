@@ -1,42 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar-side integration bootstrap (Phase 1.4, env-delivery path).
+ * Sidecar-side integration bootstrap (Phase 1.4 + 1.5).
  *
  * Reads the `INTEGRATIONS_TO_SPAWN_JSON` env var produced by the
  * platform launcher (see `apps/api/src/services/run-launcher/pi.ts`),
  * fetches each integration's bundle bytes via the internal credentials
  * surface, materialises them on local fs, spawns the declared MCP
- * subprocess with the resolved env (OAuth access tokens / API keys
- * placed under `delivery.env`), and aggregates their tools on a shared
- * {@link McpHost}.
+ * subprocess through the selected {@link IntegrationRuntimeAdapter}
+ * (Docker container by default, in-process fallback for dev/tests,
+ * future: Firecracker microVM, podman, …), and aggregates their tools
+ * on a shared {@link McpHost}.
  *
- * Scope is intentionally narrow — this is the minimum wiring needed to
- * surface real integration tools to the agent. It deliberately skips:
+ * Phase 1.5 also wires per-integration HTTPS MITM listeners for auths
+ * that declare `delivery.http`: a per-run CA is minted on boot, each
+ * such integration gets a credentials source (cache + refresh hook) +
+ * listener bound on the adapter's preferred interface, and the listener
+ * injects the configured header on outbound calls. The runner reaches
+ * the listener via the URL the adapter computed.
  *
- *   - MITM proxy + CA bundle minting (only needed when an auth declares
- *     `delivery.http` — env delivery hands the credential to the
- *     subprocess at spawn time and the subprocess talks to upstream
- *     directly).
- *   - Credential refresh on SIGHUP (re-spawn-on-401 only — refresh-while-
- *     running is a Phase 1.5 concern).
- *   - Restart supervision (single attempt per integration; if the
- *     subprocess crashes the host emits a tool-error on the next call).
+ * Boundaries this module deliberately does NOT cross:
  *
- * Once `delivery.http` integrations land, the same controller swaps to
- * `bootstrapIntegrationRuntime` from `./integration-runtime-controller.ts`
- * (which handles CA, MITM, and per-request credential injection).
+ *   - HOW the integration's MCP server is spawned (container, subprocess,
+ *     VM) is the {@link IntegrationRuntimeAdapter}'s concern.
+ *   - WHERE the runner reaches the MITM listener (DNS alias, loopback,
+ *     gateway) is the adapter's concern.
+ *   - Restart-on-crash supervision is deferred to a later phase; today
+ *     a crashed integration surfaces as a tool-error on the next call.
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { dirname, join, normalize, posix } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
-  SubprocessTransport,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -55,6 +55,15 @@ import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
 } from "./integration-credentials-source.ts";
+import {
+  selectIntegrationRuntimeAdapter,
+  type IntegrationRuntimeAdapter,
+  type RuntimeMitmContext,
+} from "./integration-runtime-adapter.ts";
+// Side-effect imports — each adapter module registers itself on load.
+// New adapters (firecracker, podman, …) plug in with one more import here.
+import "./integration-runtime-adapter-docker.ts";
+import "./integration-runtime-adapter-process.ts";
 
 /**
  * Per-integration spec produced by the platform launcher. The launcher
@@ -80,9 +89,9 @@ export interface IntegrationSpawnSpec {
    * Phase 1.5 — per-auth `delivery.http` metadata. Presence (with at
    * least one entry) tells the sidecar to take the MITM path for this
    * integration: start a per-integration HTTPS listener, mint a CA
-   * bundle, hand the runner container `HTTPS_PROXY` + `*_CA_*` env vars,
-   * and let the listener inject the live header per `delivery.http`
-   * spec. Absent / empty = stay on the env-delivery-only path.
+   * bundle, hand the runner `HTTPS_PROXY` + `*_CA_*` env vars, and let
+   * the listener inject the live header per `delivery.http` spec.
+   * Absent / empty = stay on the env-delivery-only path.
    *
    * Structural mirror of `IntegrationSpawnSpec.httpDeliveryAuths` in
    * `@appstrate/core/sidecar-types` — the wire payload is the same shape.
@@ -137,7 +146,7 @@ export interface BootIntegrationsResult {
   spawned: Array<{ packageId: string; namespace: string; toolCount: number }>;
   /** Per-integration failures — emitted as warnings but do not abort boot. */
   failed: Array<{ packageId: string; error: string }>;
-  /** Idempotent teardown — closes every upstream MCP client. */
+  /** Idempotent teardown — closes every upstream MCP client + runtime adapter. */
   shutdown: () => Promise<void>;
 }
 
@@ -224,337 +233,6 @@ async function extractBundle(bytes: Uint8Array, namespace: string): Promise<stri
 }
 
 /**
- * Map `server.type` (MCPB-compatible: `node` | `python` | `binary`) to
- * the corresponding Appstrate runner image. The runner image carries
- * the language interpreter; the sidecar's own image carries none.
- *
- * Adding a new runtime is one map entry here + one `runtime-pi/runners/
- * {name}/Dockerfile`. The sidecar stays minimal regardless.
- */
-const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
-  node: "appstrate-mcp-runner-node:latest",
-  python: "appstrate-mcp-runner-python:latest",
-  binary: "appstrate-mcp-runner-binary:latest",
-};
-
-interface IntegrationContainerPlan {
-  /** Runner image, e.g. `appstrate-mcp-runner-node:latest`. */
-  image: string;
-  /**
-   * Absolute path INSIDE the runner container that the runner's
-   * ENTRYPOINT will execute (passed as CMD). For node/python this is
-   * the entry script under `/bundle`; for binary it's the binary
-   * itself.
-   */
-  containerEntry: string;
-  /**
-   * Absolute path ON THE SIDECAR'S FILESYSTEM of the extracted bundle
-   * dir — `docker cp <bundleRoot>/. <id>:/bundle/` populates the
-   * container before `docker start`.
-   */
-  bundleRoot: string;
-}
-
-function planIntegrationContainer(
-  spec: IntegrationSpawnSpec,
-  bundleRoot: string,
-): IntegrationContainerPlan {
-  const t = spec.manifest.server.type;
-  const image = RUNNER_IMAGE_BY_TYPE[t];
-  if (!image) {
-    throw new Error(
-      `integrations-boot: server.type "${t}" has no registered runner image. ` +
-        `Supported types: ${Object.keys(RUNNER_IMAGE_BY_TYPE).join(", ")}`,
-    );
-  }
-  const entry = spec.manifest.server.entryPoint;
-  if (!entry) {
-    throw new Error(`integrations-boot: server.entryPoint required for server.type="${t}"`);
-  }
-  // Path-traversal guard — the validated host-side path. We still
-  // re-derive the container-side path independently below; this check
-  // exists so a malformed manifest can't trick us into docker-cp'ing
-  // outside the bundle root.
-  const absHostEntry = normalize(join(bundleRoot, entry));
-  if (!absHostEntry.startsWith(bundleRoot + posix.sep) && absHostEntry !== bundleRoot) {
-    throw new Error(`integrations-boot: server.entryPoint escapes bundle root`);
-  }
-  // POSIX-join the container path — the runner image is always Linux,
-  // and `path.join` on the sidecar host (also Linux in production but
-  // could be macOS in dev) might pick the wrong separator.
-  const rel = entry.replace(/^\.?\/+/, "");
-  const containerEntry = posix.join("/bundle", rel);
-  return { image, containerEntry, bundleRoot };
-}
-
-/**
- * Run a docker CLI command synchronously and capture stdout. Throws on
- * non-zero exit with both streams in the error message so a failing
- * `docker create` doesn't disappear into a generic "spawn failed".
- */
-interface DockerExecSubprocess {
-  stdout: ReadableStream<Uint8Array>;
-  stderr: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
-}
-
-type DockerExecSpawn = (
-  cmd: string[],
-  opts: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" },
-) => DockerExecSubprocess;
-
-async function dockerExec(args: string[]): Promise<string> {
-  const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: DockerExecSpawn } }).Bun?.spawn;
-  if (!bunSpawn) throw new Error("integrations-boot: Bun.spawn unavailable");
-  const proc = bunSpawn(["docker", ...args], {
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) {
-    throw new Error(`docker ${args[0]} failed (exit ${code}): ${stderr.trim() || stdout.trim()}`);
-  }
-  return stdout.trim();
-}
-
-/**
- * Create a runner container in `Created` state (entrypoint not fired
- * yet), `docker cp` the bundle into `/bundle`, and return the container
- * id so the caller can `docker start -ai` to launch it with stdio
- * piped. `--rm` (HostConfig.AutoRemove) makes the daemon clean up the
- * container once it exits, so the only thing the sidecar needs to do
- * on shutdown is `docker kill <id>` — the rm happens automatically.
- *
- * The integration is placed on the default `bridge` network (gets
- * NAT'd internet for upstream API calls) and is **not** joined to the
- * agent's run network — the agent never talks to the integration
- * directly; it talks to the sidecar, which talks stdio over docker
- * attach. Labels mirror the platform's convention so the orphan reaper
- * (`cleanupOrphanedContainers()`) sweeps any container the sidecar
- * couldn't kill itself (hard crash / SIGKILL).
- */
-/**
- * Optional MITM wiring layered on top of {@link setupIntegrationContainer}.
- * Populated when the integration declares `delivery.http` and the sidecar
- * has minted a per-run CA bundle:
- *
- *   - `proxyUrl` — full URL the runner uses as HTTPS_PROXY. Reaches the
- *     MITM listener via the per-run Docker network's DNS alias
- *     (`http://sidecar:<port>`) instead of `127.0.0.1` — sharing the
- *     sidecar's network NS via `--network container:<id>` is too fragile
- *     on Docker Desktop (the runner can fail to attach if the sidecar's
- *     short-id lookup races its own boot), and bridge-DNS sidesteps that
- *     class of failure entirely.
- *   - `runNetwork` — name of the per-run docker network
- *     (`appstrate-exec-<runId>`). The runner joins this network so the
- *     `sidecar` DNS alias resolves. May be `null` when the sidecar can't
- *     determine its run id (older code paths / process mode), in which
- *     case we skip the MITM container wiring and fall back to env-only.
- *   - `caCertHostPath` — path to the run-CA PEM ON the sidecar's fs.
- *     `docker cp`'d into the runner at {@link CA_CONTAINER_PATH} so the
- *     runner's language ecosystem (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
- *     `REQUESTS_CA_BUNDLE`) trusts the minted leaf certs.
- */
-interface MitmSpawnExtras {
-  proxyUrl: string;
-  runNetwork: string | null;
-  caCertHostPath: string;
-}
-
-/**
- * Path inside the runner container where the run-CA cert lands. Matched
- * by the env vars below so every supported language ecosystem
- * (Node / Python / shell-installed binary) trusts it without per-language
- * Dockerfile edits.
- */
-// `/tmp` is guaranteed to exist on every runner image (alpine + busybox
-// both ship it), so `docker cp` lands the cert without needing an
-// intermediate `mkdir`. Docker's cp explicitly does NOT create parent
-// directories on the destination side — copying to `/etc/appstrate/ca.pem`
-// fails with `Could not find the file /etc/appstrate in container <id>`
-// because `/etc/appstrate/` doesn't pre-exist. The env vars below
-// (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
-// `CURL_CA_BUNDLE`) all accept arbitrary file paths — they don't care
-// the cert lives under /tmp.
-const CA_CONTAINER_PATH = "/tmp/appstrate-ca.pem";
-
-async function setupIntegrationContainer(
-  runId: string,
-  spec: IntegrationSpawnSpec,
-  plan: IntegrationContainerPlan,
-  mitm?: MitmSpawnExtras,
-): Promise<string> {
-  const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
-  const envFlags: string[] = [];
-  for (const [k, v] of Object.entries(spec.spawnEnv)) {
-    envFlags.push("-e", `${k}=${v}`);
-  }
-  if (mitm) {
-    // Standardised proxy env vars honoured by Node (via undici-style
-    // dispatchers + NODE_TLS_REJECT_UNAUTHORIZED), Python (requests /
-    // httpx / urllib via REQUESTS_CA_BUNDLE / SSL_CERT_FILE), and most
-    // CLI HTTP clients. The cert path inside the runner is fixed
-    // (CA_CONTAINER_PATH) — the runner Dockerfiles don't need awareness.
-    const proxyEnv: Record<string, string> = {
-      HTTPS_PROXY: mitm.proxyUrl,
-      HTTP_PROXY: mitm.proxyUrl,
-      https_proxy: mitm.proxyUrl,
-      http_proxy: mitm.proxyUrl,
-      NO_PROXY: "127.0.0.1,localhost",
-      no_proxy: "127.0.0.1,localhost",
-      NODE_EXTRA_CA_CERTS: CA_CONTAINER_PATH,
-      SSL_CERT_FILE: CA_CONTAINER_PATH,
-      REQUESTS_CA_BUNDLE: CA_CONTAINER_PATH,
-      CURL_CA_BUNDLE: CA_CONTAINER_PATH,
-    };
-    for (const [k, v] of Object.entries(proxyEnv)) {
-      envFlags.push("-e", `${k}=${v}`);
-    }
-  }
-  const labelFlags: string[] = [
-    "--label",
-    `appstrate.run=${runId}`,
-    "--label",
-    "appstrate.managed=true",
-    "--label",
-    "appstrate.adapter=integration",
-    "--label",
-    `appstrate.integration=${spec.packageId}`,
-  ];
-  // Network mode: when MITM is active AND we know the per-run docker
-  // network, the runner joins that network and reaches the MITM listener
-  // via the `sidecar` DNS alias (resolved by Docker's embedded DNS on
-  // any user-defined bridge). Earlier iterations used
-  // `--network container:<sidecar-id>` to share the sidecar's network
-  // namespace — that worked in theory but blew up on Docker Desktop
-  // (macOS): `docker create` succeeds but `docker start` then races
-  // against the daemon's short-id lookup and frequently fails with
-  // `joining network namespace of container: No such container: <id>`,
-  // leaving the runner stuck in `Created`. Bridge-DNS sidesteps that
-  // entirely. Fallback to the default bridge network when no run
-  // network is known (process mode in tests).
-  const networkFlags: string[] = mitm && mitm.runNetwork ? ["--network", mitm.runNetwork] : [];
-  const createArgs = [
-    "create",
-    "--rm",
-    "-i",
-    "--name",
-    containerName,
-    "--security-opt",
-    "no-new-privileges",
-    "--cap-drop",
-    "ALL",
-    "--memory",
-    "256m",
-    "--pids-limit",
-    "128",
-    ...networkFlags,
-    ...labelFlags,
-    ...envFlags,
-    plan.image,
-    plan.containerEntry,
-  ];
-  const containerId = await dockerExec(createArgs);
-  // docker cp <src>/. <id>:/<dst>/  — the trailing `/.` semantics
-  // copy the directory's *contents* into /bundle (already exists in
-  // the runner image as the WORKDIR), so the runner's entrypoint sees
-  // `/bundle/server/index.js` at the path the manifest declared.
-  await dockerExec(["cp", `${plan.bundleRoot}/.`, `${containerId}:/bundle/`]);
-  if (mitm) {
-    // Copy the CA cert into the runner's filesystem at CA_CONTAINER_PATH
-    // (see the const declaration for why it lives under /tmp). The
-    // container's root fs is ephemeral (`--rm` cleans up at exit) so the
-    // cert lives only for the run.
-    await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
-  }
-  return containerId;
-}
-
-/**
- * Best-effort container kill. We use `docker kill` (SIGKILL) rather
- * than `stop` because the integration MCP server's only contract is to
- * read JSON-RPC from stdin — gracefully terminating it via SIGTERM
- * gives nothing back and the `--rm` flag will clean up either way.
- * Errors are swallowed because cleanup runs in shutdown paths where
- * the orphan reaper is the safety net.
- */
-async function killIntegrationContainer(containerId: string): Promise<void> {
-  await dockerExec(["kill", containerId]).catch(() => {});
-}
-
-/**
- * Detect whether the sidecar can reach a Docker daemon. Used to pick
- * between the container-per-integration path (Docker mode — proper
- * runtime isolation, scales to Python/Ruby/… without bloating the
- * sidecar image) and the legacy subprocess path (Process mode — the
- * sidecar is itself a Bun subprocess on the host, so we just spawn
- * `node` / `python3` directly off the host PATH).
- *
- * Result is cached for the sidecar's lifetime — a single `docker info`
- * roundtrip at boot.
- */
-let dockerAvailableCache: boolean | null = null;
-async function isDockerAvailable(): Promise<boolean> {
-  if (dockerAvailableCache !== null) return dockerAvailableCache;
-  try {
-    await dockerExec(["info", "--format", "{{.ServerVersion}}"]);
-    dockerAvailableCache = true;
-  } catch {
-    dockerAvailableCache = false;
-  }
-  return dockerAvailableCache;
-}
-
-/**
- * Subprocess-mode fallback for `server.type`. The runner image's
- * ENTRYPOINT is the language interpreter — symmetric mapping here for
- * the direct-spawn path. Adding a new runtime is one entry on this
- * map AND one entry on `RUNNER_IMAGE_BY_TYPE` above.
- */
-const HOST_INTERPRETER_BY_TYPE: Record<string, { command: string; argsBefore: string[] }> = {
-  node: { command: "node", argsBefore: [] },
-  python: { command: "python3", argsBefore: ["-u"] },
-  // `binary` is a no-op: exec the bundle entry directly.
-  binary: { command: "", argsBefore: [] },
-};
-
-interface SubprocessPlan {
-  command: string;
-  args: string[];
-  cwd: string;
-}
-
-function planSubprocessSpawn(spec: IntegrationSpawnSpec, bundleRoot: string): SubprocessPlan {
-  const t = spec.manifest.server.type;
-  const cfg = HOST_INTERPRETER_BY_TYPE[t];
-  if (!cfg) {
-    throw new Error(`integrations-boot: server.type "${t}" has no host-interpreter mapping`);
-  }
-  const entry = spec.manifest.server.entryPoint;
-  if (!entry) {
-    throw new Error(`integrations-boot: server.entryPoint required for server.type="${t}"`);
-  }
-  const absEntry = normalize(join(bundleRoot, entry));
-  if (!absEntry.startsWith(bundleRoot + posix.sep) && absEntry !== bundleRoot) {
-    throw new Error(`integrations-boot: server.entryPoint escapes bundle root`);
-  }
-  if (t === "binary") {
-    return { command: absEntry, args: [], cwd: bundleRoot };
-  }
-  return {
-    command: cfg.command,
-    args: [...cfg.argsBefore, absEntry],
-    cwd: bundleRoot,
-  };
-}
-
-/**
  * Spawn every integration in parallel, register the surviving ones on a
  * shared {@link McpHost}, and return the materialised tool list. The
  * function never throws — per-integration failures are captured in
@@ -576,11 +254,10 @@ export async function bootIntegrations(
   const spawned: BootIntegrationsResult["spawned"] = [];
   const failed: BootIntegrationsResult["failed"] = [];
   const clients: AppstrateMcpClient[] = [];
-  const containerIds: string[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
 
   // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
-  // need a stable identifier for labelling the integration containers
+  // need a stable identifier for labelling integration containers
   // (lets the orphan reaper match containers back to their run if the
   // sidecar dies mid-shutdown). NEVER derive this from RUN_TOKEN: even
   // a 12-char slice of the signed token would leak ~72 bits of secret
@@ -589,9 +266,26 @@ export async function bootIntegrations(
   // isn't available — orphan-cleanup is best-effort either way.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
-  const useDocker = await isDockerAvailable();
-  logger.info("integration runtime path", {
-    mode: useDocker ? "container" : "subprocess",
+  // Pick the runtime backend (docker if reachable, otherwise the
+  // in-process fallback). The selection logic is in
+  // {@link selectIntegrationRuntimeAdapter}; adding a new backend
+  // (firecracker, podman) means dropping a new
+  // `integration-runtime-adapter-*.ts` module that calls
+  // `registerIntegrationRuntimeAdapter()`.
+  let adapter: IntegrationRuntimeAdapter;
+  try {
+    adapter = await selectIntegrationRuntimeAdapter();
+  } catch (err) {
+    logger.error("integration runtime adapter selection failed", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+  const adapterCtx = await adapter.prepare(runId);
+  logger.info("integration runtime selected", {
+    adapter: adapter.id,
+    listenerBindHost: adapterCtx.listenerBindHost,
     integrations: specs.length,
   });
 
@@ -599,7 +293,7 @@ export async function bootIntegrations(
   // Mint the CA once per run, regardless of how many integrations need it.
   // Per-integration listeners share the same minter (lazily creates leaf
   // certs per upstream SNI host). The CA cert PEM lands on local fs so
-  // `docker cp` can ferry it into each runner container's trust store.
+  // the adapter can ferry it into each runner's trust store.
   const mitmIntegrationCount = specs.filter(
     (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
   ).length;
@@ -643,17 +337,6 @@ export async function bootIntegrations(
     }
   }
 
-  // Per-run docker network name — the platform creates
-  // `appstrate-exec-<runId>` and attaches the sidecar with alias
-  // `sidecar`. The runner joins the same network so its HTTPS_PROXY can
-  // resolve `http://sidecar:<port>` via Docker's embedded DNS. We read
-  // `RUN_ID` straight off env (the platform sets it on sidecar create).
-  // Falls back to `null` in process mode / tests, where MITM degrades to
-  // the loopback path (process mode shares the parent's NS, so
-  // 127.0.0.1 still works).
-  const runNetwork =
-    useDocker && process.env.RUN_ID ? `appstrate-exec-${process.env.RUN_ID}` : null;
-
   for (const spec of specs) {
     try {
       const wantsMitm =
@@ -662,8 +345,13 @@ export async function bootIntegrations(
       // Per-integration MITM listener (only when the CA came up + the
       // integration declared `delivery.http`).
       let listener: MitmListenerHandle | null = null;
-      let mitmProxyUrl: string | null = null;
-      if (wantsMitm && sharedMinter !== null && runCaBundle !== null) {
+      let mitmCtx: RuntimeMitmContext | null = null;
+      if (
+        wantsMitm &&
+        sharedMinter !== null &&
+        runCaBundle !== null &&
+        runCaCertHostPath !== null
+      ) {
         const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
         const source = createIntegrationCredentialsSource({
           packageId: spec.packageId,
@@ -675,11 +363,10 @@ export async function bootIntegrations(
           caBundle: runCaBundle,
           minter: sharedMinter,
           credentials: source,
-          // Bind to 0.0.0.0 in Docker mode so the runner — joined to the
-          // per-run network — can reach the listener via the sidecar's
-          // `sidecar` DNS alias. Process mode keeps the loopback default
-          // (no other process should reach it).
-          ...(runNetwork ? { host: "0.0.0.0" } : {}),
+          // Adapter decides where the listener should bind so the
+          // runner can reach it (0.0.0.0 for bridged networks, 127.0.0.1
+          // when the runner shares the parent's NS).
+          host: adapterCtx.listenerBindHost,
           onEvent: (event) => {
             // Filter sensitive bits (URLs may carry signed query params).
             const safe =
@@ -699,100 +386,45 @@ export async function bootIntegrations(
         });
         await listener.ready;
         mitmListeners.push(listener);
-        // The runner reaches the listener via the per-run network's DNS
-        // alias `sidecar` — substitute the bind host (likely 0.0.0.0)
-        // for the alias before handing the URL to the runner's
-        // HTTPS_PROXY env. Process mode keeps the 127.0.0.1 URL
-        // unchanged (subprocess shares the parent's NS).
-        const localUrl = listener.proxyUrl();
-        if (runNetwork) {
-          const port = listener.address().port;
-          mitmProxyUrl = `http://sidecar:${port}`;
-        } else {
-          mitmProxyUrl = localUrl;
-        }
+        const port = listener.address().port;
+        const runnerProxyUrl = adapterCtx.proxyUrlFor(port);
+        mitmCtx = {
+          proxyUrl: runnerProxyUrl,
+          caCertHostPath: runCaCertHostPath,
+        };
         logger.info("integration MITM listener ready", {
           packageId: spec.packageId,
-          localUrl,
-          runnerProxyUrl: mitmProxyUrl,
+          localUrl: listener.proxyUrl(),
+          runnerProxyUrl,
         });
       }
 
       const bytes = await fetchBundleBytes(spec.packageId, bundleFetchOpts);
       const root = await extractBundle(bytes, spec.namespace);
 
-      let transport: SubprocessTransport;
-      let containerId: string | null = null;
-      let plannedImage: string | null = null;
-      if (useDocker) {
-        const plan = planIntegrationContainer(spec, root);
-        plannedImage = plan.image;
-        const mitmExtras: MitmSpawnExtras | undefined =
-          mitmProxyUrl !== null && runCaCertHostPath !== null
-            ? {
-                proxyUrl: mitmProxyUrl,
-                runNetwork,
-                caCertHostPath: runCaCertHostPath,
-              }
-            : undefined;
-        containerId = await setupIntegrationContainer(runId, spec, plan, mitmExtras);
-        containerIds.push(containerId);
-        // `docker start -ai <id>` starts the container's entrypoint (e.g.
-        // `node /bundle/server/index.js`) AND attaches stdio. SubprocessTransport
-        // spawns this as a child process, pipes the JSON-RPC line stream
-        // through, and tears the whole thing down when `.close()` is
-        // called. Auto-rm on the container side handles cleanup if we
-        // crash without a graceful close.
-        transport = new SubprocessTransport({
-          command: "docker",
-          args: ["start", "-ai", containerId],
-          // Note: `env` is NOT passed to the subprocess (docker CLI)
-          // because credentials are already baked into the container at
-          // create-time via `-e KEY=VAL`. The CLI itself only needs the
-          // ambient PATH/HOME/DOCKER_HOST to find the daemon socket.
-          envPassthrough: ["PATH", "HOME", "DOCKER_HOST"],
-          onStderrLine: (line) => {
-            logger.info("integration stderr", { packageId: spec.packageId, line });
-          },
-        });
-      } else {
-        const plan = planSubprocessSpawn(spec, root);
-        // Process-mode MITM: subprocess inherits the parent's network NS,
-        // so 127.0.0.1:<port> reaches our listener directly. CA env vars
-        // point at the on-disk PEM the planner already materialised. Both
-        // are unset when this integration isn't on the MITM path.
-        const procEnv: Record<string, string> = { ...spec.spawnEnv };
-        if (mitmProxyUrl !== null && runCaCertHostPath !== null) {
-          procEnv.HTTPS_PROXY = mitmProxyUrl;
-          procEnv.HTTP_PROXY = mitmProxyUrl;
-          procEnv.https_proxy = mitmProxyUrl;
-          procEnv.http_proxy = mitmProxyUrl;
-          procEnv.NO_PROXY = "127.0.0.1,localhost";
-          procEnv.no_proxy = "127.0.0.1,localhost";
-          procEnv.NODE_EXTRA_CA_CERTS = runCaCertHostPath;
-          procEnv.SSL_CERT_FILE = runCaCertHostPath;
-          procEnv.REQUESTS_CA_BUNDLE = runCaCertHostPath;
-          procEnv.CURL_CA_BUNDLE = runCaCertHostPath;
-        }
-        transport = new SubprocessTransport({
-          command: plan.command,
-          args: plan.args,
-          cwd: plan.cwd,
-          env: procEnv,
-          envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],
-          onStderrLine: (line) => {
-            logger.info("integration stderr", { packageId: spec.packageId, line });
-          },
-        });
-      }
+      const spawnedIntegration = await adapter.spawn({
+        runId,
+        spec,
+        bundleRoot: root,
+        mitm: mitmCtx,
+        onStderrLine: (line) => {
+          logger.info("integration stderr", { packageId: spec.packageId, line });
+        },
+      });
 
       const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
-      const connectPromise = client.connect(transport);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000).unref?.(),
-      );
-      await Promise.race([connectPromise, timeoutPromise]);
-      const wrapped = wrapClient(client, transport);
+      const connectPromise = client.connect(spawnedIntegration.transport);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
+        timeoutId.unref?.();
+      });
+      try {
+        await Promise.race([connectPromise, timeoutPromise]);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      }
+      const wrapped = wrapClient(client, spawnedIntegration.transport);
       const sizeBefore = host.size();
       await host.register({ namespace: spec.namespace, client: wrapped });
       const added = host.size() - sizeBefore;
@@ -805,9 +437,10 @@ export async function bootIntegrations(
       logger.info("integration registered", {
         packageId: spec.packageId,
         namespace: spec.namespace,
-        mode: useDocker ? "container" : "subprocess",
-        ...(containerId ? { containerId: containerId.slice(0, 12) } : {}),
-        ...(plannedImage ? { image: plannedImage } : {}),
+        adapter: adapter.id,
+        ...(spawnedIntegration.diagnosticId
+          ? { diagnosticId: spawnedIntegration.diagnosticId }
+          : {}),
         toolCount: added,
       });
     } catch (err) {
@@ -827,25 +460,36 @@ export async function bootIntegrations(
     spawned,
     failed,
     shutdown: async () => {
-      await host.dispose().catch(() => {});
+      await host.dispose().catch((err) => {
+        logger.debug("integration host dispose failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       for (const c of clients) {
-        await c.close().catch(() => {});
+        await c.close().catch((err) => {
+          logger.debug("integration client close failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
-      // Kill containers AFTER closing MCP clients — closing the client
-      // ends the `docker start -ai` subprocess (stdin EOF reaches the
-      // server which exits → container exits → --rm cleans up). The
-      // explicit `docker kill` is the belt-and-suspenders path for
-      // misbehaving servers that ignore stdin EOF.
-      for (const id of containerIds) {
-        await killIntegrationContainer(id);
+      // Adapter teardown AFTER closing MCP clients — closing the client
+      // ends the runner's stdio (subprocess EOF / docker-attach pipe
+      // close → server exits → container/process exits). The adapter's
+      // shutdown is the belt-and-suspenders path for misbehaving servers
+      // that ignore stdin EOF.
+      try {
+        await adapter.shutdown();
+      } catch (err) {
+        logger.warn("integration adapter shutdown failed", {
+          adapter: adapter.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      // Close MITM listeners after containers are torn down — listeners
-      // hold open the per-SNI Bun.serve sockets + cached leaf certs.
-      // Order matters only weakly; either way the CA cert file unlinks
-      // last so any straggler dump-on-shutdown still has the bytes.
-      for (const listener of mitmListeners) {
+      // Close MITM listeners after the runtimes are torn down — listeners
+      // hold open per-SNI Bun.serve sockets + cached leaf certs.
+      for (const l of mitmListeners) {
         try {
-          await listener.close();
+          await l.close();
         } catch {
           // ignore — listener already torn down via SIGTERM
         }

@@ -310,29 +310,44 @@ The sidecar's `integrations-boot.ts` then spawns one MCP server **per integratio
 ```
 sidecar (Bun, +docker-cli, /var/run/docker.sock mounted, runs as root only when integrations.length > 0)
   ├─ readIntegrationSpecsFromEnv()                  ← INTEGRATIONS_TO_SPAWN_JSON
-  ├─ fetchBundleBytes()                             ← platform /internal/integration-bundle/...
-  ├─ extractBundle() → /tmp/afps-integ-{ns}-XXX/    ← fflate unzip in-sidecar
-  ├─ isDockerAvailable()                            ← `docker info`; falls back to host subprocess in process mode
-  ├─ planIntegrationContainer():                    ← `RUNNER_IMAGE_BY_TYPE[server.type]`
-  │     node   → appstrate-mcp-runner-node:latest    (75 MB)
-  │     python → appstrate-mcp-runner-python:latest  (49 MB)
-  │     binary → appstrate-mcp-runner-binary:latest  (11 MB)
-  ├─ docker create --rm -i --cap-drop ALL --memory 256m --pids-limit 128 \
-  │       -e <spawnEnv...> --label appstrate.run=$RUN_ID --label appstrate.managed=true \
-  │       <image> /bundle/<entryPoint>
-  ├─ docker cp /tmp/afps-integ-{ns}-XXX/. <id>:/bundle/
-  ├─ SubprocessTransport(["docker","start","-ai",<id>]) ← MCP stdio piped through docker attach
-  ├─ Client.connect → initialize → tools/list       ← MCP handshake
-  └─ McpHost.register({ namespace, client })        ← tools exposed to the agent as {ns}__{tool}
+  ├─ selectIntegrationRuntimeAdapter()              ← INTEGRATION_RUNTIME_ADAPTER env override, or auto-detect
+  │                                                    by descending priority (docker probe → process fallback)
+  ├─ adapter.prepare(runId)                         ← returns { listenerBindHost, proxyUrlFor(port) }
+  │
+  ├─ for each spec:
+  │     ├─ fetchBundleBytes()                       ← platform /internal/integration-bundle/...
+  │     ├─ extractBundle() → /tmp/afps-integ-{ns}-XXX/  ← fflate unzip in-sidecar
+  │     ├─ adapter.spawn({ runId, spec, bundleRoot, mitm })
+  │     │     ── docker adapter ──
+  │     │     RUNNER_IMAGE_BY_TYPE[server.type]:
+  │     │       node   → appstrate-mcp-runner-node:latest    (75 MB)
+  │     │       python → appstrate-mcp-runner-python:latest  (49 MB)
+  │     │       binary → appstrate-mcp-runner-binary:latest  (11 MB)
+  │     │     docker create --rm -i --cap-drop ALL --memory 256m --pids-limit 128 \
+  │     │         --network appstrate-exec-<runId> -e <spawnEnv...> \
+  │     │         --label appstrate.run=$RUN_ID --label appstrate.managed=true \
+  │     │         <image> /bundle/<entryPoint>
+  │     │     docker cp /tmp/afps-integ-{ns}-XXX/. <id>:/bundle/
+  │     │     docker cp <ca.pem> <id>:/tmp/appstrate-ca.pem      ← MITM only
+  │     │     → SubprocessTransport(["docker","start","-ai",<id>])
+  │     │     ── process adapter (dev / tests) ──
+  │     │     HOST_INTERPRETER_BY_TYPE[server.type]:
+  │     │       node → "node", python → "python3 -u", binary → exec entry directly
+  │     │     → SubprocessTransport({ command, args, cwd, env: { ...spawnEnv, ...mitmEnv } })
+  │     ├─ Client.connect → initialize → tools/list   ← MCP handshake
+  │     └─ McpHost.register({ namespace, client })    ← tools exposed to the agent as {ns}__{tool}
+  │
+  └─ on shutdown: close MCP clients → adapter.shutdown() → close MITM listeners → unlink CA file
 ```
 
 Key invariants:
 
-- **Sidecar minimal by design**: no `node`, no `python` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` — the sidecar image (132 MB) doesn't grow.
+- **Sidecar minimal by design**: no `node`, no `python` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` (in `integration-runtime-adapter-docker.ts`) — the sidecar image (132 MB) doesn't grow.
+- **Pluggable runtime adapter** (`integration-runtime-adapter.ts`): the sidecar's `bootIntegrations` is orchestrator-agnostic. `selectIntegrationRuntimeAdapter()` walks a registry in descending priority order (`docker` priority 100, `process` priority 0, future `firecracker`/`podman` slot between) and picks the first one whose `isAvailable()` resolves true. Each adapter owns: how to spawn the runner, what host the MITM listener should bind to (`listenerBindHost`), what URL the runner uses to reach it (`proxyUrlFor(port)`), where the CA cert lands inside the runtime, and how to tear down. Adding Firecracker is one new `integration-runtime-adapter-firecracker.ts` that calls `registerIntegrationRuntimeAdapter()` — nothing in `integrations-boot.ts` changes. Override the auto-detect with `INTEGRATION_RUNTIME_ADAPTER=docker|process|firecracker|…`.
 - **Docker socket gated by need**: `docker-orchestrator.createSidecar` only adds `binds: ["/var/run/docker.sock"]` + `user: "0:0"` when `spec.integrations.length > 0`. Runs without integrations keep the default `nobody:nobody` user with no socket.
 - **Bundle delivery is HTTP, not env**: `INTEGRATIONS_TO_SPAWN_JSON` carries only manifest metadata + decrypted spawn env. Bundle bytes (potentially several MB) ship out-of-band via `GET /internal/integration-bundle/:scope/:name`.
-- **Auto-cleanup**: `docker create --rm` auto-removes the container when stdio closes; explicit `docker kill` in the sidecar's `bootIntegrations().shutdown()` covers misbehaving servers; orphan reaper sweeps anything missed by `appstrate.managed=true appstrate.run=<runId>`.
-- **Process-mode fallback**: when `docker info` fails (sidecar running as a host subprocess in dev), `bootIntegrations` falls back to `Bun.spawn(["node"|"python3", entry])` against the host PATH — same MCP wire, no container isolation. Tests run in this mode.
+- **Auto-cleanup**: `docker create --rm` auto-removes the container when stdio closes; the docker adapter's `shutdown()` is the explicit-kill belt-and-suspenders path for misbehaving servers; orphan reaper sweeps anything missed by `appstrate.managed=true appstrate.run=<runId>`.
+- **Process-mode fallback**: when `docker info` fails (sidecar running as a host subprocess in dev), the process adapter takes over via `Bun.spawn(["node"|"python3", entry])` against the host PATH — same MCP wire, no container isolation. Tests run in this mode.
 - **MCPB compatibility preserved**: `server.type` matches the MCPB standard exactly. `.afps` integration bundles are installable as `.mcpb` extensions elsewhere and vice-versa.
 - **Tools surfaced to the LLM**: the sidecar's `McpHost` multiplexes spawned tools under a namespaced prefix (`{namespace}__{tool}`). The agent's `runtime-pi/mcp/direct.ts` discovers them via `tools/list` and registers one Pi extension per advertised non-first-party tool that forwards verbatim to `mcp.callTool`.
 
