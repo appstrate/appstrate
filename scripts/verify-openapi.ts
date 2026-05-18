@@ -126,6 +126,7 @@ const expectedEndpoints = [
   "DELETE /api/integrations/{packageId}/oauth-clients/{authKey}",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
+  "GET /api/integrations/{packageId}/auths/{authKey}/required-scopes",
   "GET /api/integrations/{packageId}/connections",
   "DELETE /api/integrations/{packageId}/connections/{connectionId}",
 

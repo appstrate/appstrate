@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Phase 2 — integration scope-resolver. Exercises the dynamic scope
+ * union the OAuth kickoff requests for an integration auth:
+ *
+ *   - `computeRequiredScopes` walks installed agents, infers scopes from
+ *     tool selections + explicit agent scopes, unions everything.
+ *   - `getCurrentGrantedScopes` reads the high-water-mark across the
+ *     actor's existing connections (drives incremental consent).
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
+import { integrationConnections } from "@appstrate/db/schema";
+import {
+  computeRequiredScopes,
+  getCurrentGrantedScopes,
+} from "../../../src/services/integration-scope-resolver.ts";
+
+const INTEGRATION_ID = "@official/gmail";
+
+function gmailManifest(): Record<string, unknown> {
+  return {
+    manifestVersion: "1.1",
+    type: "integration",
+    name: INTEGRATION_ID,
+    version: "1.0.0",
+    displayName: "Gmail",
+    server: { type: "python", entryPoint: "./server.py" },
+    auths: {
+      primary: {
+        type: "oauth2",
+        authorizationUrl: "https://idp/a",
+        tokenUrl: "https://idp/t",
+        authorizedUris: ["https://api/*"],
+        delivery: { http: {} },
+        availableScopes: [
+          { value: "read", label: "Read" },
+          { value: "send", label: "Send" },
+          { value: "delete", label: "Delete" },
+        ],
+      },
+    },
+    tools: {
+      list_messages: { requiredScopes: ["read"] },
+      get_message: { requiredScopes: ["read"] },
+      send_message: { requiredScopes: ["send"] },
+      delete_message: { requiredScopes: ["delete"] },
+    },
+  };
+}
+
+function agentManifest(name: string, integrationDep: unknown): Record<string, unknown> {
+  return {
+    name,
+    version: "1.0.0",
+    type: "agent",
+    schemaVersion: "1.0",
+    displayName: name,
+    dependencies: { integrations: { [INTEGRATION_ID]: integrationDep } },
+  };
+}
+
+describe("integration-scope-resolver", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "scope" });
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gmailManifest(),
+    });
+  });
+
+  describe("computeRequiredScopes", () => {
+    it("returns empty when no agent depends on the integration", async () => {
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required).toEqual([]);
+      expect(out.breakdown).toEqual([]);
+    });
+
+    it("returns empty when the integration package itself isn't visible", async () => {
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: "@nothing/here",
+        authKey: "primary",
+      });
+      expect(out.required).toEqual([]);
+    });
+
+    it("infers required scopes from a single agent's tool selection", async () => {
+      await seedPackage({
+        id: "@scope/agent-reader",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-reader", {
+          version: "^1.0.0",
+          tools: ["list_messages", "get_message"],
+        }),
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-reader",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required).toEqual(["read"]);
+      expect(out.breakdown).toHaveLength(1);
+      expect(out.breakdown[0]!.agentId).toBe("@scope/agent-reader");
+      expect(out.breakdown[0]!.viaTools).toEqual(["read"]);
+    });
+
+    it("unions scopes across multiple installed agents (dedupes overlap)", async () => {
+      // Reader uses gmail.readonly. Sender uses gmail.send. Union = both.
+      for (const [id, tools] of [
+        ["@scope/reader", ["list_messages"]],
+        ["@scope/sender", ["send_message"]],
+        ["@scope/another-reader", ["get_message"]], // overlaps reader
+      ] as const) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "agent",
+          draftManifest: agentManifest(id, { version: "^1.0.0", tools: [...tools] }),
+        });
+        await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      }
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required.sort()).toEqual(["read", "send"]);
+      expect(out.breakdown).toHaveLength(3);
+    });
+
+    it("agent declaring no tools (legacy string dep) contributes all declared tool scopes", async () => {
+      await seedPackage({
+        id: "@scope/agent-legacy",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-legacy", "^1.0.0"),
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-legacy",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required.sort()).toEqual(["delete", "read", "send"]);
+    });
+
+    it("includes explicit agent.scopes[] in the breakdown and union", async () => {
+      await seedPackage({
+        id: "@scope/agent-manual",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-manual", {
+          version: "^1.0.0",
+          tools: ["list_messages"],
+          scopes: ["delete"],
+        }),
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-manual",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required.sort()).toEqual(["delete", "read"]);
+      const entry = out.breakdown[0]!;
+      expect(entry.viaTools).toEqual(["read"]);
+      expect(entry.viaExplicit).toEqual(["delete"]);
+    });
+
+    it("agent that declared rich form with empty tools[] contributes only its explicit scopes", async () => {
+      await seedPackage({
+        id: "@scope/agent-empty",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-empty", {
+          version: "^1.0.0",
+          tools: [],
+          scopes: ["read"],
+        }),
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-empty",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required).toEqual(["read"]);
+      expect(out.breakdown[0]!.viaTools).toEqual([]);
+      expect(out.breakdown[0]!.viaExplicit).toEqual(["read"]);
+    });
+
+    it("skips agents whose dep doesn't reference this integration", async () => {
+      await seedPackage({
+        id: "@scope/agent-other",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: {
+          name: "@scope/agent-other",
+          version: "1.0.0",
+          type: "agent",
+          schemaVersion: "1.0",
+          displayName: "Other",
+          dependencies: { integrations: { "@some/other": "^1.0.0" } },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-other",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required).toEqual([]);
+    });
+  });
+
+  describe("getCurrentGrantedScopes", () => {
+    it("returns empty when the actor has no connection", async () => {
+      const granted = await getCurrentGrantedScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        actor: { type: "user", id: ctx.user.id },
+      });
+      expect(granted).toEqual([]);
+    });
+
+    it("returns the union across the actor's existing connections (multi-account)", async () => {
+      await db.insert(integrationConnections).values([
+        {
+          integrationPackageId: INTEGRATION_ID,
+          authKey: "primary",
+          accountId: "acct-1",
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: ["read"],
+        },
+        {
+          integrationPackageId: INTEGRATION_ID,
+          authKey: "primary",
+          accountId: "acct-2",
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: ["read", "send"],
+        },
+      ]);
+      const granted = await getCurrentGrantedScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        actor: { type: "user", id: ctx.user.id },
+      });
+      expect(granted.sort()).toEqual(["read", "send"]);
+    });
+
+    it("filters by authKey — connections for a different auth don't leak", async () => {
+      await db.insert(integrationConnections).values([
+        {
+          integrationPackageId: INTEGRATION_ID,
+          authKey: "primary",
+          accountId: "acct-1",
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: ["read"],
+        },
+        {
+          integrationPackageId: INTEGRATION_ID,
+          authKey: "secondary",
+          accountId: "acct-2",
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: ["admin"],
+        },
+      ]);
+      const granted = await getCurrentGrantedScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        actor: { type: "user", id: ctx.user.id },
+      });
+      expect(granted).toEqual(["read"]);
+    });
+  });
+});

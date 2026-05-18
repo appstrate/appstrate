@@ -401,6 +401,126 @@ describe("OAuth2 connect initiate", () => {
   });
 });
 
+describe("GET /api/integrations/:packageId/auths/:authKey/required-scopes", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+  });
+
+  it("returns defaults + empty required/granted when no agent uses the integration", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/required-scopes", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      defaults: string[];
+      required: string[];
+      granted: string[];
+      union: string[];
+      missingFromGranted: string[];
+      breakdown: { agentId: string }[];
+    };
+    expect(body.defaults.sort()).toEqual(["email", "openid"]);
+    expect(body.required).toEqual([]);
+    expect(body.granted).toEqual([]);
+    expect(body.union.sort()).toEqual(["email", "openid"]);
+    expect(body.missingFromGranted.sort()).toEqual(["email", "openid"]);
+    expect(body.breakdown).toEqual([]);
+  });
+
+  it("includes scopes inferred from agent tool selection", async () => {
+    // Use a manifest with availableScopes + per-tool requiredScopes for inference.
+    const richManifest: IntegrationManifest = {
+      manifestVersion: "1.1",
+      type: "integration",
+      name: "@myorg/gmail-rich",
+      version: "1.0.0",
+      displayName: "Gmail Rich",
+      server: { type: "python", entryPoint: "./server.py" },
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+          authorizedUris: ["https://api/*"],
+          delivery: { http: {} },
+          scopes: [],
+          availableScopes: [
+            { value: "read", label: "Read" },
+            { value: "send", label: "Send" },
+          ],
+        },
+      },
+      tools: {
+        list_messages: { requiredScopes: ["read"] },
+        send_message: { requiredScopes: ["send"] },
+      },
+    };
+    await seedIntegration(ctx.orgId, richManifest);
+    await seedPackage({
+      id: "@myorg/agent-x",
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: {
+        name: "@myorg/agent-x",
+        version: "1.0.0",
+        type: "agent",
+        schemaVersion: "1.0",
+        displayName: "X",
+        dependencies: {
+          integrations: { "@myorg/gmail-rich": { version: "^1.0.0", tools: ["send_message"] } },
+        },
+      },
+    });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: "@myorg/agent-x",
+    });
+
+    const res = await app.request(
+      "/api/integrations/@myorg/gmail-rich/auths/primary/required-scopes",
+      { headers: authHeaders(ctx) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      required: string[];
+      union: string[];
+      breakdown: { agentId: string; viaTools: string[] }[];
+    };
+    expect(body.required).toEqual(["send"]);
+    expect(body.union).toEqual(["send"]);
+    expect(body.breakdown).toHaveLength(1);
+    expect(body.breakdown[0]!.agentId).toBe("@myorg/agent-x");
+    expect(body.breakdown[0]!.viaTools).toEqual(["send"]);
+  });
+
+  it("reflects existing connection scopes in granted + drops them from missingFromGranted", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await db.insert(integrationConnections).values({
+      integrationPackageId: "@myorg/gmail",
+      authKey: "google",
+      accountId: "acct-1",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      credentialsEncrypted: "x",
+      scopesGranted: ["openid"],
+    });
+
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/required-scopes", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      granted: string[];
+      missingFromGranted: string[];
+    };
+    expect(body.granted).toEqual(["openid"]);
+    expect(body.missingFromGranted).toEqual(["email"]);
+  });
+});
+
 describe("GET /api/integrations/callback (public — no session required)", () => {
   beforeEach(async () => {
     await truncateAll();

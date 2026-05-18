@@ -66,6 +66,10 @@ import {
   saveIntegrationConnection,
   upsertIntegrationOAuthClient,
 } from "../services/integration-connections.ts";
+import {
+  computeRequiredScopes,
+  getCurrentGrantedScopes,
+} from "../services/integration-scope-resolver.ts";
 import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
@@ -320,6 +324,42 @@ export function createIntegrationsRouter() {
     },
   );
 
+  // Phase 2 (niveau 2 scope model) — surface the scope union the OAuth
+  // kickoff is going to request. UI uses this to show "this integration
+  // will request: X, Y, Z" before the user clicks Connect, and to detect
+  // the "agent install needs an upgrade" case (required ⊄ granted).
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/required-scopes",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const auth = await readIntegrationAuth(scope, packageId, authKey);
+      const [computed, granted] = await Promise.all([
+        computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
+        getCurrentGrantedScopes({
+          scope,
+          integrationPackageId: packageId,
+          authKey,
+          actor,
+        }),
+      ]);
+      const defaults = auth.scopes ?? [];
+      const union = [...new Set([...defaults, ...computed.required, ...granted])];
+      const missingFromGranted = union.filter((s) => !granted.includes(s));
+      return c.json({
+        defaults,
+        required: computed.required,
+        granted,
+        union,
+        missingFromGranted,
+        breakdown: computed.breakdown,
+      });
+    },
+  );
+
   router.put(
     "/:packageId{@[^/]+/[^/]+}/oauth-clients/:authKey",
     requirePermission("integrations", "install"),
@@ -421,7 +461,35 @@ export function createIntegrationsRouter() {
         );
       }
       const redirectUri = client.redirectUri ?? getOAuthCallbackUrl();
-      const scopes = [...(auth.scopes ?? []), ...(body.scopes ?? [])];
+      // Niveau 2 (Phase 2) — request the strict superset of:
+      //   - manifest defaults (`auth.scopes`)
+      //   - caller-supplied (`body.scopes`)
+      //   - inferred from agents installed in this app (`computeRequiredScopes`)
+      //   - currently granted across the actor's existing connections
+      //     (`getCurrentGrantedScopes`) → incremental consent
+      // Granted is unioned so re-consent never silently shrinks the set
+      // the user already authorized.
+      const [computed, granted] = await Promise.all([
+        computeRequiredScopes({
+          scope,
+          integrationPackageId: packageId,
+          authKey,
+        }),
+        getCurrentGrantedScopes({
+          scope,
+          integrationPackageId: packageId,
+          authKey,
+          actor,
+        }),
+      ]);
+      const scopes = [
+        ...new Set([
+          ...(auth.scopes ?? []),
+          ...(body.scopes ?? []),
+          ...computed.required,
+          ...granted,
+        ]),
+      ];
       const result = await initiateIntegrationOAuth(oauthStateStore, {
         packageId,
         authKey,

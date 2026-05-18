@@ -408,6 +408,62 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/auths/{authKey}/required-scopes": {
+    get: {
+      operationId: "getIntegrationRequiredScopes",
+      tags: ["Integrations"],
+      summary: "Compute the OAuth scope union the kickoff will request",
+      description:
+        "Returns the niveau 2 scope envelope for `(application, integration, auth)`: the manifest defaults, the dynamic union inferred from installed agents (via `tools.{name}.requiredScopes`), the actor's currently-granted scopes (high-water-mark across accounts), the strict union that the OAuth kickoff actually requests, the subset that's not yet granted (drives the incremental-consent UI), and a per-agent breakdown for the 'which agent asked for X' surface.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+        authKeyParam,
+      ],
+      responses: {
+        "200": {
+          description: "Scope envelope",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "defaults",
+                  "required",
+                  "granted",
+                  "union",
+                  "missingFromGranted",
+                  "breakdown",
+                ],
+                properties: {
+                  defaults: { type: "array", items: { type: "string" } },
+                  required: { type: "array", items: { type: "string" } },
+                  granted: { type: "array", items: { type: "string" } },
+                  union: { type: "array", items: { type: "string" } },
+                  missingFromGranted: { type: "array", items: { type: "string" } },
+                  breakdown: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["agentId", "viaTools", "viaExplicit"],
+                      properties: {
+                        agentId: { type: "string" },
+                        viaTools: { type: "array", items: { type: "string" } },
+                        viaExplicit: { type: "array", items: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
     post: {
       operationId: "connectIntegrationFields",
