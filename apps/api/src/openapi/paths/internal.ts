@@ -329,6 +329,124 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/integration-credentials/{scope}/{name}": {
+    get: {
+      operationId: "getIntegrationCredentials",
+      tags: ["Internal"],
+      summary: "Fetch live credentials + HTTP delivery plans for an installed integration",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Live credentials + delivery plans + per-auth expiries.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
+                properties: {
+                  auths: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["authKey", "authType", "fields", "authorizedUris"],
+                      properties: {
+                        authKey: { type: "string" },
+                        authType: { type: "string" },
+                        fields: { type: "object", additionalProperties: { type: "string" } },
+                        authorizedUris: { type: "array", items: { type: "string" } },
+                        audience: { type: "string" },
+                        expiresAt: { type: "string", format: "date-time" },
+                        scopesGranted: { type: "array", items: { type: "string" } },
+                      },
+                    },
+                  },
+                  deliveryPlans: {
+                    type: "object",
+                    additionalProperties: {
+                      type: "object",
+                      required: ["headerName", "headerPrefix", "value", "allowServerOverride"],
+                      properties: {
+                        headerName: { type: "string" },
+                        headerPrefix: { type: "string" },
+                        value: { type: "string" },
+                        allowServerOverride: { type: "boolean" },
+                      },
+                    },
+                  },
+                  expiresAtEpochMs: {
+                    type: "object",
+                    additionalProperties: { type: ["integer", "null"] },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description:
+            "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}/refresh": {
+    post: {
+      operationId: "refreshIntegrationCredentials",
+      tags: ["Internal"],
+      summary: "Force-refresh OAuth2 credentials for an installed integration",
+      description:
+        "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Refreshed credentials + delivery plans + per-auth expiries.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
+                properties: {
+                  auths: { type: "array", items: { type: "object" } },
+                  deliveryPlans: { type: "object", additionalProperties: { type: "object" } },
+                  expiresAtEpochMs: {
+                    type: "object",
+                    additionalProperties: { type: ["integer", "null"] },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description: "Refresh token revoked upstream — same semantics as the GET endpoint.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/internal/integration-bundle/{scope}/{name}": {
     get: {
       operationId: "getIntegrationBundle",

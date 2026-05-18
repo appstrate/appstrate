@@ -44,6 +44,7 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
+import { resolveLiveIntegrationCredentials } from "../services/integration-credentials-resolver.ts";
 
 /**
  * Safety margin used when deciding whether a stored access token is still
@@ -463,6 +464,99 @@ export function createInternalRouter() {
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+  });
+
+  /**
+   * Pin: the running agent must declare this integration in
+   * `dependencies.integrations` AND it must be installed in the run's
+   * application. Same guard used by /integration-bundle and the Phase 1.5
+   * /integration-credentials endpoints to keep a leaked run token from
+   * enumerating integration secrets across the org.
+   */
+  async function assertAgentDeclaresIntegration(
+    packageId: string,
+    run: { packageId: string; orgId: string; applicationId: string },
+    runId: string,
+  ): Promise<void> {
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    if (!agent) throw notFound("Agent not found");
+    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const integrations = asRecord(deps.integrations);
+    if (!(packageId in integrations)) {
+      logger.warn("Integration credentials request rejected — not declared by agent", {
+        runId,
+        packageId,
+        agentId: agent.id,
+      });
+      throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
+    }
+    const [installRow] = await db
+      .select({ packageId: applicationPackages.packageId })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, run.applicationId),
+          eq(applicationPackages.packageId, packageId),
+        ),
+      )
+      .limit(1);
+    if (!installRow) {
+      throw notFound(`Integration '${packageId}' is not installed in this application`);
+    }
+  }
+
+  // GET /internal/integration-credentials/:scope/:name — Phase 1.5
+  // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
+  // delivery plans for an integration the running agent depends on.
+  // OAuth tokens are refreshed proactively if within the lead window;
+  // POST .../refresh forces a refresh regardless.
+  router.get("/integration-credentials/:scope{@[^/]+}/:name", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+    const result = await resolveLiveIntegrationCredentials(packageId, {
+      runId,
+      orgId: run.orgId,
+      applicationId: run.applicationId,
+      agentPackageId: run.packageId,
+      actor,
+    });
+    logger.info("Integration credentials delivered", {
+      runId,
+      packageId,
+      authCount: result.auths.length,
+      deliveryPlanCount: Object.keys(result.deliveryPlans).length,
+    });
+    return c.json(result);
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/refresh — Phase 1.5
+  // Sidecar-only. Force-refresh every OAuth2 auth on this integration,
+  // then return the freshly-resolved payload. Called by the MITM
+  // listener's `refreshOnUnauthorized` hook when upstream returns 401.
+  router.post("/integration-credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+    const result = await resolveLiveIntegrationCredentials(
+      packageId,
+      {
+        runId,
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        agentPackageId: run.packageId,
+        actor,
+      },
+      { forceRefresh: true },
+    );
+    logger.info("Integration credentials refreshed", {
+      runId,
+      packageId,
+      authCount: result.auths.length,
+    });
+    return c.json(result);
   });
 
   // GET /internal/integration-bundle/:scope/:name — Phase 1.4

@@ -29,7 +29,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
-import { decryptCredentials } from "@appstrate/connect";
+import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
@@ -133,15 +133,21 @@ async function resolveOne(
     return null;
   }
 
-  // (c) Resolve connections + build spawnEnv from delivery.env mappings.
+  // (c) Resolve connections + build spawnEnv from delivery.env mappings
+  // AND httpDeliveryAuths from delivery.http (Phase 1.5).
+  //
   // Note: bundle bytes are NOT inlined into the spec — the sidecar fetches
   // them via `GET /internal/integration-bundle/...` at boot because base64
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
-  const spawnEnv = await resolveDeliveryEnv(packageId, applicationId, actor, manifest);
-  if (!spawnEnv) {
-    // resolveDeliveryEnv already logged the reason (missing connection,
-    // decrypt failure, no env mapping); skip without surfacing further.
+  //
+  // An integration is viable if EITHER `delivery.env` OR `delivery.http`
+  // resolved to something — pure-http integrations (no env vars) still
+  // need to spawn with an empty `spawnEnv`.
+  const deliveries = await resolveDeliveries(packageId, applicationId, actor, manifest);
+  if (!deliveries) {
+    // resolveDeliveries already logged the reason (missing connection,
+    // decrypt failure, no delivery mapping); skip without surfacing further.
     return null;
   }
 
@@ -162,28 +168,43 @@ async function resolveOne(
       },
       ...(manifest.transport ? { transport: { type: manifest.transport.type } } : {}),
     },
-    spawnEnv,
+    spawnEnv: deliveries.spawnEnv,
+    ...(deliveries.httpDeliveryAuths ? { httpDeliveryAuths: deliveries.httpDeliveryAuths } : {}),
   };
 }
 
-async function resolveDeliveryEnv(
+interface ResolvedDeliveries {
+  spawnEnv: Record<string, string>;
+  httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
+}
+
+/**
+ * Resolve the per-auth delivery plans (env + http) for one integration.
+ * Returns `null` when none of the integration's auths produced anything
+ * usable (no connections, all decrypt failures, or pure-custom auths
+ * that the platform doesn't know how to render).
+ *
+ * Iterates auths once, decrypts each connection once, then dispatches
+ * fields to the two delivery branches independently — avoids double
+ * decryption when one auth declares both `env` and `http`.
+ */
+async function resolveDeliveries(
   packageId: string,
   applicationId: string,
   actor: Actor,
   manifest: IntegrationManifest,
-): Promise<Record<string, string> | null> {
+): Promise<ResolvedDeliveries | null> {
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
-    // Integration declares no auth — spawn with no extra env. Valid.
-    return {};
+    // Integration declares no auth — spawn with no extra env, no MITM.
+    return { spawnEnv: {} };
   }
-  const out: Record<string, string> = {};
+
+  const spawnEnv: Record<string, string> = {};
+  const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {};
   let resolvedAtLeastOne = false;
 
   for (const [authKey, auth] of Object.entries(auths)) {
-    const envMap = auth.delivery?.env;
-    if (!envMap || Object.keys(envMap).length === 0) continue; // delivery.http path — Phase 1.5
-
     const ownerPredicate =
       actor.type === "user"
         ? eq(integrationConnections.userId, actor.id)
@@ -192,6 +213,7 @@ async function resolveDeliveryEnv(
     const [row] = await db
       .select({
         credentialsEncrypted: integrationConnections.credentialsEncrypted,
+        expiresAt: integrationConnections.expiresAt,
       })
       .from(integrationConnections)
       .where(
@@ -204,7 +226,7 @@ async function resolveDeliveryEnv(
       )
       .limit(1);
     if (!row) {
-      logger.info("no connection for integration auth; skipping env entries", {
+      logger.info("no connection for integration auth; skipping delivery entries", {
         packageId,
         authKey,
         actorType: actor.type,
@@ -223,26 +245,74 @@ async function resolveDeliveryEnv(
       });
       continue;
     }
+    // Normalise creds to Record<string, string> for downstream consumers.
     // The OAuth callback stores access_token under `accessToken`; map it
     // explicitly so the manifest's `from: "accessToken"` resolves.
-    const sourceMap: Record<string, unknown> = { ...creds };
+    const fields: Record<string, string> = {};
+    for (const [k, v] of Object.entries(creds)) {
+      if (typeof v === "string") fields[k] = v;
+    }
 
-    for (const [envKey, conf] of Object.entries(envMap)) {
-      const value = sourceMap[conf.from];
-      if (typeof value !== "string" || value.length === 0) {
-        logger.info("delivery.env source field missing on credentials", {
+    // ─── delivery.env ───
+    const envMap = auth.delivery?.env;
+    if (envMap && Object.keys(envMap).length > 0) {
+      for (const [envKey, conf] of Object.entries(envMap)) {
+        const value = readCredentialFieldFromRecord(fields, conf.from);
+        if (value === undefined || value.length === 0) {
+          logger.info("delivery.env source field missing on credentials", {
+            packageId,
+            authKey,
+            envKey,
+            from: conf.from,
+          });
+          continue;
+        }
+        spawnEnv[envKey] = value;
+        resolvedAtLeastOne = true;
+      }
+    }
+
+    // ─── delivery.http (Phase 1.5) ───
+    const httpDecl = auth.delivery?.http;
+    if (httpDecl) {
+      const plan = resolveHttpDelivery(auth.type, fields, httpDecl);
+      if (!plan) {
+        logger.info("delivery.http produced no plan (auth missing required fields)", {
           packageId,
           authKey,
-          envKey,
-          from: conf.from,
+          authType: auth.type,
         });
-        continue;
+      } else {
+        httpDeliveryAuths[authKey] = {
+          authType: auth.type,
+          headerName: plan.headerName,
+          headerPrefix: plan.headerPrefix,
+          value: plan.value,
+          allowServerOverride: plan.allowServerOverride,
+          authorizedUris: [...auth.authorizedUris],
+          expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
+        };
+        resolvedAtLeastOne = true;
       }
-      out[envKey] = value;
-      resolvedAtLeastOne = true;
     }
   }
 
   if (!resolvedAtLeastOne) return null;
-  return out;
+  return {
+    spawnEnv,
+    ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
+  };
+}
+
+/**
+ * Local wrapper around `readCredentialField` that takes the already-narrowed
+ * `Record<string, string>` rather than the loose `Record<string, unknown>`
+ * the decrypted blob produces. Keeps the alias-aware lookup (camelCase ↔
+ * snake_case) without re-implementing it.
+ */
+function readCredentialFieldFromRecord(
+  fields: Record<string, string>,
+  name: string,
+): string | undefined {
+  return readCredentialField(fields, name);
 }
