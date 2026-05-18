@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { extractDependencies, detectCycle } from "../src/dependencies.ts";
+import {
+  extractDependencies,
+  detectCycle,
+  parseManifestIntegrations,
+} from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
 
 describe("extractDependencies", () => {
@@ -87,6 +91,106 @@ describe("extractDependencies", () => {
     expect(() => extractDependencies(manifest)).toThrow(
       "Invalid scoped package name: invalid-name",
     );
+  });
+
+  it("manifest with integrations as bare version string (legacy)", () => {
+    const manifest = {
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("integration");
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
+  });
+
+  it("manifest with integrations in niveau 2 rich object form", () => {
+    const manifest = {
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            tools: ["list_messages"],
+            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+          },
+        },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("integration");
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
+  });
+
+  it("throws on malformed integration value (object without version)", () => {
+    const manifest = {
+      dependencies: {
+        integrations: { "@acme/gmail-mcp": { tools: ["list_messages"] } },
+      },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/Invalid integration dependency/);
+  });
+});
+
+describe("parseManifestIntegrations", () => {
+  it("returns empty list for manifest without integrations", () => {
+    expect(parseManifestIntegrations({})).toEqual([]);
+    expect(parseManifestIntegrations({ dependencies: {} })).toEqual([]);
+  });
+
+  it("normalises bare version strings to { version, tools: undefined }", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+    });
+    expect(out).toEqual([
+      { id: "@acme/gmail-mcp", version: "^1.0.0", tools: undefined, scopes: undefined },
+    ]);
+  });
+
+  it("preserves tools/scopes from the rich form", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            tools: ["list_messages", "get_message"],
+            scopes: ["s1", "s2"],
+          },
+        },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("@acme/gmail-mcp");
+    expect(out[0]!.tools).toEqual(["list_messages", "get_message"]);
+    expect(out[0]!.scopes).toEqual(["s1", "s2"]);
+  });
+
+  it("skips invalid entries silently (object without version)", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/ok": "^1.0.0",
+          "@acme/bad": { tools: ["x"] },
+        },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("@acme/ok");
+  });
+
+  it("filters non-string entries inside tools/scopes arrays", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            tools: ["good", 42, null, "another"],
+            scopes: ["s1", false, "s2"],
+          },
+        },
+      },
+    });
+    expect(out[0]!.tools).toEqual(["good", "another"]);
+    expect(out[0]!.scopes).toEqual(["s1", "s2"]);
   });
 });
 

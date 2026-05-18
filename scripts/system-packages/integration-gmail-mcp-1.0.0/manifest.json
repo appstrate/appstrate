@@ -28,9 +28,85 @@
       "scopeSeparator": " ",
       "tokenAuthMethod": "client_secret_post",
       "authorizedUris": ["https://gmail.googleapis.com/**", "https://www.googleapis.com/gmail/**"],
+      "availableScopes": [
+        {
+          "value": "https://www.googleapis.com/auth/gmail.readonly",
+          "label": "Read-only access",
+          "description": "List, read, and search messages and labels."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.metadata",
+          "label": "Metadata only",
+          "description": "Read headers, labels, and metadata without message bodies."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.send",
+          "label": "Send messages",
+          "description": "Send mail as the user (no read access)."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.compose",
+          "label": "Compose drafts & send",
+          "description": "Create, read, update, and send drafts."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.modify",
+          "label": "Read & write (no delete)",
+          "description": "All Gmail operations except permanent deletion."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.labels",
+          "label": "Manage labels"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.insert",
+          "label": "Insert messages"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.settings.basic",
+          "label": "Manage basic settings"
+        },
+        {
+          "value": "https://mail.google.com/",
+          "label": "Full mailbox access"
+        }
+      ],
       "delivery": {
         "http": {}
       }
+    }
+  },
+  "tools": {
+    "list_messages": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+      "urlPatterns": [
+        {
+          "pattern": "https://gmail.googleapis.com/gmail/v1/users/*/messages",
+          "methods": ["GET"]
+        }
+      ]
+    },
+    "get_message": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+      "urlPatterns": [
+        {
+          "pattern": "https://gmail.googleapis.com/gmail/v1/users/*/messages/*",
+          "methods": ["GET"]
+        }
+      ]
+    },
+    "search_messages": {
+      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+      "urlPatterns": [
+        {
+          "pattern": "https://gmail.googleapis.com/gmail/v1/users/*/messages",
+          "methods": ["GET"]
+        },
+        {
+          "pattern": "https://gmail.googleapis.com/gmail/v1/users/*/messages/*",
+          "methods": ["GET"]
+        }
+      ]
     }
   }
 }

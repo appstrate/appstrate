@@ -391,6 +391,21 @@ Key invariants:
 - **`allowServerOverride`**: defaults to `false`. When the integration sets its own header of the same name as the injection target, the proxy strips it before forwarding (defence against integration code accidentally pre-empting the injection).
 - **Reference integration**: `@appstrate/mitm-test` (under `system-packages/`) — a pure-stdlib Python MCP server with a `call_upstream` tool that fetches `https://api.test.appstrate.dev/<path>`. Its `api_key` auth declares `delivery.http` with `X-Mitm-Test-Token`. The integration never reads the API key — proves the injection happens entirely sidecar-side.
 
+### AFPS Integrations — scope model & tool selection (niveau 2, Phase 0 schema)
+
+Integration manifests model OAuth scopes the same way provider manifests do — and richer, because integrations expose discrete MCP tools the agent can pick from. The manifest declares the catalog; agents declare which tools they consume; the runtime infers the minimum scope set per (user, integration auth, account) as `∪(tools.requiredScopes for tools any installed agent uses)`.
+
+Two additive manifest fields (validated by `packages/core/src/integration.ts`):
+
+- `auths.{key}.availableScopes: Array<{ value, label, description? }>` — catalog of OAuth scopes the upstream IdP exposes for this auth. Optional. When declared, `auths.{key}.scopes` defaults and `tools.{name}.requiredScopes` are validated as a subset; the IdP remains the ultimate authority at consent time.
+- `tools.{name}: { requiredScopes?, requiredAuthKey?, urlPatterns? }` — per-MCP-tool metadata. `requiredScopes` drives the agent-install scope union; `urlPatterns` (with optional HTTP methods) is reserved for Phase 4 MITM scope-envelope enforcement. `requiredAuthKey` disambiguates multi-auth integrations (omitted when there's a single auth).
+
+Agent-side, `dependencies.integrations[id]` now accepts either the legacy bare semver-range string or the niveau 2 rich form `{ version, tools?: string[], scopes?: string[] }`. `tools[]` is the agent's tool allowlist (drives scope inference); `scopes[]` is an escape hatch unioned with the inferred set. Backward compat is strict — an agent without `tools[]` defaults to "all tools allowed" (= today's behaviour), an integration without `tools` declarations means "no per-tool inference, fall back to `auths.{key}.scopes` defaults". `parseManifestIntegrations(manifest)` in `packages/core/src/dependencies.ts` normalises both forms for callers.
+
+`extractDependencies()` also accepts both shapes — only `version` is read at the dependency-graph layer; tools/scopes metadata is consumed by Phase 2+ resolvers via `parseManifestIntegrations`.
+
+Phase 0 is schema-only — no runtime change. Phase 1 adds install-time validation against the integration's catalog; Phase 2 computes the dynamic scope union for the OAuth connect flow; Phase 3 enforces the tool allowlist in the sidecar's `McpHost`.
+
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 
 `packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` handshake on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:

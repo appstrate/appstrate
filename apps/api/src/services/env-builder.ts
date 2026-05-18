@@ -182,8 +182,12 @@ export async function buildRunContext(params: {
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Failures here are per-integration warnings; the
   // run proceeds with the surviving subset.
+  // Accepts both the legacy bare-version-string and the niveau 2 rich
+  // object form (`{ version, tools?, scopes? }`). The downstream
+  // resolver only reads the keys (per-tool/per-scope plumbing lands in
+  // Phase 3); typing as `unknown` keeps that boundary honest.
   const integrationDeps = (asRecord(asRecord(agent.manifest).dependencies).integrations ??
-    undefined) as Record<string, string> | undefined;
+    undefined) as Record<string, unknown> | undefined;
   const integrationSpawns = await resolveIntegrationSpawns({
     applicationId,
     actor,

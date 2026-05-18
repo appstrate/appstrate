@@ -521,3 +521,190 @@ describe("integrationManifestSchema — author/repository union", () => {
     ).not.toThrow();
   });
 });
+
+// ─────────────────────────────────────────────
+// Niveau 2 scope model — auths.{k}.availableScopes catalog
+// + top-level tools.{name} metadata
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — availableScopes catalog", () => {
+  function oauthBase(authOverrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return baseManifest({
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/a",
+          tokenUrl: "https://idp/t",
+          authorizedUris: ["https://api.example.com/*"],
+          delivery: { http: { valueFrom: "accessToken" } },
+          ...authOverrides,
+        },
+      },
+    });
+  }
+
+  it("accepts a manifest with availableScopes catalog", () => {
+    const m = oauthBase({
+      availableScopes: [
+        { value: "read", label: "Read", description: "Read everything" },
+        { value: "write", label: "Write" },
+      ],
+    });
+    const parsed = integrationManifestSchema.parse(m);
+    expect(
+      parsed.auths?.primary && "availableScopes" in parsed.auths.primary
+        ? parsed.auths.primary.availableScopes?.length
+        : 0,
+    ).toBe(2);
+  });
+
+  it("rejects availableScopes items missing value", () => {
+    const m = oauthBase({
+      availableScopes: [{ label: "Read" }],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("rejects default scopes outside the catalog", () => {
+    const m = oauthBase({
+      scopes: ["delete"],
+      availableScopes: [{ value: "read", label: "Read" }],
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const joined = r.error.issues.map((i) => i.message).join("|");
+      expect(joined).toMatch(/availableScopes/);
+    }
+  });
+
+  it("accepts default scopes that are a subset of the catalog", () => {
+    const m = oauthBase({
+      scopes: ["read"],
+      availableScopes: [
+        { value: "read", label: "Read" },
+        { value: "write", label: "Write" },
+      ],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("skips catalog validation when availableScopes is omitted", () => {
+    const m = oauthBase({ scopes: ["any-scope-string"] });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+describe("integrationManifestSchema — tools.{name} metadata", () => {
+  function gmailLike(toolsOverride: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/a",
+          tokenUrl: "https://idp/t",
+          authorizedUris: ["https://api.example.com/*"],
+          delivery: { http: {} },
+          availableScopes: [
+            { value: "read", label: "Read" },
+            { value: "send", label: "Send" },
+          ],
+        },
+      },
+      tools: toolsOverride,
+    });
+  }
+
+  it("accepts well-formed tools with requiredScopes + urlPatterns", () => {
+    const m = gmailLike({
+      list_messages: {
+        requiredScopes: ["read"],
+        urlPatterns: [{ pattern: "https://api.example.com/list", methods: ["GET"] }],
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects tool names that violate the snake_case pattern", () => {
+    const m = gmailLike({ "List-Messages": { requiredScopes: ["read"] } });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("rejects requiredScopes not in the targeted auth catalog", () => {
+    const m = gmailLike({ list_messages: { requiredScopes: ["delete"] } });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const joined = r.error.issues.map((i) => i.message).join("|");
+      expect(joined).toMatch(/availableScopes/);
+    }
+  });
+
+  it("rejects requiredScopes when multi-auth and requiredAuthKey is missing", () => {
+    const m = baseManifest({
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/a",
+          tokenUrl: "https://idp/t",
+          authorizedUris: ["https://api/*"],
+          delivery: { http: {} },
+        },
+        secondary: {
+          type: "oauth2",
+          authorizationUrl: "https://idp2/a",
+          tokenUrl: "https://idp2/t",
+          authorizedUris: ["https://api2/*"],
+          delivery: { http: {} },
+        },
+      },
+      tools: { do_thing: { requiredScopes: ["x"] } },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const joined = r.error.issues.map((i) => i.message).join("|");
+      expect(joined).toMatch(/requiredAuthKey/);
+    }
+  });
+
+  it("rejects a requiredAuthKey that doesn't match any auths.{key}", () => {
+    const m = gmailLike({
+      list_messages: { requiredAuthKey: "doesnotexist", requiredScopes: ["read"] },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("rejects an invalid HTTP method in urlPatterns", () => {
+    const m = gmailLike({
+      list_messages: {
+        requiredScopes: ["read"],
+        urlPatterns: [{ pattern: "https://api/x", methods: ["TRACE"] }],
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("accepts tools without requiredScopes (legacy default behaviour)", () => {
+    const m = gmailLike({ list_messages: {} });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+describe("integrationManifestSchema — system package gmail-mcp manifest", () => {
+  it("validates the live integration-gmail-mcp manifest with catalog + tools", async () => {
+    const path = new URL(
+      "../../../scripts/system-packages/integration-gmail-mcp-1.0.0/manifest.json",
+      import.meta.url,
+    );
+    const raw = JSON.parse(await Bun.file(path).text()) as Record<string, unknown>;
+    const r = integrationManifestSchema.safeParse(raw);
+    if (!r.success) {
+      throw new Error(
+        "gmail-mcp manifest failed validation:\n" +
+          r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n"),
+      );
+    }
+    expect(r.success).toBe(true);
+  });
+});

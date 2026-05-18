@@ -192,6 +192,60 @@ describe("validateManifest", () => {
     expect(deps.tools).toEqual({ "@test/ext": ">=0.1.0" });
   });
 
+  it("agent with integrations declared as bare version string (legacy)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("agent with integrations declared as niveau 2 rich object form", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": {
+              version: "^1.0.0",
+              tools: ["list_messages", "get_message"],
+              scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+            },
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects agent integrations object missing the required version", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": { tools: ["list_messages"] },
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects agent integration tool names that don't match snake_case", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": { version: "^1.0.0", tools: ["List-Messages"] },
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
   it("agent with built-in skill using wildcard version", () => {
     const result = validateManifest(
       validAgentManifest({

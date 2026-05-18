@@ -32,8 +32,46 @@ export interface DepEntry {
 }
 
 /**
+ * Rich-form value an agent manifest may use for `dependencies.integrations[id]`
+ * (niveau 2 scope model). Coexists with the legacy bare-version-string
+ * form — `coerceIntegrationDepValue` normalises both into this shape.
+ */
+export interface AgentIntegrationDepValue {
+  version: string;
+  tools?: string[];
+  scopes?: string[];
+}
+
+/**
+ * Normalise an agent's `dependencies.integrations[id]` value, accepting
+ * either the legacy bare semver-range string or the niveau 2 rich
+ * object. Returns a stable shape callers can rely on.
+ */
+function coerceIntegrationDepValue(value: unknown): AgentIntegrationDepValue | null {
+  if (typeof value === "string") {
+    return { version: value };
+  }
+  if (value && typeof value === "object" && "version" in value) {
+    const v = value as Record<string, unknown>;
+    if (typeof v.version !== "string" || v.version.length === 0) return null;
+    const tools = Array.isArray(v.tools)
+      ? (v.tools as unknown[]).filter((t): t is string => typeof t === "string")
+      : undefined;
+    const scopes = Array.isArray(v.scopes)
+      ? (v.scopes as unknown[]).filter((s): s is string => typeof s === "string")
+      : undefined;
+    return { version: v.version, tools, scopes };
+  }
+  return null;
+}
+
+/**
  * Extract dependency entries from a manifest's `dependencies` field.
- * Parses scoped names from the skills, tools, and providers dependency maps.
+ * Parses scoped names from the skills, tools, providers, and integrations
+ * dependency maps. Accepts both the legacy bare-version-string shape and
+ * the niveau 2 rich object form for `dependencies.integrations[id]` (the
+ * extra metadata is dropped at this level — use {@link parseManifestIntegrations}
+ * to read tools/scopes).
  * @param manifest - Raw manifest object containing an optional `dependencies` field
  * @returns Array of parsed dependency entries
  * @throws Error if any dependency has an invalid scoped package name
@@ -44,7 +82,7 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
         skills?: Record<string, string>;
         tools?: Record<string, string>;
         providers?: Record<string, string>;
-        integrations?: Record<string, string>;
+        integrations?: Record<string, string | AgentIntegrationDepValue>;
       }
     | undefined;
 
@@ -54,14 +92,13 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
 
   const { skills = {}, tools = {}, providers = {}, integrations = {} } = dependencies;
 
-  const maps: [Record<string, string>, DepEntry["depType"]][] = [
+  const stringMaps: [Record<string, string>, DepEntry["depType"]][] = [
     [skills, "skill"],
     [tools, "tool"],
     [providers, "provider"],
-    [integrations, "integration"],
   ];
 
-  for (const [map, depType] of maps) {
+  for (const [map, depType] of stringMaps) {
     for (const [fullName, versionRange] of Object.entries(map)) {
       const parsed = parseScopedName(fullName);
       if (!parsed) {
@@ -69,6 +106,23 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
       }
       deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange });
     }
+  }
+
+  for (const [fullName, value] of Object.entries(integrations)) {
+    const parsed = parseScopedName(fullName);
+    if (!parsed) {
+      throw new Error(`Invalid scoped package name: ${fullName}`);
+    }
+    const coerced = coerceIntegrationDepValue(value);
+    if (!coerced) {
+      throw new Error(`Invalid integration dependency value for ${fullName}`);
+    }
+    deps.push({
+      depScope: `@${parsed.scope}`,
+      depName: parsed.name,
+      depType: "integration",
+      versionRange: coerced.version,
+    });
   }
 
   return deps;
@@ -132,6 +186,49 @@ export function writeManifestProviders(
   } else {
     delete manifest.providersConfiguration;
   }
+}
+
+// ─────────────────────────────────────────────
+// Integration entries (manifest.dependencies.integrations)
+// ─────────────────────────────────────────────
+
+/**
+ * A single integration entry as read from an agent manifest. `tools` and
+ * `scopes` only carry a value when the agent declared the niveau 2 rich
+ * form; legacy bare-version-string deps surface as `tools: undefined`
+ * (= "all tools allowed" semantics resolved downstream).
+ */
+export interface ManifestIntegrationEntry {
+  id: string;
+  version: string;
+  tools?: string[];
+  scopes?: string[];
+}
+
+/**
+ * Read `dependencies.integrations` into a flat array preserving the
+ * niveau 2 tool/scope selection when present. Counterpart of
+ * {@link parseManifestProviders} for integrations.
+ */
+export function parseManifestIntegrations(
+  manifest: Record<string, unknown>,
+): ManifestIntegrationEntry[] {
+  const deps = (manifest.dependencies ?? {}) as {
+    integrations?: Record<string, unknown>;
+  };
+  const integrations = deps.integrations ?? {};
+  const out: ManifestIntegrationEntry[] = [];
+  for (const [id, value] of Object.entries(integrations)) {
+    const coerced = coerceIntegrationDepValue(value);
+    if (!coerced) continue;
+    out.push({
+      id,
+      version: coerced.version || "*",
+      tools: coerced.tools,
+      scopes: coerced.scopes,
+    });
+  }
+  return out;
 }
 
 /** Result of circular dependency detection. */

@@ -61,7 +61,25 @@ export const manifestSchema = z.looseObject({
       // Phase 1.0 — proposal §4.2.3. Additive: legacy `providers`
       // remains valid; the manifest may reference both sets while
       // legacy types are still being migrated.
-      integrations: z.record(z.string(), z.string()).optional(),
+      //
+      // Niveau 2 — value accepts either the legacy bare semver range or
+      // an object selecting tools/scopes for the niveau 2 scope model.
+      // The base shape mirrors the AgentManifest narrowing so any caller
+      // that downcasts an AgentManifest to a base Manifest still type-
+      // checks.
+      integrations: z
+        .record(
+          z.string(),
+          z.union([
+            z.string(),
+            z.object({
+              version: z.string().min(1),
+              tools: z.array(z.string()).optional(),
+              scopes: z.array(z.string()).optional(),
+            }),
+          ]),
+        )
+        .optional(),
     })
     .optional(),
 });
@@ -88,15 +106,38 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
   license: z.string().optional(),
   repository: z.string().optional(),
   // Phase 1.0 — additive sibling of `dependencies.providers`. Keys must
-  // be scoped package names; values are semver ranges. The AFPS agent
-  // schema already accepts `dependencies` via `looseObject`, but we
-  // narrow `integrations` here so the type system surfaces it.
+  // be scoped package names; values are either a semver range (legacy
+  // shape) or a rich object selecting tools/scopes (niveau 2 scope
+  // model). Both shapes coexist — the rich form is opt-in per agent.
   dependencies: z
     .looseObject({
       skills: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       tools: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       providers: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
-      integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
+      integrations: z
+        .record(
+          z.string().regex(scopedNameRegex),
+          z.union([
+            // Legacy: bare semver range.
+            z.string(),
+            // Niveau 2: object selecting tools (drives scope inference
+            // via the integration manifest's tools.{name}.requiredScopes)
+            // and optional escape-hatch scopes the runtime unions with
+            // the inferred set.
+            z.object({
+              version: z.string().min(1),
+              tools: z
+                .array(
+                  z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+                    error: "integration tool names must match /^[a-z_][a-z0-9_]*$/",
+                  }),
+                )
+                .optional(),
+              scopes: z.array(z.string()).optional(),
+            }),
+          ]),
+        )
+        .optional(),
     })
     .optional(),
 });

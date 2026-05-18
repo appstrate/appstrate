@@ -366,6 +366,22 @@ const authSchema = z
       error: "auths.{key}.authorizedUris must declare at least one URI pattern",
     }),
 
+    // Catalog of OAuth scopes the upstream IdP exposes for this auth.
+    // Mirrors `provider.definition.availableScopes`. Optional — when
+    // declared, agent-declared scopes and tool requiredScopes that
+    // target this auth must be a subset (validated at install time,
+    // not in this schema). The IdP remains the ultimate authority on
+    // what scopes are accepted at consent time.
+    availableScopes: z
+      .array(
+        z.object({
+          value: z.string().min(1),
+          label: z.string().min(1),
+          description: z.string().optional(),
+        }),
+      )
+      .optional(),
+
     credentials: credentialsSchemaObject.optional(),
 
     delivery: deliverySchema,
@@ -393,7 +409,76 @@ const authSchema = z
         path: ["credentials"],
       });
     }
+    // If both `scopes` (defaults) and `availableScopes` (catalog) are
+    // declared, defaults must be a subset of the catalog — protects
+    // against typos in the manifest and aligns default OAuth behaviour
+    // with what's documented as installable.
+    if (auth.availableScopes && auth.scopes) {
+      const catalog = new Set(auth.availableScopes.map((s) => s.value));
+      for (const s of auth.scopes) {
+        if (!catalog.has(s)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `default scope "${s}" is not declared in availableScopes catalog`,
+            path: ["scopes"],
+          });
+        }
+      }
+    }
   });
+
+// ─────────────────────────────────────────────
+// Tools — per-tool scope + URL pattern metadata
+// ─────────────────────────────────────────────
+
+/**
+ * HTTP method enum used in `tools.{name}.urlPatterns[].methods`. Closed
+ * list matching the methods the MITM proxy enforces against.
+ */
+const httpMethodEnum = z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
+/**
+ * URL pattern an integration tool will reach. Consumed at runtime
+ * (sidecar MITM) to enforce that only requests covered by the tool's
+ * `requiredScopes` actually go upstream — a defence-in-depth on top of
+ * the IdP-side scope narrowing. Pattern grammar matches the existing
+ * `authorizedUris` semantics (glob-style with `**`).
+ */
+const toolUrlPatternSchema = z.object({
+  pattern: z.string().min(1),
+  methods: z.array(httpMethodEnum).optional(),
+});
+
+/**
+ * Per-tool metadata mapping each MCP tool the integration exposes to
+ * the OAuth scopes it needs and the URL surface it touches. Optional
+ * everywhere — integrations that omit a tool entry default to "tool
+ * requires the full set of auth.scopes defaults" (= today's behaviour).
+ *
+ * `requiredAuthKey` disambiguates which auth in `auths.{key}` the
+ * scopes are relative to, for multi-auth integrations. When omitted,
+ * the resolver picks the single declared auth (or fails-loudly at
+ * install time if there's ambiguity).
+ */
+const toolMetadataSchema = z.object({
+  requiredScopes: z.array(z.string()).optional(),
+  requiredAuthKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, {
+      error: "tools.{name}.requiredAuthKey must match an auths.{key}",
+    })
+    .optional(),
+  urlPatterns: z.array(toolUrlPatternSchema).optional(),
+});
+
+const toolsRecordSchema = z.record(
+  z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+    error: "tool names must match /^[a-z_][a-z0-9_]*$/",
+  }),
+  toolMetadataSchema,
+);
+
+export type IntegrationToolMetadata = z.infer<typeof toolMetadataSchema>;
 
 // ─────────────────────────────────────────────
 // Integration manifest (root)
@@ -454,6 +539,13 @@ export const integrationManifestSchema = z
         authSchema,
       )
       .optional(),
+
+    // Per-tool scope + URL pattern metadata (niveau 2 scope model).
+    // Optional and additive — integrations that don't declare `tools`
+    // keep the legacy behaviour (token scoped to auth.scopes defaults,
+    // no per-tool URL enforcement, no scope inference from agent tool
+    // selection).
+    tools: toolsRecordSchema.optional(),
   })
   .superRefine((m, ctx) => {
     // `serverAuth` only makes sense for remote transports.
@@ -466,6 +558,56 @@ export const integrationManifestSchema = z
             'serverAuth is only valid when transport.type is "streamable-http" or "sse" (stdio servers do not have an HTTP transport to authenticate against)',
           path: ["serverAuth"],
         });
+      }
+    }
+
+    // Cross-validate `tools.{name}.requiredAuthKey` against `auths.{key}`
+    // and `tools.{name}.requiredScopes` against the targeted auth's
+    // `availableScopes` catalog. Both checks are skipped when the
+    // corresponding declaration is absent — catalogs and auth keys are
+    // opt-in.
+    if (!m.tools) return;
+    const authKeys = m.auths ? Object.keys(m.auths) : [];
+    for (const [toolName, tool] of Object.entries(m.tools)) {
+      // Pick the auth this tool's scopes apply to: explicit key, or
+      // the single declared auth, or — if ambiguous — refuse to guess.
+      let targetAuthKey: string | undefined;
+      if (tool.requiredAuthKey) {
+        if (!authKeys.includes(tool.requiredAuthKey)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `tools.${toolName}.requiredAuthKey "${tool.requiredAuthKey}" does not match any auths.{key}`,
+            path: ["tools", toolName, "requiredAuthKey"],
+          });
+          continue;
+        }
+        targetAuthKey = tool.requiredAuthKey;
+      } else if (authKeys.length === 1) {
+        targetAuthKey = authKeys[0];
+      } else if (authKeys.length > 1 && tool.requiredScopes && tool.requiredScopes.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `tools.${toolName}.requiredScopes declared but the integration has multiple auths; add requiredAuthKey to disambiguate`,
+          path: ["tools", toolName, "requiredAuthKey"],
+        });
+        continue;
+      }
+
+      // Validate requiredScopes ⊆ availableScopes (when both declared).
+      if (targetAuthKey && tool.requiredScopes && tool.requiredScopes.length > 0) {
+        const auth = m.auths?.[targetAuthKey];
+        if (auth?.availableScopes) {
+          const catalog = new Set(auth.availableScopes.map((s) => s.value));
+          for (const s of tool.requiredScopes) {
+            if (!catalog.has(s)) {
+              ctx.addIssue({
+                code: "custom",
+                message: `tools.${toolName}.requiredScopes contains "${s}" not declared in auths.${targetAuthKey}.availableScopes`,
+                path: ["tools", toolName, "requiredScopes"],
+              });
+            }
+          }
+        }
       }
     }
   });

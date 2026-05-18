@@ -42,10 +42,13 @@ export interface ResolveIntegrationsInput {
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
   /**
-   * Agent's `dependencies.integrations` map (`packageId → versionRange`).
-   * Empty / undefined skips the work.
+   * Agent's `dependencies.integrations` map (`packageId → versionRange | rich object`).
+   * Accepts both the legacy bare-version-string shape and the niveau 2
+   * rich form (`{ version, tools?, scopes? }`) — the resolver only
+   * consumes the keys here; per-tool/per-scope selection lands in
+   * Phase 3. Empty / undefined skips the work.
    */
-  integrationDeps: Record<string, string> | undefined;
+  integrationDeps: Record<string, unknown> | undefined;
 }
 
 /**
