@@ -140,6 +140,23 @@ export interface IntegrationSpawnSpec {
       expiresAtEpochMs: number | null;
     }
   >;
+  /**
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, the
+   * sidecar's `McpHost` filters `tools/list` to only expose these tools
+   * to the agent and rejects `tools/call` for any tool outside the set
+   * (returning a structured "tool_not_authorized" error to the agent
+   * without ever forwarding to the integration).
+   *
+   * `undefined` (the default) keeps the legacy "all tools allowed"
+   * semantics — agents that declared their integration as a bare
+   * semver-range string or via the rich form without `tools[]` get the
+   * full surface, same as before niveau 2.
+   *
+   * Bare empty array `[]` (rare but valid) means "no tools allowed" —
+   * the integration is spawned (so its env-delivery / MITM stays
+   * functional for side-channel use) but exposes nothing to the agent.
+   */
+  toolAllowlist?: readonly string[];
 }
 
 /**

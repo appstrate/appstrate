@@ -391,9 +391,11 @@ Key invariants:
 - **`allowServerOverride`**: defaults to `false`. When the integration sets its own header of the same name as the injection target, the proxy strips it before forwarding (defence against integration code accidentally pre-empting the injection).
 - **Reference integration**: `@appstrate/mitm-test` (under `system-packages/`) — a pure-stdlib Python MCP server with a `call_upstream` tool that fetches `https://api.test.appstrate.dev/<path>`. Its `api_key` auth declares `delivery.http` with `X-Mitm-Test-Token`. The integration never reads the API key — proves the injection happens entirely sidecar-side.
 
-### AFPS Integrations — scope model & tool selection (niveau 2, Phase 0 schema)
+### AFPS Integrations — scope model & tool selection (niveau 2)
 
 Integration manifests model OAuth scopes the same way provider manifests do — and richer, because integrations expose discrete MCP tools the agent can pick from. The manifest declares the catalog; agents declare which tools they consume; the runtime infers the minimum scope set per (user, integration auth, account) as `∪(tools.requiredScopes for tools any installed agent uses)`.
+
+Three enforcement layers (Phase 0/1/2/3 schema + validation + runtime):
 
 Two additive manifest fields (validated by `packages/core/src/integration.ts`):
 
@@ -404,7 +406,11 @@ Agent-side, `dependencies.integrations[id]` now accepts either the legacy bare s
 
 `extractDependencies()` also accepts both shapes — only `version` is read at the dependency-graph layer; tools/scopes metadata is consumed by Phase 2+ resolvers via `parseManifestIntegrations`.
 
-Phase 0 is schema-only — no runtime change. Phase 1 adds install-time validation against the integration's catalog; Phase 2 computes the dynamic scope union for the OAuth connect flow; Phase 3 enforces the tool allowlist in the sidecar's `McpHost`.
+- **Phase 1 (install-time, `apps/api/src/services/integration-scope-validation.ts`)** — `POST/PUT /api/packages/agents` + ZIP import refuse manifests whose `tools[]` selection includes an undeclared tool, or whose `scopes[]` selection escapes the catalog (per target auth). Legacy bare-version-string deps and integrations without catalogs short-circuit silently.
+- **Phase 2 (OAuth connect, `apps/api/src/services/integration-scope-resolver.ts`)** — `POST /api/integrations/.../connect/oauth2` requests `defaults ∪ caller-supplied ∪ computeRequiredScopes(installed agents) ∪ getCurrentGrantedScopes(actor)`. Granted is unioned for **incremental consent**: re-consent never silently shrinks the granted set. `GET /api/integrations/.../auths/.../required-scopes` surfaces the breakdown for UI previews + "agent install needs an upgrade" detection.
+- **Phase 3 (runtime, `runtime-pi/sidecar/mcp-host.ts` + `integrations-boot.ts`)** — `IntegrationSpawnSpec.toolAllowlist` (filled by `integration-spawn-resolver` from the agent's `dependencies.integrations[id].tools[]`) propagates to `McpHost.register({ allowedTools })`. The host filters `tools/list` so the agent's LLM only sees the tools its manifest declared; excluded tools emit a `tool_excluded_by_allowlist` audit log. `undefined` allowlist (legacy dep or rich form without tools) preserves the historical "all tools allowed" default; empty `[]` is a valid explicit lockdown.
+
+Phase 0 is schema-only. Phase 4 (URL-pattern enforcement on the MITM proxy) and Phase 5 (UI incremental consent flow) are tracked but not yet implemented.
 
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 

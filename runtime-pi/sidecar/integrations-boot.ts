@@ -108,6 +108,14 @@ export interface IntegrationSpawnSpec {
       expiresAtEpochMs: number | null;
     }
   >;
+  /**
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. Passed straight
+   * through to `McpHost.register({ allowedTools })` so the agent's LLM
+   * only sees the tools its manifest declared. `undefined` keeps the
+   * legacy "all tools allowed" semantics. Structural mirror of
+   * `IntegrationSpawnSpec.toolAllowlist` in `@appstrate/core/sidecar-types`.
+   */
+  toolAllowlist?: readonly string[];
 }
 
 /**
@@ -426,7 +434,15 @@ export async function bootIntegrations(
       }
       const wrapped = wrapClient(client, spawnedIntegration.transport);
       const sizeBefore = host.size();
-      await host.register({ namespace: spec.namespace, client: wrapped });
+      await host.register({
+        namespace: spec.namespace,
+        client: wrapped,
+        // Niveau 2 Phase 3 — pass the agent-declared tool allowlist
+        // through so McpHost.register filters `tools/list` to only the
+        // tools the agent declared in its `dependencies.integrations[id].tools[]`.
+        // `undefined` keeps the legacy "all tools allowed" semantics.
+        ...(spec.toolAllowlist ? { allowedTools: spec.toolAllowlist } : {}),
+      });
       const added = host.size() - sizeBefore;
       clients.push(wrapped);
       spawned.push({

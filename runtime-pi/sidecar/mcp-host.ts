@@ -42,6 +42,17 @@ export interface McpHostUpstream {
   namespace: string;
   /** Connected client (any transport). */
   client: AppstrateMcpClient;
+  /**
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
+   * tools whose ORIGINAL name (as advertised by the upstream's
+   * `tools/list`) appears here are registered with the host; excluded
+   * tools are silently dropped (with an audit log) so the agent's LLM
+   * never sees a tool it isn't authorised to call.
+   *
+   * `undefined` (default) preserves the legacy "all tools allowed"
+   * behaviour. Empty `[]` is a valid explicit "register nothing".
+   */
+  allowedTools?: readonly string[];
 }
 
 export interface McpHostOptions {
@@ -132,7 +143,23 @@ export class McpHost {
     }
 
     const { tools } = await effectiveUpstream.client.listTools();
+    // Niveau 2 Phase 3 — pre-filter against the agent-declared allowlist
+    // before any sanitisation / registration. The check uses the
+    // ORIGINAL upstream tool name; namespacing happens downstream and
+    // wouldn't survive a Set lookup against the agent's declared names.
+    const allowlist = upstream.allowedTools ? new Set<string>(upstream.allowedTools) : null;
     for (const tool of tools) {
+      if (allowlist && !allowlist.has(tool.name)) {
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: {
+            event: "tool_excluded_by_allowlist",
+            originalName: tool.name,
+          },
+        });
+        continue;
+      }
       // Strip hidden Unicode, cap field lengths, defeat tool poisoning
       // before any third-party descriptor reaches
       // the agent's LLM. A descriptor that exceeds the schema-size cap

@@ -297,6 +297,94 @@ describe("McpHost — dispose", () => {
   });
 });
 
+// ─────────────────────────────────────────────
+// Niveau 2 Phase 3 — allowedTools filter
+// ─────────────────────────────────────────────
+
+describe("McpHost — allowedTools filter", () => {
+  it("registers only the tools in the allowlist (originalName-based)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: ["read_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("undefined allowedTools preserves the legacy 'all tools allowed' default", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "fs", client: fs.client });
+      expect(host.size()).toBe(2);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("empty allowlist registers nothing (explicit lockdown)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: [],
+      });
+      expect(host.size()).toBe(0);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("emits a 'tool_excluded_by_allowlist' log entry for each filtered tool", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const logs: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: ["read_file"],
+      });
+      const excluded = logs.filter((l) => {
+        const d = l.data as Record<string, unknown>;
+        return d?.event === "tool_excluded_by_allowlist";
+      });
+      expect(excluded).toHaveLength(1);
+      expect((excluded[0]!.data as { originalName: string }).originalName).toBe("write_file");
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("allowlist using the namespaced name does NOT match (we filter by original name)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        // Mistake: caller passed `fs__read_file` instead of `read_file`.
+        // The filter is intentionally strict to make the failure visible
+        // (zero tools registered) rather than silently let through.
+        allowedTools: ["fs__read_file"],
+      });
+      expect(host.size()).toBe(0);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+});
+
 describe("McpHost — capability discovery (V7)", () => {
   it("emits upstream_registered with serverInfo + capabilities on register", async () => {
     const fs = await makeUpstream(fsTool());

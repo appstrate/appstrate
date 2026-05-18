@@ -32,6 +32,7 @@ import { applicationPackages, integrationConnections, packages } from "@appstrat
 import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
@@ -44,9 +45,11 @@ export interface ResolveIntegrationsInput {
   /**
    * Agent's `dependencies.integrations` map (`packageId → versionRange | rich object`).
    * Accepts both the legacy bare-version-string shape and the niveau 2
-   * rich form (`{ version, tools?, scopes? }`) — the resolver only
-   * consumes the keys here; per-tool/per-scope selection lands in
-   * Phase 3. Empty / undefined skips the work.
+   * rich form (`{ version, tools?, scopes? }`). The resolver now reads
+   * tools[] from the rich form and propagates it to
+   * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement
+   * (Phase 3). Legacy / no-tools entries skip the field, preserving the
+   * "all tools allowed" default.
    */
   integrationDeps: Record<string, unknown> | undefined;
 }
@@ -63,14 +66,18 @@ export async function resolveIntegrationSpawns(
   if (!actor) return [];
   if (!integrationDeps || Object.keys(integrationDeps).length === 0) return [];
 
+  // Parse the rich form once so we can hand the per-integration
+  // `tools[]` selection (and explicit `scopes[]`) to `resolveOne`
+  // alongside the package id.
+  const entries = parseManifestIntegrations({ dependencies: { integrations: integrationDeps } });
   const out: IntegrationSpawnSpec[] = [];
-  for (const packageId of Object.keys(integrationDeps)) {
+  for (const entry of entries) {
     try {
-      const spec = await resolveOne(packageId, applicationId, actor);
+      const spec = await resolveOne(entry.id, applicationId, actor, entry.tools);
       if (spec) out.push(spec);
     } catch (err) {
       logger.warn("integration resolve failed; skipping", {
-        packageId,
+        packageId: entry.id,
         applicationId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -83,6 +90,7 @@ async function resolveOne(
   packageId: string,
   applicationId: string,
   actor: Actor,
+  agentToolSelection: readonly string[] | undefined,
 ): Promise<IntegrationSpawnSpec | null> {
   // (a) Package exists + integration type — read the latest manifest
   // straight off `packages.draft_manifest`. System integrations have
@@ -173,6 +181,11 @@ async function resolveOne(
     },
     spawnEnv: deliveries.spawnEnv,
     ...(deliveries.httpDeliveryAuths ? { httpDeliveryAuths: deliveries.httpDeliveryAuths } : {}),
+    // Niveau 2 Phase 3 — when the agent declared a tools[] selection
+    // for this integration, propagate it to the sidecar's McpHost so
+    // `tools/list` is pre-filtered. `undefined` (legacy dep or rich
+    // form without tools) preserves the "all tools allowed" default.
+    ...(agentToolSelection !== undefined ? { toolAllowlist: agentToolSelection } : {}),
   };
 }
 
