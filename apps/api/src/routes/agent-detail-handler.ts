@@ -22,6 +22,7 @@ import {
 } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/status.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -162,6 +163,12 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
         ...(e.version ? { version: e.version } : {}),
         ...(e.name ? { name: e.name } : {}),
         ...(e.description ? { description: e.description } : {}),
+      })),
+      integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
+        id: e.id,
+        version: e.version,
+        ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
+        ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       })),
     },
     ...(m.input ? { input: m.input } : {}),

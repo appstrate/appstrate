@@ -16,7 +16,7 @@ import {
   type JSONSchema7,
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
-import { AgentProvidersSection } from "./agent-providers-section";
+import { AgentConnectionsSection } from "./agent-connections-section";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
@@ -99,7 +99,7 @@ export function AgentConnectorsTab({
   packageId: string;
   detail?: import("@appstrate/shared-types").AgentDetail;
 }) {
-  return <AgentProvidersSection packageId={packageId} detail={detail} />;
+  return <AgentConnectionsSection packageId={packageId} detail={detail} />;
 }
 
 export function AgentMemoryTab({ packageId }: { packageId: string }) {

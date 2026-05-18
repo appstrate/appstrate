@@ -381,6 +381,27 @@ export const schemas = {
           providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
           tools: { type: "array", items: { $ref: "#/components/schemas/AgentToolRef" } },
+          integrations: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "version"],
+              properties: {
+                id: { type: "string" },
+                version: { type: "string" },
+                tools: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Niveau 2 tool allowlist (optional)",
+                },
+                scopes: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Niveau 2 explicit scope escape hatch (optional)",
+                },
+              },
+            },
+          },
         },
       },
       lastRun: {

@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch, buildQs, uploadFormData } from "../api";
+import { api, apiFetch, ApiError, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
 import { invalidateConnectionRelated } from "./invalidation";
@@ -12,6 +12,13 @@ import { invalidateConnectionRelated } from "./invalidation";
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function onMutationError(err: Error) {
+  // Skip the generic toast for missing_integration_connection (412) —
+  // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
+  // for that case. Showing both a toast AND the modal is noisy and the
+  // toast carries strictly less info than the modal.
+  if (err instanceof ApiError && err.code === "missing_integration_connection") {
+    return;
+  }
   toast.error(i18n.t("error.prefix", { message: err.message }));
 }
 

@@ -9,11 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { RunModal } from "./run-modal";
 import { ConnectionSummaryModal } from "./connection-summary-modal";
+import {
+  MissingConnectionsModal,
+  type MissingIntegrationFieldError,
+} from "./missing-connections-modal";
 import { useRunAgent } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { hasDisconnectedProviders } from "../lib/provider-status";
 import { packageDetailPath } from "../lib/package-paths";
 import { usePermissions } from "../hooks/use-permissions";
+import { ApiError } from "../api";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunAgentButtonProps {
@@ -46,6 +51,25 @@ export function RunAgentButton({
   const runAgent = useRunAgent(packageId);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
+  const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
+
+  // Intercept 412 missing_integration_connection — surface the recovery
+  // modal instead of (or alongside) the generic toast. Set via the
+  // per-call onError so we open the modal in response to a user action
+  // (passes the react-hooks/set-state-in-effect rule) rather than mirroring
+  // the mutation's error state in a useEffect.
+  const onRunError = (err: unknown) => {
+    if (
+      err instanceof ApiError &&
+      err.status === 412 &&
+      err.code === "missing_integration_connection"
+    ) {
+      const errors = Array.isArray(err.details)
+        ? (err.details as MissingIntegrationFieldError[])
+        : [];
+      setMissingErrors(errors);
+    }
+  };
 
   // Skip the lazy fetch when the parent already provided the detail.
   const { data: fetchedDetail, isFetching } = usePackageDetail(
@@ -65,7 +89,7 @@ export function RunAgentButton({
     const agentHasInput =
       !!detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate({ version });
+      runAgent.mutate({ version }, { onError: onRunError });
       return;
     }
     setInputOpen(true);
@@ -151,10 +175,19 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input) => runAgent.mutate({ input, version })}
+          onSubmit={(input) => runAgent.mutate({ input, version }, { onError: onRunError })}
           isPending={runAgent.isPending}
         />
       )}
+
+      <MissingConnectionsModal
+        open={missingErrors !== null}
+        onClose={() => {
+          setMissingErrors(null);
+          runAgent.reset();
+        }}
+        errors={missingErrors ?? []}
+      />
     </>
   );
 }
