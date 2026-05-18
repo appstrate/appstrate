@@ -1,0 +1,18 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/dice",
+  "version": "1.0.0",
+  "displayName": "Dice Roller (Python)",
+  "description": "Pure-Python MCP integration that rolls N-sided dice. Demonstrates the appstrate-mcp-runner-python container without any pip-installed deps.",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "server": {
+    "type": "python",
+    "entryPoint": "./server.py"
+  },
+  "transport": {
+    "type": "stdio"
+  }
+}
