@@ -613,3 +613,130 @@ export const integrationManifestSchema = z
   });
 
 export type IntegrationManifest = z.infer<typeof integrationManifestSchema>;
+
+// ─────────────────────────────────────────────
+// Niveau 2 — install-time validation helpers
+// ─────────────────────────────────────────────
+
+/**
+ * Names of MCP tools the integration declares in its top-level `tools`
+ * record. Empty when the integration didn't opt into per-tool metadata.
+ */
+export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
+  return manifest.tools ? Object.keys(manifest.tools) : [];
+}
+
+/**
+ * Required OAuth scopes for a single tool, looked up against the
+ * integration manifest's `tools.{name}.requiredScopes`. Returns an
+ * empty array when the tool isn't declared, which the resolver
+ * (Phase 2+) treats as "no scope contribution from this tool".
+ */
+export function getToolRequiredScopes(
+  manifest: IntegrationManifest,
+  toolName: string,
+): readonly string[] {
+  return manifest.tools?.[toolName]?.requiredScopes ?? [];
+}
+
+/**
+ * Union of every OAuth scope advertised across the integration's auths.
+ * Used by {@link validateAgentIntegrationScopes} to refuse agent-declared
+ * scopes that no auth on this integration even claims to support. When
+ * no auth declares an `availableScopes` catalog, returns an empty list
+ * and the caller skips the check (legacy behaviour).
+ */
+export function getAvailableScopes(manifest: IntegrationManifest): readonly string[] {
+  if (!manifest.auths) return [];
+  const out = new Set<string>();
+  for (const auth of Object.values(manifest.auths)) {
+    if (auth.availableScopes) {
+      for (const s of auth.availableScopes) out.add(s.value);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Shape of an agent's `dependencies.integrations[id]` entry once it has
+ * been normalised through `parseManifestIntegrations` in `dependencies.ts`.
+ * Duplicated here (rather than imported) to keep `integration.ts`
+ * dependency-free at runtime.
+ */
+export interface AgentIntegrationDepSelection {
+  /** Fully-scoped integration package id (`@scope/name`) — used in error paths. */
+  readonly id: string;
+  /** MCP tool allowlist declared by the agent (Phase 3 enforcement). */
+  readonly tools?: readonly string[];
+  /** Manual OAuth-scope escape hatch (unioned with the inferred set in Phase 2). */
+  readonly scopes?: readonly string[];
+}
+
+/** Structured validation error returned by {@link validateAgentIntegrationScopes}. */
+export interface AgentIntegrationScopeError {
+  /** Dotted JSON path into the agent manifest (`dependencies.integrations.<id>.<field>`). */
+  field: string;
+  /** Stable machine-readable code consumed by route layer / UI. */
+  code: "unknown_tool" | "scope_not_in_catalog";
+  /** Human-readable detail for surfaces that don't translate `code`. */
+  message: string;
+}
+
+/**
+ * Validate an agent's tool/scope selection against the integration
+ * manifest's catalog. Returns an array of structured errors — empty
+ * means the selection is install-valid.
+ *
+ * Backward compat semantics (Phase 0/1 strict):
+ *  - When the integration declares no `tools` block, any agent tool
+ *    selection is accepted (= legacy "all tools allowed" default).
+ *  - When the integration declares no `availableScopes` catalog on any
+ *    auth, any agent scope is accepted (the IdP is the ultimate
+ *    authority at consent time).
+ *
+ * The function is pure and DB-free; the service-layer wrapper resolves
+ * the integration manifest from the DB before calling it.
+ */
+export function validateAgentIntegrationScopes(
+  selection: AgentIntegrationDepSelection,
+  integrationManifest: IntegrationManifest,
+): AgentIntegrationScopeError[] {
+  const errors: AgentIntegrationScopeError[] = [];
+
+  // Tool allowlist must be a subset of declared tools (when declared).
+  if (selection.tools && selection.tools.length > 0) {
+    const declared = new Set(getDeclaredToolNames(integrationManifest));
+    if (declared.size > 0) {
+      for (const tool of selection.tools) {
+        if (!declared.has(tool)) {
+          errors.push({
+            field: `dependencies.integrations.${selection.id}.tools`,
+            code: "unknown_tool",
+            message: `Tool "${tool}" is not declared by integration ${selection.id}`,
+          });
+        }
+      }
+    }
+    // declared.size === 0 → integration opts out of catalog enforcement.
+  }
+
+  // Manual scopes must be a subset of the union of availableScopes
+  // (when at least one auth declares a catalog).
+  if (selection.scopes && selection.scopes.length > 0) {
+    const catalog = getAvailableScopes(integrationManifest);
+    if (catalog.length > 0) {
+      const catalogSet = new Set(catalog);
+      for (const scope of selection.scopes) {
+        if (!catalogSet.has(scope)) {
+          errors.push({
+            field: `dependencies.integrations.${selection.id}.scopes`,
+            code: "scope_not_in_catalog",
+            message: `Scope "${scope}" is not declared in availableScopes catalog of integration ${selection.id}`,
+          });
+        }
+      }
+    }
+  }
+
+  return errors;
+}

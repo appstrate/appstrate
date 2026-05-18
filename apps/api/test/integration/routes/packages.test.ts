@@ -601,6 +601,161 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // Niveau 2 Phase 1 — install-time integration scope validation
+  // (assertAgentIntegrationScopesValid in routes/packages.ts)
+  // ═══════════════════════════════════════════════
+
+  describe("agent install — integration scope validation", () => {
+    const integrationId = "@pkgorg/gmail-mcp-test";
+
+    async function seedGmailIntegration() {
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: {
+          manifestVersion: "1.1",
+          type: "integration",
+          name: integrationId,
+          version: "1.0.0",
+          displayName: "Gmail (test)",
+          server: { type: "python", entryPoint: "./server.py" },
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationUrl: "https://idp/a",
+              tokenUrl: "https://idp/t",
+              authorizedUris: ["https://api/*"],
+              delivery: { http: {} },
+              availableScopes: [
+                { value: "read", label: "Read" },
+                { value: "send", label: "Send" },
+              ],
+            },
+          },
+          tools: {
+            list_messages: { requiredScopes: ["read"] },
+            send_message: { requiredScopes: ["send"] },
+          },
+        },
+      });
+    }
+
+    function buildAgentBody(integration: unknown, suffix = "ok") {
+      return {
+        manifest: {
+          name: `@pkgorg/agent-${suffix}`,
+          version: "0.1.0",
+          type: "agent",
+          schemaVersion: "1.0",
+          displayName: `Agent ${suffix}`,
+          dependencies: {
+            integrations: { [integrationId]: integration },
+          },
+        },
+        content: "Prompt",
+      };
+    }
+
+    it("accepts an agent whose tool selection is a subset of the integration's catalog", async () => {
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(
+          buildAgentBody({ version: "^1.0.0", tools: ["list_messages"], scopes: ["read"] }, "ok"),
+        ),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("rejects an agent selecting a tool not declared by the integration", async () => {
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(
+          buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "bad-tool"),
+        ),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string; field: string }[] };
+      expect(body.errors?.[0]?.code).toBe("unknown_tool");
+      expect(body.errors?.[0]?.field).toBe(`dependencies.integrations.${integrationId}.tools`);
+    });
+
+    it("rejects an agent declaring a scope outside the integration's availableScopes", async () => {
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(
+          buildAgentBody({ version: "^1.0.0", scopes: ["read", "admin"] }, "bad-scope"),
+        ),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect(body.errors?.some((e) => e.code === "scope_not_in_catalog")).toBe(true);
+    });
+
+    it("accepts a legacy bare-version-string integration dep (no validation triggered)", async () => {
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(buildAgentBody("^1.0.0", "legacy")),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("skips validation silently when the referenced integration is not installed in the org", async () => {
+      // No seedGmailIntegration — the integration doesn't exist in this org.
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(
+          buildAgentBody({ version: "^1.0.0", tools: ["whatever"], scopes: ["foo"] }, "absent"),
+        ),
+      });
+      // Phase 1 defers "integration must exist" to run-time dep validation.
+      expect(res.status).toBe(201);
+    });
+
+    it("PUT also runs the scope validation", async () => {
+      await seedGmailIntegration();
+      const agent = await seedAgent({
+        id: "@pkgorg/agent-put",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/packages/agents/@pkgorg/agent-put", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/agent-put",
+            version: "0.2.0",
+            type: "agent",
+            schemaVersion: "1.0",
+            displayName: "Updated",
+            dependencies: {
+              integrations: {
+                [integrationId]: { version: "^1.0.0", tools: ["nope"] },
+              },
+            },
+          },
+          content: "Updated prompt",
+          lockVersion: agent.lockVersion,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect(body.errors?.[0]?.code).toBe("unknown_tool");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // DELETE /api/packages/agents/:scope/:name — delete agent (admin only)
   // ═══════════════════════════════════════════════
 

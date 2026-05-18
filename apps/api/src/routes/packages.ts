@@ -60,6 +60,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
+import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import {
   ApiError,
   invalidRequest,
@@ -79,6 +80,23 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
     title: "Invalid Manifest",
     fieldPrefix: "manifest.",
   });
+}
+
+/**
+ * Phase 1 gate — after `validateManifest` accepts an agent manifest,
+ * cross-check that any rich-form `dependencies.integrations[id]`
+ * selection is a subset of the referenced integration's catalog. Skips
+ * silently for non-agent types, legacy-string deps, and integrations
+ * not visible to the org (the latter handled by run-time dep validation).
+ */
+async function assertAgentIntegrationScopesValid(
+  manifest: Record<string, unknown>,
+  orgId: string,
+): Promise<void> {
+  const scopeErrors = await validateAgentIntegrationSelections({ manifest, orgId });
+  if (scopeErrors.length > 0) {
+    throw validationFailed(scopeErrors);
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -430,6 +448,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
       const validatedManifest = manifestResult.manifest;
+      await assertAgentIntegrationScopesValid(validatedManifest as Record<string, unknown>, orgId);
 
       if (rcfg.requireContent && !content.trim()) {
         throw invalidRequest("Content cannot be empty", "content");
@@ -551,6 +570,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (!manifestResult.valid) {
         throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
+      await assertAgentIntegrationScopesValid(
+        manifestResult.manifest as Record<string, unknown>,
+        orgId,
+      );
     }
 
     let warnings: string[] = [];
@@ -730,6 +753,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     if (!manifestResult.valid) {
       throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
+    await assertAgentIntegrationScopesValid(
+      manifestResult.manifest as Record<string, unknown>,
+      orgId,
+    );
 
     // Ensure ID immutability (all types)
     const newScopedName = (manifest as { name?: string }).name;
@@ -1289,6 +1316,11 @@ export function createPackagesRouter() {
         detail: `'${packageId}' is a system package and cannot be overwritten`,
       });
     }
+
+    // Phase 1 — for agent imports, cross-check rich-form integration
+    // selections against the referenced integration catalogs. `parsePackageZip`
+    // already ran `validateManifest`; this is the niveau 2 follow-up.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);

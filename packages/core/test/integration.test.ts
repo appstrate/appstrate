@@ -12,6 +12,11 @@ import {
   integrationManifestSchema,
   integrationServerTypeEnum,
   caTrustEnvEnum,
+  getAvailableScopes,
+  getDeclaredToolNames,
+  getToolRequiredScopes,
+  validateAgentIntegrationScopes,
+  type IntegrationManifest,
 } from "../src/integration.ts";
 import { validateManifest } from "../src/validation.ts";
 
@@ -706,5 +711,167 @@ describe("integrationManifestSchema — system package gmail-mcp manifest", () =
       );
     }
     expect(r.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Niveau 2 Phase 1 — install-time validation helpers
+// (pure functions consumed by the apps/api scope-validation service)
+// ─────────────────────────────────────────────
+
+describe("getAvailableScopes / getDeclaredToolNames / getToolRequiredScopes", () => {
+  function gmailManifest(): IntegrationManifest {
+    return integrationManifestSchema.parse(
+      baseManifest({
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api/*"],
+            delivery: { http: {} },
+            availableScopes: [
+              { value: "read", label: "Read" },
+              { value: "write", label: "Write" },
+            ],
+          },
+        },
+        tools: {
+          list_messages: { requiredScopes: ["read"] },
+          send_message: { requiredScopes: ["write"] },
+          ping: {},
+        },
+      }),
+    );
+  }
+
+  it("getAvailableScopes returns the union of catalog values across auths", () => {
+    const m = gmailManifest();
+    expect([...getAvailableScopes(m)].sort()).toEqual(["read", "write"]);
+  });
+
+  it("getAvailableScopes returns [] when no auth declares a catalog", () => {
+    const m = integrationManifestSchema.parse(baseManifest()); // no auths
+    expect(getAvailableScopes(m)).toEqual([]);
+  });
+
+  it("getDeclaredToolNames returns the keys of the top-level tools record", () => {
+    const m = gmailManifest();
+    expect([...getDeclaredToolNames(m)].sort()).toEqual(["list_messages", "ping", "send_message"]);
+  });
+
+  it("getDeclaredToolNames returns [] for manifests without a tools block", () => {
+    const m = integrationManifestSchema.parse(baseManifest());
+    expect(getDeclaredToolNames(m)).toEqual([]);
+  });
+
+  it("getToolRequiredScopes reads from the manifest, [] for unknown tool", () => {
+    const m = gmailManifest();
+    expect(getToolRequiredScopes(m, "list_messages")).toEqual(["read"]);
+    expect(getToolRequiredScopes(m, "ping")).toEqual([]);
+    expect(getToolRequiredScopes(m, "no_such_tool")).toEqual([]);
+  });
+});
+
+describe("validateAgentIntegrationScopes", () => {
+  function catalogedManifest(): IntegrationManifest {
+    return integrationManifestSchema.parse(
+      baseManifest({
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api/*"],
+            delivery: { http: {} },
+            availableScopes: [
+              { value: "read", label: "Read" },
+              { value: "write", label: "Write" },
+            ],
+          },
+        },
+        tools: {
+          list_messages: { requiredScopes: ["read"] },
+          send_message: { requiredScopes: ["write"] },
+        },
+      }),
+    );
+  }
+
+  it("returns no errors when selection is empty (legacy bare-version-string case)", () => {
+    expect(validateAgentIntegrationScopes({ id: "@a/i" }, catalogedManifest())).toEqual([]);
+  });
+
+  it("accepts a subset selection of declared tools and catalog scopes", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", tools: ["list_messages"], scopes: ["read"] },
+      catalogedManifest(),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("flags an unknown tool selected by the agent", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", tools: ["list_messages", "delete_message"] },
+      catalogedManifest(),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.code).toBe("unknown_tool");
+    expect(errors[0]!.field).toBe("dependencies.integrations.@a/i.tools");
+    expect(errors[0]!.message).toContain("delete_message");
+  });
+
+  it("flags every scope outside the catalog (accumulates errors)", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", scopes: ["read", "admin", "root"] },
+      catalogedManifest(),
+    );
+    expect(errors).toHaveLength(2);
+    expect(errors.every((e) => e.code === "scope_not_in_catalog")).toBe(true);
+    expect(errors.map((e) => e.message).join(" ")).toMatch(/admin/);
+    expect(errors.map((e) => e.message).join(" ")).toMatch(/root/);
+  });
+
+  it("skips tool subset check when the integration declares no tools block", () => {
+    const noTools = integrationManifestSchema.parse(
+      baseManifest({
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api/*"],
+            delivery: { http: {} },
+            availableScopes: [{ value: "read", label: "Read" }],
+          },
+        },
+      }),
+    );
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", tools: ["anything_goes"] },
+      noTools,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("skips scope subset check when no auth declares a catalog", () => {
+    const noCatalog = integrationManifestSchema.parse(
+      baseManifest({
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api/*"],
+            delivery: { http: {} },
+          },
+        },
+      }),
+    );
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", scopes: ["anything-the-idp-accepts"] },
+      noCatalog,
+    );
+    expect(errors).toEqual([]);
   });
 });
