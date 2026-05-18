@@ -28,7 +28,7 @@
  * (which handles CA, MITM, and per-request credential injection).
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { unzipSync } from "fflate";
@@ -40,7 +40,7 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import { planCaBundle, type CaBundle } from "@appstrate/connect";
+import { planCaBundle, type CaBundle } from "@appstrate/connect/integrations";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
@@ -335,11 +335,18 @@ async function dockerExec(args: string[]): Promise<string> {
  * Populated when the integration declares `delivery.http` and the sidecar
  * has minted a per-run CA bundle:
  *
- *   - `proxyUrl` — points at the per-integration MITM listener bound on
- *     127.0.0.1 inside the sidecar's network namespace.
- *   - `sidecarContainerId` — the runner container joins the sidecar's
- *     network namespace (`--network container:<id>`) so 127.0.0.1
- *     resolves to the listener without needing a dedicated docker network.
+ *   - `proxyUrl` — full URL the runner uses as HTTPS_PROXY. Reaches the
+ *     MITM listener via the per-run Docker network's DNS alias
+ *     (`http://sidecar:<port>`) instead of `127.0.0.1` — sharing the
+ *     sidecar's network NS via `--network container:<id>` is too fragile
+ *     on Docker Desktop (the runner can fail to attach if the sidecar's
+ *     short-id lookup races its own boot), and bridge-DNS sidesteps that
+ *     class of failure entirely.
+ *   - `runNetwork` — name of the per-run docker network
+ *     (`appstrate-exec-<runId>`). The runner joins this network so the
+ *     `sidecar` DNS alias resolves. May be `null` when the sidecar can't
+ *     determine its run id (older code paths / process mode), in which
+ *     case we skip the MITM container wiring and fall back to env-only.
  *   - `caCertHostPath` — path to the run-CA PEM ON the sidecar's fs.
  *     `docker cp`'d into the runner at {@link CA_CONTAINER_PATH} so the
  *     runner's language ecosystem (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
@@ -347,7 +354,7 @@ async function dockerExec(args: string[]): Promise<string> {
  */
 interface MitmSpawnExtras {
   proxyUrl: string;
-  sidecarContainerId: string | null;
+  runNetwork: string | null;
   caCertHostPath: string;
 }
 
@@ -357,7 +364,16 @@ interface MitmSpawnExtras {
  * (Node / Python / shell-installed binary) trusts it without per-language
  * Dockerfile edits.
  */
-const CA_CONTAINER_PATH = "/etc/appstrate/ca.pem";
+// `/tmp` is guaranteed to exist on every runner image (alpine + busybox
+// both ship it), so `docker cp` lands the cert without needing an
+// intermediate `mkdir`. Docker's cp explicitly does NOT create parent
+// directories on the destination side — copying to `/etc/appstrate/ca.pem`
+// fails with `Could not find the file /etc/appstrate in container <id>`
+// because `/etc/appstrate/` doesn't pre-exist. The env vars below
+// (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+// `CURL_CA_BUNDLE`) all accept arbitrary file paths — they don't care
+// the cert lives under /tmp.
+const CA_CONTAINER_PATH = "/tmp/appstrate-ca.pem";
 
 async function setupIntegrationContainer(
   runId: string,
@@ -403,15 +419,19 @@ async function setupIntegrationContainer(
     "--label",
     `appstrate.integration=${spec.packageId}`,
   ];
-  // Network mode: when MITM is active AND we know the sidecar's container
-  // id, the runner joins the sidecar's network namespace so `127.0.0.1`
-  // inside the runner reaches the MITM listener bound on the sidecar's
-  // loopback. Without this share, the runner would need its own docker
-  // network attached to the sidecar — extra plumbing the MITM model
-  // doesn't justify. Falls back to the default bridge network when we
-  // can't read the sidecar's id (e.g. sidecar running unconfined in dev).
-  const networkFlags: string[] =
-    mitm && mitm.sidecarContainerId ? ["--network", `container:${mitm.sidecarContainerId}`] : [];
+  // Network mode: when MITM is active AND we know the per-run docker
+  // network, the runner joins that network and reaches the MITM listener
+  // via the `sidecar` DNS alias (resolved by Docker's embedded DNS on
+  // any user-defined bridge). Earlier iterations used
+  // `--network container:<sidecar-id>` to share the sidecar's network
+  // namespace — that worked in theory but blew up on Docker Desktop
+  // (macOS): `docker create` succeeds but `docker start` then races
+  // against the daemon's short-id lookup and frequently fails with
+  // `joining network namespace of container: No such container: <id>`,
+  // leaving the runner stuck in `Created`. Bridge-DNS sidesteps that
+  // entirely. Fallback to the default bridge network when no run
+  // network is known (process mode in tests).
+  const networkFlags: string[] = mitm && mitm.runNetwork ? ["--network", mitm.runNetwork] : [];
   const createArgs = [
     "create",
     "--rm",
@@ -439,11 +459,14 @@ async function setupIntegrationContainer(
   // `/bundle/server/index.js` at the path the manifest declared.
   await dockerExec(["cp", `${plan.bundleRoot}/.`, `${containerId}:/bundle/`]);
   if (mitm) {
-    // Copy the CA cert into a stable path. The container's root fs is
-    // ephemeral (`--rm` cleans up at exit) so this lives only for the
-    // run. The runner image WORKDIR is `/bundle` but we want the cert
-    // under `/etc/appstrate/` to match the env vars above — `docker cp`
-    // creates intermediate dirs as needed.
+    // Copy the CA cert into the runner's filesystem at a path the env
+    // vars above reference (CA_CONTAINER_PATH). The container's root fs
+    // is ephemeral (`--rm` cleans up at exit) so the cert lives only
+    // for the run. CA_CONTAINER_PATH lives under `/tmp/` for a reason:
+    // `docker cp` does NOT create parent directories on the destination,
+    // so anything pointing at a non-existent dir (e.g. `/etc/appstrate/`)
+    // would fail with `Could not find the file <parent> in container`,
+    // silently breaking every HTTP-delivery integration on the run.
     await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
   }
   return containerId;
@@ -614,15 +637,16 @@ export async function bootIntegrations(
     }
   }
 
-  // Sidecar's own container id — used to attach runner containers to the
-  // sidecar's network namespace (`--network container:<id>`) so the
-  // runner's `127.0.0.1` reaches the MITM listener bound on the
-  // sidecar's loopback. In container deployments Docker sets HOSTNAME
-  // to the short container id; in process mode it's the host's hostname
-  // (and `--network container:<host>` would fail). We guard the use of
-  // this id below by `useDocker` AND check that we're actually inside a
-  // container by sniffing /.dockerenv.
-  const sidecarContainerId = await readSidecarContainerIdIfDockerized();
+  // Per-run docker network name — the platform creates
+  // `appstrate-exec-<runId>` and attaches the sidecar with alias
+  // `sidecar`. The runner joins the same network so its HTTPS_PROXY can
+  // resolve `http://sidecar:<port>` via Docker's embedded DNS. We read
+  // `RUN_ID` straight off env (the platform sets it on sidecar create).
+  // Falls back to `null` in process mode / tests, where MITM degrades to
+  // the loopback path (process mode shares the parent's NS, so
+  // 127.0.0.1 still works).
+  const runNetwork =
+    useDocker && process.env.RUN_ID ? `appstrate-exec-${process.env.RUN_ID}` : null;
 
   for (const spec of specs) {
     try {
@@ -645,6 +669,11 @@ export async function bootIntegrations(
           caBundle: runCaBundle,
           minter: sharedMinter,
           credentials: source,
+          // Bind to 0.0.0.0 in Docker mode so the runner — joined to the
+          // per-run network — can reach the listener via the sidecar's
+          // `sidecar` DNS alias. Process mode keeps the loopback default
+          // (no other process should reach it).
+          ...(runNetwork ? { host: "0.0.0.0" } : {}),
           onEvent: (event) => {
             // Filter sensitive bits (URLs may carry signed query params).
             const safe =
@@ -664,10 +693,22 @@ export async function bootIntegrations(
         });
         await listener.ready;
         mitmListeners.push(listener);
-        mitmProxyUrl = listener.proxyUrl();
+        // The runner reaches the listener via the per-run network's DNS
+        // alias `sidecar` — substitute the bind host (likely 0.0.0.0)
+        // for the alias before handing the URL to the runner's
+        // HTTPS_PROXY env. Process mode keeps the 127.0.0.1 URL
+        // unchanged (subprocess shares the parent's NS).
+        const localUrl = listener.proxyUrl();
+        if (runNetwork) {
+          const port = listener.address().port;
+          mitmProxyUrl = `http://sidecar:${port}`;
+        } else {
+          mitmProxyUrl = localUrl;
+        }
         logger.info("integration MITM listener ready", {
           packageId: spec.packageId,
-          proxyUrl: mitmProxyUrl,
+          localUrl,
+          runnerProxyUrl: mitmProxyUrl,
         });
       }
 
@@ -684,7 +725,7 @@ export async function bootIntegrations(
           mitmProxyUrl !== null && runCaCertHostPath !== null
             ? {
                 proxyUrl: mitmProxyUrl,
-                sidecarContainerId,
+                runNetwork,
                 caCertHostPath: runCaCertHostPath,
               }
             : undefined;
@@ -812,40 +853,4 @@ export async function bootIntegrations(
       }
     },
   };
-}
-
-/**
- * Read the sidecar's own container id when running inside Docker. Used
- * for `--network container:<id>` to share the network namespace with
- * spawned integration runner containers. Returns `null` in process mode
- * (no `/.dockerenv` sentinel — the network-share trick doesn't apply).
- *
- * Docker sets `HOSTNAME` to the short container id by default; we sniff
- * `/.dockerenv` to confirm we're actually inside a container before
- * trusting that value. Custom hostnames (rare in sidecar deployments)
- * would break this — fall back to the long id via `/proc/self/cgroup`
- * (cgroup v1 only). For cgroup v2 the long id lives in `/proc/self/mountinfo`,
- * which we don't parse; the short HOSTNAME is the load-bearing path.
- */
-async function readSidecarContainerIdIfDockerized(): Promise<string | null> {
-  try {
-    // Stat /.dockerenv — its mere existence signals "inside Docker".
-    // We don't read it; just probe.
-    await readFile("/.dockerenv");
-  } catch {
-    return null;
-  }
-  const hostname = process.env.HOSTNAME;
-  if (hostname && /^[0-9a-f]{12,}$/.test(hostname)) {
-    return hostname;
-  }
-  // Fall back to cgroup v1's container id (longer than HOSTNAME, full id).
-  try {
-    const cgroup = await readFile("/proc/self/cgroup", "utf-8");
-    const match = cgroup.match(/[0-9a-f]{64}/);
-    if (match) return match[0];
-  } catch {
-    // ignore
-  }
-  return null;
 }

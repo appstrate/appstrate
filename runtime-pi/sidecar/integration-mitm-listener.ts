@@ -57,8 +57,8 @@ import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
   MitmRequestContext,
-} from "@appstrate/connect";
-import { planMitmAction, type CaBundle } from "@appstrate/connect";
+} from "@appstrate/connect/integrations";
+import { planMitmAction, type CaBundle } from "@appstrate/connect/integrations";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────

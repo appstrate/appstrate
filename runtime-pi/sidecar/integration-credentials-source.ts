@@ -21,7 +21,10 @@
  * auths.
  */
 
-import type { HttpDeliveryPlan, IntegrationCredentialsPayload } from "@appstrate/connect";
+import type {
+  HttpDeliveryPlan,
+  IntegrationCredentialsPayload,
+} from "@appstrate/connect/integrations";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
 

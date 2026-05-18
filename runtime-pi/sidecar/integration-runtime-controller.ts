@@ -44,7 +44,7 @@ import {
   type IntegrationSpawnRequest,
   type ProxyEnvInjectionInput,
   type SignalDispatcher,
-} from "@appstrate/connect";
+} from "@appstrate/connect/integrations";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   makeSupervisedSpawnFactory,

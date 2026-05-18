@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./proxy-primitives": "./src/proxy-primitives.ts"
+    "./proxy-primitives": "./src/proxy-primitives.ts",
+    "./integrations": "./src/integrations.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

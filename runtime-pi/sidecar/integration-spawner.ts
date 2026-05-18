@@ -20,8 +20,8 @@
  *     here. We just spawn + expose; rewiring belongs upstairs.
  */
 
-import type { ChildHandle } from "@appstrate/connect";
-import type { SpawnCommandPlan } from "@appstrate/connect";
+import type { ChildHandle } from "@appstrate/connect/integrations";
+import type { SpawnCommandPlan } from "@appstrate/connect/integrations";
 
 /**
  * Minimal `Bun.spawn` subprocess shape used by the adapter. Typed

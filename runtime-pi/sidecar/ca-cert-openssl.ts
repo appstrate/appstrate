@@ -38,7 +38,11 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type { CaGenerationOutput, CaGenerationRequest, CertGenerator } from "@appstrate/connect";
+import type {
+  CaGenerationOutput,
+  CaGenerationRequest,
+  CertGenerator,
+} from "@appstrate/connect/integrations";
 
 // ─────────────────────────────────────────────
 // Public types

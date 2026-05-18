@@ -1482,27 +1482,59 @@ export interface MountMcpOptions {
   /**
    * Promise that resolves once the integration runtime has finished its
    * initial bootstrap pass. The first `/mcp` request awaits it (capped
-   * at 10s) so the agent's initial `tools/list` sees all declared
-   * integration tools, even though the sidecar's HTTP listener came up
-   * first. Subsequent requests skip the wait (the promise is already
-   * resolved).
+   * at INTEGRATION_BOOT_WAIT_MS) so the agent's initial `tools/list`
+   * sees all declared integration tools, even though the sidecar's HTTP
+   * listener came up first. Subsequent requests skip the wait (the
+   * promise is already resolved).
    */
   integrationBootPromise?: Promise<void>;
 }
+
+/**
+ * Cap on how long the first `/mcp` request waits for integrations to
+ * register their tools before responding. Tuned for the Phase 1.5 path
+ * on Docker Desktop / macOS: per-integration spawn pays for `docker
+ * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
+ * `docker start` + Python/Node runner cold-start + MCP handshake, each
+ * `docker exec` round-trip costing 1–2 s on the LinuxKit VM. Linux hosts
+ * see <2 s end-to-end; the ceiling exists to bound pathological cases,
+ * not the happy path. Mirrors the agent-side MCP connect deadline so a
+ * truly hung integration boot surfaces as the agent's own handshake
+ * timeout rather than as an empty toolset (the failure mode that hides
+ * the bug — the LLM cheerfully tells the user "no provider connected"
+ * instead of erroring out).
+ */
+const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
   const firstParty = buildSidecarTools(options);
   const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   // Cache the await so only the first `/mcp` request pays the wait —
-  // every subsequent request sees an already-resolved promise.
+  // every subsequent request sees an already-resolved promise. The
+  // timeout side of the race logs when it fires so a slow boot doesn't
+  // silently degrade the agent's toolset (see comment on
+  // INTEGRATION_BOOT_WAIT_MS).
   let bootReady = options.integrationBootPromise;
   if (bootReady) {
     bootReady = Promise.race([
       bootReady.then(() => {
         bootReady = undefined; // resolved — skip the race on later requests
       }),
-      new Promise<void>((resolve) => setTimeout(resolve, 10_000).unref?.()),
+      new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          // Best-effort log; tools/list still responds with whatever
+          // integrations DID register before the deadline. Operators
+          // diagnosing "agent doesn't see my integration" should look
+          // for this line.
+          logger.warn(
+            "integration boot wait exceeded; tools/list will respond without late integrations",
+            { waitMs: INTEGRATION_BOOT_WAIT_MS },
+          );
+          resolve();
+        }, INTEGRATION_BOOT_WAIT_MS);
+        t.unref?.();
+      }),
     ]);
   }
 
