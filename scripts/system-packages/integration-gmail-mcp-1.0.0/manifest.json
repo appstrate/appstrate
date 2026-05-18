@@ -1,0 +1,36 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/gmail-mcp",
+  "version": "1.0.0",
+  "displayName": "Gmail",
+  "description": "Gmail MCP integration — exposes typed tools (list_messages, get_message, search_messages) backed by the Gmail REST API. OAuth2 access tokens are injected transparently by the sidecar's MITM proxy on every upstream call; the bundle never reads the credential itself. Pure-stdlib Python (urllib + json) — zero pip deps.",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "iconUrl": "gmail",
+  "categories": ["email", "productivity"],
+  "server": {
+    "type": "python",
+    "entryPoint": "./server.py"
+  },
+  "transport": {
+    "type": "stdio"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+      "scopeSeparator": " ",
+      "tokenAuthMethod": "client_secret_post",
+      "authorizedUris": ["https://gmail.googleapis.com/**", "https://www.googleapis.com/gmail/**"],
+      "delivery": {
+        "http": {}
+      }
+    }
+  }
+}

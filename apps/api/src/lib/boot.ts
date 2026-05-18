@@ -38,7 +38,8 @@ import {
   getAllSystemPackageVersions,
   type SystemPackageEntry,
 } from "../services/system-packages.ts";
-import { createVersionAndUpload } from "../services/package-versions.ts";
+import { createVersionAndUpload, replaceVersionContent } from "../services/package-versions.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/storage.ts";
 import { storageFolderForType } from "../services/package-items/config.ts";
 import { listOrphanRunIds } from "../services/state/runs.ts";
@@ -397,15 +398,49 @@ async function loadAndSyncSystemPackages(): Promise<void> {
 
   // Step 2 — register every loaded version in `package_versions` so semver
   // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
-  // alongside the legacy line. createVersionAndUpload is idempotent.
+  // alongside the legacy line. createVersionAndUpload is idempotent
+  // (skip-if-exists). When a system source is rebuilt with the same
+  // version but new bytes (deterministic build differences, manifest
+  // tweaks, runtime changes), the existing row's `integrity` would drift
+  // from the freshly-computed hash — the sidecar then refuses to spawn
+  // the bundle with an `Integrity check failed`. Heal in place via
+  // `replaceVersionContent` whenever the source hash differs from DB.
   const syncVersion = async (entry: SystemPackageEntry) => {
-    await createVersionAndUpload({
-      packageId: entry.packageId,
-      version: entry.version,
-      createdBy: null,
-      zipBuffer: entry.zipBuffer,
-      manifest: entry.manifest as unknown as Record<string, unknown>,
-    });
+    const freshIntegrity = computeIntegrity(new Uint8Array(entry.zipBuffer));
+
+    const [existing] = await db
+      .select({ integrity: packageVersions.integrity })
+      .from(packageVersions)
+      .where(
+        and(
+          eq(packageVersions.packageId, entry.packageId),
+          eq(packageVersions.version, entry.version),
+        ),
+      )
+      .limit(1);
+
+    if (existing && existing.integrity !== freshIntegrity) {
+      logger.warn("System package version drift — healing in place", {
+        packageId: entry.packageId,
+        version: entry.version,
+        dbIntegrity: existing.integrity,
+        sourceIntegrity: freshIntegrity,
+      });
+      await replaceVersionContent({
+        packageId: entry.packageId,
+        version: entry.version,
+        zipBuffer: entry.zipBuffer,
+        manifest: entry.manifest as unknown as Record<string, unknown>,
+      });
+    } else {
+      await createVersionAndUpload({
+        packageId: entry.packageId,
+        version: entry.version,
+        createdBy: null,
+        zipBuffer: entry.zipBuffer,
+        manifest: entry.manifest as unknown as Record<string, unknown>,
+      });
+    }
     syncedVersions++;
   };
 
