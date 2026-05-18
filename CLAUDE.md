@@ -336,7 +336,45 @@ Key invariants:
 - **MCPB compatibility preserved**: `server.type` matches the MCPB standard exactly. `.afps` integration bundles are installable as `.mcpb` extensions elsewhere and vice-versa.
 - **Tools surfaced to the LLM**: the sidecar's `McpHost` multiplexes spawned tools under a namespaced prefix (`{namespace}__{tool}`). The agent's `runtime-pi/mcp/direct.ts` discovers them via `tools/list` and registers one Pi extension per advertised non-first-party tool that forwards verbatim to `mcp.callTool`.
 
-Phase 1.5 (not yet implemented): in-run credential refresh on SIGHUP via `integration-runtime-controller.ts` (the broader controller that also handles `delivery.http` MITM + CA bundle minting). Today's path injects credentials at spawn time only — a `delivery.env` token that expires mid-run results in 401s from upstream until the next run respawns the integration. The platform's `OAUTH_REFRESH_WORKER_ENABLED` BullMQ worker mitigates by proactively refreshing tokens before their lead window, but is opt-in.
+### AFPS Integrations MITM credential injection (Phase 1.5, `delivery.http`)
+
+When an integration's `manifest.auths.{key}.delivery.http` declares a header (`api_key`, `oauth2`, `oauth1`, `basic`, `custom`), Phase 1.5 routes its upstream HTTPS calls through a per-integration MITM proxy hosted **inside the sidecar**. The integration's MCP server never reads the credential — the proxy injects the configured header on the way out, refreshes the underlying OAuth2 token transparently when it nears expiry, and recovers from a mid-run `401` by force-refreshing and retrying once.
+
+```
+sidecar
+  ├─ planCaBundle() + createOpensslCertGenerator()   ← per-run CA, openssl-backed
+  ├─ createCertMinter({ caCert, caKey })             ← lazy per-SNI leaf certs
+  ├─ for each integration with httpDeliveryAuths:
+  │     ├─ GET /internal/integration-credentials/<id>           ← initial payload
+  │     ├─ createIntegrationCredentialsSource()                  ← cache + refresh hook
+  │     ├─ createIntegrationMitmListener()                       ← per-SNI Bun.serve
+  │     └─ docker create … --network container:<sidecar-id>
+  │             -e HTTPS_PROXY=http://127.0.0.1:<port>
+  │             -e NODE_EXTRA_CA_CERTS=/etc/appstrate/ca.pem
+  │             -e SSL_CERT_FILE / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE
+  │        docker cp <ca.pem> <id>:/etc/appstrate/ca.pem
+  │
+  └─ on upstream 401:
+        listener.refreshOnUnauthorized(authKey)
+          → POST /internal/integration-credentials/<id>/refresh
+          → swap in-cache payload, retry the upstream call once
+```
+
+Platform surface:
+
+- `GET /internal/integration-credentials/{scope}/{name}` — live credentials + `HttpDeliveryPlan` per auth + `expires_at`. OAuth2 tokens refresh proactively when within `OAUTH_REFRESH_LEAD_MS` of expiry. Auth: same Bearer run-token as `/integration-bundle`. Same dep-and-install guard so a leaked token can't enumerate credentials across the org.
+- `POST /internal/integration-credentials/{scope}/{name}/refresh` — force-refresh every OAuth2 auth on this integration. `403` ↔ refresh-token revoked (connection flagged `needsReconnection`); sidecar translates to `401` for the integration.
+
+Refresh helper: `apps/api/src/services/integration-token-refresh.ts:forceRefreshIntegrationConnection` mirrors `@appstrate/connect/token-refresh.forceRefresh` (which targets `user_provider_connections`) but writes back to `integration_connections`. Same `RefreshError` taxonomy (`revoked` vs `transient`); `invalid_grant` flips `needsReconnection`.
+
+Key invariants:
+
+- **Network model**: runner shares the sidecar's network namespace (`--network container:<sidecar-id>`) so `127.0.0.1` reaches the MITM listener bound on the sidecar's loopback. Process mode inherits the parent's NS — same target works. No dedicated docker network per integration.
+- **Refresh storm protection**: per-`authKey` 5 s cooldown + in-flight dedup on `refreshOnUnauthorized` so a mis-scoped 401 (the credential is fine, the request itself is wrong) can't hammer the platform endpoint.
+- **CA hygiene**: per-run CA, 1 h validity (matches max run duration), private key lives in memory on the sidecar — only the cert PEM (not the key) lands on local fs (`mode 0444`) for `docker cp`. Unlinked on `bootIntegrations().shutdown()`.
+- **Graceful degradation**: if openssl is missing or CA bring-up fails, the sidecar logs `HTTP-delivery integrations will skip` and continues with env-delivery-only integrations. `delivery.env` integrations are unchanged from Phase 1.4 — credentials baked in at container create time.
+- **`allowServerOverride`**: defaults to `false`. When the integration sets its own header of the same name as the injection target, the proxy strips it before forwarding (defence against integration code accidentally pre-empting the injection).
+- **Reference integration**: `@appstrate/mitm-test` (under `system-packages/`) — a pure-stdlib Python MCP server with a `call_upstream` tool that fetches `https://api.test.appstrate.dev/<path>`. Its `api_key` auth declares `delivery.http` with `X-Mitm-Test-Token`. The integration never reads the API key — proves the injection happens entirely sidecar-side.
 
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 
